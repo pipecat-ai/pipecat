@@ -8,10 +8,11 @@
 
 import pytest
 
-from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.frames.frames import LLMFullResponseEndFrame, LLMFullResponseStartFrame, LLMTextFrame
 from pipecat.pipeline.worker import PipelineParams
-from pipecat.services.minimax.tts import MiniMaxExpressionAdapter, MiniMaxHttpTTSService
+from pipecat.services.minimax.tts import MiniMaxHttpTTSService
 from pipecat.tests.utils import run_test
 
 
@@ -63,7 +64,7 @@ class TestMiniMaxExpressionAdapter:
     [
         ("speech-2.8-turbo", MiniMaxExpressionAdapter),
         ("speech-2.8-hd", MiniMaxExpressionAdapter),
-        ("speech-2.6-turbo", ExpressionAdapter),
+        ("speech-2.6-turbo", BaseExpressionAdapter),
     ],
 )
 def test_expression_adapter_follows_the_model(model, adapter):

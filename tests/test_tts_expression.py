@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from loguru import logger
 
-from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
 from pipecat.expressive.parser import Event, Pause, Text
 from pipecat.expressive.tts_expression import TTSExpression, _segment_frames
@@ -46,7 +46,7 @@ REPLY = ["<<cheerful>> It's [[la", "ugh]] ^back up^ now. [[pause 400]] Bye!"]
 WRITTEN = "<<cheerful>> It's [[laugh]] ^back up^ now. [[pause 400]] Bye!"
 
 
-class BracketAdapter(ExpressionAdapter):
+class BracketAdapter(BaseExpressionAdapter):
     """Renders modes as {modes} where they change, events as <name>, pauses as <Nms>."""
 
     def capabilities(self):
@@ -319,7 +319,7 @@ async def test_a_pause_is_kept_within_the_services_range():
     assert requests == ["One.", "<1000ms>Two."]
 
 
-class StyleAdapter(ExpressionAdapter):
+class StyleAdapter(BaseExpressionAdapter):
     """For a service that takes modes with each request."""
 
     def capabilities(self):
@@ -425,7 +425,7 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
     ]
 
 
-class LearnedAdapter(ExpressionAdapter):
+class LearnedAdapter(BaseExpressionAdapter):
     """An adapter whose vocabulary is learned after it is created, as at start."""
 
     def __init__(self):
@@ -461,7 +461,7 @@ def test_pieces_leave_out_what_the_service_cant_perform():
     assert [(frame.text, frame.modes, text) for frame, text in pieces] == [("Hi.", [], "Hi.")]
 
 
-class MarkupAdapter(ExpressionAdapter):
+class MarkupAdapter(BaseExpressionAdapter):
     """Renders tags as bracketed markup, which its service reports back with its words."""
 
     def capabilities(self):

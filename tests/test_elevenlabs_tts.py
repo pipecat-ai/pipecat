@@ -16,7 +16,8 @@ from websockets.exceptions import ConnectionClosedOK
 from websockets.frames import Close
 from websockets.protocol import State
 
-from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
@@ -31,7 +32,6 @@ from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_V2_5_LANGUAGES,
     ELEVENLABS_V3_LANGUAGES,
     ELEVENLABS_V4_LANGUAGES,
-    ElevenLabsAudioTagExpressionAdapter,
     elevenlabs_language_code,
     language_to_elevenlabs_language,
 )
@@ -550,8 +550,8 @@ async def test_wordless_alignment_still_advances_the_clock():
 @pytest.mark.parametrize(
     "model, adapter",
     [
-        ("eleven_flash_v2_5", ExpressionAdapter),
-        ("eleven_multilingual_v2", ExpressionAdapter),
+        ("eleven_flash_v2_5", BaseExpressionAdapter),
+        ("eleven_multilingual_v2", BaseExpressionAdapter),
         ("eleven_v3", ElevenLabsAudioTagExpressionAdapter),
         ("eleven_v4_turbo", ElevenLabsAudioTagExpressionAdapter),
     ],

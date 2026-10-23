@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
 from pipecat.expressive.expression import ModeScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -18,7 +19,6 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.services.cartesia.tts import (
-    CartesiaExpressionAdapter,
     CartesiaHttpTTSService,
     CartesiaTTSService,
     language_to_cartesia_language,

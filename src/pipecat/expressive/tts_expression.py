@@ -9,7 +9,7 @@
 Part of expressive conversation (alpha). A :class:`TTSExpression` reads the
 tags in the text a TTS service is given, decides what the service can
 perform, and renders it through the service's
-:class:`~pipecat.expressive.adapter.ExpressionAdapter`. The TTS service speaks
+:class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`. The TTS service speaks
 the pieces it returns, one request per unit of text.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
@@ -20,7 +20,7 @@ from collections.abc import Callable
 
 from loguru import logger
 
-from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import EXPRESSION_TEXT_TYPES, ExpressionCapabilities, ModeScope
 from pipecat.expressive.parser import EMPHASIS_MODE, Event, ExpressionParser, Pause, Segment, Text
 from pipecat.frames.frames import AggregatedTextFrame, TextType
@@ -36,7 +36,7 @@ class TTSExpression:
     what clients see agree.
     """
 
-    def __init__(self, adapter: Callable[[], ExpressionAdapter], owner: object):
+    def __init__(self, adapter: Callable[[], BaseExpressionAdapter], owner: object):
         """Initialize the service's expression.
 
         Args:

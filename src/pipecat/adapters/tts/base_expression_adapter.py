@@ -6,9 +6,9 @@
 
 """How a TTS service performs expression tags.
 
-Part of expressive conversation (alpha). Each TTS service has an
-:class:`ExpressionAdapter`, the way each LLM service has an LLM adapter. The
-adapter declares what the service can perform and renders it into the text
+Part of expressive conversation (alpha). Each TTS service has an expression
+adapter, a :class:`BaseExpressionAdapter`, the way each LLM service has an LLM
+adapter. The adapter declares what the service can perform and renders it into the text
 sent to the service: words in their modes, and events and pauses. The base
 adapter performs nothing, so a service without one speaks only the words.
 
@@ -18,7 +18,7 @@ adapter performs nothing, so a service without one speaks only the words.
 from pipecat.expressive.expression import ExpressionCapabilities
 
 
-class ExpressionAdapter:
+class BaseExpressionAdapter:
     """Renders expression for one TTS service. The base performs nothing.
 
     Its capabilities are what the service can perform: the service broadcasts

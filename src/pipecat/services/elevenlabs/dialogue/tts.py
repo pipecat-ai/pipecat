@@ -19,12 +19,12 @@ from typing import Any, ClassVar, Union
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.elevenlabs.tts_base import (
-    ElevenLabsAudioTagExpressionAdapter,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
     _join_audio_tags,

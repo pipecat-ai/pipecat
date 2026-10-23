@@ -19,8 +19,8 @@ from typing import (
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.expressive.adapter import ExpressionAdapter
 from pipecat.expressive.expression import EXPRESSION_TEXT_TYPES
 from pipecat.expressive.parser import Segment
 from pipecat.expressive.tts_expression import TTSExpression
@@ -161,7 +161,7 @@ class TTSService(AIService):
 
     # Renders expressive conversation's tags for this service (alpha). The base
     # adapter performs nothing.
-    expression_adapter_class: type[ExpressionAdapter] = ExpressionAdapter
+    expression_adapter_class: type[BaseExpressionAdapter] = BaseExpressionAdapter
 
     def __init__(
         self,
@@ -469,7 +469,7 @@ class TTSService(AIService):
         """
         return True
 
-    def get_expression_adapter(self) -> ExpressionAdapter:
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
         """The adapter that renders this service's expression tags.
 
         Part of expressive conversation (alpha). Its capabilities are what the

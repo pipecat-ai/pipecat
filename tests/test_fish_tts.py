@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock
 import ormsgpack
 import pytest
 
-from pipecat.expressive.adapter import ExpressionAdapter
-from pipecat.services.fish.tts import FishAudioS2ExpressionAdapter, FishAudioTTSService
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
+from pipecat.services.fish.tts import FishAudioTTSService
 from pipecat.utils.types import NOT_GIVEN
 
 
@@ -181,8 +182,8 @@ class TestS2ExpressionAdapter:
     [
         ("s2.1-pro", FishAudioS2ExpressionAdapter),
         ("s2-pro", FishAudioS2ExpressionAdapter),
-        ("s1", ExpressionAdapter),
-        ("drama-3", ExpressionAdapter),
+        ("s1", BaseExpressionAdapter),
+        ("drama-3", BaseExpressionAdapter),
     ],
 )
 def test_expression_adapter_follows_the_model(model, adapter):

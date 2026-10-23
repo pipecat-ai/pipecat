@@ -13,6 +13,7 @@ import unittest
 import pytest
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
@@ -22,7 +23,6 @@ from pipecat.services.elevenlabs.dialogue.tts import (
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
 from pipecat.services.elevenlabs.tts_base import (
-    ElevenLabsAudioTagExpressionAdapter,
     _join_audio_tags,
 )
 from pipecat.services.tts_service import TextAggregationMode

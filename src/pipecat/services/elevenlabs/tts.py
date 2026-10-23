@@ -27,7 +27,8 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
-from pipecat.expressive.adapter import ExpressionAdapter
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -39,7 +40,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
-    ElevenLabsAudioTagExpressionAdapter,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
     _join_audio_tags,
@@ -896,7 +896,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
         self._audio_tag_expression_adapter = ElevenLabsAudioTagExpressionAdapter()
 
-    def get_expression_adapter(self) -> ExpressionAdapter:
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
         """The adapter for the model: audio tags on Eleven v3 and v4, otherwise none.
 
         Returns:
