@@ -1113,6 +1113,37 @@ class TestStopStrategiesVote(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
 
+    def _record_cancelled_answers(self) -> list[None]:
+        cancelled: list[None] = []
+
+        @self.controller.event_handler("on_user_turn_answer_cancelled")
+        async def on_user_turn_answer_cancelled(controller):
+            cancelled.append(None)
+
+        return cancelled
+
+    async def test_new_speech_cancels_the_answer_once_it_started(self):
+        first, on_inference = VotingStopStrategy(), VotingStopStrategy(on_inference=True)
+        await self._start([first, on_inference])
+        cancelled = self._record_cancelled_answers()
+        await self._speak()
+        await first.vote()
+
+        await self._speak()
+
+        self.assertEqual(len(cancelled), 1)
+
+    async def test_new_speech_before_the_answer_started_cancels_nothing(self):
+        first, second = VotingStopStrategy(), VotingStopStrategy()
+        await self._start([first, second, VotingStopStrategy(on_inference=True)])
+        cancelled = self._record_cancelled_answers()
+        await self._speak()
+        await first.vote()
+
+        await self._speak()
+
+        self.assertEqual(cancelled, [])
+
     async def test_the_turn_end_combines_the_votes(self):
         """A turn end announced elsewhere, or confirming a speculation, applies to the whole turn."""
         announced, confirming = VotingStopStrategy(), VotingStopStrategy()

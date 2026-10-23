@@ -58,6 +58,7 @@ from pipecat.frames.frames import (
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -432,6 +433,49 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             [type(s) for s in strategies.stop or []],
             [TurnAnalyzerUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy],
         )
+
+    async def _resume_after_the_answer_started(self, start: UserTurnStrategies) -> list[Frame]:
+        """Run a turn whose inference starts, then have the user speak again."""
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(user_turn_strategies=start),
+        )
+        down, _ = await run_test(
+            user_aggregator,
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="Hi", user_id="", timestamp="now"),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+            ],
+        )
+        return down
+
+    async def test_new_speech_interrupts_the_turns_answer(self):
+        """The user speaking again after the answer started voids it."""
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            )
+        )
+
+        answer = next(i for i, f in enumerate(down) if isinstance(f, LLMContextFrame))
+        self.assertTrue(any(isinstance(f, InterruptionFrame) for f in down[answer:]))
+
+    async def test_a_turn_that_does_not_interrupt_only_cancels_its_answer(self):
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                start=[VADUserTurnStartStrategy(enable_interruptions=False)],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+
+        answer = next(i for i, f in enumerate(down) if isinstance(f, LLMContextFrame))
+        self.assertFalse(any(isinstance(f, InterruptionFrame) for f in down))
+        self.assertTrue(any(isinstance(f, UserTurnResponseCancelFrame) for f in down[answer:]))
 
     async def test_proposed_frames_produce_turn_frames_and_interruption(self):
         """A proposal leaves the decision here, so the aggregator emits."""

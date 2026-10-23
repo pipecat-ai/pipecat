@@ -796,6 +796,8 @@ class LLMUserAggregator(LLMContextAggregator):
 
         # Whether the current user turn interrupted the bot.
         self._user_turn_interrupted_bot = False
+        # Whether the open turn interrupts the bot, for the answer it cancels.
+        self._user_turn_interruptions = False
         self._consecutive_empty_user_turn_recoveries = 0
 
         self._user_turn_controller = UserTurnController(
@@ -807,6 +809,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
         self._user_turn_controller.add_event_handler(
             "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_answer_cancelled", self._on_user_turn_answer_cancelled
         )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_started", self._on_user_turn_started
@@ -1401,6 +1406,15 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _on_broadcast_frame(self, controller, frame_cls: type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
 
+    async def _on_user_turn_answer_cancelled(self, controller):
+        # The user is still talking, so the answer started for the turn so far
+        # is void. An interruption stops it wherever it got to. A turn that
+        # doesn't interrupt the bot only withdraws a speculation.
+        if self._user_turn_interruptions:
+            await self.broadcast_interruption()
+        else:
+            await self.broadcast_frame(UserTurnResponseCancelFrame)
+
     async def _on_user_turn_speculation_cancelled(self, controller):
         # Broadcast rather than queued, so it reaches a downstream gate ahead of
         # the turn end that follows it. Queued, it would arrive after, and the
@@ -1438,6 +1452,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = (
             params.enable_interruptions and not self._user_idle_controller.waiting_for_user
         )
+        self._user_turn_interruptions = params.enable_interruptions
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)

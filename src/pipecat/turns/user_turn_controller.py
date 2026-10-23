@@ -68,6 +68,8 @@ class UserTurnController(BaseObject):
       most strategies; fires alone when the turn's end waits for a vote on
       the inference, or for an eager end of turn to be confirmed.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
+    - on_user_turn_answer_cancelled: Emitted when the user speaking again
+      cancels the answer started for the open turn.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
     - on_push_frame: Emitted when a strategy wants to push a frame.
     - on_broadcast_frame: Emitted when a strategy wants to broadcast a frame.
@@ -143,6 +145,7 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_speculation_cancelled", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
+        self._register_event_handler("on_user_turn_answer_cancelled", sync=True)
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
@@ -329,8 +332,7 @@ class UserTurnController(BaseObject):
         self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
     ):
         self._user_speaking = True
-        self._user_turn_stop_votes.clear()
-        self._user_turn_answered = False
+        await self._clear_user_turn_stop_votes()
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -345,8 +347,7 @@ class UserTurnController(BaseObject):
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
-        self._user_turn_stop_votes.clear()
-        self._user_turn_answered = False
+        await self._clear_user_turn_stop_votes()
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -356,6 +357,15 @@ class UserTurnController(BaseObject):
 
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
+
+    async def _clear_user_turn_stop_votes(self):
+        # Speech in an open turn voids the votes cast so far, and the answer
+        # started for them.
+        answered = self._user_turn_answered
+        self._user_turn_stop_votes.clear()
+        self._user_turn_answered = False
+        if answered:
+            await self._call_event_handler("on_user_turn_answer_cancelled")
 
     async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
         # We have received a transcription, let's reset the user turn timeout.
