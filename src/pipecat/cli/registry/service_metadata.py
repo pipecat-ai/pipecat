@@ -1163,6 +1163,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="zoom_ai_voice_agent_realtime",
+            label="Zoom AI Voice Agent",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIVoiceAgentLLMService"],
+            env_prefix="ZOOM_AI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="ultravox",
             label="Ultravox",
             package="pipecat-ai[ultravox]",
