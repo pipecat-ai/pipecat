@@ -208,7 +208,9 @@ async def run_test(
         if send_end_frame:
             await worker.queue_frame(EndFrame())
 
-    runner = WorkerRunner()
+    # The host process owns its signals: a long-lived loop, such as a server
+    # running pipelines on request, would otherwise keep the runner's handler.
+    runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
     await runner.add_workers(worker)
     await asyncio.gather(runner.run(), push_frames())
 
