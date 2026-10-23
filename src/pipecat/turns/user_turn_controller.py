@@ -7,6 +7,7 @@
 """This module defines a controller for managing user turn lifecycle."""
 
 import asyncio
+from dataclasses import replace
 from enum import Enum
 
 from pipecat.frames.frames import (
@@ -67,7 +68,7 @@ class UserTurnController(BaseObject):
     strategy that waits for the turn's inference gets its say in either
     mode: in a ``FIRST`` list, the first stop strategy to decide runs the
     inference, and the turn ends once a strategy waiting for that inference
-    decides.
+    decides. A cancelled answer voids the stop decisions made on it.
 
     In an ``ALL`` list the controller starts the turn's inference itself,
     once every stop strategy that listens to the user has decided. A stop
@@ -271,8 +272,6 @@ class UserTurnController(BaseObject):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
-        elif isinstance(frame, UserTurnResponseCancelFrame):
-            self._user_turn_inference = _UserTurnInference.NONE
 
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
@@ -284,6 +283,11 @@ class UserTurnController(BaseObject):
             # Every strategy in an ALL list needs every frame to decide on.
             if result == ProcessFrameResult.STOP and self._stop_mode == StrategyMode.FIRST:
                 break
+
+        # Handled once the stop strategies have seen it, so an inference started
+        # here is the one they then wait for.
+        if isinstance(frame, UserTurnResponseCancelFrame):
+            await self._handle_user_turn_response_cancel()
 
     @property
     def _stop_mode(self) -> StrategyMode:
@@ -376,6 +380,22 @@ class UserTurnController(BaseObject):
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
+    async def _handle_user_turn_response_cancel(self):
+        # The decisions made on the cancelled answer no longer hold. A
+        # decision that confirmed it still says the user is done, so once
+        # every stop strategy that listens to the user has decided, the
+        # turn's answer runs again.
+        self._user_turn_inference = _UserTurnInference.NONE
+        self._user_turn_stop_decisions = {
+            strategy: replace(params, confirms_speculation=False)
+            for strategy, params in self._user_turn_stop_decisions.items()
+            if params.confirms_speculation
+        }
+        if self._user_turn_stop_decisions and self._ready_for_inference():
+            await self._trigger_user_turn_inference_triggered(
+                next(iter(self._user_turn_stop_decisions))
+            )
+
     async def _handle_speech_started(self):
         # Speech in an open turn clears the stop decisions made so far, and
         # the inference triggered for them. It resumes the turn when the user had
@@ -414,9 +434,10 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
-        # The turn's answer is gone, so the next stop decision runs it again.
-        self._user_turn_inference = _UserTurnInference.NONE
         await self._call_event_handler("on_user_turn_speculation_cancelled")
+        # Every strategy learns the speculation is gone, as when its service
+        # withdraws it.
+        await self.process_frame(UserTurnResponseCancelFrame())
 
     async def _on_user_turn_started(
         self,
@@ -510,11 +531,23 @@ class UserTurnController(BaseObject):
     async def _add_user_turn_stop_decision(
         self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
     ):
-        # A decision made while the user speaks is stale, as a turn end would be.
-        if not self._user_turn or self._user_speaking:
+        # A decision counts while the user speaks, as when a service still
+        # hears them while an eager answer runs. Only the turn end waits for
+        # them to stop, and new speech clears the decisions.
+        if not self._user_turn:
             return
 
         self._user_turn_stop_decisions[strategy] = params
+        # The eager strategy confirms its speculation when the transcript
+        # commits. If the speculation was already withdrawn, for example because
+        # the LLM wrote ◐, there's nothing left to confirm, so it's handled like
+        # the withdrawal: the decision becomes a plain one and the committed turn
+        # gets its own inference.
+        if (
+            params.confirms_speculation
+            and self._user_turn_inference != _UserTurnInference.SPECULATIVE
+        ):
+            await self._handle_user_turn_response_cancel()
 
         # Once every stop strategy that listens to the user has decided, run
         # the turn's inference. This comes before the turn-end check below, so

@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserStartedSpeakingFrame,
     UserTurnCompletionFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.services.settings import LLMSettings
@@ -47,6 +48,10 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     decides the user is done and asks the LLM to re-engage them, even when
     the controller's turn stop timeout ended the turn first. When the user
     speaks again, it waits for the next inference instead.
+
+    An eager end of turn answers the turn speculatively, and the strategy
+    decides on that answer too. ◐ or ○ withdraws it, and the committed turn
+    brings an inference of its own.
     """
 
     def __init__(
@@ -108,6 +113,9 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._awaited = frame
         elif isinstance(frame, UserTurnCompletionFrame):
             await self._handle_report(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            # The answer it was waiting for is gone.
+            self._awaited = None
         elif isinstance(
             frame,
             (
@@ -140,8 +148,11 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if self._awaited is None or report.context_frame_id != self._awaited.id:
             return
 
+        speculation = self._awaited.speculation
         self._awaited = None
-        if report.kind in ("short", "long"):
+        if report.kind in ("short", "long") and speculation:
+            await self.trigger_user_turn_speculation_cancelled()
+        elif report.kind in ("short", "long"):
             await self._start_reprompt(report.kind)
         else:
             await self._cancel_reprompt()
