@@ -455,6 +455,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="smallest_stt",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestSTTService"],
+            env_prefix="SMALLEST",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="soniox_stt",
             label="Soniox",
             package="pipecat-ai[soniox]",
