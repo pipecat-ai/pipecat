@@ -26,7 +26,6 @@ from pipecat.turns.user_stop import (
     ExternalUserTurnStopStrategy,
     LLMTurnCompletionUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
-    deferred,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
@@ -239,13 +238,12 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     finalizes the user turn; ◐ / ○ keep the turn open so the user can
     continue speaking and the LLM can re-evaluate later.
 
-    Configuring strategies this way preserves the existing detector
-    chain (defaults or user-supplied) for inference triggering and
-    appends :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`
-    as the finalizer. The detector strategies are wrapped with
-    :func:`~pipecat.turns.user_stop.deferred` automatically so they fire
-    only ``on_user_turn_inference_triggered`` and leave finalization to
-    the LLM gate.
+    Configuring strategies this way keeps the stop strategies (defaults or
+    user-supplied) and adds
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
+    which votes on the turn's inference. Once the other stop strategies have
+    voted, the inference runs, and the turn ends once the LLM marks it
+    complete. This relies on ``StrategyMode.ALL``, the default ``stop_mode``.
 
     With ``UserTurnStrategiesParams(stop_merge_mode=MergeMode.EXTEND)``, the
     LLM gate and any stop strategies given join the ones a service
@@ -263,7 +261,7 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
 
         user_turn_strategies=FilterIncompleteUserTurnStrategies()
 
-        # Custom detector chain:
+        # Custom stop strategies:
         user_turn_strategies=FilterIncompleteUserTurnStrategies(
             stop=[SpeechTimeoutUserTurnStopStrategy(...)],
         )
@@ -287,14 +285,11 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
 
     def __post_init__(self):
         super().__post_init__()
-        # Defer the detector chain so it only fires inference-triggered,
-        # then append the LLM gate as the sole finalizer.
-        gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
         gate = LLMTurnCompletionUserTurnStopStrategy(config=self.config)
-        self.stop = [*gated, gate]
+        self.stop = [*(self.stop or []), gate]
         # Extending a service's stop strategies adds the LLM gate and the stop
         # strategies given, never the default ones.
-        self._stop_extension = [*gated, gate] if self._stop_extension else [gate]
+        self._stop_extension = [*(self._stop_extension or []), gate]
 
 
 @dataclass

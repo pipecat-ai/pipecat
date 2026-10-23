@@ -944,6 +944,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
+        await self._track_pushed_frame(frame)
+
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is
         # pushed past it — routing that back through here would re-gate it.

@@ -29,10 +29,10 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
             ExternalUserTurnCompletionStopStrategy(),
         ]
 
-    For LLM-completion-marker gating specifically, use the subclass
+    For LLM-completion-marker gating specifically, use
     :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`
-    instead, which additionally pushes the ``LLMUpdateSettingsFrame``
-    that enables the marker protocol on the LLM.
+    instead, which also turns the markers on in the LLM and re-prompts a user
+    who goes quiet after an incomplete turn.
 
     A completion resolves with some latency (e.g. the LLM ``●`` arrives
     after the inference finishes), so the user may have resumed speaking
