@@ -252,6 +252,8 @@ suite:
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sarvam.py
     scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-smallest.py
+    scenarios: [scripted/weather_function_call]
 
   #
   # Async function calling: the tool keeps running after the LLM's turn ends
