@@ -282,8 +282,9 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
     Input audio is sent at the pipeline's input sample rate. Audio that arrives
     while the session is connecting or reconnecting is held (up to the latest
     three seconds) and sent once the session is ready, so the caller's first words
-    aren't lost. The agent speaks at 16 kHz, played at 24 kHz. A function call's output is created right after
-    the call in the conversation, where the Voice Agent's model reads it.
+    aren't lost. The agent speaks at 16 kHz, played at 24 kHz. A function call's
+    output is created right after the call in the conversation, where the Voice
+    Agent's model reads it.
 
     The model and the listen settings are sent in the first session update
     only; later updates change the instructions, tools and voice. Errors the
@@ -319,7 +320,7 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
         """Initialize the Zoom Voice Agent service.
 
         Args:
-            api_key: Zoom AI Services API key or JWT. It is sent on every
+            api_key: Zoom AI Services API key. It is sent on every
                 connection and reconnect, so it must stay valid for as long as
                 the service runs.
             url: Voice Agent WebSocket URL.
