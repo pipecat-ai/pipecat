@@ -268,24 +268,24 @@ class TestCartesiaExpressionAdapter:
 
     def test_emotion_rendered_where_it_changes(self):
         adapter = CartesiaExpressionAdapter()
-        assert adapter.render_text("Hi.", ["excited"], None) == '<emotion value="excited"/>Hi.'
+        assert adapter.render_text("Hi.", ["excited"], None) == '<emotion value="excited"/> Hi.'
         assert adapter.render_text("Hi.", ["excited"], ["excited"]) == "Hi."
-        assert adapter.render_text("Hi.", ["sad"], ["excited"]) == '<emotion value="sad"/>Hi.'
+        assert adapter.render_text("Hi.", ["sad"], ["excited"]) == '<emotion value="sad"/> Hi.'
         assert adapter.render_text("Hi.", [], None) == "Hi."
 
     def test_return_to_baseline_renders_neutral(self):
         adapter = CartesiaExpressionAdapter()
-        assert adapter.render_text("Hi.", [], ["sad"]) == '<emotion value="neutral"/>Hi.'
+        assert adapter.render_text("Hi.", [], ["sad"]) == '<emotion value="neutral"/> Hi.'
 
     def test_several_modes_render_the_first(self):
         adapter = CartesiaExpressionAdapter()
-        assert adapter.render_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/>Hi.'
+        assert adapter.render_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/> Hi.'
         assert adapter.render_text("Hi.", ["sad", "tired"], ["sad", "calm"]) == "Hi."
 
     def test_events_and_pauses(self):
         adapter = CartesiaExpressionAdapter()
         assert adapter.render_event("laughter") == " [laughter] "
-        assert adapter.render_pause(600) == '<break time="600ms"/>'
+        assert adapter.render_pause(600) == ' <break time="600ms"/> '
 
 
 def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():

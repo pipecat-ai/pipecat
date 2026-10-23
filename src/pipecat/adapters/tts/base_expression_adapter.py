@@ -25,6 +25,9 @@ class BaseExpressionAdapter:
     them at start, and reads and renders tags by them. The service calls the
     adapter only with what they say it supports: other modes are taken off
     the words first, and other events are never rendered.
+
+    Markup is set apart from the words by spaces, so the words a service with
+    word timestamps reports line up with the text it was sent.
     """
 
     def capabilities(self) -> ExpressionCapabilities | None:

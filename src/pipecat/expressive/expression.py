@@ -26,9 +26,6 @@ from enum import Enum
 
 from pipecat.utils.text.base_text_aggregator import TextType
 
-# The text types of what a TTS performs rather than says: events and pauses.
-EXPRESSION_TEXT_TYPES = (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE)
-
 
 class ModeScope(Enum):
     """Where in a response a TTS service can change mode.

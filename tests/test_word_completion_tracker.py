@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import re
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -3197,3 +3198,30 @@ class TestWordCompletionTrackerUnmatchedSymbolStaysPut(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTagsOnlyTheLLMTextCarries(unittest.TestCase):
+    """Tags such as expressive conversation's are in the LLM's text alone: the
+    cursor into it passes over them, so a word is never attributed half a tag.
+    """
+
+    LLM_TEXT = "<<calm>> It's [[laugh]] fine now."
+    TTS_TEXT = "It's [laughter] fine now."
+    USER_FACING = "It's fine now."
+
+    def _llm_consumed(self, llm_markup):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT,
+            llm_text=self.LLM_TEXT,
+            user_facing_text=self.USER_FACING,
+            llm_markup=llm_markup,
+        )
+        consumed = []
+        for word in ["It's", "[laughter]", "fine", "now."]:
+            tracker.add_word_and_check_complete(word)
+            consumed.append(tracker.get_llm_consumed())
+        return consumed
+
+    def test_a_word_is_attributed_whole_tags(self):
+        consumed = self._llm_consumed(re.compile(r"<<[^<>]*>>|\[\[[^\[\]]*\]\]"))
+        self.assertEqual(consumed, ["<<calm>> It's", None, "[[laugh]] fine", "now."])

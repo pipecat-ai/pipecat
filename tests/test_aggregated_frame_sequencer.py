@@ -1642,57 +1642,6 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Modes: the delivery a segment's text is spoken in
-# ---------------------------------------------------------------------------
-
-
-def _token(text: str, modes: list[str]) -> AggregatedTextFrame:
-    return AggregatedTextFrame(text, TextType.TOKEN, modes=modes)
-
-
-class TestModes(unittest.IsolatedAsyncioTestCase):
-    async def test_words_carry_the_modes_of_their_segment(self):
-        seq = _seq()
-        frame = AggregatedTextFrame("hello world", TextType.SENTENCE, modes=["calm"])
-        await seq.register_spoken(frame, "ctx1", "hello world", append_to_context=True)
-        words = [f for f in seq.process_word("hello", pts=1, context_id="ctx1")]
-        self.assertEqual([f.modes for f in words if isinstance(f, TTSTextFrame)], [["calm"]])
-
-    async def test_progress_carries_the_modes_of_its_segment(self):
-        seq = _seq()
-        frame = AggregatedTextFrame("hello world", TextType.SENTENCE, modes=["calm"])
-        await seq.register_spoken(frame, "ctx1", "hello world", append_to_context=True)
-        frames = seq.process_word("hello", pts=1, context_id="ctx1")
-        progress = [f for f in frames if isinstance(f, AggregatedTextProgressFrame)]
-        self.assertEqual([f.modes for f in progress], [["calm"]])
-
-    async def test_a_streamed_sentence_carries_its_tokens_modes(self):
-        seq = _seq(streaming=True)
-        result = []
-        for t in ("Hi", " there.", " How"):
-            result += await seq.register_spoken(
-                _token(t, ["calm"]), "ctx1", t, append_to_context=True, build_tracker=False
-            )
-        promoted = [f for f in result if isinstance(f, AggregatedTextFrame)]
-        self.assertEqual(
-            [(f.text.strip(), f.modes) for f in promoted], [("Hi there.", ["calm"])] * 2
-        )
-
-    async def test_a_change_of_modes_ends_the_streamed_sentence(self):
-        seq = _seq(streaming=True)
-        result = []
-        for t, modes in (("It's ", ["calm"]), ("fine", ["calm", "emphasis"]), (" now.", ["calm"])):
-            result += await seq.register_spoken(
-                _token(t, modes), "ctx1", t, append_to_context=True, build_tracker=False
-            )
-        result += await seq.finalize("ctx1")
-        texts = [(f.text.strip(), f.modes) for f in result if isinstance(f, TTSTextFrame)]
-        self.assertEqual(
-            texts, [("It's", ["calm"]), ("fine", ["calm", "emphasis"]), ("now.", ["calm"])]
-        )
-
-
-# ---------------------------------------------------------------------------
 # register_spoken — streaming: words buffered until a pending sentence promotes
 # ---------------------------------------------------------------------------
 

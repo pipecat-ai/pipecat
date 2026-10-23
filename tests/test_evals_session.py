@@ -301,6 +301,8 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertEqual(
             expression(bot_output(2, modes=["excited", "emphasis"])), "<<excited emphasis>>"
         )
+        # Modes can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, modes=["calm"])), "<<calm>>")
         # An event counts when it is heard, once.
         self.assertIsNone(expression(bot_output(3, "expression_event", "laughter", status="new")))
         self.assertEqual(

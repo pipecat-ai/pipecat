@@ -103,17 +103,17 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
         )
 
     def render_text(self, text: str, modes: list[str], previous_modes: list[str] | None) -> str:
-        """Prefix an emotion tag where the emotion changes."""
+        """Prefix an emotion tag, set apart from the words, where the emotion changes."""
         emotion = modes[0] if modes else None
         previous = previous_modes[0] if previous_modes else None
         if emotion == previous:
             return text
-        return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/>{text}'
+        return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/> {text}'
 
     def render_event(self, name: str) -> str:
         """Render laughter, set apart so Cartesia times it as a word of its own."""
         return f" [{name}] "
 
     def render_pause(self, duration_ms: int) -> str:
-        """Render a break."""
-        return f'<break time="{duration_ms}ms"/>'
+        """Render a break, set apart from the words."""
+        return f' <break time="{duration_ms}ms"/> '

@@ -138,8 +138,8 @@ class EvalEventStream:
         self.last_activity = self._t0
         self._llm_text_at: float | None = None
         # The modes the bot last reported speaking in during the current response,
-        # and the spoken segments already reported, so an ``expression`` event
-        # marks only where the modes change.
+        # so an ``expression`` event marks only where the modes change, and the
+        # event and pause segments already reported.
         self._expression_modes: list[str] = []
         self._expression_segments: set = set()
         # The reply rule's flag: set by a send or an interruption, cleared at the
@@ -634,31 +634,24 @@ class EvalEventStream:
     def _expression_event(self, data: dict) -> dict | None:
         """The expression the bot performed, from a ``bot-output``, written as the LLM writes it.
 
-        Only expressive conversation reports it: an event or pause segment, or
-        spoken text carrying ``modes``. Each is reported once per segment, as it
-        is spoken rather than announced, so they keep the order they were
-        performed in; spoken text only where its modes differ from those before
-        it in the response.
+        Only expressive conversation reports it: an event or pause segment,
+        once, or spoken text carrying ``modes``, where they differ from the
+        modes before it in the response. Each is reported as it is spoken
+        rather than announced, so they keep the order they were performed in.
         """
         text_type = data.get("text_type")
         segment_id = data.get("segment_id")
-        if (
-            not data.get("will_be_spoken")
-            or data.get("spoken_status") == "new"
-            or segment_id in self._expression_segments
-        ):
+        if not data.get("will_be_spoken") or data.get("spoken_status") == "new":
             return None
-        if text_type == "expression_event":
+        if text_type in ("expression_event", "expression_pause"):
+            if segment_id in self._expression_segments:
+                return None
             self._expression_segments.add(segment_id)
-            return {"type": "expression", "text": f"[[{data.get('text', '')}]]"}
-        if text_type == "expression_pause":
-            self._expression_segments.add(segment_id)
-            return {"type": "expression", "text": f"[[pause {data.get('text', '')}]]"}
+            text = data.get("text", "")
+            tag = f"[[{text}]]" if text_type == "expression_event" else f"[[pause {text}]]"
+            return {"type": "expression", "text": tag}
         modes = data.get("modes")
-        if modes is None:
-            return None
-        self._expression_segments.add(segment_id)
-        if modes == self._expression_modes:
+        if modes is None or modes == self._expression_modes:
             return None
         self._expression_modes = modes
         return {"type": "expression", "text": f"<<{' '.join(modes) or 'neutral'}>>"}
