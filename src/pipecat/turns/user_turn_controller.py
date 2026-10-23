@@ -22,7 +22,11 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import (
+    ProcessFrameResult,
+    UserTurnResumedParams,
+    UserTurnSpeculation,
+)
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     UserTurnStartedParams,
@@ -80,6 +84,10 @@ class UserTurnController(BaseObject):
       most strategies; fires alone when the turn's end waits for a decision
       on the inference, or for an eager end of turn to be confirmed.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
+    - on_user_turn_resumed: Emitted when the user starts speaking again in
+      an open turn, after they stopped or after the turn's inference was
+      triggered. Its `UserTurnResumedParams` say whether that inference
+      was triggered, since the new speech voids the answer it started.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
     - on_push_frame: Emitted when a strategy wants to push a frame.
     - on_broadcast_frame: Emitted when a strategy wants to broadcast a frame.
@@ -147,6 +155,8 @@ class UserTurnController(BaseObject):
         self._user_turn_stop_decisions: dict[BaseUserTurnStopStrategy, UserTurnStoppedParams] = {}
         # The inference triggered for the stop decisions made so far, if any.
         self._user_turn_inference = _UserTurnInference.NONE
+        # Whether the open turn interrupts the bot, as its start decided.
+        self._user_turn_enable_interruptions = False
         self._user_turn_stop_timeout_event = asyncio.Event()
         self._user_turn_stop_timeout_task: asyncio.Task | None = None
 
@@ -156,6 +166,7 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_speculation_cancelled", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
+        self._register_event_handler("on_user_turn_resumed", sync=True)
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
@@ -340,9 +351,7 @@ class UserTurnController(BaseObject):
     async def _handle_user_started_speaking(
         self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
     ):
-        self._user_speaking = True
-        self._user_turn_stop_decisions.clear()
-        self._user_turn_inference = _UserTurnInference.NONE
+        await self._handle_speech_started()
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -356,9 +365,7 @@ class UserTurnController(BaseObject):
         self._user_turn_stop_timeout_event.set()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._user_speaking = True
-        self._user_turn_stop_decisions.clear()
-        self._user_turn_inference = _UserTurnInference.NONE
+        await self._handle_speech_started()
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -368,6 +375,23 @@ class UserTurnController(BaseObject):
 
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
+
+    async def _handle_speech_started(self):
+        # Speech in an open turn clears the stop decisions made so far, and
+        # the inference triggered for them. It resumes the turn when the user had
+        # stopped, or when that inference was already triggered.
+        resumed = self._user_turn and (
+            not self._user_speaking or self._user_turn_inference_triggered
+        )
+        params = UserTurnResumedParams(
+            enable_interruptions=self._user_turn_enable_interruptions,
+            inference_triggered=self._user_turn_inference_triggered,
+        )
+        self._user_speaking = True
+        self._user_turn_stop_decisions.clear()
+        self._user_turn_inference = _UserTurnInference.NONE
+        if resumed:
+            await self._call_event_handler("on_user_turn_resumed", params)
 
     async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
         # We have received a transcription, let's reset the user turn timeout.
@@ -450,6 +474,7 @@ class UserTurnController(BaseObject):
 
         self._user_turn = True
         self._user_turn_stop_timeout_event.set()
+        self._user_turn_enable_interruptions = params.enable_interruptions
 
         # Notify every strategy that the turn has started. Start strategies
         # ready themselves for the next detection; stop strategies arm to detect

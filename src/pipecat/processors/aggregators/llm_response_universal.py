@@ -97,7 +97,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
-from pipecat.turns.types import UserTurnSpeculation
+from pipecat.turns.types import UserTurnResumedParams, UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -812,6 +812,9 @@ class LLMUserAggregator(LLMContextAggregator):
             "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
         )
         self._user_turn_controller.add_event_handler(
+            "on_user_turn_resumed", self._on_user_turn_resumed
+        )
+        self._user_turn_controller.add_event_handler(
             "on_user_turn_started", self._on_user_turn_started
         )
         self._user_turn_controller.add_event_handler(
@@ -1403,6 +1406,18 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _on_broadcast_frame(self, controller, frame_cls: type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
+
+    async def _on_user_turn_resumed(self, controller, params: UserTurnResumedParams):
+        if not params.inference_triggered:
+            return
+
+        # The user is still talking, so the answer started for the turn so far
+        # is void. An interruption stops it wherever it got to. A turn that
+        # doesn't interrupt the bot only withdraws a speculation.
+        if params.enable_interruptions:
+            await self.broadcast_interruption()
+        else:
+            await self.broadcast_frame(UserTurnResponseCancelFrame)
 
     async def _on_user_turn_speculation_cancelled(self, controller):
         # Broadcast rather than queued, so it reaches a downstream gate ahead of

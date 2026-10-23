@@ -23,7 +23,11 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import (
+    ProcessFrameResult,
+    UserTurnResumedParams,
+    UserTurnSpeculation,
+)
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -1137,6 +1141,48 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await eager.decide()
 
         self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
+
+    def _record_resumes(self) -> list[UserTurnResumedParams]:
+        resumes: list[UserTurnResumedParams] = []
+
+        @self.controller.event_handler("on_user_turn_resumed")
+        async def on_user_turn_resumed(controller, params):
+            resumes.append(params)
+
+        return resumes
+
+    async def test_speaking_again_in_an_open_turn_resumes_it(self):
+        await self._start([DecidingStopStrategy(), DecidingStopStrategy()])
+        resumes = self._record_resumes()
+        await self._speak()
+
+        await self._speak()
+
+        self.assertEqual(
+            resumes,
+            [UserTurnResumedParams(enable_interruptions=True, inference_triggered=False)],
+        )
+
+    async def test_a_resume_after_the_inference_was_triggered_says_so(self):
+        first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([first, on_inference])
+        resumes = self._record_resumes()
+        await self._speak()
+        await first.decide()
+
+        await self._speak()
+
+        self.assertEqual([p.inference_triggered for p in resumes], [True])
+
+    async def test_one_speech_reported_twice_resumes_the_turn_once(self):
+        await self._start([DecidingStopStrategy(), DecidingStopStrategy()])
+        resumes = self._record_resumes()
+        await self._speak()
+
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+
+        self.assertEqual(len(resumes), 1)
 
     async def test_the_turn_end_combines_the_decisions(self):
         """A turn end announced elsewhere, or confirming a speculation, applies to the whole turn."""

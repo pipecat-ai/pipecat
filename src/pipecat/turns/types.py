@@ -38,3 +38,18 @@ class UserTurnSpeculation:
     """
 
     text: str
+
+
+@dataclass
+class UserTurnResumedParams:
+    """Parameters emitted when the user speaks again in an open turn.
+
+    Parameters:
+        enable_interruptions: Whether the turn interrupts the bot, as decided
+            when it started.
+        inference_triggered: Whether the turn's inference was already
+            triggered. The new speech voids the answer it started.
+    """
+
+    enable_interruptions: bool
+    inference_triggered: bool
