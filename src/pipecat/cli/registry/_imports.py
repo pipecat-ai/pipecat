@@ -187,6 +187,9 @@ IMPORTS = {
         "from pipecat.services.openai.realtime.events import SessionProperties, AudioConfiguration, AudioInput, InputAudioTranscription, SemanticTurnDetection, InputAudioNoiseReduction",
         "from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService",
     ],
+    "zoom_ai_realtime": [
+        "from pipecat.services.zoom_ai.realtime.llm import ZoomAIRealtimeLLMService"
+    ],
     "ultravox": [
         "from pipecat.services.ultravox.llm import UltravoxRealtimeLLMService, OneShotInputParams",
         "import datetime",

@@ -6191,6 +6191,9 @@ websocket = [
 whisper = [
     { name = "faster-whisper" },
 ]
+zoom-ai = [
+    { name = "httpx", extra = ["http2"] },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -6250,6 +6253,7 @@ requires-dist = [
     { name = "httpx", extras = ["http2"], marker = "extra == 'cloudflare'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'openai'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'typesafe'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'zoom-ai'", specifier = ">=0.27,<1" },
     { name = "hume", marker = "extra == 'hume'", specifier = ">=0.11.2,<1" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.0,<4" },
     { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.5.0,<1" },
