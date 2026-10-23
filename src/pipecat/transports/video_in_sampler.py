@@ -125,7 +125,7 @@ class _VideoInSampler:
         if self._framerate == 0:
             return request is not None, request
 
-        now = time.time()
+        now = time.monotonic()
         interval = 1 / self._framerate
         tolerance = min(JITTER_TOLERANCE_SECS, interval / 2)
 
