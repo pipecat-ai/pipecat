@@ -1777,11 +1777,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     async def _reconnect(self):
         """Reconnect to Gemini Live API."""
-        await self._disconnect()
+        await self._disconnect(preserve_tool_calls=bool(self._session_resumption_handle))
         await self._connect(session_resumption_handle=self._session_resumption_handle)
 
-    async def _disconnect(self):
-        """Disconnect from Gemini Live API and clean up resources."""
+    async def _disconnect(self, *, preserve_tool_calls: bool = False):
+        """Disconnect from Gemini Live API and clean up resources.
+
+        Args:
+            preserve_tool_calls: Keep settled call IDs and in-flight function
+                names when reconnecting to the same resumed session.
+        """
         logger.info("Disconnecting from Gemini service")
         try:
             self._disconnecting = True
@@ -1798,8 +1803,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             if self._session:
                 await self._session.close()
                 self._session = None
-            self._completed_tool_calls = set()
-            self._tool_call_id_to_name = {}
+            if not preserve_tool_calls:
+                self._completed_tool_calls = set()
+                self._tool_call_id_to_name = {}
             self._async_tool_warning_logged = False
             self._ready_for_realtime_input = False
             self._disconnecting = False
