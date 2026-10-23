@@ -354,28 +354,34 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [("new", sentence.id), ("completed", sentence.id)],
         )
 
-    async def test_a_segment_reports_its_modes_as_it_is_spoken(self):
-        segment = self._segment("back up", TextType.SENTENCE)
-        segment.modes = ["calm", "emphasis"]
-        progress = self._progress(segment, "back up", "")
-        progress.modes = segment.modes
+    async def test_a_segment_reports_the_modes_of_each_word_as_it_is_spoken(self):
+        segment = self._segment("I'm back", TextType.SENTENCE)
+        first = self._progress(segment, "I'm", " back")
+        first.modes = ["calm"]
+        second = self._progress(segment, "I'm back", "")
+        second.modes = ["excited", "emphasis"]
         await self._push(segment)
-        await self._push(self._word("back up", segment))
-        await self._push(progress)
+        await self._push(self._word("I'm", segment))
+        await self._push(first)
+        await self._push(self._word("back", segment))
+        await self._push(second)
 
         self.assertEqual(
             [(data.spoken_status, data.modes) for data in self._sent_outputs()],
-            [("new", ["calm", "emphasis"]), ("completed", ["calm", "emphasis"])],
+            [("new", None), ("in-progress", ["calm"]), ("completed", ["excited", "emphasis"])],
         )
 
-    async def test_an_expression_event_is_sent_as_text_that_isnt_spoken(self):
-        laugh = AggregatedTextFrame("laugh", TextType.EXPRESSION_EVENT, raw_text="[[laugh]]")
-        laugh.skip_tts = True
+    async def test_an_expression_event_is_a_segment_of_its_own_once_performed(self):
+        laugh = TTSTextFrame("laugh", TextType.EXPRESSION_EVENT, context_id="turn")
+        laugh.will_be_spoken = True
         await self._push(laugh)
 
         self.assertEqual(
-            [(d.text, d.text_type, d.will_be_spoken, d.modes) for d in self._sent_outputs()],
-            [("laugh", TextType.EXPRESSION_EVENT, False, None)],
+            [
+                (d.text, d.text_type, d.spoken_status, d.segment_id, d.modes)
+                for d in self._sent_outputs()
+            ],
+            [("laugh", TextType.EXPRESSION_EVENT, "completed", laugh.id, None)],
         )
 
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):

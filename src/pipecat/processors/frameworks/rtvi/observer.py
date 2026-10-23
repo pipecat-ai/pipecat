@@ -1012,7 +1012,7 @@ class RTVIObserver(BaseObserver):
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
-                modes=frame.modes,
+                modes=frame.modes if isinstance(frame, TTSTextFrame) else None,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
