@@ -37,6 +37,7 @@ from pipecat.frames.frames import LLMFullResponseEndFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.openai.realtime import events as openai_events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 from . import events
@@ -308,10 +309,12 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
     instructions, tools and voice.
 
     Errors the Voice Agent reports without ending the session are pushed as
-    non-fatal errors. If the session ends unexpectedly (the connection closing,
-    or a session reaching its time limit), the service reconnects and restores
-    the conversation; otherwise, as when the provider rejects your provider key,
-    it pushes a permanent error.
+    non-fatal errors. If it rejects the session's settings (an unknown voice,
+    say) or the provider rejects your provider key, the error is permanent,
+    categorized as an invalid request or an authentication failure. If the
+    session ends unexpectedly (the connection closing, or a session reaching its
+    time limit), the service reconnects and restores the conversation; if
+    reconnecting fails, it pushes a permanent error.
 
     Example::
 
@@ -375,6 +378,10 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
         # The model and listen settings go in the first session update of a
         # connection only; they can't change after that.
         self._listen_configured = False
+        # Whether the connection's first session update awaits session.updated.
+        self._configuring = False
+        # The Voice Agent refused the settings; a new session would be refused too.
+        self._settings_rejected = False
         # call_id -> the item id of its function call in the conversation
         self._call_items: dict[str, str] = {}
         # event_id of a response.create the server hasn't answered yet
@@ -417,6 +424,7 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
                 max_size=None,
             )
             self._listen_configured = False
+            self._configuring = False
             self._call_items = {}
             self._pending_response_create = None
             self._terminal_message = None
@@ -450,6 +458,8 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
             await websocket.close()
         except Exception:
             pass
+        if self._settings_rejected:
+            return  # already reported
 
         reason = self._terminal_message or (str(closed) if closed else "connection closed")
         retryable = terminal is None or bool(terminal.get("retryable"))
@@ -469,10 +479,11 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
             if self._disconnecting:
                 return
             reason += "; reconnecting failed"
-        await self.push_error(
-            error_msg=f"Zoom Voice Agent session ended: {reason} (tracking_id={self._tracking_id})",
-            force_treat_as_permanent=True,
-        )
+        error_msg = f"Zoom Voice Agent session ended: {reason} (tracking_id={self._tracking_id})"
+        if terminal is not None and terminal.get("type") == "invalid_connection_credentials":
+            await self.push_error(error_msg=error_msg, category=ErrorCategory.AUTHENTICATION)
+        else:
+            await self.push_error(error_msg=error_msg, force_treat_as_permanent=True)
 
     async def _end_session(self):
         """Settle what the ended session left open."""
@@ -549,6 +560,19 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
         if any(expected in message.lower() for expected in _EXPECTED_ERRORS):
             logger.debug(f"{self}: {message}")
             return
+        if self._configuring and error.get("type") == "invalid_request_error":
+            # The Voice Agent refused the session's settings (an unknown voice, say)
+            # and waits for a corrected update, which the same settings can't give.
+            self._configuring = False
+            self._settings_rejected = True
+            await self.push_error(
+                error_msg=f"Zoom Voice Agent rejected the session settings: {message} "
+                f"(tracking_id={self._tracking_id})",
+                category=ErrorCategory.INVALID_REQUEST,
+            )
+            if self._websocket:
+                await self._websocket.close()  # ends the receive loop, without reconnecting
+            return
         await self.push_error(
             error_msg=f"Zoom Voice Agent error: {message} (tracking_id={self._tracking_id})"
         )
@@ -591,6 +615,7 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
 
     async def _handle_evt_session_updated(self, evt):
         self._listen_configured = True
+        self._configuring = False
         if self._restore_conversation_when_ready:
             self._restore_conversation_when_ready = False
             await self._restore_conversation()
@@ -650,6 +675,7 @@ class ZoomAIVoiceAgentLLMService(OpenAIRealtimeLLMService):
             extra.pop("listen", None)  # fixed once the session is configured
         update["session"] = _merge(update["session"], extra)
         await self._ws_send(update)
+        self._configuring = self._configuring or not self._listen_configured
         self._listen_configured = True
 
     def _build_session(

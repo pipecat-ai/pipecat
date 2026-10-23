@@ -28,6 +28,7 @@ from pipecat.services.zoom_ai.voice_agent.llm import (
     ZoomAIVoiceAgentLLMService,
     _ZoomAIVoiceAgentWebSocket,
 )
+from pipecat.utils.errors import ErrorCategory
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,10 +41,12 @@ class _ErrorRecorder:
     def __init__(self):
         self.messages: list[str] = []
         self.raw: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
 
     async def __call__(self, error_msg: str, **kwargs):
         self.raw.append(error_msg)
         self.messages.append(re.sub(r" \(tracking_id=[^)]*\)$", "", error_msg))
+        self.kwargs.append(kwargs)
 
 
 def _service(**settings) -> ZoomAIVoiceAgentLLMService:
@@ -914,6 +917,51 @@ async def test_a_rejected_provider_key_ends_the_session_without_reconnecting():
     assert errors.messages == [
         "Zoom Voice Agent session ended: Provider rejected the BYOK credentials at setup"
     ]
+    assert errors.kwargs[-1] == {"category": ErrorCategory.AUTHENTICATION}
+
+
+@pytest.mark.asyncio
+async def test_rejected_session_settings_are_a_permanent_invalid_request():
+    service = _service(speak=events.Speak(voice="nosuchvoice"))
+    service.push_error = errors = _ErrorRecorder()  # type: ignore[method-assign]
+    await _session_updates(service)  # the first update of the connection
+    message = "invalid client event: session.audio.output.voice: Input should be 'alex'"
+    await service._handle_server_error({"type": "invalid_request_error", "message": message}, set())
+    assert errors.messages == [f"Zoom Voice Agent rejected the session settings: {message}"]
+    assert errors.kwargs[-1] == {"category": ErrorCategory.INVALID_REQUEST}
+
+    # Once the session is configured, a rejected update leaves it running.
+    await service._handle_evt_session_updated(
+        openai_events.SessionUpdatedEvent(
+            type="session.updated", event_id="e1", session=openai_events.SessionProperties()
+        )
+    )
+    await service._handle_server_error({"type": "invalid_request_error", "message": message}, set())
+    assert errors.messages[-1] == f"Zoom Voice Agent error: {message}"
+    assert errors.kwargs[-1] == {}
+
+
+@pytest.mark.asyncio
+async def test_rejected_session_settings_end_the_session_without_reconnecting():
+    service = _service()
+    service.push_error = errors = _ErrorRecorder()  # type: ignore[method-assign]
+    connects: list[int] = []
+
+    async def _connect():
+        connects.append(1)
+
+    service._connect = _connect  # type: ignore[method-assign]
+    service._configuring = True  # the first session update awaits session.updated
+    service._websocket = _ZoomAIVoiceAgentWebSocket(
+        _FakeWebSocket(
+            [{"type": "error", "error": {"type": "invalid_request_error", "message": "bad"}}]
+        ),
+        on_error=service._handle_server_error,
+    )
+    await service._receive_task_handler()
+    assert connects == []
+    assert errors.messages == ["Zoom Voice Agent rejected the session settings: bad"]
+    assert service._websocket is None
 
 
 @pytest.mark.asyncio
