@@ -7,6 +7,7 @@
 """This module defines a controller for managing user turn lifecycle."""
 
 import asyncio
+from enum import Enum
 
 from pipecat.frames.frames import (
     Frame,
@@ -16,6 +17,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -38,6 +40,14 @@ from pipecat.turns.user_turn_strategies import (
 from pipecat.utils.base_object import BaseObject
 
 
+class _UserTurnInference(Enum):
+    """The inference triggered for the stop decisions made so far in a user turn."""
+
+    NONE = "none"
+    TRIGGERED = "triggered"
+    SPECULATIVE = "speculative"
+
+
 class UserTurnController(BaseObject):
     """Controller for managing user turn lifecycle.
 
@@ -49,7 +59,17 @@ class UserTurnController(BaseObject):
     :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`:
     with ``StrategyMode.ALL``, the default, the turn ends once every stop
     strategy has decided the user is done, and with ``StrategyMode.FIRST``
-    the first stop strategy to decide the user is done ends it.
+    the first stop strategy to decide the user is done ends it. A stop
+    strategy that waits for the turn's inference gets its say in either
+    mode: in a ``FIRST`` list, the first stop strategy to decide runs the
+    inference, and the turn ends once a strategy waiting for that inference
+    decides.
+
+    In an ``ALL`` list the controller starts the turn's inference itself,
+    once every stop strategy that listens to the user has decided. A stop
+    strategy that waits for the inference instead, such as one reading the
+    LLM's turn-completion marker, then decides on that inference. An eager
+    end of turn still starts its speculation at once.
 
     Event handlers available:
 
@@ -57,8 +77,8 @@ class UserTurnController(BaseObject):
     - on_user_turn_inference_triggered: Emitted when enough signal exists to
       start LLM inference, carrying a `UserTurnSpeculation` when the turn it
       answers hasn't ended yet. Fires together with `on_user_turn_stopped` for
-      most strategies; fires alone when a downstream strategy gates
-      finalization on the LLM's verdict.
+      most strategies; fires alone when the turn's end waits for a decision
+      on the inference, or for an eager end of turn to be confirmed.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
     - on_push_frame: Emitted when a strategy wants to push a frame.
@@ -114,6 +134,7 @@ class UserTurnController(BaseObject):
         super().__init__()
 
         self._user_turn_strategies = user_turn_strategies
+        self._user_turn_stop_strategies = self._stop_strategies_of(user_turn_strategies)
         self._user_turn_strategies_params = (
             user_turn_strategies_params or UserTurnStrategiesParams()
         )
@@ -124,6 +145,8 @@ class UserTurnController(BaseObject):
 
         self._user_turn = False
         self._user_turn_stop_decisions: dict[BaseUserTurnStopStrategy, UserTurnStoppedParams] = {}
+        # The inference triggered for the stop decisions made so far, if any.
+        self._user_turn_inference = _UserTurnInference.NONE
         self._user_turn_stop_timeout_event = asyncio.Event()
         self._user_turn_stop_timeout_task: asyncio.Task | None = None
 
@@ -191,6 +214,7 @@ class UserTurnController(BaseObject):
         """
         await self._cleanup_strategies()
         self._user_turn_strategies = strategies
+        self._user_turn_stop_strategies = self._stop_strategies_of(strategies)
         self._user_turn_stop_decisions.clear()
         await self._setup_strategies()
 
@@ -213,9 +237,7 @@ class UserTurnController(BaseObject):
 
         The end-of-turn counterpart to :attr:`resolves_proposed_turn_start_frames`.
         """
-        return any(
-            s.resolves_proposed_turn_stop_frames for s in self._user_turn_strategies.stop or []
-        )
+        return any(s.resolves_proposed_turn_stop_frames for s in self._user_turn_stop_strategies)
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.
@@ -238,13 +260,15 @@ class UserTurnController(BaseObject):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            self._user_turn_inference = _UserTurnInference.NONE
 
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
             if result == ProcessFrameResult.STOP:
                 break
 
-        for strategy in self._user_turn_strategies.stop or []:
+        for strategy in self._user_turn_stop_strategies:
             result = await strategy.process_frame(frame)
             # Every strategy in an ALL list needs every frame to decide on.
             if result == ProcessFrameResult.STOP and self._stop_mode == StrategyMode.FIRST:
@@ -253,6 +277,10 @@ class UserTurnController(BaseObject):
     @property
     def _stop_mode(self) -> StrategyMode:
         return self._user_turn_strategies_params.stop_mode
+
+    @property
+    def _user_turn_inference_triggered(self) -> bool:
+        return self._user_turn_inference != _UserTurnInference.NONE
 
     async def _setup_strategies(self):
         if not self._setup:
@@ -265,7 +293,7 @@ class UserTurnController(BaseObject):
             s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
             s.add_event_handler("on_reset_aggregation", self._on_reset_aggregation)
 
-        for s in self._user_turn_strategies.stop or []:
+        for s in self._user_turn_stop_strategies:
             await s.setup(self._setup)
             s.add_event_handler("on_push_frame", self._on_push_frame)
             s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
@@ -275,9 +303,7 @@ class UserTurnController(BaseObject):
             s.add_event_handler(
                 "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
             )
-            self._user_turn_stop_source(s).add_event_handler(
-                "on_user_turn_stopped", self._on_user_turn_stopped
-            )
+            s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _cleanup_strategies(self):
         # Remove the handlers _setup_strategies added (symmetric), so re-applying
@@ -290,7 +316,7 @@ class UserTurnController(BaseObject):
             s.remove_event_handler("on_user_turn_started", self._on_user_turn_started)
             s.remove_event_handler("on_reset_aggregation", self._on_reset_aggregation)
 
-        for s in self._user_turn_strategies.stop or []:
+        for s in self._user_turn_stop_strategies:
             await s.cleanup()
             s.remove_event_handler("on_push_frame", self._on_push_frame)
             s.remove_event_handler("on_broadcast_frame", self._on_broadcast_frame)
@@ -300,26 +326,23 @@ class UserTurnController(BaseObject):
             s.remove_event_handler(
                 "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
             )
-            self._user_turn_stop_source(s).remove_event_handler(
-                "on_user_turn_stopped", self._on_user_turn_stopped
-            )
+            s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
-    def _user_turn_stop_source(
-        self, strategy: BaseUserTurnStopStrategy
-    ) -> BaseUserTurnStopStrategy:
-        # Every stop strategy decides, so a deferred one decides as the
-        # strategy it wraps.
-        if self._stop_mode == StrategyMode.ALL and isinstance(
-            strategy, DeferredUserTurnStopStrategy
-        ):
-            return strategy.inner
-        return strategy
+    @staticmethod
+    def _stop_strategies_of(strategies: UserTurnStrategies) -> list[BaseUserTurnStopStrategy]:
+        # The controller runs the turn's inference, so a deferred strategy is
+        # just the strategy it wraps.
+        return [
+            s.inner if isinstance(s, DeferredUserTurnStopStrategy) else s
+            for s in strategies.stop or []
+        ]
 
     async def _handle_user_started_speaking(
         self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
     ):
         self._user_speaking = True
         self._user_turn_stop_decisions.clear()
+        self._user_turn_inference = _UserTurnInference.NONE
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -335,6 +358,7 @@ class UserTurnController(BaseObject):
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
         self._user_turn_stop_decisions.clear()
+        self._user_turn_inference = _UserTurnInference.NONE
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -366,6 +390,8 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
+        # The turn's answer is gone, so the next stop decision runs it again.
+        self._user_turn_inference = _UserTurnInference.NONE
         await self._call_event_handler("on_user_turn_speculation_cancelled")
 
     async def _on_user_turn_started(
@@ -378,6 +404,11 @@ class UserTurnController(BaseObject):
     async def _on_user_turn_inference_triggered(
         self, strategy: BaseUserTurnStopStrategy, speculation: UserTurnSpeculation | None
     ):
+        # The controller runs the turn's inference itself once the stop
+        # strategies have decided. A strategy only starts one to speculate.
+        if not speculation:
+            return
+
         await self._trigger_user_turn_inference_triggered(strategy, speculation)
 
     async def _on_user_turn_stopped(
@@ -386,7 +417,26 @@ class UserTurnController(BaseObject):
         if self._stop_mode == StrategyMode.ALL:
             await self._add_user_turn_stop_decision(strategy, params)
         else:
-            await self._trigger_user_turn_stop(strategy, params)
+            await self._first_user_turn_stop(strategy, params)
+
+    async def _first_user_turn_stop(
+        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
+    ):
+        if not self._user_turn:
+            return
+
+        # The first decision runs the turn's inference and ends the turn. A
+        # stop strategy that waits for that inference still gets its say: the
+        # turn then ends on its decision instead, keeping what the earlier
+        # decisions said about the turn end.
+        self._user_turn_stop_decisions[strategy] = params
+        if not strategy.waits_for_inference and not self._user_turn_inference_triggered:
+            await self._trigger_user_turn_inference_triggered(strategy)
+        turn_waits_for_inference = any(
+            s.waits_for_inference for s in self._user_turn_stop_strategies
+        )
+        if strategy.waits_for_inference or not turn_waits_for_inference:
+            await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
 
     async def _on_reset_aggregation(self, strategy: BaseUserTurnStartStrategy):
         await self._call_event_handler("on_reset_aggregation", strategy)
@@ -407,7 +457,7 @@ class UserTurnController(BaseObject):
         # inside its own handle_user_turn_started.
         for s in self._user_turn_strategies.start or []:
             await s.handle_user_turn_started()
-        for s in self._user_turn_strategies.stop or []:
+        for s in self._user_turn_stop_strategies:
             await s.handle_user_turn_started()
 
         await self._call_event_handler("on_user_turn_started", strategy, params)
@@ -421,6 +471,10 @@ class UserTurnController(BaseObject):
         # remains active afterward — only `on_user_turn_stopped` flips state.
         if not self._user_turn:
             return
+
+        self._user_turn_inference = (
+            _UserTurnInference.SPECULATIVE if speculation else _UserTurnInference.TRIGGERED
+        )
 
         # Re-arm the stop watchdog so a stuck turn (inference fired but
         # finalization never arrives) still times out and finalizes.
@@ -437,8 +491,23 @@ class UserTurnController(BaseObject):
 
         self._user_turn_stop_decisions[strategy] = params
 
-        if len(self._user_turn_stop_decisions) == len(self._user_turn_strategies.stop or []):
+        # Once every stop strategy that listens to the user has decided, run
+        # the turn's inference. This comes before the turn-end check below, so
+        # when this decision also ends the turn, the inference still starts
+        # first.
+        if not self._user_turn_inference_triggered and self._ready_for_inference():
+            await self._trigger_user_turn_inference_triggered(strategy)
+
+        if len(self._user_turn_stop_decisions) == len(self._user_turn_stop_strategies):
             await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
+
+    def _ready_for_inference(self) -> bool:
+        # Only the stop strategies that wait for the inference are left to decide.
+        return all(
+            s in self._user_turn_stop_decisions
+            for s in self._user_turn_stop_strategies
+            if not s.waits_for_inference
+        )
 
     def _user_turn_stop_params(self) -> UserTurnStoppedParams:
         # One decision saying the turn end was announced elsewhere, or that it
@@ -467,6 +536,7 @@ class UserTurnController(BaseObject):
 
         self._user_turn = False
         self._user_turn_stop_decisions.clear()
+        self._user_turn_inference = _UserTurnInference.NONE
         self._user_turn_stop_timeout_event.set()
 
         # Notify every strategy that the turn has ended. Stop strategies reset
@@ -476,7 +546,7 @@ class UserTurnController(BaseObject):
         # semantic, so resetting them here would be wrong.
         for s in self._user_turn_strategies.start or []:
             await s.handle_user_turn_stopped()
-        for s in self._user_turn_strategies.stop or []:
+        for s in self._user_turn_stop_strategies:
             await s.handle_user_turn_stopped()
 
         await self._call_event_handler("on_user_turn_stopped", strategy, params)

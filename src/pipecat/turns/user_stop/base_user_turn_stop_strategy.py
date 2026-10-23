@@ -123,6 +123,17 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         return False
 
+    @property
+    def waits_for_inference(self) -> bool:
+        """Whether this strategy waits for the turn's inference before deciding.
+
+        In a ``StrategyMode.ALL`` list, the turn's inference runs once every
+        other stop strategy has decided, and this strategy then decides on
+        it. Override to True in a strategy that decides from the turn's
+        answer, such as one reading the LLM's turn-completion marker.
+        """
+        return False
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the strategy.
 
@@ -216,37 +227,46 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_user_turn_speculation_cancelled")
 
-    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
-        """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
+    async def trigger_user_turn_stopped(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        confirms_speculation: bool = False,
+    ):
+        """Report that the user is done, by firing ``on_user_turn_stopped``.
 
-        Most strategies call this when they decide a turn has ended. To
-        defer finalization to another strategy (so this strategy fires
-        only the inference-triggered event), wrap this strategy with
-        :func:`~pipecat.turns.user_stop.deferred` instead of changing
-        the trigger call.
+        A strategy calls this when it decides the user's turn has ended. The
+        controller runs the turn's inference itself once the stop strategies
+        have decided.
 
         Args:
             enable_user_speaking_frames: Whether to emit
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn. Pass False when something else in the pipeline has already
                 emitted it.
+            confirms_speculation: Whether a response generated ahead of this
+                turn ending already answers it, so inference should not run
+                again.
         """
-        await self.trigger_user_turn_inference_triggered()
         await self.trigger_user_turn_finalized(
-            enable_user_speaking_frames=enable_user_speaking_frames
+            enable_user_speaking_frames=enable_user_speaking_frames,
+            confirms_speculation=confirms_speculation,
         )
 
     async def trigger_user_turn_inference_triggered(
         self, *, speculation: UserTurnSpeculation | None = None
     ):
-        """Trigger only the `on_user_turn_inference_triggered` event.
+        """Start a speculative inference, by firing ``on_user_turn_inference_triggered``.
+
+        The controller runs a turn's inference itself once the stop strategies
+        have decided, so a strategy only calls this to answer ahead of that, as an
+        eager end of turn does.
 
         Args:
-            speculation: Set to run this inference speculatively, against a
-                provisional context carrying the turn text it names, for a turn
-                that hasn't ended yet. The response it produces is held back
-                until the turn is confirmed. Leave None to run the inference
-                against the conversation as it stands.
+            speculation: The speculation to run, against a provisional context
+                carrying the turn text it names, for a turn that hasn't ended
+                yet. The speculation gate keeps its response back until the turn
+                is confirmed. A call without one is ignored.
         """
         await self._call_event_handler("on_user_turn_inference_triggered", speculation)
 

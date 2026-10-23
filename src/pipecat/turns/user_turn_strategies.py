@@ -98,9 +98,11 @@ class UserTurnStrategiesParams(BaseModel):
         stop_merge_mode: How the bot's stop strategies combine with the ones a
             service recommends. Defaults to ``MergeMode.REPLACE``.
         stop_mode: Whether the turn ends once every stop strategy has decided the
-            user is done, or on the first one that does. With
-            ``StrategyMode.ALL``, the user speaking again clears the decisions
-            made so far. Defaults to ``StrategyMode.ALL``.
+            user is done, or on the first one that does. A stop strategy that
+            waits for the turn's inference, such as
+            ``LLMTurnCompletionUserTurnStopStrategy``, decides on it in either
+            mode. The user speaking again clears the decisions made so far.
+            Defaults to ``StrategyMode.ALL``.
     """
 
     start_merge_mode: MergeMode = MergeMode.REPLACE

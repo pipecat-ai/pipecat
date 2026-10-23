@@ -102,28 +102,37 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         return await super().process_frame(frame)
 
-    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
-        """End the turn, keeping the speculative response only if it still applies.
+    async def trigger_user_turn_stopped(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        confirms_speculation: bool = False,
+    ):
+        """Report that the user is done, keeping the speculative response only if it applies.
 
         Args:
             enable_user_speaking_frames: Whether to emit
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn.
+            confirms_speculation: Whether a response generated ahead of this
+                turn ending already answers it. The strategy decides this
+                itself for its own speculation.
         """
         speculation = await self._take_speculation()
         if not speculation:
             await super().trigger_user_turn_stopped(
-                enable_user_speaking_frames=enable_user_speaking_frames
+                enable_user_speaking_frames=enable_user_speaking_frames,
+                confirms_speculation=confirms_speculation,
             )
             return
 
         if self._match_policy.matches(speculation.text, self._text):
             logger.debug(f"{self}: eager end of turn held, keeping the speculative response")
-            # Inference already ran, on the eager transcript. Only finalize:
-            # the UserStoppedSpeakingFrame it emits is what releases the
+            # Inference already ran, on the eager transcript. The
+            # UserStoppedSpeakingFrame the turn end emits is what releases the
             # response, and the flag stops a second inference answering the
             # same turn.
-            await self.trigger_user_turn_finalized(
+            await super().trigger_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames,
                 confirms_speculation=True,
             )
@@ -134,8 +143,8 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"(eager: [{speculation.text}], committed: [{self._text}])"
         )
         await self.trigger_user_turn_speculation_cancelled()
-        # Inference has to run again, on the committed transcript, so fire both
-        # events rather than just finalizing.
+        # The committed transcript needs an inference of its own, which the
+        # controller runs for this decision.
         await super().trigger_user_turn_stopped(
             enable_user_speaking_frames=enable_user_speaking_frames
         )
