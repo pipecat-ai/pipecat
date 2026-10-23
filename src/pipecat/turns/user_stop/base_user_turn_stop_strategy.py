@@ -230,11 +230,7 @@ class BaseUserTurnStopStrategy(BaseObject):
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
 
-        Most strategies call this when they decide a turn has ended. To
-        defer finalization to another strategy (so this strategy fires
-        only the inference-triggered event), wrap this strategy with
-        :func:`~pipecat.turns.user_stop.deferred` instead of changing
-        the trigger call.
+        Most strategies call this when they decide a turn has ended.
 
         Args:
             enable_user_speaking_frames: Whether to emit

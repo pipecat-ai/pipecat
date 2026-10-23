@@ -640,7 +640,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """handle_user_turn_stopped() also runs when the stop watchdog ends the turn."""
         finalized = 0
 
-        class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
+        class SpyNeverStopStrategy(BaseUserTurnStopStrategy):
             async def handle_user_turn_stopped(self):
                 nonlocal finalized
                 await super().handle_user_turn_stopped()
@@ -698,7 +698,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):  # the deprecated hook
                     nonlocal resets
                     resets += 1
@@ -712,7 +712,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """Overriding the deprecated reset() warns when the class is defined."""
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):
                     pass
 
@@ -758,7 +758,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
 
-            class Migrated(ExternalUserTurnCompletionStopStrategy):
+            class Migrated(BaseUserTurnStopStrategy):
                 async def handle_user_turn_stopped(self):
                     pass
 

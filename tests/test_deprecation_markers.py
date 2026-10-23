@@ -257,11 +257,33 @@ def test_eager_end_of_turn_cancel_frame_warns():
     assert isinstance(frame, UserTurnResponseCancelFrame)
 
 
+def test_deferring_a_stop_strategy_warns_once():
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        deferred(SpeechTimeoutUserTurnStopStrategy())
+    messages = [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert messages == [
+        "`deferred` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement."
+    ]
+
+
+def test_external_user_turn_completion_stop_strategy_warns():
+    from pipecat.turns.user_stop import ExternalUserTurnCompletionStopStrategy
+
+    with pytest.warns(
+        DeprecationWarning, match="`ExternalUserTurnCompletionStopStrategy` is deprecated"
+    ):
+        ExternalUserTurnCompletionStopStrategy()
+
+
 def test_no_deprecation_warnings_at_import_time():
     """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
     Guards the suppression of @deprecated subclassing warnings for the task frame
-    aliases defined inside pipecat.frames.frames. Done in a subprocess for a
+    aliases defined inside pipecat.frames.frames, and the deprecated stop
+    strategies in pipecat.turns.user_stop. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
     "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
     e.g. ``audioop`` on Python 3.12 — don't trip it.
@@ -273,6 +295,7 @@ def test_no_deprecation_warnings_at_import_time():
         "    import pipecat.frames.frames\n"
         "    import pipecat.pipeline.worker\n"
         "    import pipecat.pipeline.runner\n"
+        "    import pipecat.turns.user_stop\n"
         "bad = [str(w.message) for w in caught\n"
         "       if issubclass(w.category, DeprecationWarning)\n"
         "       and ' is deprecated since ' in str(w.message)]\n"

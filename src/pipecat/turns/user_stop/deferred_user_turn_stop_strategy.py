@@ -6,12 +6,19 @@
 
 """Wrapper that defers a stop strategy's finalization to another strategy."""
 
+import warnings
+
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`DeferredUserTurnStopStrategy` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "No replacement."
+)
 class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     """Wraps a stop strategy and suppresses its ``on_user_turn_stopped`` event.
 
@@ -32,6 +39,12 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
             deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=...)),
             LLMTurnCompletionUserTurnStopStrategy(),
         ]
+
+    .. deprecated:: 1.14.0
+        No replacement. Every stop strategy votes before a turn ends, the default
+        ``stop_mode`` of
+        :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`, so
+        pass the wrapped strategy itself. Will be removed in 2.0.0.
     """
 
     def __init__(self, inner: BaseUserTurnStopStrategy, **kwargs):
@@ -100,6 +113,7 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         return await self._inner.process_frame(frame)
 
 
+@deprecated("`deferred` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.")
 def deferred(strategy: BaseUserTurnStopStrategy) -> DeferredUserTurnStopStrategy:
     """Defer this stop strategy's finalization to another strategy.
 
@@ -122,5 +136,14 @@ def deferred(strategy: BaseUserTurnStopStrategy) -> DeferredUserTurnStopStrategy
     Returns:
         A wrapper that exposes the inner strategy's behavior with
         finalization suppressed.
+
+    .. deprecated:: 1.14.0
+        No replacement. Every stop strategy votes before a turn ends, the default
+        ``stop_mode`` of
+        :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`, so
+        pass the wrapped strategy itself. Will be removed in 2.0.0.
     """
-    return DeferredUserTurnStopStrategy(strategy)
+    # This call already warned; the wrapper it builds would warn again.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return DeferredUserTurnStopStrategy(strategy)
