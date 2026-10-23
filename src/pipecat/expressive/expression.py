@@ -13,6 +13,10 @@ words after it are spoken, and ``^^word^^`` to stress a word. A mode lasts until
 the next mode tag or the end of the response, and ``<<neutral>>`` returns to
 the voice's baseline.
 
+For example::
+
+    <<cheerful>> It's [[laughs]] ^^back^^ up. [[pause 300]] <<neutral>> Anything else?
+
 A TTS service declares which of these it can perform with
 :class:`ExpressionCapabilities`, and broadcasts them at start in a
 :class:`~pipecat.frames.frames.TTSMetadataFrame`, so the LLM can be told which
@@ -37,12 +41,19 @@ EMPHASIS_MODE = "emphasis"
 class ModeScope(Enum):
     """Where in a response a TTS service can change mode.
 
+    In ``"<<calm>> Sure, <<excited>> it worked!"``, a service with
+    ``ANYWHERE`` speaks "it worked!" excited. One with ``SENTENCE`` speaks the
+    whole sentence calm, the modes its words start in, and the next sentence
+    excited.
+
     Parameters:
         ANYWHERE: A mode takes effect where its tag appears.
-        SENTENCE: A mode can change only between sentences, for a service
-            that takes modes with each request rather than as markup. When
-            the service streams tokens, a request is a token, so a change can
-            take effect within a sentence.
+        SENTENCE: A mode can change only between requests, for a service
+            that takes modes as a setting of each request, such as MiniMax,
+            or that changes them reliably only between generations, such as
+            Cartesia. A sentence is one request; when the service streams
+            tokens, a request is a token, so a change can take effect within
+            a sentence.
     """
 
     ANYWHERE = "anywhere"
@@ -66,6 +77,20 @@ class ExpressionTerm:
 @dataclass
 class ExpressionCapabilities:
     """The expression tags a TTS service can perform.
+
+    The LLM is taught these, and tags outside them are left out of the
+    service's speech. A service that can laugh, speak in two moods, pause and
+    stress words declares::
+
+        ExpressionCapabilities(
+            events=[ExpressionTerm("laughs")],
+            modes=[
+                ExpressionTerm("cheerful"),
+                ExpressionTerm("calm", "to reassure a worried caller"),
+            ],
+            pause_range_ms=(100, 3000),
+            emphasis=True,
+        )
 
     Parameters:
         events: Sounds the service can make at one point, written ``[[name]]``.

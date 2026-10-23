@@ -6,9 +6,27 @@
 
 """Reads the expression tags an LLM writes, and formats them for a TTS service.
 
-Part of expressive conversation (alpha). :class:`ExpressionFormatter` splits
-each unit of text a TTS service is given into the words to speak, with the
-modes they are spoken in, and the events between them:
+Part of expressive conversation (alpha). A TTS service with expressive
+conversation on is given its text a unit at a time: a sentence, or a token when
+it streams tokens. :class:`ExpressionFormatter` handles each unit in three steps:
+
+1. :meth:`~ExpressionFormatter.parse` splits the unit into segments: the words
+   to speak, with the modes they are spoken in, and the events and pauses
+   between them.
+2. :meth:`~ExpressionFormatter.shown_text` gives the words without the tags,
+   which clients are shown.
+3. :meth:`~ExpressionFormatter.format` builds the request the service is sent,
+   in its provider's markup, and says what each stretch of the unit performs,
+   for :class:`~pipecat.expressive.spoken.SpokenExpression` to report as the
+   words are spoken.
+
+With ElevenLabs' audio tags, one sentence goes::
+
+    "<<cheerful>> It's [[laughs]] ^^back^^ up."       the unit, as the LLM wrote it
+    "It's back up."                                   shown to clients
+    "[cheerful] It's [laughs] BACK up."               sent to ElevenLabs
+
+The tags are:
 
 - ``<<name ...>>`` sets the modes the words after it are spoken in, until the
   next mode tag or the end of the response: ``<<cheerful>>``, or several
@@ -30,9 +48,11 @@ The formatter reads whole units: an aggregator such as
 :data:`EXPRESSION_TAGS`, keeps each tag in one unit as text streams. A tag
 left unfinished at the end of a unit is removed, never spoken.
 
-It then formats a unit's request through the service's
-:class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`,
-leaving out what the service can't perform.
+The service's
+:class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`
+says what it can perform and formats each piece in its provider's markup.
+What the service can't perform is left out of the request, and kept in the
+unit's text for the context.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
@@ -53,10 +73,13 @@ from pipecat.expressive.expression import (
 from pipecat.frames.frames import TextType
 from pipecat.utils.string import StartEndTags
 
-# The delimiters of the tags, for an aggregator to keep each tag in one unit.
+# The delimiters of the tags, for an aggregator such as SkipTagsAggregator to
+# keep each tag in one unit.
 EXPRESSION_TAGS: list[StartEndTags] = [("<<", ">>"), ("[[", "]]"), ("^^", "^^")]
 
-# The tags an LLM writes into its text, which word tracking passes over in it.
+# The mode and event tags in the LLM's text, which word tracking passes over so
+# their names aren't matched against spoken words. Emphasis has no letters in
+# its delimiters, so it needs none.
 EXPRESSION_TAG_PATTERN = re.compile(r"<<[^<>\n]*>>|\[\[[^\[\]\n]*\]\]")
 
 # A tag holds words, digits and a little punctuation; anything else is text.
@@ -75,11 +98,15 @@ _SPACES = re.compile(r"[ \t]{2,}")
 class Text:
     """Words to speak, and the modes to speak them in.
 
+    ``start`` and ``end`` are offsets into the unit as the LLM wrote it, tags
+    included. In ``"<<calm>> Hi."``, the words are
+    ``Text(" Hi.", ("calm",), 8, 12)``.
+
     Parameters:
-        text: The words.
+        text: The words, with the spacing around them.
         modes: The modes the words are spoken in, empty for the voice's
             baseline.
-        start: Where the words start in the unit of text.
+        start: Where the words start in the unit.
         end: Where they end.
     """
 
@@ -93,9 +120,11 @@ class Text:
 class Event:
     """A sound made at one point, such as a laugh.
 
+    In ``"Hi [[laughs]]"``, the event is ``Event("laughs", 3, 13)``.
+
     Parameters:
         name: The event, as written between the brackets.
-        start: Where its tag starts in the unit of text.
+        start: Where its tag starts in the unit.
         end: Where it ends.
     """
 
@@ -106,11 +135,11 @@ class Event:
 
 @dataclass(frozen=True)
 class Pause:
-    """A silence at one point.
+    """A silence at one point, written ``[[pause N]]`` for N milliseconds.
 
     Parameters:
         duration_ms: How long, in milliseconds.
-        start: Where its tag starts in the unit of text.
+        start: Where its tag starts in the unit.
         end: Where it ends.
     """
 
@@ -124,14 +153,28 @@ Segment = Text | Event | Pause
 
 @dataclass(frozen=True)
 class ExpressionSpan:
-    """What a stretch of a unit's text performs: words in their modes, or an event.
+    """What a stretch of a unit performs: words in their modes, or an event.
+
+    :meth:`ExpressionFormatter.format` returns one for each segment the
+    service performs, with what it actually performs: a mode or emphasis the
+    service can't perform is left out of ``modes``, and an event it can't
+    perform has no span. Offsets are into the unit as the LLM wrote it, so
+    :class:`~pipecat.expressive.spoken.SpokenExpression` can find which spans
+    the text of each word the service reports covers.
+
+    For ``"<<calm>> Hi [[laughs]]"`` on a service that performs both::
+
+        ExpressionSpan(8, 12, modes=["calm"])
+        ExpressionSpan(12, 22, event=(TextType.EXPRESSION_EVENT, "laughs"))
 
     Parameters:
-        start: Where the stretch starts in the unit of text.
+        start: Where the stretch starts in the unit.
         end: Where it ends.
-        modes: The modes its words are spoken in, or None for an event.
-        event: The event or pause, with its text type, as reported to
-            clients, or None for words.
+        modes: The modes its words are spoken in, empty for the voice's
+            baseline, or None for an event.
+        event: The event or pause, as reported to clients: its text type,
+            ``EXPRESSION_EVENT`` or ``EXPRESSION_PAUSE``, and its text, the
+            event's name or the pause's milliseconds. None for words.
     """
 
     start: int
@@ -143,23 +186,34 @@ class ExpressionSpan:
 class ExpressionFormatter:
     """Reads a TTS service's expression tags and formats its requests.
 
-    Parse each unit of a response in turn with :meth:`parse`, and call
-    :meth:`reset` when the response ends or is interrupted. The modes last
-    until the next mode tag, and the end of a response returns them to the
-    baseline. :meth:`format` builds a unit's request: the words, transformed
-    and formatted in the modes the service can perform, and its events and
-    pauses. What the service can't perform is left out, with one warning per
-    tag.
+    A TTS service has one formatter, which follows a response from unit to
+    unit. A mode set in one sentence carries on into the next, until the next
+    mode tag or :meth:`reset`, which the service calls when the response ends
+    or is interrupted. Call :meth:`parse` on each unit in order, then
+    :meth:`format` to build its request. What the service can't perform is
+    left out of the request, with one warning per tag.
 
     Example::
 
         formatter = ExpressionFormatter(lambda: adapter, owner=tts)
-        formatter.parse("<<cheerful>> It's ^^back^^ [[laugh]]!")
+
+        segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
         # [Text(" It's ", ("cheerful",), 12, 18),
-        #  Text("back", ("cheerful", "emphasis"), 20, 24),
-        #  Text(" ", ("cheerful",), 26, 27),
-        #  Event("laugh", 27, 36),
-        #  Text("!", ("cheerful",), 36, 37)]
+        #  Event("laughs", 18, 28),
+        #  Text(" ", ("cheerful",), 28, 29),
+        #  Text("back", ("cheerful", "emphasis"), 31, 35),
+        #  Text(" up.", ("cheerful",), 37, 41)]
+
+        ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
+        # "It's back up."
+
+        request, spans = await formatter.format(
+            segments, TextType.SENTENCE, transform, trim
+        )
+        # With ElevenLabs' audio tags: "[cheerful] It's [laughs] BACK up."
+
+        formatter.parse("Bye.")
+        # [Text("Bye.", ("cheerful",), 0, 4)]: still cheerful
     """
 
     def __init__(self, adapter: Callable[[], BaseExpressionAdapter], owner: object):
@@ -181,7 +235,12 @@ class ExpressionFormatter:
 
     @property
     def modes(self) -> list[str]:
-        """The modes the latest request is spoken in, empty for the voice's baseline."""
+        """The modes the latest request is spoken in, empty for the voice's baseline.
+
+        These are the modes its first words are spoken in. A service that
+        takes modes with each request, as a setting rather than as markup in
+        the text, sends these.
+        """
         return self._modes
 
     def capabilities(self) -> ExpressionCapabilities | None:
@@ -195,15 +254,31 @@ class ExpressionFormatter:
     def parse(self, text: str, *, whole: bool = False) -> list[Segment]:
         """Split a unit of text into segments.
 
+        Words take the modes in effect where they are written, which may have
+        been set by an earlier unit of the response::
+
+            formatter.parse("<<calm>> All set.")
+            # [Text(" All set.", ("calm",), 8, 17)]
+            formatter.parse(" Bye.")
+            # [Text(" Bye.", ("calm",), 0, 5)]
+
+        Text that stands on its own, such as a ``TTSSpeakFrame``'s spoken in
+        the middle of a response, is parsed with ``whole=True``: it starts in
+        the voice's baseline, and the response's modes carry on after it::
+
+            formatter.parse("<<excited>> One moment.", whole=True)
+            # [Text(" One moment.", ("excited",), 11, 23)]
+            formatter.parse(" Back.")
+            # [Text(" Back.", ("calm",), 0, 6)]
+
         Args:
             text: The unit, with each of its tags whole.
             whole: Whether the text stands on its own, apart from any
-                response, such as a ``TTSSpeakFrame``'s. It starts in the
-                baseline and leaves the response's modes as they were.
+                response.
 
         Returns:
             Its segments, in order. Spacing alone between two tags is a
-            :class:`Text` of its own.
+            :class:`Text` of its own, so the request keeps it.
         """
         response_modes = self._active_modes
         if whole:
@@ -232,7 +307,11 @@ class ExpressionFormatter:
     def restate_modes(self):
         """Have the next request state its modes from its start.
 
-        For text spoken in a context of its own, such as a ``TTSSpeakFrame``'s.
+        Markup marks only where the modes change, so a request continuing
+        the one before it doesn't repeat them. Text spoken in an audio context
+        of its own, such as a ``TTSSpeakFrame``'s, follows no earlier request
+        there, nor does the response's next request follow it, so the
+        service calls this before and after it.
         """
         self._formatted_modes = None
 
@@ -244,6 +323,12 @@ class ExpressionFormatter:
     @staticmethod
     def shown_text(segments: list[Segment], text_type: TextType | str) -> str:
         """The words of a unit, without its tags, spaced as written.
+
+        This is the unit's text as clients are shown it::
+
+            segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
+            ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
+            # "It's back up."
 
         Args:
             segments: The unit's segments.
@@ -265,10 +350,24 @@ class ExpressionFormatter:
     ) -> tuple[str, list[ExpressionSpan]]:
         """Build the request for a unit.
 
-        Each run of words is transformed, then formatted in the modes the
-        service can perform. Events and pauses are formatted at their places.
-        A sentence's request is trimmed at both ends; a streamed token keeps
-        its spacing.
+        Each run of words goes through ``transform`` first, so text
+        transforms such as markdown stripping never see markup, and is then
+        formatted by the adapter in the modes the service can perform. Events
+        and pauses are formatted at their places. A sentence's request is
+        trimmed at both ends; a streamed token keeps its spacing.
+
+        Cartesia has no emphasis, and changes emotion only between sentences::
+
+            segments = formatter.parse("<<happy>> It's [[laughter]] ^^back^^ up.")
+            request, spans = await formatter.format(
+                segments, TextType.SENTENCE, transform, trim
+            )
+            # request: '<emotion value="happy"/> It's [laughter] back up.'
+            # spans:   [ExpressionSpan(9, 15, modes=["happy"]),
+            #           ExpressionSpan(15, 27, event=(EXPRESSION_EVENT, "laughter")),
+            #           ExpressionSpan(27, 28, modes=["happy"]),
+            #           ExpressionSpan(30, 34, modes=["happy"]),  # no emphasis
+            #           ExpressionSpan(36, 40, modes=["happy"])]
 
         Args:
             segments: The unit's segments.
@@ -280,7 +379,7 @@ class ExpressionFormatter:
 
         Returns:
             The text to send to the service, empty when nothing is left to
-            say, and what each stretch of the unit performs.
+            say, and a span for each stretch of the unit the service performs.
         """
         capabilities = self.capabilities()
         if text_type != TextType.TOKEN:
