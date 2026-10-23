@@ -515,10 +515,10 @@ class BotOutputMessageData(TextMessageData):
         segment_id: ID of the source AggregatedTextFrame.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
-        spoken_status: **(v2+)** Lifecycle status of the segment:
-            ``"new"`` on first emit, ``"in-progress"`` during word playback,
-            ``"completed"`` when the last word is spoken (or immediately for
-            non-spoken segments).
+        spoken_status: **(v2+)** Lifecycle status of the segment: ``"new"`` on
+            its first message, the only one for text that isn't spoken;
+            ``"in-progress"`` as each of its words is spoken, for TTS services
+            with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
     """

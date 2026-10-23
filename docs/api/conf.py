@@ -6,26 +6,33 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Fix Pydantic v2 + Sphinx autodoc incompatibility: ConfigDict(extra="allow") fails
-# during Sphinx's import because __pydantic_extra__ annotation on BaseModel resolves to
-# `Dict[str, Any] | None` whose get_origin() is Union, not dict. Patch the check to
-# accept Union-wrapped dict types (i.e., Optional[Dict[str, Any]]).
-import pydantic._internal._generate_schema as _pydantic_gs
+import pydantic.main
 from sphinx import addnodes
 
 try:
-    from sphinx.ext.autodoc._sentinels import INSTANCE_ATTR
-except ImportError:
+    from sphinx.ext.autodoc import _sentinels
+
+    INSTANCE_ATTR = _sentinels.INSTANCE_ATTR
+except (ImportError, AttributeError):
     # Private to Sphinx, and the public ``INSTANCEATTR`` alias is a different
     # object that never matches. Without it the redundant field stubs stay.
     INSTANCE_ATTR = None
 
-_ORIG_DICT_TYPES = _pydantic_gs.DICT_TYPES
-# Expand the accepted types to include Union (Optional[Dict[str, Any]])
-import types
-import typing
+# Documenting an attribute makes autodoc walk the owning class's MRO and write
+# the annotations it parses from each base's source back onto the live classes.
+# Pydantic empties ``BaseModel.__annotations__``; once autodoc restores
+# ``__pydantic_extra__: Dict[str, Any] | None`` there, every ``extra="allow"``
+# model defined afterwards fails to build, and the modules declaring one drop
+# out of the docs. Marking ``pydantic.main`` as already processed leaves it alone.
+try:
+    from sphinx.ext.autodoc._dynamic._type_comments import (
+        _objects_with_type_comment_annotations,
+    )
 
-_pydantic_gs.DICT_TYPES = [*_ORIG_DICT_TYPES, typing.Union, types.UnionType]
+    _objects_with_type_comment_annotations.add(pydantic.main)
+    PYDANTIC_ANNOTATIONS_GUARDED = True
+except ImportError:
+    PYDANTIC_ANNOTATIONS_GUARDED = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -294,6 +301,12 @@ def setup(app):
             "Find what replaced it and update skip_documented_field."
         )
     app.connect("autodoc-skip-member", skip_documented_field)
+    if not PYDANTIC_ANNOTATIONS_GUARDED:
+        logger.warning(
+            "sphinx.ext.autodoc._dynamic._type_comments._objects_with_type_comment_annotations "
+            "is gone; autodoc may rewrite pydantic.BaseModel's annotations and break every "
+            'module defining an extra="allow" model. Find what replaced it.'
+        )
 
     docs_dir = Path(__file__).parent
     project_root = docs_dir.parent.parent

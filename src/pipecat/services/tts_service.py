@@ -9,7 +9,7 @@
 import asyncio
 import uuid
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -65,6 +66,7 @@ from pipecat.utils.text.transforms.pronunciations import (
     PronunciationTransform,
     pronunciation_transform,
 )
+from pipecat.utils.text.transforms.text_transform import TextTransform
 from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.types import is_given
 
@@ -179,14 +181,12 @@ class TTSService(AIService):
         # Types of text that should not be spoken.
         skip_text_types: list[str] | None = None,
         skip_aggregator_types: list[str] | None = None,
-        # A list of callables to transform text before just before sending it to TTS.
-        # Each callable takes the aggregated text and its type, and returns the transformed text.
-        # To register, provide a list of tuples of (text_type | '*', transform_function).
-        text_transforms: list[
-            tuple[TextType | str, Callable[[str, str | TextType], Awaitable[str]]]
-        ]
-        | None = None,
-        # Text filter executed after text has been aggregated.
+        # A list of TextTransforms to transform text just before sending it to TTS.
+        # Each TextTransform takes the aggregated text and its type, and returns the transformed
+        # text. To register, provide a list of tuples of (text_type | '*', transform_function).
+        text_transforms: list[tuple[TextType | str, TextTransform]] | None = None,
+        # Text filter executed after text has been aggregated. Deprecated: use
+        # text_transforms instead.
         text_filters: Sequence[BaseTextFilter] | None = None,
         # Audio transport destination of the generated frames.
         transport_destination: str | None = None,
@@ -248,12 +248,19 @@ class TTSService(AIService):
                     Use ``skip_text_types`` instead.
                     Will be removed in 2.0.0.
 
-            text_transforms: A list of callables to transform text before just before sending it
-                to TTS. Each callable takes the aggregated text and its type, and returns the
-                transformed text. To register, provide a list of tuples of
+            text_transforms: A list of TextTransforms to transform text before just before
+                sending it to TTS. Each TextTransform takes the aggregated text and its type,
+                and returns the transformed text. To register, provide a list of tuples of
                 (text_type | '*', transform_function).
 
-            text_filters: Sequence of text filters to apply after aggregation.
+            text_filters: Text filters run before the transforms.
+
+                .. deprecated:: 1.14.0
+                    Use ``text_transforms`` instead, with
+                    :data:`~pipecat.utils.text.transforms.strip_markdown` in place of
+                    :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`.
+                    Will be removed in 2.0.0.
+
             transport_destination: Destination for generated audio frames.
             settings: The runtime-updatable settings for the TTS service.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
@@ -320,6 +327,15 @@ class TTSService(AIService):
             aggregation_type=self._text_aggregation_mode,
             language=aggregation_language,
         )
+        # Cuts LLM text marked skip_tts into sentences, so a reply that isn't
+        # spoken still reaches clients as bot output. It's separate from the
+        # aggregator above because that one yields single tokens in token mode,
+        # and only spoken tokens are regrouped into sentences afterwards (by the
+        # sequencer).
+        self._skipped_text_aggregator = SimpleTextAggregator(
+            aggregation_type=TextAggregationMode.SENTENCE,
+            language=aggregation_language,
+        )
 
         if skip_aggregator_types is not None:
             warn_deprecated(
@@ -330,13 +346,16 @@ class TTSService(AIService):
             if skip_text_types is None:
                 skip_text_types = skip_aggregator_types
         self._skip_text_types: list[str] = skip_text_types or []
-        self._text_transforms: list[
-            tuple[TextType | str, Callable[[str, TextType | str], Awaitable[str]]]
-        ] = text_transforms or []
+        self._text_transforms: list[tuple[TextType | str, TextTransform]] = text_transforms or []
         # Whether pronunciation transforms are being skipped, so the warning is
         # logged once each time they start being skipped, not for every sentence.
         self._skipping_pronunciations = False
-        # TODO: Deprecate _text_filters when added to LLMTextProcessor
+        if text_filters:
+            warn_deprecated(
+                "`text_filters` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+                "Use `text_transforms` instead.",
+                stacklevel=2,
+            )
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: str | None = transport_destination
 
@@ -560,7 +579,7 @@ class TTSService(AIService):
 
     def add_text_transformer(
         self,
-        transform_function: Callable[[str, TextType | str], Awaitable[str]],
+        transform_function: TextTransform,
         text_type: TextType | str = "*",
         *,
         aggregation_type: TextType | str | None = None,
@@ -590,7 +609,7 @@ class TTSService(AIService):
 
     def remove_text_transformer(
         self,
-        transform_function: Callable[[str, TextType | str], Awaitable[str]],
+        transform_function: TextTransform,
         text_type: TextType | str = "*",
         *,
         aggregation_type: TextType | str | None = None,
@@ -1046,10 +1065,15 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if (
-            isinstance(frame, (TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame))
-            and frame.skip_tts
-        ):
+        # A reply that isn't spoken is queued behind the audio still playing, so
+        # it comes out after that audio, its start, sentences and end in order.
+        if isinstance(frame, LLMFullResponseStartFrame) and frame.skip_tts:
+            await self._audio_context_manager.put_frame(frame)
+        elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
+            await self._handle_skipped_llm_text(frame)
+        elif isinstance(frame, LLMFullResponseEndFrame) and frame.skip_tts:
+            await self._handle_skipped_llm_response_end(frame)
+        elif isinstance(frame, TextFrame) and frame.skip_tts:
             await self.push_frame(frame, direction)
         elif isinstance(frame, AggregatedTextFrame):
             await self._handle_aggregated_text(frame)
@@ -1124,6 +1148,7 @@ class TTSService(AIService):
 
         if is_given(language):
             self._text_aggregator.set_language(language)
+            self._skipped_text_aggregator.set_language(language)
 
         return changed
 
@@ -1189,6 +1214,10 @@ class TTSService(AIService):
 
         # Reset aggregator state
         self._sent_non_whitespace_in_context = False
+        # A filter's state belongs to one reply, so it's cleared as an
+        # interruption clears it.
+        for filter in self._text_filters:
+            await filter.handle_interruption()
         if isinstance(frame, LLMFullResponseEndFrame):
             # Queue behind the audio contexts so the frame follows the turn's
             # audio and text.
@@ -1197,6 +1226,27 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
 
         await self.on_turn_context_completed()
+
+    async def _handle_skipped_llm_text(self, frame: LLMTextFrame):
+        """Queue each sentence of LLM text that isn't spoken."""
+        async for aggregate in self._skipped_text_aggregator.aggregate(frame.text):
+            await self._queue_skipped_llm_text(aggregate)
+
+    async def _handle_skipped_llm_response_end(self, frame: LLMFullResponseEndFrame):
+        """Queue the rest of a reply that isn't spoken, then the end of the reply."""
+        remaining = await self._skipped_text_aggregator.flush()
+        if remaining:
+            await self._queue_skipped_llm_text(remaining)
+        await self._audio_context_manager.put_frame(frame)
+
+    async def _queue_skipped_llm_text(self, aggregation: Aggregation):
+        """Queue a sentence of LLM text that isn't spoken, as the bot's output."""
+        if not aggregation.text.strip():
+            return
+        frame = self._aggregated_text_frame(aggregation)
+        frame.skip_tts = True
+        frame.transport_destination = self._transport_destination
+        await self._audio_context_manager.put_frame(frame)
 
     async def _handle_tts_speak(self, frame: TTSSpeakFrame):
         """Speak a TTSSpeakFrame as a turn of its own, even in the middle of an LLM turn."""
@@ -1263,6 +1313,7 @@ class TTSService(AIService):
         self._text_aggregation_metrics_started = False
 
         await self._text_aggregator.handle_interruption()
+        await self._skipped_text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1414,6 +1465,8 @@ class TTSService(AIService):
 
     async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
         """Push text that isn't spoken, in order with the spoken text around it."""
+        # Marked so whatever is downstream knows the TTS left it out.
+        frame.skip_tts = True
         # The sequencer returns the frame at once if no spoken slot precedes it,
         # or holds it until it can flush it in order.
         await self._push_sequencer_frames(
@@ -1437,22 +1490,18 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        filtered_text = await self._filter_text(text)
-        if filtered_text is not None:
-            prepared_text = await self._transform_text(filtered_text, src_frame.text_type)
-            if prepared_text is not None:
-                # A TTSSpeakFrame sets up its context before its text gets here.
-                context = self._tts_contexts.setdefault(
-                    context_id, TTSContext(interruptible=src_frame.interruptible)
-                )
-                await self._announce_text(src_frame, context_id)
-                await self._call_event_handler("on_tts_request", context_id, prepared_text)
-                await self._start_audio_context(context_id)
-                await self._register_spoken_text(src_frame, prepared_text, context_id)
-                await self._synthesize_text(prepared_text, context_id)
-                await self._push_spoken_text(
-                    src_frame, filtered_text, context_id, context.append_to_context
-                )
+        prepared_text = await self._transform_text(text, src_frame.text_type)
+        if prepared_text is not None:
+            # A TTSSpeakFrame sets up its context before its text gets here.
+            context = self._tts_contexts.setdefault(
+                context_id, TTSContext(interruptible=src_frame.interruptible)
+            )
+            await self._announce_text(src_frame, context_id)
+            await self._call_event_handler("on_tts_request", context_id, prepared_text)
+            await self._start_audio_context(context_id)
+            await self._register_spoken_text(src_frame, prepared_text, context_id)
+            await self._synthesize_text(prepared_text, context_id)
+            await self._push_spoken_text(src_frame, text, context_id, context.append_to_context)
 
         await self.stop_processing_metrics()
 
@@ -1474,49 +1523,28 @@ class TTSService(AIService):
             has_text = bool(text.strip())
         return text if has_text else None
 
-    async def _filter_text(self, text: str) -> str | None:
-        """Run the text filters on text about to be synthesized.
-
-        Returns:
-            The filtered text, or None if nothing is left to say.
-        """
-        for filter in self._text_filters:
-            await filter.reset_interruption()
-            text = await filter.filter(text)
-
-        # Mirrors the whitespace gate before the filters, so filter output that
-        # collapses to whitespace-only is handled consistently. When streaming
-        # tokens, whitespace is only sent once something else has been.
-        if self._is_streaming_tokens:
-            has_text = bool(text.strip()) or (bool(text) and self._sent_non_whitespace_in_context)
-            if has_text:
-                self._sent_non_whitespace_in_context = True
-        else:
-            has_text = bool(text.strip())
-        return text if has_text else None
-
     async def _transform_text(self, text: str, text_type: str) -> str | None:
-        """Turn filtered text into the text sent to the TTS.
+        """Turn text to speak into the text sent to the TTS.
 
-        Transforms only affect the text sent to the TTS for TTS-specific
-        purposes (e.g. inserting tags for spelling or emotion, or replacing an
-        @ with "at"). For services with word timestamps they can affect the
-        context, since TTSTextFrames are built from the TTS output.
+        Filters and transforms only affect the text sent to the TTS, for
+        TTS-specific purposes (e.g. inserting tags for spelling or emotion, or
+        replacing an @ with "at"). The context keeps the text as it arrived.
 
         Returns:
-            The text to synthesize, or None if a transform failed.
+            The text to synthesize, or None if nothing is left to say or a
+            transform failed.
         """
         transformed_text = text
-        prepared_text = None
         try:
+            for filter in self._text_filters:
+                await filter.reset_interruption()
+                transformed_text = await filter.filter(transformed_text)
             for transform_type, transform in self._text_transforms:
                 if transform_type in (text_type, "*") and (
                     not isinstance(transform, PronunciationTransform)
                     or self._can_apply_pronunciations()
                 ):
                     transformed_text = await transform(transformed_text, text_type)
-            # Apply any final text preparation (e.g., trailing space)
-            prepared_text = self._prepare_text_for_tts(transformed_text)
         except Exception as e:
             # Pushing the error with category "APPLICATION" since the failure came
             # from the application's text transformer. Speaking the untransformed
@@ -1527,7 +1555,23 @@ class TTSService(AIService):
                 exception=e,
                 category=ErrorCategory.APPLICATION,
             )
-        return prepared_text
+            return None
+
+        # Mirrors the whitespace gate in _trim_text, so output that collapses to
+        # whitespace-only is handled consistently. When streaming tokens,
+        # whitespace is only sent once something else has been.
+        if self._is_streaming_tokens:
+            has_text = bool(transformed_text.strip()) or (
+                bool(transformed_text) and self._sent_non_whitespace_in_context
+            )
+            if has_text:
+                self._sent_non_whitespace_in_context = True
+        else:
+            has_text = bool(transformed_text.strip())
+        if not has_text:
+            return None
+        # Apply any final text preparation (e.g., trailing space)
+        return self._prepare_text_for_tts(transformed_text)
 
     def _can_apply_pronunciations(self) -> bool:
         """Whether pronunciation transforms apply, warning once when they stop applying."""

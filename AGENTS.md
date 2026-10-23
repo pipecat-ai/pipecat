@@ -15,7 +15,7 @@ uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 # Install pre-commit hooks
 uv run pre-commit install
 
-# Run all tests
+# Run all tests (in parallel, one worker per CPU core; `-n 0` runs them in one process)
 uv run pytest
 
 # Run a single test file
@@ -108,7 +108,9 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone. A frame that must act after the bot speaks, such as a transfer, needs `interruptible = False` on both it and the `TTSSpeakFrame` before it, so the user talking over the bot can't drop either one.
+
+- **Frames are the primary public interface**: Some classes have public methods that do the same work as a frame. When the frame gets the job done, prefer it, and don't add a new method that duplicates it. Use the method only when the work has to happen outside the frame order: a method acts at once, ahead of frames already queued. A method that duplicates a frame says so in its docstring and names the frame.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
@@ -136,7 +138,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
-| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/adapters/`    | LLM adapters (`llm/`): context/tools conversion    |
 | `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |

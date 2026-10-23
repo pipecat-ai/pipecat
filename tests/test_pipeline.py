@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    PipelineFlushFrame,
     StartFrame,
     StopFrame,
     TextFrame,
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
@@ -222,6 +224,72 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
             ignore_start=False,
         )
+
+
+FLUSH_LEGS = [
+    (FrameDirection.DOWNSTREAM, False),
+    (FrameDirection.UPSTREAM, False),
+    (FrameDirection.DOWNSTREAM, True),
+]
+
+
+class FlushRecorder(FrameProcessor):
+    """Records the legs of each flush that pass through it."""
+
+    def __init__(self):
+        super().__init__()
+        self.legs: dict[int, list[tuple[FrameDirection, bool]]] = {}
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, PipelineFlushFrame):
+            self.legs.setdefault(frame.flush_id, []).append((direction, frame.returning))
+        await self.push_frame(frame, direction)
+
+
+class TestPipelineFlush(unittest.IsolatedAsyncioTestCase):
+    async def _flush(self, processor: FrameProcessor, flushes: int = 1) -> list[bool]:
+        worker = PipelineWorker(Pipeline([processor]))
+        started = asyncio.Event()
+        results = []
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(worker, frame):
+            started.set()
+
+        async def drive():
+            await started.wait()
+            flushing = (worker.flush_pipeline(timeout=1.0) for _ in range(flushes))
+            results.extend(await asyncio.gather(*flushing))
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(
+            asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), drive()),
+            timeout=10.0,
+        )
+        return results
+
+    async def test_flush_through_parallel_pipeline(self):
+        """Every branch sees every leg of each flush."""
+        branches = [FlushRecorder(), FlushRecorder()]
+
+        results = await self._flush(ParallelPipeline(*[[b] for b in branches]), flushes=2)
+
+        self.assertEqual(results, [True, True])
+        for branch in branches:
+            self.assertEqual(list(branch.legs.values()), [FLUSH_LEGS, FLUSH_LEGS])
+
+    async def test_flush_through_nested_service_switchers(self):
+        """Only the active service sees the flush."""
+        active, inactive, outer = FlushRecorder(), FlushRecorder(), FlushRecorder()
+        switcher = ServiceSwitcher(services=[ServiceSwitcher(services=[active, inactive]), outer])
+
+        results = await self._flush(switcher)
+
+        self.assertEqual(results, [True])
+        self.assertEqual(list(active.legs.values()), [FLUSH_LEGS])
+        self.assertEqual(inactive.legs, {})
+        self.assertEqual(outer.legs, {})
 
 
 class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):

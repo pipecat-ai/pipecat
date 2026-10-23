@@ -19,7 +19,7 @@ from typing import Any
 
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultProperties,

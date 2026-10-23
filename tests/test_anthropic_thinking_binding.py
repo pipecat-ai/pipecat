@@ -15,9 +15,9 @@ import anthropic
 import httpx
 import pytest
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.anthropic_adapter import (
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.anthropic_adapter import (
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,
 )

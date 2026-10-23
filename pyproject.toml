@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "aiofiles>=24.1.0,<27",
-    "aiohttp>=3.14.0,<4",
+    "aiohttp>=3.14.4,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
@@ -35,7 +35,7 @@ dependencies = [
     "Markdown>=3.7,<4",
     "sentencex==1.0.32",
     "numpy>=1.26.4,<3",
-    "Pillow>=11.1.0,<13",
+    "Pillow>=11.1.0,<14",
     "protobuf>=5.29.6,<7",
     "pydantic>=2.10.6,<3",
     # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
@@ -54,7 +54,7 @@ dependencies = [
     "num2words>=0.5.14",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
-    "onnxruntime~=1.24.3",
+    "onnxruntime>=1.24.3,<2",
 ]
 
 [project.urls]
@@ -158,7 +158,7 @@ smallest = []
 soniox = []
 soundfile = []
 speechify = []
-speechmatics = ["speechmatics-agent-stt~=0.1.0"]
+speechmatics = ["speechmatics-agent-stt~=0.3.0"]
 strands = [ "strands-agents>=1.9.1,<2" ]
 tavus = [ "pipecat-ai[daily]" ]
 together = []
@@ -172,6 +172,7 @@ websocket = [ "fastapi>=0.115.6,<1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = []
 xtts = []
+zoom-ai = []
 
 # CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
 # install stays lean; install with `pip install "pipecat-ai[cli]"`.
@@ -181,7 +182,7 @@ cli = [
     "jinja2>=3.1.0,<4",
     "questionary>=2.0.0,<3",
     "ruff>=0.12.1,<1",
-    "pipecat-ai-context-hub>=0.7.0,<1",
+    "pipecat-ai-context-hub>=0.9.0,<1",
 ]
 
 [dependency-groups]
@@ -195,6 +196,8 @@ dev = [
     "pytest>=9.0.0,<10",
     "pytest-asyncio>=1.0.0,<2",
     "pytest-aiohttp>=1.0.0,<2",
+    "pytest-cov>=7.0.0,<8",
+    "pytest-xdist>=3.8.0,<4",
     "ruff>=0.12.11,<1",
     "setuptools~=83.0.0",
     "setuptools_scm~=8.3.1",
@@ -227,7 +230,7 @@ where = ["src"]
 ]
 
 [tool.pytest.ini_options]
-addopts = "--verbose"
+addopts = "--verbose -n auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"

@@ -20,7 +20,7 @@ from weakref import WeakKeyDictionary
 
 from anthropic import BadRequestError
 
-from pipecat.adapters.services.anthropic_adapter import (
+from pipecat.adapters.llm.services.anthropic_adapter import (
     AnthropicLLMInvocationParams,
     anthropic_is_given,
 )

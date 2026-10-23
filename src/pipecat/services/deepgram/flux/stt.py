@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
+from pipecat.services.deepgram._errors import describe_refusal
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
@@ -195,17 +196,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                     ),
                 )
         """
-        # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
-        # the _receive_task inside _connect_websocket, because the websocket should only be
-        # considered connected and ready to send audio once we receive from Flux the message
-        # which confirms the connection has been established.
-        # If we try to keep the logic reconnect_on_error, when receiving a message, the
-        # _receive_task_handler would try to reconnect in case of error, invoking the
-        # _connect_websocket again and leading to a case where the first _receive_task_handler
-        # was never destroyed.
-        # So we can keep it here as false, because inside the method send_with_retry, it will
-        # already try to reconnect if needed.
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="flux-general-en",
@@ -256,7 +246,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self, reconnect_on_error=False)
+        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url
@@ -294,37 +284,42 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     # ------------------------------------------------------------------
 
     async def _connect(self):
-        """Connect to WebSocket and start background tasks.
+        """Connect to WebSocket and start the receive loop.
 
-        Establishes the WebSocket connection to the Deepgram Flux API and starts
-        the background task for receiving transcription results.
+        The receive loop starts even when the connection fails: with no socket
+        it goes straight to its reconnect path, which retries the connect. It
+        owns reconnection for the session, so audio is never held up waiting
+        on a connection.
         """
-        await super()._connect()
+        # `DeepgramFluxSTTBase._connect` is abstract and doesn't chain on, so
+        # call the websocket side directly.
+        await WebsocketService._connect(self)
         self._websocket_url = f"{self._url}?{self._build_query_string()}"
         await self._connect_websocket()
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        """Disconnect from WebSocket and clean up tasks.
+        """Stop the receive loop and watchdog, then close the connection."""
+        # Marks the disconnect as intentional, so the receive loop doesn't
+        # reconnect as it winds down.
+        await WebsocketService._disconnect(self)
 
-        Gracefully disconnects from the Deepgram Flux API, cancels background tasks,
-        and cleans up resources to prevent memory leaks.
-        """
-        await super()._disconnect()
+        if self._receive_task:
+            await self.cancel_task(self._receive_task, timeout=2.0)
+            self._receive_task = None
+        if self._watchdog_task:
+            await self.cancel_task(self._watchdog_task, timeout=2.0)
+            self._watchdog_task = None
+            self._last_stt_time = None
 
-        try:
-            await self._disconnect_websocket()
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            # Reset state only after everything is cleaned up
-            self._websocket = None
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Establish WebSocket connection to API.
+        """Open the WebSocket to Deepgram Flux.
 
-        Creates a WebSocket connection to the Deepgram Flux API using the configured
-        URL and authentication headers. Handles connection errors and reports them
-        through the event handler system.
+        Flux confirms the connection with a ``Connected`` message, which the
+        receive loop waits for (see ``_receive_messages``).
         """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
@@ -346,43 +341,19 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             response_headers = websocket.response.headers if websocket.response else {}
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
-
-            # Creating the receiver task
-            if not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-
-            # Creating the watchdog task
-            if not self._watchdog_task:
-                self._watchdog_task = self.create_task(self._watchdog_task_handler())
-
-            # Now wait for the connection established event
-            logger.debug("WebSocket connected, waiting for server confirmation...")
-            await self._await_connection_established()
-            logger.debug("Connected to Deepgram Flux Websocket")
-            await self._call_event_handler("on_connected")
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            refusal = describe_refusal(e)
+            await self.push_error(error_msg=refusal or f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
-            await self._call_event_handler("on_connection_error", f"{e}")
+            await self._call_event_handler("on_connection_error", refusal or f"{e}")
 
     async def _disconnect_websocket(self):
-        """Close WebSocket connection and clean up state.
+        """Close the WebSocket connection and reset connection state.
 
-        Closes the WebSocket connection to the Deepgram Flux API and stops all
-        metrics collection. Handles disconnection errors gracefully.
+        Called on its own by the receive loop when it reconnects, so it leaves
+        the receive loop and watchdog running.
         """
         try:
-            # Cancel background tasks BEFORE closing websocket
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=2.0)
-                self._receive_task = None
-            if self._watchdog_task:
-                await self.cancel_task(self._watchdog_task, timeout=2.0)
-                self._watchdog_task = None
-                self._last_stt_time = None
-
             self._connection_established_event.clear()
             # Discard any in-flight/pending Configure — the connection is going
             # away (including ahead of a reconnect), so it can no longer be
@@ -414,19 +385,22 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         Args:
             audio: Raw audio bytes in linear16 format (signed little-endian 16-bit PCM).
 
+        Audio that arrives while the connection is down is dropped; the
+        receive loop reconnects in the background.
+
         Yields:
             Frame: None (transcription results are delivered via WebSocket callbacks
                 rather than as return values from this method), or
                 :class:`ErrorFrame` on send failure.
         """
-        # With no socket (the first connect failed), send_with_retry reconnects.
-        try:
-            self._last_stt_time = time.monotonic()
-            self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
-            await self.send_with_retry(audio, self._report_error)
-        except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
-            return
+        if self._transport_is_active():
+            try:
+                self._last_stt_time = time.monotonic()
+                self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
+                await self._transport_send_audio(audio)
+            except Exception as e:
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                return
 
         yield None
 
@@ -449,26 +423,56 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     async def _receive_messages(self):
         """Receive and process messages from WebSocket.
 
-        Continuously receives messages from the Deepgram Flux WebSocket connection
-        and processes various message types including connection status, transcription
-        results, turn information, and error conditions. Handles different event types
-        such as StartOfTurn, EndOfTurn, EagerEndOfTurn, and Update events.
+        Waits for Flux to confirm the connection with ``Connected``, then
+        processes connection status, transcription results, turn information
+        and errors, including StartOfTurn, EndOfTurn, EagerEndOfTurn and Update
+        events.
+
+        Raises:
+            ConnectionError: If ``Connected`` doesn't arrive within
+                ``_CONNECTION_TIMEOUT``. Flux refuses unsupported settings with
+                an HTTP 400 during the handshake, so a connection that opens
+                but never confirms is retried like a dropped one.
         """
-        async for message in self._get_websocket():
-            if isinstance(message, str):
-                try:
-                    data = json.loads(message)
-                    await self._handle_message(data)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode JSON message: {e}")
-                    # Skip malformed messages
-                    continue
-                except Exception as e:
-                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-                    # Error will be handled inside WebsocketService->_receive_task_handler
-                    raise
-            else:
-                logger.warning(f"Received non-string message: {type(message)}")
+        messages = aiter(self._get_websocket())
+        if not await self._receive_until_confirmed(
+            messages,
+            self._connection_established_event,
+            self._process_message,
+            self._CONNECTION_TIMEOUT,
+        ):
+            # Closed before confirming; the receive loop treats it as a drop.
+            return
+
+        await self._call_event_handler("on_connected")
+        # The watchdog stops when its connection closes, so each confirmed
+        # connection gets a new one.
+        if not self._watchdog_task or self._watchdog_task.done():
+            self._watchdog_task = self.create_task(self._watchdog_task_handler())
+
+        try:
+            async for message in messages:
+                await self._process_message(message)
+        finally:
+            # A turn lives in one connection, so it ends when the connection
+            # does, unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()
+
+    async def _process_message(self, message: str | bytes):
+        """Decode and handle one message from the WebSocket."""
+        if not isinstance(message, str):
+            logger.warning(f"Received non-string message: {type(message)}")
+            return
+        try:
+            data = json.loads(message)
+            await self._handle_message(data)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON message: {e}")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Error will be handled inside WebsocketService->_receive_task_handler
+            raise
 
     async def _report_error(self, error, force_treat_as_permanent: bool = False):
         await self._call_event_handler("on_connection_error", error.error)

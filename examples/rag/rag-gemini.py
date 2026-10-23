@@ -5,27 +5,32 @@
 #
 """CrossFit Games 2025 Rulebook RAG Demo.
 
-This example demonstrates a Model-Assisted Generation (MAG) chatbot using Google's Gemini model.
-This example uses 2 Gemini models:
-- Gemini 2.0 Flash: This is the voice model that is used to generate the response.
-- Gemini 2.0 Flash Lite: This is the model that is used to answer questions about the CrossFit Games 2025 rulebook - information that isn't yet publicly
-indexed by Gemini (or any other LLM).
+This example demonstrates a Model-Assisted Generation (MAG) chatbot using two Gemini models:
+
+- The voice model (the ``GoogleLLMService`` default) holds the conversation and generates the
+  spoken response.
+- The RAG model (``RAG_MODEL``, a Flash-Lite model) answers questions about the CrossFit Games
+  2025 rulebook, information that isn't publicly indexed by Gemini (or any other LLM).
 
 How it works:
-- The voice model (Gemini 2.0 Flash) is configured to call a function whenever the user asks a question.
-- The function call is a tool call to the MAG model (Gemini 2.0 Flash Lite).
-- The MAG model generates a response based on the question. The MAG model has the entire contents of the CrossFit Games 2025 rulebook in it's context window.
-- The response is returned to the voice model (Gemini 2.0 Flash), which then generates the response to the user.
+
+- The voice model is configured to call a function whenever the user asks a question.
+- The function sends the last few conversation turns to the RAG model, a second
+  ``GoogleLLMService`` that stays outside the pipeline and answers through ``run_inference()``.
+- The RAG model has the entire contents of the rulebook in its context window, and answers
+  from it.
+- The answer is returned to the voice model, which then generates the response to the user.
 
 Why this works:
-- Gemini 2.0 Flash is fast
-- Gemini 2.0 Flash Lite is faster
-- Gemini 2.0 Flash Lite has a large (1 million tokens) context window
-- IMPORTANT: The generated response from Gemini 2.0 Flash Lite is limited to 50 words or less and 64 tokens.
-You can see this in the RAG_PROMPT variable and the generation_config in the query_knowledge_base function.
-Long generations are slower and more expensive, in the world of Voice AI, we don't need long generations.
+
+- The voice model is fast, and the Flash-Lite RAG model is faster.
+- The RAG model's context window holds the whole rulebook, so no retrieval step is needed.
+- IMPORTANT: The RAG model's answer is limited to 50 words and 64 tokens. You can see this in
+  the RAG_PROMPT variable and the rag_llm settings. Long generations are slower and more
+  expensive, and a voice reply doesn't need one.
 
 Example questions to ask and compare to other RAG solutions:
+
 - What lenses are not allowed?
 - How many people can be on a team?
 - What do winning gyms get?
@@ -34,25 +39,23 @@ Example questions to ask and compare to other RAG solutions:
 - What happens if I start too early?
 
 Notes:
-- The RAG model is Gemini 2.0 Flash Lite.
-- The voice model is Gemini 2.0 Flash.
-- The RAG content is stored in the assets/rag-content.txt file.
-- The model for voice is Gemini 2.0 Flash, but can be easily switched to any other model.
+
+- The RAG content is stored in the examples/assets/rag-content.txt file.
+- The voice model can be switched to any other LLM service.
 
 Customization options:
-- update assets/rag-content.txt with your own knowledge base
+
+- update examples/assets/rag-content.txt with your own knowledge base
 - increase/decrease the RAG_MODEL's generation length
 - use a different voice model
 - play with the RAG_PROMPT
 - change the function calling logic
 """
 
-import json
 import os
 import time
 
 from dotenv import load_dotenv
-from google import genai  # pyright: ignore[reportAttributeAccessIssue]
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -79,20 +82,16 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-# Initialize the client globally
-client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-
 
 def get_rag_content():
     """Get the RAG content from the file."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    rag_content_path = os.path.join(script_dir, "assets", "rag-content.txt")
+    rag_content_path = os.path.join(script_dir, "..", "assets", "rag-content.txt")
     with open(rag_content_path) as f:
         return f.read()
 
 
-RAG_MODEL = "gemini-2.0-flash-lite-preview-02-05"
-VOICE_MODEL = "gemini-2.0-flash"
+RAG_MODEL = "gemini-3.5-flash-lite"
 RAG_CONTENT = get_rag_content()
 RAG_PROMPT = f"""
 You are a helpful assistant designed to answer user questions based solely on the provided knowledge base.
@@ -100,22 +99,27 @@ You are a helpful assistant designed to answer user questions based solely on th
 **Instructions:**
 
 1.  **Knowledge Base Only:** Answer questions *exclusively* using the information in the "Knowledge Base" section below. Do not use any outside information.
-2.  **Conversation History:** Use the "Conversation History" (ordered oldest to newest) to understand the context of the current question.
+2.  **Conversation History:** Use the earlier messages in the conversation to understand the context of the current question.
 3.  **Concise Response:**  Respond in 50 words or fewer.  The response will be spoken, so avoid symbols, abbreviations, or complex formatting. Use plain, natural language.
 4.  **Unknown Answer:** If the answer is not found within the "Knowledge Base," respond with "I don't know." Do not guess or make up an answer.
 5. Do not introduce your response. Just provide the answer.
 6. You must follow all instructions.
 
-**Input Format:**
-
-Each request will include:
-
-*   **Conversation History:**  (A list of previous user and assistant messages, if any)
-
 **Knowledge Base:**
 Here is the knowledge base you have access to:
 {RAG_CONTENT}
 """
+
+# Answers knowledge-base questions with run_inference(); it never joins the pipeline.
+rag_llm = GoogleLLMService(
+    api_key=os.environ["GOOGLE_API_KEY"],
+    settings=GoogleLLMService.Settings(
+        model=RAG_MODEL,
+        system_instruction=RAG_PROMPT,
+        temperature=0.1,
+        max_tokens=64,
+    ),
+)
 
 
 async def query_knowledge_base(params: FunctionCallParams, question: str):
@@ -126,40 +130,27 @@ async def query_knowledge_base(params: FunctionCallParams, question: str):
     """
     logger.info(f"Querying knowledge base for question: {question}")
 
-    # for our case, the first two messages are the instructions and the user message
-    # so we remove them.
+    # The first two messages are the intro instruction and the bot's greeting.
     conversation_turns = params.context.get_messages()[2:]
 
-    def _is_tool_call(turn):
-        if turn.get("role", None) == "tool":
-            return True
-        if turn.get("tool_calls", None):
-            return True
-        return False
+    def _is_conversation_turn(turn):
+        # Gemini keeps its function calls and results as LLM-specific messages.
+        if not isinstance(turn, dict):
+            return False
+        return turn.get("role") != "tool" and not turn.get("tool_calls")
 
-    # filter out tool calls
-    messages = [turn for turn in conversation_turns if not _is_tool_call(turn)]
+    messages = [turn for turn in conversation_turns if _is_conversation_turn(turn)]
     # use the last 3 turns as the conversation history/context
     messages = messages[-3:]
-    messages_json = json.dumps(messages, ensure_ascii=False, indent=2)
 
-    logger.info(f"Conversation turns: {messages_json}")
+    logger.info(f"Conversation turns: {messages}")
 
     start = time.perf_counter()
-    full_prompt = f"System: {RAG_PROMPT}\n\nConversation History: {messages_json}"
-
-    response = await client.aio.models.generate_content(
-        model=RAG_MODEL,
-        contents=[full_prompt],
-        config={
-            "temperature": 0.1,
-            "max_output_tokens": 64,
-        },
-    )
+    answer = await rag_llm.run_inference(LLMContext(messages=messages))
     end = time.perf_counter()
     logger.info(f"Time taken: {end - start:.2f} seconds")
-    logger.info(response.text)
-    await params.result_callback(response.text)
+    logger.info(answer)
+    await params.result_callback(answer or "I don't know.")
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -211,7 +202,6 @@ Your response will be turned into speech so use only simple words and punctuatio
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
-            model=VOICE_MODEL,
             system_instruction=system_prompt,
         ),
     )

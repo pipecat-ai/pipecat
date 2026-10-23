@@ -48,6 +48,24 @@ _TURN_DETECTION_FIELDS = (
 )
 
 
+class CartesiaTurnsRequestError(Exception):
+    """Cartesia Ink-2 ASR rejected a connection's settings.
+
+    Carries the HTTP status code the server reports with the error, so the
+    error is classified like a rejected HTTP request.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        """Initialize the error.
+
+        Args:
+            message: The error message.
+            status_code: The HTTP status code the server reported, if any.
+        """
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @dataclass
 class CartesiaTurnsSTTSettings(STTSettings):
     """Settings for CartesiaTurnsSTTService.
@@ -126,8 +144,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     _settings: Settings
 
     # How long to wait for the server's ``connected`` frame after the
-    # handshake. Reconnects run while sending audio, so an unbounded wait
-    # would stall the audio path.
+    # handshake before treating the connection as failed.
     _CONNECTION_TIMEOUT = 10.0
 
     def __init__(
@@ -188,12 +205,8 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # reconnect_on_error=False: we want the server's "connected" frame
-        # before declaring the socket ready; send_with_retry handles
-        # reconnection on demand.
         super().__init__(
             sample_rate=sample_rate,
-            reconnect_on_error=False,
             enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             **kwargs,
@@ -216,6 +229,9 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
         self._last_audio_chunk_duration: float = 0.0
+        # The transcript of the turn in progress, pushed if its connection
+        # closes before turn.end.
+        self._turn_transcript = ""
 
         self._register_event_handler("on_turn_start")
         self._register_event_handler("on_turn_update")
@@ -313,17 +329,56 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     # ------------------------------------------------------------------
 
     async def _connect(self):
+        """Connect to the WebSocket and start the receive loop.
+
+        The receive loop starts even when the connection fails: with no socket
+        it goes straight to its reconnect path, which retries the connect. It
+        owns reconnection for the session, so audio is never held up waiting
+        on a connection.
+        """
         await super()._connect()
         await self._connect_websocket()
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        """Close the session, letting the server flush pending turn responses first."""
+        # Marks the disconnect as intentional, so the receive loop doesn't
+        # reconnect as it winds down.
         await super()._disconnect()
         try:
-            await self._disconnect_websocket()
+            # Cancel the watchdog before sending close so it doesn't keep
+            # injecting silence during the drain.
+            if self._watchdog_task:
+                await self.cancel_task(self._watchdog_task, timeout=1.0)
+                self._watchdog_task = None
+
+            # Send close so the server can flush any pending turn responses
+            # before it tears the socket down from its side.
+            if self._websocket and self._websocket.state is State.OPEN:
+                logger.debug("Sending close command to Cartesia Ink-2 ASR")
+                try:
+                    await self._websocket.send(json.dumps({"type": "close"}))
+                except Exception as e:
+                    logger.warning(f"Failed to send close command: {e}")
+
+            # Wait for the receive loop to exit as the server drains responses
+            # and closes the socket. Fall back to cancellation if it doesn't
+            # complete in time.
+            if self._receive_task:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._receive_task), timeout=2.0)
+                except TimeoutError:
+                    logger.debug("Timed out waiting for server to close; cancelling receive task")
+                    await self.cancel_task(self._receive_task, timeout=1.0)
+                except Exception:
+                    # Receive task already errored; cancel_task is a no-op on done tasks.
+                    await self.cancel_task(self._receive_task, timeout=1.0)
+                self._receive_task = None
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            self._websocket = None
+
+        await self._disconnect_websocket()
 
     def _websocket_url(self) -> str:
         # Pipecat pipes 16-bit signed little-endian PCM through the pipeline,
@@ -344,7 +399,11 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         return f"{self._url}?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
 
     async def _connect_websocket(self):
-        """Connect to the v2 WebSocket and wait for the server's ``connected`` frame."""
+        """Open the v2 WebSocket.
+
+        The server confirms the connection with a ``connected`` frame, which
+        the receive loop waits for (see ``_receive_messages``).
+        """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -363,63 +422,18 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             self._websocket = await self._websocket_connect(
                 self._websocket_url(), additional_headers=headers
             )
-
-            if not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-
-            if not self._watchdog_task:
-                self._watchdog_task = self.create_task(self._watchdog_task_handler())
-
-            logger.debug("WebSocket connected, waiting for server confirmation...")
-            try:
-                await asyncio.wait_for(
-                    self._connection_established_event.wait(), timeout=self._CONNECTION_TIMEOUT
-                )
-            except TimeoutError:
-                raise TimeoutError(
-                    f"Cartesia did not confirm the connection within {self._CONNECTION_TIMEOUT}s"
-                ) from None
-            logger.debug(f"Connected to Cartesia Ink-2 ASR (request_id={self._request_id})")
-            await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
-        """Send a ``close`` command, drain pending responses, then close the WebSocket."""
+        """Close the WebSocket and reset connection state.
+
+        Called on its own by the receive loop when it reconnects, so it leaves
+        the receive loop and watchdog running.
+        """
         try:
-            # Cancel the watchdog before sending close so it doesn't keep
-            # injecting silence during the drain.
-            if self._watchdog_task:
-                await self.cancel_task(self._watchdog_task, timeout=1.0)
-                self._watchdog_task = None
-
-            # Send close so the server can flush any pending turn responses
-            # before it tears the socket down from its side.
-            if self._websocket and self._websocket.state is State.OPEN:
-                logger.debug("Sending close command to Cartesia Ink-2 ASR")
-                try:
-                    await self._websocket.send(json.dumps({"type": "close"}))
-                except Exception as e:
-                    logger.warning(f"Failed to send close command: {e}")
-
-            # Wait for the receive task to exit naturally as the server drains
-            # responses and closes the socket. Fall back to cancellation if it
-            # doesn't complete in time.
-            if self._receive_task:
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._receive_task), timeout=2.0)
-                except TimeoutError:
-                    logger.debug("Timed out waiting for server to close; cancelling receive task")
-                    await self.cancel_task(self._receive_task, timeout=1.0)
-                except Exception:
-                    # Receive task already errored; cancel_task is a no-op on done tasks.
-                    await self.cancel_task(self._receive_task, timeout=1.0)
-                self._receive_task = None
-
             self._connection_established_event.clear()
             await self.stop_all_metrics()
 
@@ -447,6 +461,10 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         Transcription results are delivered asynchronously via the receive
         task and are not yielded from this method.
 
+        Audio that arrives while the connection is down is dropped; the
+        receive loop reconnects in the background. The server takes audio as
+        soon as the socket opens, ahead of its ``connected`` frame.
+
         Args:
             audio: Raw 16-bit signed little-endian PCM audio bytes.
 
@@ -454,14 +472,14 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             Frame: ``None`` (transcription results are pushed by the receive
                 task), or :class:`ErrorFrame` on send failure.
         """
-        # With no socket (the first connect failed), send_with_retry reconnects.
-        try:
-            self._last_stt_time = time.monotonic()
-            self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
-            await self.send_with_retry(audio, self._report_error)
-        except Exception as e:
-            yield ErrorFrame(error=f"Cartesia Ink-2 ASR send error: {e}")
-            return
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                self._last_stt_time = time.monotonic()
+                self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
+                await self._websocket.send(audio)
+            except Exception as e:
+                yield ErrorFrame(error=f"Cartesia Ink-2 ASR send error: {e}")
+                return
         yield None
 
     async def _send_silence(self, duration_secs: float = 0.5):
@@ -470,7 +488,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         num_channels = 1  # mono
         num_samples = int(self.sample_rate * duration_secs)
         silence = b"\x00" * (num_samples * sample_width * num_channels)
-        await self.send_with_retry(silence, self._report_error)
+        await self._get_websocket().send(silence)
         # Watchdog silence is real audio submitted to the service, so it
         # counts toward usage.
         self._record_stt_audio_usage(silence)
@@ -503,24 +521,81 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             await asyncio.sleep(0.1)
 
     async def _receive_messages(self):
-        """Receive and process messages from the WebSocket."""
-        async for message in self._get_websocket():
-            if not isinstance(message, str):
-                logger.warning(f"Received non-text message: {type(message)}")
-                continue
-            try:
-                data = json.loads(message)
-            except json.JSONDecodeError:
-                logger.exception("Failed to decode JSON message")
-                continue
-            try:
-                await self._handle_message(data)
-            except Exception as e:
-                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-                # Re-raise so WebsocketService._receive_task_handler tears down
-                # the receive loop. With reconnect_on_error=False, it reports
-                # the error and exits — no reconnect happens here.
-                raise
+        """Receive and process messages from the WebSocket.
+
+        Waits for the server to confirm the connection with ``connected``, then
+        processes turn events and errors.
+
+        Raises:
+            ConnectionError: If ``connected`` doesn't arrive within
+                ``_CONNECTION_TIMEOUT``.
+            CartesiaTurnsRequestError: If the server rejects the connection's
+                settings.
+        """
+        messages = aiter(self._get_websocket())
+        if not await self._receive_until_confirmed(
+            messages,
+            self._connection_established_event,
+            self._process_message,
+            self._CONNECTION_TIMEOUT,
+        ):
+            # Closed before confirming; the receive loop treats it as a drop.
+            return
+
+        await self._call_event_handler("on_connected")
+        # The watchdog stops when its connection closes, so each confirmed
+        # connection gets a new one.
+        if not self._watchdog_task or self._watchdog_task.done():
+            self._watchdog_task = self.create_task(self._watchdog_task_handler())
+
+        try:
+            async for message in messages:
+                await self._process_message(message)
+        finally:
+            # A turn lives in one connection, so it ends when the connection
+            # does, unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()
+
+    async def _process_message(self, message: str | bytes):
+        """Decode and handle one message from the WebSocket."""
+        if not isinstance(message, str):
+            logger.warning(f"Received non-text message: {type(message)}")
+            return
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            logger.exception("Failed to decode JSON message")
+            return
+        try:
+            await self._handle_message(data)
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Re-raise so the receive loop handles it: it reconnects, unless
+            # the error left the service unusable.
+            raise
+
+    async def _end_turn_cut_short(self):
+        """End a turn whose connection closed before the server sent turn.end.
+
+        A turn lives in one connection, so a new connection never ends the old
+        one's turn. The transcript received so far is pushed as the turn's
+        transcription, unfinalized since the server never committed it, and the
+        turn stop is proposed. If the user keeps talking on a new connection,
+        the rest is transcribed as a new turn.
+        """
+        if not self._user_is_speaking:
+            return
+        logger.debug(f"{self}: connection closed mid-turn, ending the turn")
+        self._user_is_speaking = False
+        self._clear_eager_end_of_turn()
+        transcript, self._turn_transcript = self._turn_transcript, ""
+        if transcript:
+            await self.emit_stt_usage_metrics()
+            await self.push_frame(
+                TranscriptionFrame(transcript, self._user_id, time_now_iso8601(), self._language)
+            )
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     @traced_stt
     async def _handle_transcription(
@@ -569,6 +644,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         transcript = data.get("transcript", "")
         logger.debug("Cartesia Ink-2 ASR turn.start")
         self._user_is_speaking = True
+        self._turn_transcript = transcript
         await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_turn_start", transcript)
 
@@ -576,6 +652,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         transcript = data.get("transcript", "")
         if transcript:
             logger.trace(f"Cartesia Ink-2 ASR turn.update: {transcript}")
+            self._turn_transcript = transcript
             await self.push_frame(
                 InterimTranscriptionFrame(
                     transcript,
@@ -611,6 +688,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         transcript = data.get("transcript", "")
         logger.debug(f"Cartesia Ink-2 ASR turn.end: {transcript}")
         self._user_is_speaking = False
+        self._turn_transcript = ""
         # The turn is committed, so any eager prediction it followed is resolved.
         self._clear_eager_end_of_turn()
         # The watchdog injects silence to force turn.end when audio stops
@@ -639,4 +717,10 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     async def _handle_server_error(self, data: dict):
         message = data.get("message", "Unknown error")
         error_code = data.get("error_code", "unknown")
-        await self.push_error(error_msg=f"Cartesia Ink-2 ASR error [{error_code}]: {message}")
+        error_msg = f"Cartesia Ink-2 ASR error [{error_code}]: {message}"
+        if not self._connection_established_event.is_set():
+            # The server validates a connection's settings after the
+            # handshake, sending this error in place of ``connected`` and then
+            # closing the connection.
+            raise CartesiaTurnsRequestError(error_msg, status_code=data.get("status_code"))
+        await self.push_error(error_msg=error_msg)
