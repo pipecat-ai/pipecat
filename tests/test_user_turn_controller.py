@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -911,10 +911,20 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 class VotingStopStrategy(BaseUserTurnStopStrategy):
     """A stop strategy that decides the user is done when a test says so."""
 
-    def __init__(self, result: ProcessFrameResult = ProcessFrameResult.CONTINUE):
+    def __init__(
+        self,
+        result: ProcessFrameResult = ProcessFrameResult.CONTINUE,
+        *,
+        on_inference: bool = False,
+    ):
         super().__init__()
         self.frames: list[Frame] = []
         self._result = result
+        self._on_inference = on_inference
+
+    @property
+    def votes_on_inference(self) -> bool:
+        return self._on_inference
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         self.frames.append(frame)
@@ -922,6 +932,12 @@ class VotingStopStrategy(BaseUserTurnStopStrategy):
 
     async def vote(self, **kwargs):
         await self.trigger_user_turn_stopped(**kwargs)
+
+    async def speculate(self):
+        await self.trigger_user_turn_inference_triggered(speculation=UserTurnSpeculation("Hi"))
+
+    async def confirm(self):
+        await self.trigger_user_turn_finalized(confirms_speculation=True)
 
 
 class TestStopStrategiesVote(unittest.IsolatedAsyncioTestCase):
@@ -1033,6 +1049,69 @@ class TestStopStrategiesVote(unittest.IsolatedAsyncioTestCase):
         await self._speak()
 
         self.assertEqual(len(other.frames), 2)
+
+    def _record_inferences(self) -> list[tuple[BaseUserTurnStopStrategy | None, object]]:
+        inferences: list[tuple[BaseUserTurnStopStrategy | None, object]] = []
+
+        @self.controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
+            inferences.append((strategy, speculation))
+
+        return inferences
+
+    async def test_the_inference_runs_once_every_vote_on_the_user_is_in(self):
+        first, second = VotingStopStrategy(), VotingStopStrategy()
+        on_inference = VotingStopStrategy(on_inference=True)
+        await self._start([first, second, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await first.vote()
+        self.assertEqual(inferences, [])
+
+        await second.vote()
+        self.assertEqual([s for s, _ in inferences], [second])
+        self.assertEqual(self.stops, [])
+
+        await on_inference.vote()
+        self.assertEqual([s for s, _ in self.stops], [on_inference])
+
+    async def test_the_inference_runs_once_per_round_of_votes(self):
+        first, on_inference = VotingStopStrategy(), VotingStopStrategy(on_inference=True)
+        await self._start([first, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await first.vote()
+        await first.vote()
+        self.assertEqual(len(inferences), 1)
+
+        await self._speak()
+        await first.vote()
+        self.assertEqual(len(inferences), 2)
+
+    async def test_a_speculation_is_the_turns_answer(self):
+        eager, on_inference = VotingStopStrategy(), VotingStopStrategy(on_inference=True)
+        await self._start([eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await eager.speculate()
+        await eager.confirm()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False])
+
+    async def test_a_withdrawn_speculation_lets_the_inference_run(self):
+        eager, on_inference = VotingStopStrategy(), VotingStopStrategy(on_inference=True)
+        await self._start([eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await eager.speculate()
+        await eager.trigger_user_turn_speculation_cancelled()
+        await eager.vote()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
 
     async def test_the_turn_end_combines_the_votes(self):
         """A turn end announced elsewhere, or confirming a speculation, applies to the whole turn."""

@@ -123,6 +123,17 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         return False
 
+    @property
+    def votes_on_inference(self) -> bool:
+        """Whether this strategy votes on the turn's inference rather than on the user.
+
+        In a ``StrategyMode.ALL`` list, the turn's inference runs once every
+        other stop strategy has voted, and this strategy then votes on it.
+        Override to True in a strategy that votes on the turn's answer, such
+        as one reading the LLM's turn-completion marker.
+        """
+        return False
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the strategy.
 

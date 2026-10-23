@@ -60,6 +60,11 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """
         return self._inner.resolves_proposed_turn_stop_frames
 
+    @property
+    def votes_on_inference(self) -> bool:
+        """Report whether the inner strategy votes on the turn's inference."""
+        return self._inner.votes_on_inference
+
     def add_event_handler(self, event_name: str, handler):
         """Forward event subscriptions to the inner strategy.
 

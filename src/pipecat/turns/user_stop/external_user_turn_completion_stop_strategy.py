@@ -48,6 +48,11 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     take longer than the default to respond.
     """
 
+    @property
+    def votes_on_inference(self) -> bool:
+        """Votes on ``UserTurnInferenceCompletedFrame``, which the turn's inference produces."""
+        return True
+
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Fire ``on_user_turn_stopped`` whenever ``UserTurnInferenceCompletedFrame`` is seen."""
         if isinstance(frame, UserTurnInferenceCompletedFrame):
