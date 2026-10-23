@@ -56,6 +56,29 @@ def test_spoken_markup_with_no_event_before_the_next_words_isnt_spoken():
     assert spoken_expression().spoken_markup() is None
 
 
+def test_an_event_after_the_last_word_is_left_for_what_follows():
+    spoken = SpokenExpression()
+    # "Bye [[laugh]]!", spoken as one word that covers the tag.
+    spoken.add(
+        "Bye [[laugh]]!", [ExpressionSpan(0, 4, modes=[]), ExpressionSpan(4, 13, event=LAUGH)]
+    )
+
+    assert spoken.spoken("Bye [[laugh]]!") == ([], [])
+    assert spoken.spoken_markup() == LAUGH
+
+
+def test_events_no_text_reported_are_unreported_at_the_end():
+    spoken = SpokenExpression()
+    spoken.add(
+        "Bye [[laugh]]", [ExpressionSpan(0, 4, modes=[]), ExpressionSpan(4, 13, event=LAUGH)]
+    )
+
+    spoken.spoken("Bye")
+
+    assert spoken.unreported() == [LAUGH]
+    assert spoken.unreported() == []
+
+
 def test_text_spoken_before_any_was_added_has_no_modes():
     spoken = SpokenExpression()
 

@@ -279,6 +279,31 @@ async def test_a_request_formats_what_the_service_performs_and_says_where():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text, shown, sent",
+    [
+        ("Hi [[laugh]], there.", "Hi, there.", "Hi, <laugh> there."),
+        ("It's ^^back^^ [[laugh]]!", "It's back!", "It's <emphasis> back! <laugh>"),
+        ("Hi[[laugh]], there.", "Hi, there.", "Hi, <laugh> there."),
+        ("Well [[laugh]]... okay.", "Well... okay.", "Well... <laugh> okay."),
+        ("Really [[laugh]]？ Yes.", "Really？ Yes.", "Really？ <laugh> Yes."),
+        ("مرحبا [[laugh]]؟", "مرحبا؟", "مرحبا؟ <laugh>"),
+        # An event the service can't perform is removed the same way.
+        ("Hi [[sigh]], there.", "Hi, there.", "Hi, there."),
+        # Spacing the LLM wrote before the punctuation is kept.
+        ("Hi [[laugh]] , there.", "Hi , there.", "Hi <laugh> , there."),
+        ("It's [[laugh]] back.", "It's back.", "It's <laugh> back."),
+    ],
+)
+async def test_punctuation_after_an_event_closes_the_words_before_it(text, shown, sent):
+    expression = formatter(events=["laugh"])
+    segments = expression.parse(text)
+
+    assert ExpressionFormatter.shown_text(segments, TextType.SENTENCE) == shown
+    assert (await expression.format(segments, TextType.SENTENCE, same, lambda w: w))[0] == sent
+
+
+@pytest.mark.asyncio
 async def test_a_request_leaves_out_what_the_service_cant_perform():
     expression = formatter()
     segments = expression.parse("<<calm>> Hi. [[laugh]]", whole=True)

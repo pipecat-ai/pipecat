@@ -96,7 +96,10 @@ class SpokenExpression:
         The text's modes are those of its first letter that falls in words,
         so a mode tag's own name, such as ``cheerful`` in
         ``"<<cheerful>> It's"``, isn't taken for a word. An event already
-        reported by :meth:`spoken_markup` isn't reported again.
+        reported by :meth:`spoken_markup` isn't reported again, and one
+        written after the text's last word, such as the laugh in
+        ``"back [[laughs]]!"``, is left for the service's markup or the next
+        text to report, since it is performed after the word.
 
         Args:
             text: The LLM's text it covers, tags included, such as a word's
@@ -115,9 +118,17 @@ class SpokenExpression:
         if start < 0:
             return self._modes, []
         end = start + len(text)
+        last_word = next(
+            (i for i in range(end - 1, start - 1, -1) if self._in_words(i)),
+            None,
+        )
+        position = end
         events = []
         for span in self._spans:
             if span.event and not span.reported and self._position <= span.start < end:
+                if last_word is not None and span.start > last_word:
+                    position = min(position, span.start)
+                    continue
                 span.reported = True
                 events.append(span.event)
         for i in range(start, end):
@@ -130,8 +141,31 @@ class SpokenExpression:
             if words is not None:
                 self._modes = words.modes or []
                 break
-        self._position = end
+        self._position = position
         return self._modes, events
+
+    def unreported(self) -> list[tuple[TextType, str]]:
+        """Read the events and pauses not yet reported, once the context's audio has ended.
+
+        An event after the last words, such as the laugh in ``"Bye
+        [[laughs]]"``, has no later text to report it, and a service may not
+        report its markup.
+
+        Returns:
+            Each such event or pause, with its text type and its text.
+        """
+        events = []
+        for span in self._spans:
+            if span.event and not span.reported and span.start >= self._position:
+                span.reported = True
+                events.append(span.event)
+        return events
+
+    def _in_words(self, i: int) -> bool:
+        """Whether the character at ``i`` is a letter or digit of words, not of a tag."""
+        return self._text[i].isalnum() and any(
+            s.modes is not None and s.start <= i < s.end for s in self._spans
+        )
 
     def spoken_markup(self) -> tuple[TextType, str] | None:
         """Read markup the service reports speaking as a word, such as ``[laughs]``.

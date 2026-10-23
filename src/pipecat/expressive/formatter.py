@@ -71,7 +71,7 @@ from pipecat.expressive.expression import (
     ModeScope,
 )
 from pipecat.frames.frames import TextType
-from pipecat.utils.string import StartEndTags
+from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
 
 # The delimiters of the tags, for an aggregator such as SkipTagsAggregator to
 # keep each tag in one unit.
@@ -92,6 +92,15 @@ _PAUSE = re.compile(r"pause (\d+)")
 
 # Spaces and tabs left side by side where a tag stood between two words.
 _SPACES = re.compile(r"[ \t]{2,}")
+# Punctuation that closes the words before a tag written ahead of it, as in
+# "Hi [[laughs]], there.": what ends a sentence, and what ends a clause.
+_CLOSING_PUNCTUATION = re.compile(
+    "["
+    + re.escape(
+        "".join(sorted(SENTENCE_ENDING_PUNCTUATION | {",", ":", ")", "，", "、", "：", "）", "،"}))
+    )
+    + "]+"
+)
 
 
 @dataclass(frozen=True)
@@ -330,6 +339,10 @@ class ExpressionFormatter:
             ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
             # "It's back up."
 
+        An event or pause is removed as a word, with the space before it when
+        punctuation follows it: ``"Hi [[laughs]], there."`` is shown as
+        ``"Hi, there."``.
+
         Args:
             segments: The unit's segments.
             text_type: The unit's text type. A sentence's words are trimmed at
@@ -338,7 +351,19 @@ class ExpressionFormatter:
         Returns:
             The words, with one space where a tag stood between two.
         """
-        words = _SPACES.sub(" ", "".join(s.text for s in segments if isinstance(s, Text)))
+        words = ""
+        event_since_words = False
+        for segment in segments:
+            if not isinstance(segment, Text):
+                event_since_words = bool(words)
+                continue
+            # An event is removed as a word, with the space before it when
+            # punctuation follows it.
+            if event_since_words and _CLOSING_PUNCTUATION.match(segment.text):
+                words = words.rstrip()
+            words += segment.text
+            event_since_words = False
+        words = _SPACES.sub(" ", words)
         return words if text_type == TextType.TOKEN else words.strip()
 
     async def format(
@@ -353,8 +378,11 @@ class ExpressionFormatter:
         Each run of words goes through ``transform`` first, so text
         transforms such as markdown stripping never see markup, and is then
         formatted by the adapter in the modes the service can perform. Events
-        and pauses are formatted at their places. A sentence's request is
-        trimmed at both ends; a streamed token keeps its spacing.
+        and pauses are formatted at their places, except that punctuation
+        written after one stays with the words before it, where the service
+        reports it: ``"Hi [[laughs]], there."`` asks for ``"Hi, [laughs]
+        there."``. A sentence's request is trimmed at both ends; a streamed
+        token keeps its spacing.
 
         Cartesia has no emphasis, and changes emotion only between sentences::
 
@@ -390,6 +418,10 @@ class ExpressionFormatter:
         spans: list[ExpressionSpan] = []
         first_modes: list[str] | None = None
         trimmed = False
+        # Where the request's last words are, and whether an event or pause
+        # was written after them.
+        words_at: int | None = None
+        event_since_words = False
         for segment in segments:
             if isinstance(segment, Text):
                 modes = self._performed_modes(list(segment.modes), capabilities)
@@ -404,21 +436,29 @@ class ExpressionFormatter:
                     parts.append(segment.text)
                     continue
                 words_text: str | None = segment.text
-                if not trimmed:
+                closing = _CLOSING_PUNCTUATION.match(segment.text)
+                if closing and words_at is not None and event_since_words:
+                    parts[words_at] = parts[words_at].rstrip() + closing.group()
+                    words_text = segment.text[closing.end() :] or None
+                event_since_words = False
+                if not trimmed and words_text is not None:
                     # The unit's first words are trimmed as its text would be, and
                     # a sentence's even after an event or pause written before them.
-                    first = segment.text if text_type == TextType.TOKEN else segment.text.lstrip()
+                    first = words_text if text_type == TextType.TOKEN else words_text.lstrip()
                     words_text = trim(first)
                     trimmed = True
                 words = await transform(words_text, text_type) if words_text is not None else None
                 if words is not None:
+                    words_at = len(parts)
                     parts.append(self._format(words, modes))
-            elif _performs(segment, capabilities):
-                event = _event_text(segment, capabilities)
-                spans.append(ExpressionSpan(segment.start, segment.end, event=event))
-                parts.append(self._format_event(segment, capabilities))
             else:
-                self._warn_unperformed(_tag(segment))
+                event_since_words = True
+                if _performs(segment, capabilities):
+                    event = _event_text(segment, capabilities)
+                    spans.append(ExpressionSpan(segment.start, segment.end, event=event))
+                    parts.append(self._format_event(segment, capabilities))
+                else:
+                    self._warn_unperformed(_tag(segment))
         if first_modes is not None:
             self._modes = first_modes
         request = _SPACES.sub(" ", "".join(parts))

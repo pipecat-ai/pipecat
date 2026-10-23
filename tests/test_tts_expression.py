@@ -489,6 +489,28 @@ async def test_reported_mode_markup_is_not_spoken():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("service", [ReportingTTSService, WordTimestampTTSService])
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        ("Hi [[laugh]], there.", ["Hi,", "laugh", "there."]),
+        ("It's ^^back^^ [[laugh]]! Bye.", ["It's", "back!", "laugh", "Bye."]),
+        ("Really [[laugh]]? Yes.", ["Really?", "laugh", "Yes."]),
+        ("Wait [[pause 300]]. Okay.", ["Wait.", "300", "Okay."]),
+        ("See you [[laugh]]", ["See", "you", "laugh"]),
+    ],
+)
+async def test_an_event_before_punctuation_is_reported_after_the_words_it_follows(
+    service, text, spoken
+):
+    words, warnings = await spoken_words(service(), text)
+
+    assert [word for word, _ in words] == spoken
+    assert not [w for w in warnings if "Dropping word" in w]
+    assert await context_after(service(), response(text)) == text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("service", SERVICES)
 async def test_punctuation_after_emphasis_stays_with_it_in_the_context(service):
     context = await context_after(service(), response("It's ^^back^^! ^^Wow^^, nice."))

@@ -1197,6 +1197,7 @@ class TTSService(AIService):
         """
         self._apply_context_interruptible(frame)
         if isinstance(frame, TTSStoppedFrame):
+            await self._report_unreported_expression(frame, direction)
             await self._finish_tts_context(frame)
             await self._push_stop_silence(frame)
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
@@ -1210,6 +1211,19 @@ class TTSService(AIService):
             if not keep:
                 return
         await super().push_frame(frame, direction)
+
+    async def _report_unreported_expression(
+        self, frame: TTSStoppedFrame, direction: FrameDirection
+    ):
+        """Report the events and pauses no text reported, once a context's audio has ended."""
+        context = self._tts_contexts.get(frame.context_id) if frame.context_id else None
+        if not self._expression_formatter or not context:
+            return
+        for event in self._expression_event_frames(frame, context.spoken_expression.unreported()):
+            # Ordered after the context's last words, as the stop frame is.
+            if self._word_timestamp_tracker.last_pts:
+                event.pts = self._word_timestamp_tracker.last_pts + 1
+            await self.push_frame(event, direction)
 
     def _report_expression(self, frame: Frame) -> tuple[list[TTSTextFrame], bool]:
         """Give spoken text the modes it is spoken in, and report the events before it.
@@ -1232,19 +1246,31 @@ class TTSService(AIService):
         if isinstance(frame, AggregatedTextProgressFrame):
             frame.modes = spoken.modes if spoken else None
             return [], True
-        if frame.raw_text is None and _is_markup(frame.text):
-            event = spoken.spoken_markup() if spoken else None
-            if event is None:
-                return [], False
-            frame.text_type, frame.text = event
-            frame.append_to_context = False
-            return [], True
         if spoken is None:
-            return [], True
+            return [], not (frame.raw_text is None and _is_markup(frame.text))
+        event = spoken.spoken_markup() if _is_markup(frame.text) else None
+        if event is not None:
+            frame.text_type, frame.text = event
+            if frame.raw_text is None:
+                frame.append_to_context = False
+                return [], True
+            # Markup can cover the LLM's text, as "[laughs]" covers "[[laughs]]!"
+            # when the punctuation was written after the tag. The context
+            # records that text with the event.
+            _, events = spoken.spoken(frame.raw_text)
+            return self._expression_event_frames(frame, events), True
+        if frame.raw_text is None and _is_markup(frame.text):
+            return [], False
         modes, events = spoken.spoken(frame.raw_text)
         if modes is not None:
             frame.modes = modes
-        reported = []
+        return self._expression_event_frames(frame, events), True
+
+    def _expression_event_frames(
+        self, frame: TTSTextFrame | TTSStoppedFrame, events: list[tuple[TextType, str]]
+    ) -> list[TTSTextFrame]:
+        """Frames for events and pauses performed at a frame's time."""
+        frames = []
         for text_type, text in events:
             event = TTSTextFrame(text, text_type=text_type)
             event.pts = frame.pts
@@ -1252,8 +1278,8 @@ class TTSService(AIService):
             event.will_be_spoken = True
             # The context records the event's tag with the text around it.
             event.append_to_context = False
-            reported.append(event)
-        return reported, True
+            frames.append(event)
+        return frames
 
     #
     # Settings
