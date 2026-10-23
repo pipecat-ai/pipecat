@@ -147,7 +147,8 @@ class LLMUserAggregatorParams:
             no audio frames are received while in SPEAKING state (e.g. user mutes
             mic mid-speech). Set to 0 to disable. Defaults to 1.0.
         user_turn_strategies: User turn start and stop strategies.
-        user_turn_strategies_params: How the user turn strategies decide.
+        user_turn_strategies_params: How the user turn strategies combine with
+            the ones a service recommends, and how they decide.
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
@@ -738,6 +739,13 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
+        # No service has recommended strategies yet, so an extending list joins
+        # the defaults.
+        if self._params.user_turn_strategies is not None:
+            user_turn_strategies = self._params.user_turn_strategies.merge_with(
+                None, self._params.user_turn_strategies_params
+            )
+
         # Realtime-mode strategy mutation: drop the transcription-based start
         # strategy and flip wait_for_transcript on stop strategies that expose
         # it, so turn-stop fires as soon as VAD / the turn analyzer / external
@@ -1100,14 +1108,17 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         """Apply user turn strategies a service recommends via its metadata frame.
 
-        Honored only when the user did not pass their own ``user_turn_strategies``,
-        which always wins. ``update_strategies`` is idempotent, so this is safe to
-        re-run on a later broadcast (e.g. a ServiceSwitcher switch).
+        The user's own ``user_turn_strategies`` replace them, except for a list
+        ``user_turn_strategies_params`` extends, which the user's strategies are
+        added to. ``update_strategies`` is idempotent, so this is safe to re-run
+        on a later broadcast (e.g. a ServiceSwitcher switch).
         """
         if user_turn_strategies is None:
             return
 
-        if self._params.user_turn_strategies is not None:
+        provided = self._params.user_turn_strategies
+        params = self._params.user_turn_strategies_params
+        if provided is not None and params.replaces_service_strategies:
             logger.debug(
                 f"{self}: ignoring user turn strategies recommended by "
                 f"`{service_name}`; using the user-provided strategies."
@@ -1116,7 +1127,10 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
-        await self._user_turn_controller.update_strategies(user_turn_strategies)
+        strategies = (
+            provided.merge_with(user_turn_strategies, params) if provided else user_turn_strategies
+        )
+        await self._user_turn_controller.update_strategies(strategies)
 
     def _warn_on_discarded_interruption_setting(
         self, service_name: str, recommended: UserTurnStrategies
@@ -1126,7 +1140,7 @@ class LLMUserAggregator(LLMContextAggregator):
         A service recommends turn strategies by putting them on its
         ``ServiceMetadataFrame.user_turn_strategies``, and one configured with
         ``should_interrupt=False`` carries that setting there. User-provided
-        strategies discard the recommendation whole — so the pipeline would
+        strategies that replace both lists discard the recommendation whole — so the pipeline would
         start interrupting with no indication why.
 
         Passing ``ExternalUserTurnStrategies`` explicitly was a safe way to opt
