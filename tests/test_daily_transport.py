@@ -314,6 +314,26 @@ async def test_tone_outside_keypad_keeps_daily_events_flowing():
 
 
 @pytest.mark.asyncio
+async def test_failing_callback_keeps_daily_events_flowing():
+    client = _make_transport()._client
+    client._joined_event.set()
+    queue = asyncio.Queue()
+    task = asyncio.create_task(client._callback_task_handler(queue))
+    next_event = AsyncMock()
+
+    async def failing_callback(data):
+        raise RuntimeError("boom")
+
+    await queue.put((failing_callback, {"id": "caller"}))
+    await queue.put((next_event, {"id": "caller"}))
+    await asyncio.wait_for(queue.join(), timeout=1)
+
+    next_event.assert_awaited_once_with({"id": "caller"})
+    assert not task.done()
+    task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_dtmf_frame_pushes_error_when_send_fails():
     transport = _make_transport()
     output = transport.output()
