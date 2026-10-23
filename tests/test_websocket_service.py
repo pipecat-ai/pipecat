@@ -269,6 +269,87 @@ async def test_stable_connection_resets_quick_failure_counter(service, report_er
 
 
 # ---------------------------------------------------------------------------
+# Waiting for the server to confirm a connection
+# ---------------------------------------------------------------------------
+
+
+async def _messages(*items: str, then_hang: bool = False):
+    for item in items:
+        yield item
+    if then_hang:
+        await asyncio.Event().wait()
+
+
+def _confirm_on(confirmation: str, confirmed: asyncio.Event, handled: list[str]):
+    async def handle(message):
+        handled.append(message)
+        if message == confirmation:
+            confirmed.set()
+
+    return handle
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_stops_after_confirmation(service):
+    """Messages up to the confirmation are handled; the rest are left for the caller."""
+    confirmed = asyncio.Event()
+    handled = []
+    messages = _messages("hello", "connected", "after")
+
+    result = await service._receive_until_confirmed(
+        messages, confirmed, _confirm_on("connected", confirmed, handled), timeout=1.0
+    )
+
+    assert result is True
+    assert handled == ["hello", "connected"]
+    assert [m async for m in messages] == ["after"]
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_returns_false_when_closed_first(service):
+    """A connection that closes before confirming returns False."""
+    confirmed = asyncio.Event()
+    handled = []
+
+    result = await service._receive_until_confirmed(
+        _messages("hello"), confirmed, _confirm_on("connected", confirmed, handled), timeout=1.0
+    )
+
+    assert result is False
+    assert handled == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_times_out_as_a_quick_failure(service):
+    """A missing confirmation raises ConnectionError and restarts the connection's lifetime."""
+    confirmed = asyncio.Event()
+    service._last_connect_time = 0.0
+
+    with pytest.raises(ConnectionError, match="did not confirm the connection"):
+        await service._receive_until_confirmed(
+            _messages("hello", then_hang=True),
+            confirmed,
+            _confirm_on("connected", confirmed, []),
+            timeout=0.05,
+        )
+
+    assert time.monotonic() - service._last_connect_time < 1.0
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_propagates_handler_errors(service):
+    """An error raised while handling a message reaches the caller."""
+
+    async def reject(message):
+        raise ValueError("rejected")
+
+    with pytest.raises(ValueError, match="rejected"):
+        await service._receive_until_confirmed(
+            _messages("error"), asyncio.Event(), reject, timeout=1.0
+        )
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle and guards
 # ---------------------------------------------------------------------------
 

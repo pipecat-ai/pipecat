@@ -23,11 +23,15 @@ from pipecat.tests.utils import SleepFrame, run_test
 
 
 class FakeWebsocket:
-    """Open socket that never receives anything until it is closed."""
+    """Open socket that records what is sent and receives nothing until closed."""
 
-    def __init__(self):
+    def __init__(self, sent: list):
         self.state = State.OPEN
+        self._sent = sent
         self._closed = asyncio.Event()
+
+    async def send(self, message):
+        self._sent.append(json.loads(message))
 
     async def close(self):
         self.state = State.CLOSED
@@ -45,15 +49,11 @@ def _make_service():
     service = InworldTTSService(api_key="test-key")
     sent = []
 
-    async def record(message, _report_error):
-        sent.append(json.loads(message))
-
     async def connect():
-        service._websocket = FakeWebsocket()
+        service._websocket = FakeWebsocket(sent)
 
-    service.send_with_retry = record
     service._connect_websocket = connect
-    service._websocket = FakeWebsocket()
+    service._websocket = FakeWebsocket(sent)
     return service, sent
 
 

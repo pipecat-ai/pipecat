@@ -93,6 +93,7 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_ai_stt": 'ZoomAISTTService(api_key=os.getenv("ZOOM_AI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"
@@ -277,10 +278,10 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "perplexity_llm": (
-        "PerplexityLLMService(\n"
+        "PerplexityAgentHttpLLMService(\n"
         '        api_key=os.getenv("PERPLEXITY_API_KEY"),\n'
-        "        settings=PerplexityLLMService.Settings(\n"
-        '            model=os.getenv("PERPLEXITY_MODEL"),\n'
+        "        settings=PerplexityAgentHttpLLMService.Settings(\n"
+        '            model=os.getenv("PERPLEXITY_MODEL", "openai/gpt-5.6-luna"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"

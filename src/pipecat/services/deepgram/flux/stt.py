@@ -6,20 +6,19 @@
 
 """Deepgram Flux speech-to-text service implementation (WebSocket transport)."""
 
-import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
-from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
+from pipecat.services.deepgram._errors import describe_refusal
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
@@ -36,21 +35,6 @@ __all__ = [
     "FluxEventType",
     "FluxMessageType",
 ]
-
-
-def _describe_refusal(exception: Exception) -> str | None:
-    """Describe Deepgram refusing the handshake, if that is what failed.
-
-    Deepgram explains a refusal (an invalid setting, a bad API key) in the
-    ``dg-error`` response header, which the exception's own message leaves out.
-    """
-    if isinstance(exception, InvalidStatus):
-        reason = exception.response.headers.get("dg-error")
-        if reason:
-            return (
-                f"Deepgram refused the connection (HTTP {exception.response.status_code}): {reason}"
-            )
-    return None
 
 
 class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
@@ -358,7 +342,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
         except Exception as e:
-            refusal = _describe_refusal(e)
+            refusal = describe_refusal(e)
             await self.push_error(error_msg=refusal or f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", refusal or f"{e}")
@@ -451,21 +435,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 but never confirms is retried like a dropped one.
         """
         messages = aiter(self._get_websocket())
-        try:
-            async with asyncio.timeout(self._CONNECTION_TIMEOUT):
-                while not self._connection_established_event.is_set():
-                    await self._process_message(await anext(messages))
-        except StopAsyncIteration:
+        if not await self._receive_until_confirmed(
+            messages,
+            self._connection_established_event,
+            self._process_message,
+            self._CONNECTION_TIMEOUT,
+        ):
             # Closed before confirming; the receive loop treats it as a drop.
             return
-        except TimeoutError:
-            # The connection never carried a session, so it counts as failing
-            # right after connecting, and the receive loop gives up after a
-            # few in a row rather than retrying forever.
-            self._last_connect_time = time.monotonic()
-            raise ConnectionError(
-                f"Flux did not confirm the connection within {self._CONNECTION_TIMEOUT}s"
-            ) from None
 
         await self._call_event_handler("on_connected")
         # The watchdog stops when its connection closes, so each confirmed

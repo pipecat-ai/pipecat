@@ -258,23 +258,46 @@ class PatternPairAggregator(SimpleTextAggregator):
             A tuple of (start_index, pattern_info) if an incomplete pattern is found,
             or None if no patterns are found or all patterns are complete.
         """
-        for type, pattern_info in self._patterns.items():
-            start = pattern_info["start"]
-            end = pattern_info["end"]
-
-            # Count occurrences
-            start_count = text.count(start)
-            end_count = text.count(end)
-
-            # If there are more starts than ends, we have incomplete patterns
-            # Again, this is written generically but there only ever should
-            # be one pattern active at a time, so the counts should be 0 or 1.
-            # Which is why we base the return on the first found.
-            if start_count > end_count:
-                start_index = text.find(start)
+        # Only one pattern should ever be open at a time, so the first found wins.
+        for pattern_info in self._patterns.values():
+            start_index = self._unmatched_start(text, pattern_info["start"], pattern_info["end"])
+            if start_index is not None:
                 return (start_index, pattern_info)
 
         return None
+
+    @staticmethod
+    def _unmatched_start(text: str, start: str, end: str) -> int | None:
+        """Find the first start delimiter in the text that has no end delimiter after it.
+
+        Delimiters are paired the way :meth:`_process_complete_patterns` pairs
+        them, left to right and non-overlapping, which also holds for a
+        delimiter that reads the same at both ends (a Markdown code fence).
+
+        Args:
+            text: The text to scan.
+            start: The start delimiter.
+            end: The end delimiter.
+
+        Returns:
+            The index of the unmatched start delimiter, or None if every start
+            delimiter is closed.
+        """
+        regex = f"{re.escape(start)}(.*?){re.escape(end)}"
+        matched_spans = [match.span() for match in re.finditer(regex, text, re.DOTALL)]
+
+        search_from = 0
+        while True:
+            index = text.find(start, search_from)
+            if index == -1:
+                return None
+
+            span = next((s for s in matched_spans if s[0] <= index < s[1]), None)
+            if span is None:
+                return index
+            # This occurrence belongs to a completed match; skip past it entirely
+            # so a start nested inside its content isn't mistaken for an unmatched one.
+            search_from = span[1]
 
     async def aggregate(self, text: str) -> AsyncIterator[PatternMatch]:
         """Aggregate text and process pattern pairs.
@@ -348,8 +371,11 @@ class PatternPairAggregator(SimpleTextAggregator):
                 continue
 
             if self._aggregation_type != TextType.TOKEN:
-                # Use parent's lookahead logic for sentence detection
-                aggregation = await super()._check_sentence_with_lookahead(char)
+                # Use parent's lookahead logic for sentence detection, ignoring
+                # boundaries inside KEEP patterns that are still in the buffer.
+                aggregation = await super()._check_sentence_with_lookahead(
+                    char, protected_end=self._kept_patterns_offset()
+                )
                 if aggregation:
                     # Convert to PatternMatch for consistency with return type
                     yield PatternMatch(
@@ -378,6 +404,22 @@ class PatternPairAggregator(SimpleTextAggregator):
                         type=TextType.TOKEN,
                         full_match=content,
                     )
+
+    def _kept_patterns_offset(self) -> int:
+        """Return the buffer offset just past the last closed KEEP pattern, or 0 if none."""
+        end_patterns = [
+            pattern["end"]
+            for pattern in self._patterns.values()
+            if pattern["action"] == MatchAction.KEEP
+        ]
+        return max(
+            (
+                self._text.rfind(end_pattern) + len(end_pattern)
+                for end_pattern in end_patterns
+                if end_pattern in self._text
+            ),
+            default=0,
+        )
 
     async def flush(self) -> Aggregation | None:
         """Flush any remaining text in the buffer.
@@ -420,11 +462,7 @@ class PatternPairAggregator(SimpleTextAggregator):
     def _find_earliest_droppable_start(self, text: str) -> int | None:
         """Find the earliest unmatched start delimiter that flush() should cut at.
 
-        For each registered pattern, replicates the same left-to-right,
-        non-overlapping pairing that :meth:`_process_complete_patterns` uses
-        (earliest start paired with earliest following end) to determine
-        which start-delimiter occurrences are still unmatched. Only
-        REMOVE/AGGREGATE patterns' unmatched starts are candidates: KEEP
+        Only REMOVE/AGGREGATE patterns' unmatched starts are candidates: KEEP
         patterns are excluded because unclosed KEEP content is kept, not cut.
 
         Args:
@@ -440,28 +478,9 @@ class PatternPairAggregator(SimpleTextAggregator):
             if pattern_info.get("action", MatchAction.REMOVE) == MatchAction.KEEP:
                 continue
 
-            start = pattern_info["start"]
-            end = pattern_info["end"]
-            regex = f"{re.escape(start)}(.*?){re.escape(end)}"
-            matched_spans = [match.span() for match in re.finditer(regex, text, re.DOTALL)]
-
-            search_from = 0
-            while True:
-                index = text.find(start, search_from)
-                if index == -1:
-                    break
-
-                span = next((s for s in matched_spans if s[0] <= index < s[1]), None)
-                if span is not None:
-                    # This occurrence belongs to a completed match; skip past
-                    # it entirely so a start nested inside its content isn't
-                    # mistaken for an unmatched one.
-                    search_from = span[1]
-                    continue
-
-                if earliest is None or index < earliest:
-                    earliest = index
-                break
+            index = self._unmatched_start(text, pattern_info["start"], pattern_info["end"])
+            if index is not None and (earliest is None or index < earliest):
+                earliest = index
 
         return earliest
 

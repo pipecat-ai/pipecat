@@ -17,6 +17,11 @@ Transforms are registered via text_transforms on the TTS service as a list of
 (text_type, callable) pairs. The text_type string controls which
 frames the transform applies to ("*" means all frames).
 
+The same pairs registered on LLMTextProcessor rewrite the text for everyone
+downstream (the voice, the context and the client) rather than for the voice
+alone. This example strips emoji there, so the LLM never sees its own emoji in
+the context and keeps adding more.
+
 This example shows a billing-assistant scenario where several transforms are
 composed:
   - strip_markdown       Remove bold/italic/headers the LLM might add
@@ -53,6 +58,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
@@ -132,6 +138,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ("*", custom_subs),
     ]
 
+    # Transforms on the LLM text processor rewrite what everyone sees: the voice,
+    # the context and the client. Emoji removed here never reach the context, so
+    # the LLM does not see its own emoji and keep adding more.
+    strip_emoji = replace_text([(r"[\U0001F300-\U0001FAFF☀-➿]️?", "")])
+    llm_text_processor = LLMTextProcessor(text_transforms=[("*", strip_emoji)])
+
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         settings=ElevenLabsTTSService.Settings(
@@ -170,6 +182,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,
             llm,
+            llm_text_processor,
             tts,
             transport.output(),
             assistant_aggregator,

@@ -9,6 +9,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
 import websockets
@@ -19,6 +20,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 
 
@@ -315,8 +317,17 @@ class WebsocketService(ABC):
         finally:
             self._reconnect_in_progress = False
 
+    @deprecated(
+        "`WebsocketService.send_with_retry` is deprecated since 1.14.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def send_with_retry(self, message, report_error: ReportErrorCallback):
-        """Attempt to send a message, retrying after reconnect if necessary."""
+        """Attempt to send a message, retrying after reconnect if necessary.
+
+        .. deprecated:: 1.14.0
+            No replacement. Will be removed in 2.0.0. Send on the websocket
+            directly and leave reconnecting to the receive loop.
+        """
         try:
             # If websocket isn't connected/present, treat as a send failure —
             # the broad `except Exception` below will trigger a reconnect
@@ -396,6 +407,48 @@ class WebsocketService(ABC):
             # the drop as terminal would close that path too.
             await report_error(ErrorFrame(error_message, exception=error))
             return False
+
+    async def _receive_until_confirmed(
+        self,
+        messages: AsyncIterator[str | bytes],
+        confirmed: asyncio.Event,
+        handle_message: Callable[[str | bytes], Awaitable[None]],
+        timeout: float,
+    ) -> bool:
+        """Handle messages until the server confirms the connection.
+
+        For services whose server confirms a connection with a message after
+        the handshake. ``handle_message`` sets ``confirmed`` when that message
+        arrives.
+
+        Args:
+            messages: The connection's message iterator, left positioned after
+                the confirmation for the caller to keep reading.
+            confirmed: Event set once the server confirms the connection.
+            handle_message: Handles one message.
+            timeout: Maximum time, in seconds, to wait for the confirmation.
+
+        Returns:
+            True once confirmed, False if the connection closed first.
+
+        Raises:
+            ConnectionError: If the confirmation doesn't arrive within ``timeout``.
+        """
+        try:
+            async with asyncio.timeout(timeout):
+                while not confirmed.is_set():
+                    await handle_message(await anext(messages))
+        except StopAsyncIteration:
+            return False
+        except TimeoutError:
+            # The connection never carried a session, so it counts as failing
+            # right after connecting, and the receive loop gives up after a
+            # few in a row rather than retrying forever.
+            self._last_connect_time = time.monotonic()
+            raise ConnectionError(
+                f"{self} did not confirm the connection within {timeout}s"
+            ) from None
+        return True
 
     async def _receive_task_handler(self, report_error: ReportErrorCallback):
         """Handle websocket message receiving with automatic retry logic.

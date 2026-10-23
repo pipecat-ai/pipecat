@@ -20,8 +20,8 @@ from PIL import Image
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_realtime_adapter import (
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
 from pipecat.audio.utils import create_stream_resampler

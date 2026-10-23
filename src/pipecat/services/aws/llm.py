@@ -20,8 +20,8 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.bedrock_adapter import (
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.bedrock_adapter import (
     AWSBedrockLLMAdapter,
     AWSBedrockLLMInvocationParams,
 )

@@ -496,6 +496,14 @@ class ServiceRegistry:
             env_prefix="XAI",
             include_params=["api_key"],
         ),
+        ServiceDefinition(
+            value="zoom_ai_stt",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAISTTService"],
+            env_prefix="ZOOM_AI",
+            include_params=["api_key"],
+        ),
     ]
 
     # Large Language Model Services
@@ -686,10 +694,11 @@ class ServiceRegistry:
             value="perplexity_llm",
             label="Perplexity",
             package="pipecat-ai[perplexity]",
-            class_name=["PerplexityLLMService"],
+            class_name=["PerplexityAgentHttpLLMService"],
             env_prefix="PERPLEXITY",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
+            param_defaults={"model": "openai/gpt-5.6-luna"},
         ),
         ServiceDefinition(
             value="qwen_llm",

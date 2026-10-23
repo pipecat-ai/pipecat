@@ -25,6 +25,7 @@ from pipecat.services.mistral.llm import MistralLLMService
 from pipecat.services.nebius.llm import NebiusLLMService
 from pipecat.services.novita.llm import NovitaLLMService
 from pipecat.services.nvidia.llm import NvidiaLLMService
+from pipecat.services.nvidia.omni.llm import NvidiaOmniLLMService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -64,6 +65,7 @@ PROVIDER_SERVICES = [
 KEY_OPTIONAL_SERVICES = {
     AzureLLMService,
     NvidiaLLMService,
+    NvidiaOmniLLMService,
     OLLamaLLMService,
     OpenAILLMService,
     OpenAISTTService,

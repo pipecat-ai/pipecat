@@ -35,7 +35,7 @@ from typing import (
 
 from typing_extensions import TypeVar
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -50,8 +50,8 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.adapters.schemas.direct_function import DirectFunction
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+    from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -2353,28 +2353,30 @@ class StopFrame(ControlFrame):
 class PipelineFlushFrame(ControlFrame):
     """Probe frame used to flush all in-flight frames from the pipeline.
 
-    Pushed downstream; the pipeline worker's sink bounces it back upstream, the
-    source turns it around, and the worker sets ``event`` when it reaches the
-    sink a second time. Once that fires, every frame queued ahead of the probe
-    has been processed, along with anything a processor started by pushing
-    upstream. Useful to wait for the pipeline to drain (e.g. after an
-    interruption) before injecting a new frame.
+    A flush makes three legs, each pushed as a new probe: down to the pipeline
+    worker's sink, back up to the source, and down to the sink again, where the
+    worker sets ``event``. All three probes carry the same ``flush_id``. Once
+    ``event`` fires, every frame queued ahead of the flush has been processed,
+    along with anything a processor started by pushing upstream. Useful to wait
+    for the pipeline to drain (e.g. after an interruption) before injecting a
+    new frame.
 
     This frame is uninterruptible so the probe survives an InterruptionFrame
-    and still completes its trip.
+    and the flush still completes its trip.
 
     Parameters:
-        event: Set by the worker when the probe completes its round-trip. The
+        event: Set by the worker when the last probe reaches the sink. The
             initiator awaits it to know the pipeline has drained. Carried on the
             frame so concurrent flushes stay isolated (each awaits its own).
-        returning: Whether the probe is on its second pass downstream, after
-            having been back up to the source. Work a processor starts by
+        returning: Whether the probe is on the last leg, back downstream after
+            the flush has been up to the source. Work a processor starts by
             pushing upstream — an LLM run triggered by a function call result,
-            say — only reaches the sink after that turnaround, so the probe
-            makes the trip twice and settles on the second arrival.
+            say — only reaches the sink after that turnaround, so the flush
+            makes the trip twice and settles when the returning probe arrives.
         origin: Name of the worker that started the flush. A probe that crosses
             into another pipeline is answered there, out of sight of whoever is
             waiting, so the answering worker reports progress back to this name.
+        flush_id: Identifies the flush, shared by the probes of all its legs.
     """
 
     interruptible: bool = field(default=False, init=False)
@@ -2382,6 +2384,10 @@ class PipelineFlushFrame(ControlFrame):
     event: asyncio.Event | None = field(default=None, compare=False)
     returning: bool = field(default=False, compare=False)
     origin: str | None = field(default=None, compare=False)
+    flush_id: int = field(default_factory=obj_id, compare=False)
+
+    def __str__(self):
+        return f"{self.name}(flush_id: {self.flush_id}, returning: {self.returning})"
 
 
 @dataclass

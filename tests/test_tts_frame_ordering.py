@@ -69,6 +69,7 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 # ---------------------------------------------------------------------------
@@ -1720,22 +1721,38 @@ async def test_no_deadlock_on_zero_audio_context_completion():
     )
 
 
+async def _strip_everything(text: str, text_type: str) -> str:
+    """Text transform that strips all text, like one removing leaked reasoning tokens."""
+    return ""
+
+
 class _StripEverythingFilter(BaseTextFilter):
-    """Text filter that strips all text, like a filter removing leaked reasoning tokens."""
+    """Deprecated text filter equivalent of :func:`_strip_everything`."""
 
     async def filter(self, text: str) -> str:
         return ""
 
 
 @pytest.mark.asyncio
-async def test_filter_stripped_text_does_not_pause_frame_processing():
-    """A text filter that strips the whole utterance must not pause frame processing.
+async def test_transform_stripped_text_does_not_pause_frame_processing():
+    """A text transform that strips the whole utterance must not pause frame processing.
 
     No audio context is opened for the stripped text, so nothing holds the
     frames that follow it.
     """
-    tts = MockWebSocketPauseTTSServiceNoAudio(text_filters=[_StripEverythingFilter()])
+    tts = MockWebSocketPauseTTSServiceNoAudio(text_transforms=[("*", _strip_everything)])
+    await _assert_stripped_text_does_not_pause(tts)
 
+
+@pytest.mark.asyncio
+async def test_filter_stripped_text_does_not_pause_frame_processing():
+    """The deprecated text filters strip text the same way, with a warning."""
+    with pytest.warns(DeprecationWarning, match="text_filters"):
+        tts = MockWebSocketPauseTTSServiceNoAudio(text_filters=[_StripEverythingFilter()])
+    await _assert_stripped_text_does_not_pause(tts)
+
+
+async def _assert_stripped_text_does_not_pause(tts: TTSService):
     frames_to_send = [
         LLMFullResponseStartFrame(),
         TextFrame(text="Leaked reasoning tokens."),
@@ -1754,6 +1771,42 @@ async def test_filter_stripped_text_does_not_pause_frame_processing():
     assert any(f.label == "after_stripped_response" for f in foo_frames), (
         "FooFrame was not received — frame processing paused on filter-stripped text"
     )
+
+
+class _RecordingHttpTTSService(MockHttpTTSService):
+    """MockHttpTTSService that records the text it's asked to synthesize."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.spoken: list[str] = []
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        self.spoken.append(text)
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+@pytest.mark.asyncio
+async def test_filter_state_does_not_carry_into_next_reply():
+    """A code block left open by one reply must not mute the next reply."""
+    with pytest.warns(DeprecationWarning, match="text_filters"):
+        tts = _RecordingHttpTTSService(
+            text_filters=[MarkdownTextFilter(MarkdownTextFilter.InputParams(filter_code=True))]
+        )
+
+    frames_to_send = [
+        LLMFullResponseStartFrame(),
+        TextFrame(text="In Markdown, type ``` to start a code block."),
+        LLMFullResponseEndFrame(),
+        SleepFrame(sleep=0.1),
+        LLMFullResponseStartFrame(),
+        TextFrame(text="How else can I help?"),
+        LLMFullResponseEndFrame(),
+    ]
+
+    await asyncio.wait_for(run_test(tts, frames_to_send=frames_to_send), timeout=3.0)
+
+    assert any("How else can I help?" in text for text in tts.spoken), tts.spoken
 
 
 @pytest.mark.asyncio
