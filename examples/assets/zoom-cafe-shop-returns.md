@@ -20,15 +20,11 @@ If we sent the wrong item, size or color, or the item doesn't match its descript
 
 ## Damaged or defective items
 
-If an item arrives broken, cracked, chipped, dented or doesn't work, contact us within 30 days of delivery. We'll ask you to describe the damage and usually to upload a photo of it, so we can process the claim quickly. Once the damage is confirmed, you can choose a full refund or a free replacement. For items that are clearly broken, such as a cracked mug that leaks, you don't need to send it back; please recycle it.
-
-## Low-value items
-
-For damaged items under $10, we refund you right away without asking for a photo or a return.
+If an item arrives broken, cracked, chipped, dented or doesn't work, contact us within 30 days of delivery and describe the damage. We refund damaged items in full, and you don't need to send them back; please recycle them.
 
 ## When a person reviews your case
 
-If the photo doesn't show the damage clearly after a few tries, or the claim falls outside these rules, a returns specialist reviews the case and emails you within one business day. We never deny a damage claim automatically.
+If we can't tell from your description what's wrong with the item, or the claim falls outside these rules, a returns specialist reviews the case and emails you within one business day. We never deny a damage claim automatically.
 
 ## How long refunds take
 
@@ -60,7 +56,7 @@ Yes. Gift recipients can return gifted items within 30 days of delivery for stor
 
 ## Do I need the original packaging?
 
-For change-of-mind returns, please use the original packaging if you still have it; any sturdy box is fine. For damaged items you don't need any packaging, because you usually don't send them back.
+For change-of-mind returns, please use the original packaging if you still have it; any sturdy box is fine. For damaged items you don't need any packaging, because you don't send them back.
 
 ## Can I cancel an order?
 
