@@ -21,8 +21,13 @@ from websockets.protocol import State
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.expressive.parser import EXPRESSION_TAGS, Segment
-from pipecat.expressive.tts_expression import EXPRESSION_TAG_PATTERN, TTSExpression
+from pipecat.expressive.renderer import (
+    EXPRESSION_TAG_PATTERN,
+    EXPRESSION_TAGS,
+    ExpressionRenderer,
+    Segment,
+)
+from pipecat.expressive.spoken import SpokenExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -422,9 +427,11 @@ class TTSService(AIService):
         self._is_yielding_frames_synchronously = False
 
         self._expression_adapter = self.expression_adapter_class()
-        # Performs the expression tags an LLM writes, when the pipeline has
+        # Renders the expression tags an LLM writes, when the pipeline has
         # expressive conversation on.
-        self._expression: TTSExpression | None = None
+        self._expression_renderer: ExpressionRenderer | None = None
+        # The modes and events of the words the service reports speaking.
+        self._spoken_expression = SpokenExpression()
 
     @property
     def sample_rate(self) -> int:
@@ -494,7 +501,7 @@ class TTSService(AIService):
         Returns:
             The modes, empty for the voice's baseline.
         """
-        return self._expression.modes if self._expression else []
+        return self._expression_renderer.modes if self._expression_renderer else []
 
     def service_metadata_frame(self) -> TTSMetadataFrame | None:
         """Build the TTS metadata frame broadcast at start.
@@ -507,7 +514,7 @@ class TTSService(AIService):
         Returns:
             The metadata frame, or None when expressive conversation is off.
         """
-        if not self._expression:
+        if not self._expression_renderer:
             return None
         return TTSMetadataFrame(
             service_name=self.name, expression=self.get_expression_adapter().capabilities()
@@ -587,7 +594,7 @@ class TTSService(AIService):
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
         if setup.enable_expressive_conversation:
-            self._expression = TTSExpression(self.get_expression_adapter, self)
+            self._expression_renderer = ExpressionRenderer(self.get_expression_adapter, self)
             self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
             # Each tag reaches the parser whole, however the text streams in.
             self._text_aggregator = SkipTagsAggregator(
@@ -1190,13 +1197,12 @@ class TTSService(AIService):
         if isinstance(frame, TTSStoppedFrame):
             await self._finish_tts_context(frame)
             await self._push_stop_silence(frame)
-            if self._expression:
-                self._expression.forget(frame.context_id)
+            self._spoken_expression.remove(frame.context_id)
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
         if isinstance(frame, AggregatedTextFrame):
             self._stamp_segment_announcement(frame)
-        if self._expression:
+        if self._expression_renderer:
             events, keep = self._report_expression(frame)
             for event in events:
                 await self.push_frame(event, direction)
@@ -1209,16 +1215,15 @@ class TTSService(AIService):
 
         The text the service reports speaking covers part of the text the LLM
         wrote, tags included, which tells its modes and the events performed
-        since the text before it. Markup the service echoes as a word stands
+        since the text before it. Markup the service reports as a word stands
         for the event it performs, or isn't spoken.
 
         Returns:
             A frame for each event or pause performed before the text, and
             whether the frame itself is pushed.
         """
-        assert self._expression
         if isinstance(frame, AggregatedTextProgressFrame):
-            frame.modes = self._expression.current_modes(frame.context_id)
+            frame.modes = self._spoken_expression.current_modes(frame.context_id)
             return [], True
         if not isinstance(frame, TTSTextFrame) or frame.text_type in (
             TextType.EXPRESSION_EVENT,
@@ -1226,13 +1231,13 @@ class TTSService(AIService):
         ):
             return [], True
         if frame.raw_text is None and _is_markup(frame.text):
-            echoed = self._expression.echoed(frame.context_id)
-            if echoed is None:
+            event = self._spoken_expression.spoken_markup(frame.context_id)
+            if event is None:
                 return [], False
-            frame.text_type, frame.text = echoed
+            frame.text_type, frame.text = event
             frame.append_to_context = False
             return [], True
-        modes, events = self._expression.spoken(frame.context_id, frame.raw_text)
+        modes, events = self._spoken_expression.spoken(frame.context_id, frame.raw_text)
         if modes is not None:
             frame.modes = modes
         reported = []
@@ -1317,8 +1322,8 @@ class TTSService(AIService):
         await self.stop_text_aggregation_metrics()
         if remaining:
             await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
-        if self._expression:
-            self._expression.end_response()
+        if self._expression_renderer:
+            self._expression_renderer.reset()
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1393,11 +1398,11 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        if self._expression and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+        if self._expression_renderer and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
-            self._expression.restate_modes()
+            self._expression_renderer.restate_modes()
             await self._speak_expression(text_frame, speak_context_id, whole=True)
-            self._expression.restate_modes()
+            self._expression_renderer.restate_modes()
         else:
             await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
@@ -1444,8 +1449,8 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
-        if self._expression:
-            self._expression.reset()
+        if self._expression_renderer:
+            self._expression_renderer.reset()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1485,6 +1490,7 @@ class TTSService(AIService):
                 logger.warning(f"{self} on_audio_context_interrupted failed for {context_id}: {e}")
             self._audio_context_manager.remove(context_id)
             self._tts_contexts.pop(context_id, None)
+            self._spoken_expression.remove(context_id)
 
         if interrupt_playing:
             self.reset_active_audio_context()
@@ -1591,7 +1597,7 @@ class TTSService(AIService):
         context_id = context_id or self.create_context_id()
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
-        elif self._expression and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+        elif self._expression_renderer and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             await self._speak_expression(src_frame, context_id)
         elif (text := self._trim_text(src_frame.text)) is not None:
             await self._speak_text(src_frame, text, context_id)
@@ -1611,16 +1617,16 @@ class TTSService(AIService):
             whole: Whether the text stands on its own, apart from the response,
                 such as a ``TTSSpeakFrame``'s.
         """
-        if not self._expression:
+        if not self._expression_renderer:
             return
         text = src_frame.text
         if src_frame.text_type != TextType.TOKEN:
             text = text.strip()
-        segments = self._expression.read_whole(text) if whole else self._expression.parse(text)
+        segments = self._expression_renderer.parse(text, whole=whole)
         if not segments:
             return
         frame = AggregatedTextFrame(
-            self._expression.shown_text(segments, src_frame.text_type),
+            ExpressionRenderer.shown_text(segments, src_frame.text_type),
             src_frame.text_type,
             raw_text=text,
         )
@@ -1665,15 +1671,11 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        if segments is not None and self._expression:
-            prepared_text = await self._expression.request(
-                segments,
-                src_frame.raw_text or "",
-                context_id,
-                src_frame.text_type,
-                self._transform_text,
-                self._trim_text,
+        if segments is not None and self._expression_renderer:
+            prepared_text, spans = await self._expression_renderer.render(
+                segments, src_frame.text_type, self._transform_text, self._trim_text
             )
+            self._spoken_expression.add(context_id, src_frame.raw_text or "", spans)
         else:
             prepared_text = await self._transform_text(text, src_frame.text_type)
         if prepared_text:
@@ -2576,7 +2578,7 @@ class AudioContextWordTTSService(AudioContextTTSService):
 
 
 def _is_markup(text: str) -> bool:
-    """Whether a word a service reports is markup it echoed, rather than speech."""
+    """Whether a word a service reports is its markup, rather than speech."""
     text = text.strip()
     return (text.startswith("[") and text.endswith("]")) or (
         text.startswith("<") and text.endswith(">")

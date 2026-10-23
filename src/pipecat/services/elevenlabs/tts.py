@@ -1180,7 +1180,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
                             # Calculate word timestamps
                             joined = alignment
-                            if self._expression:
+                            if self._expression_renderer:
                                 # The audio tags expressive conversation sends mark
                                 # when its events are performed.
                                 joined, in_audio_tag = _join_audio_tags(

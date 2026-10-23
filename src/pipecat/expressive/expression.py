@@ -26,6 +26,13 @@ from enum import Enum
 
 from pipecat.utils.text.base_text_aggregator import TextType
 
+# The mode that returns to the voice's baseline. Part of the protocol, so it is
+# a mode whatever a service declares.
+NEUTRAL_MODE = "neutral"
+
+# The mode of stressed words, written ^^words^^.
+EMPHASIS_MODE = "emphasis"
+
 
 class ModeScope(Enum):
     """Where in a response a TTS service can change mode.

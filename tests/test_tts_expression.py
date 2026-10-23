@@ -6,6 +6,7 @@
 
 """Tests for how a TTSService reads expression tags in expressive conversation."""
 
+import asyncio
 import re
 from collections.abc import AsyncGenerator
 
@@ -14,8 +15,6 @@ from loguru import logger
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ModeScope
-from pipecat.expressive.parser import Event, Pause, Text
-from pipecat.expressive.tts_expression import TTSExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -25,6 +24,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     TextType,
+    TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSTextFrame,
 )
@@ -432,44 +432,6 @@ async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
     ]
 
 
-class LearnedAdapter(BaseExpressionAdapter):
-    """An adapter whose vocabulary is learned after it is created, as at start."""
-
-    def __init__(self):
-        self.events: list[str] = []
-
-    def capabilities(self):
-        return ExpressionCapabilities(events=[ExpressionTerm(name) for name in self.events])
-
-
-def test_the_parser_knows_capabilities_learned_before_first_use():
-    adapter = LearnedAdapter()
-    expression = TTSExpression(lambda: adapter, owner="tts")
-    adapter.events = ["laugh"]
-
-    # A declared event keeps its kind in mode brackets.
-    segments = expression.parse("<<laugh>> Hi.")
-
-    assert isinstance(segments[0], Event) and segments[0].name == "laugh"
-    assert isinstance(segments[1], Text)
-
-
-@pytest.mark.asyncio
-async def test_a_request_leaves_out_what_the_service_cant_perform():
-    expression = TTSExpression(LearnedAdapter, owner="tts")
-    text = "<<calm>> Hi. [[laugh]]"
-    segments = expression.read_whole(text)
-
-    async def transform(words, text_type):
-        return words
-
-    request = await expression.request(
-        segments, text, "context", TextType.SENTENCE, transform, lambda words: words
-    )
-
-    assert request == "Hi."
-
-
 class MarkupAdapter(BaseExpressionAdapter):
     """Renders tags as bracketed markup, which its service reports back with its words."""
 
@@ -511,7 +473,7 @@ async def spoken_words(tts: TTSService, text: str) -> tuple[list[tuple[str, int]
 async def test_an_event_is_timed_by_the_markup_its_service_reports():
     words, warnings = await spoken_words(ReportingTTSService(), "It's [[laugh]] back.")
 
-    # The markup the service echoes reports the event, at its time.
+    # The markup the service reports times the event.
     assert [text for text, _ in words] == ["It's", "laugh", "back."]
     its, laugh, back = (pts for _, pts in words)
     assert its < laugh < back
@@ -519,7 +481,7 @@ async def test_an_event_is_timed_by_the_markup_its_service_reports():
 
 
 @pytest.mark.asyncio
-async def test_echoed_mode_markup_is_not_spoken():
+async def test_reported_mode_markup_is_not_spoken():
     words, warnings = await spoken_words(ReportingTTSService(), "<<calm>> It's [[laugh]] back.")
 
     assert [text for text, _ in words] == ["It's", "laugh", "back."]
@@ -598,9 +560,45 @@ async def test_a_patterns_match_is_spoken_as_it_is():
     assert context == "<spell>ABC</spell>"
 
 
-def test_a_units_words_are_shown_without_its_tags():
-    expression = TTSExpression(BracketAdapter, owner="tts")
-    segments = expression.read_whole("<<calm>> It's [[laugh]] fine. [[pause 400]]")
+class StreamingTTSService(TTSService):
+    """Streams each word's audio and timestamp after the request, as a WebSocket service does."""
 
-    assert expression.shown_text(segments, TextType.SENTENCE) == "It's fine."
-    assert expression.shown_text(segments, TextType.TOKEN) == " It's fine. "
+    expression_adapter_class = BracketAdapter
+
+    def __init__(self):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            push_text_frames=False,
+            stop_frame_timeout_s=0.2,
+            sample_rate=16000,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        words = re.sub(r" ([!?.,;:])", r"\1", re.sub(r"<[^>]*>", " ", text)).split()
+        self.create_task(self._stream(words, context_id))
+        yield None
+
+    async def _stream(self, words: list[str], context_id: str):
+        for i, word in enumerate(words):
+            await asyncio.sleep(0.05)
+            audio = TTSAudioRawFrame(b"\x00" * 320, 16000, 1, context_id=context_id)
+            await self.append_to_audio_context(context_id, audio)
+            await self.add_word_timestamps([(word, i * 0.05)], context_id=context_id)
+
+
+@pytest.mark.asyncio
+async def test_uninterruptible_speech_keeps_its_modes_through_an_interruption():
+    speech = TTSSpeakFrame("<<calm>> One two three four five six.")
+    speech.interruptible = False
+    down, _ = await run_test(
+        StreamingTTSService(),
+        frames_to_send=[speech, SleepFrame(sleep=0.15), InterruptionFrame(), SleepFrame(sleep=0.8)],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    words = [(f.text, f.modes) for f in down if isinstance(f, TTSTextFrame)]
+    assert words == [(word, ["calm"]) for word in ["One", "two", "three", "four", "five", "six."]]

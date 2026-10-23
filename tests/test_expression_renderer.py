@@ -4,13 +4,50 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the expression tag parser."""
+"""Tests for reading expression tags and rendering them for a TTS service."""
 
 import pytest
 
-from pipecat.expressive.parser import EXPRESSION_TAGS, Event, ExpressionParser, Segment, Text
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.renderer import (
+    EXPRESSION_TAGS,
+    Event,
+    ExpressionRenderer,
+    ExpressionSpan,
+    Segment,
+    Text,
+)
 from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+
+
+class DeclaredAdapter(BaseExpressionAdapter):
+    """Declares events and modes, and renders modes as <modes> where they change."""
+
+    def __init__(self, events=(), modes=()):
+        self.events = list(events)
+        self.modes = list(modes)
+
+    def capabilities(self):
+        return ExpressionCapabilities(
+            events=[ExpressionTerm(name) for name in self.events],
+            modes=[ExpressionTerm(name) for name in self.modes],
+            pause_range_ms=(100, 1000),
+            emphasis=True,
+        )
+
+    def render_text(self, text, modes, previous_modes):
+        changed = modes != (previous_modes or [])
+        return f"<{','.join(modes)}> {text}" if changed and modes else text
+
+    def render_event(self, name):
+        return f" <{name}> "
+
+
+def renderer(**kwargs) -> ExpressionRenderer:
+    adapter = DeclaredAdapter(**kwargs)
+    return ExpressionRenderer(lambda: adapter, owner="tts")
 
 
 def words(text: str, modes: tuple[str, ...]):
@@ -27,7 +64,7 @@ def shape(segment: Segment):
 
 
 def parse(text: str, **kwargs) -> list:
-    return [shape(s) for s in ExpressionParser(**kwargs).parse(text)]
+    return [shape(s) for s in renderer(**kwargs).parse(text)]
 
 
 REPLY = (
@@ -51,7 +88,7 @@ def test_a_reply_splits_into_words_with_their_modes_and_events():
 
 
 def test_each_segment_says_where_it_was_written():
-    for segment in ExpressionParser().parse(REPLY):
+    for segment in renderer().parse(REPLY):
         written = REPLY[segment.start : segment.end]
         if isinstance(segment, Text):
             assert written == segment.text
@@ -68,7 +105,7 @@ def test_several_modes_are_separated_by_spaces():
 
 
 def test_a_mode_lasts_until_the_next_mode_tag_across_units():
-    parser = ExpressionParser()
+    parser = renderer()
 
     assert [shape(s) for s in parser.parse("<<calm>>One. ")] == [words("One. ", ("calm",))]
     assert [shape(s) for s in parser.parse("Two. <<warm>>Three.")] == [
@@ -82,11 +119,19 @@ def test_neutral_returns_to_the_baseline():
 
 
 def test_the_modes_end_with_the_response():
-    parser = ExpressionParser()
+    parser = renderer()
     parser.parse("<<calm>>One.")
     parser.reset()
 
     assert [shape(s) for s in parser.parse("Two")] == [words("Two", ())]
+
+
+def test_text_that_stands_on_its_own_leaves_the_responses_modes():
+    parser = renderer()
+    parser.parse("<<calm>>One. ")
+
+    assert [shape(s) for s in parser.parse("Hello.", whole=True)] == [words("Hello.", ())]
+    assert [shape(s) for s in parser.parse("Two.")] == [words("Two.", ("calm",))]
 
 
 def test_a_mode_tag_ending_the_text_says_nothing():
@@ -186,7 +231,59 @@ async def test_an_aggregator_keeps_each_tag_in_one_unit(mode):
     flushed = await aggregator.flush()
     units += [flushed.text] if flushed else []
 
-    parser = ExpressionParser()
+    parser = renderer()
     segments = [shape(s) for unit in units for s in parser.parse(unit)]
     assert ("event", "laugh") in segments
     assert words("back up", ("cheerful", "emphasis")) in segments
+
+
+def test_names_declared_after_the_renderer_is_made_are_known():
+    adapter = DeclaredAdapter()
+    expression = ExpressionRenderer(lambda: adapter, owner="tts")
+    adapter.events = ["laugh"]
+
+    # A declared event keeps its kind in mode brackets.
+    segments = expression.parse("<<laugh>> Hi.")
+
+    assert isinstance(segments[0], Event) and segments[0].name == "laugh"
+    assert isinstance(segments[1], Text)
+
+
+def test_a_units_words_are_shown_without_its_tags():
+    segments = renderer().parse("<<calm>> It's [[laugh]] fine. [[pause 400]]")
+
+    assert ExpressionRenderer.shown_text(segments, TextType.SENTENCE) == "It's fine."
+    assert ExpressionRenderer.shown_text(segments, TextType.TOKEN) == " It's fine. "
+
+
+async def same(words, text_type):
+    return words
+
+
+@pytest.mark.asyncio
+async def test_a_request_renders_what_the_service_performs_and_says_where():
+    expression = renderer(events=["laugh"], modes=["calm"])
+    text = "<<calm>> Hi. [[laugh]] [[pause 50]]"
+
+    request, spans = await expression.render(
+        expression.parse(text), TextType.SENTENCE, same, lambda words: words
+    )
+
+    assert request == "<calm> Hi. <laugh>"
+    assert spans == [
+        ExpressionSpan(8, 13, modes=["calm"]),
+        ExpressionSpan(13, 22, event=(TextType.EXPRESSION_EVENT, "laugh")),
+        ExpressionSpan(22, 23, modes=["calm"]),
+        ExpressionSpan(23, 35, event=(TextType.EXPRESSION_PAUSE, "100")),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_request_leaves_out_what_the_service_cant_perform():
+    expression = renderer()
+    segments = expression.parse("<<calm>> Hi. [[laugh]]", whole=True)
+
+    request, spans = await expression.render(segments, TextType.SENTENCE, same, lambda w: w)
+
+    assert request == "Hi."
+    assert spans == [ExpressionSpan(8, 13, modes=[])]

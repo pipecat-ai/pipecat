@@ -7,8 +7,7 @@
 """ElevenLabs expression adapter for Pipecat."""
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
-from pipecat.expressive.parser import EMPHASIS_MODE
+from pipecat.expressive.expression import EMPHASIS_MODE, ExpressionCapabilities, ExpressionTerm
 
 # The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
 # into sounds made at one point and deliveries that last. Their guide doesn't
