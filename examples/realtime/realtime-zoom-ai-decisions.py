@@ -27,7 +27,7 @@ Requirements:
         --extra runner --extra websocket --extra webrtc
 
 Usage:
-    uv run python examples/realtime/realtime-zoom-ai-voice-agent-decisions.py -t webrtc
+    uv run python examples/realtime/realtime-zoom-ai-decisions.py -t webrtc
 """
 
 import math
@@ -58,8 +58,8 @@ from pipecat.processors.aggregators.llm_response_universal import LLMContextAggr
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.zoom_ai.voice_agent.events import Speak
-from pipecat.services.zoom_ai.voice_agent.llm import ZoomAIVoiceAgentLLMService
+from pipecat.services.zoom_ai.realtime.events import Speak
+from pipecat.services.zoom_ai.realtime.llm import ZoomAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -289,9 +289,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
         await params.result_callback({"item": order["item"], **decide(order, reason, frustration)})
 
-    llm = ZoomAIVoiceAgentLLMService(
+    llm = ZoomAIRealtimeLLMService(
         api_key=os.environ["ZOOM_AI_API_KEY"],
-        settings=ZoomAIVoiceAgentLLMService.Settings(
+        settings=ZoomAIRealtimeLLMService.Settings(
             system_instruction=INSTRUCTIONS,
             speak=Speak(voice="jenna"),
         ),

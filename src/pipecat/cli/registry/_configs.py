@@ -721,10 +721,10 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
-    "zoom_ai_voice_agent_realtime": (
-        "llm = ZoomAIVoiceAgentLLMService(\n"
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
         '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
-        "    settings=ZoomAIVoiceAgentLLMService.Settings(\n"
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"
         ")\n"
