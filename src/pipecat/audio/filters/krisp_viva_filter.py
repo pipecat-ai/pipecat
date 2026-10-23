@@ -39,8 +39,10 @@ class KrispVivaFilter(BaseAudioFilter):
     """Audio filter using the Krisp VIVA SDK.
 
     Provides real-time noise reduction for audio streams using Krisp's
-    proprietary noise suppression algorithms. This filter requires a
-    valid Krisp model file to operate.
+    proprietary noise suppression algorithms. This filter requires a valid
+    Krisp VIVA SDK package. To run VIVA in Krisp's cloud with just an API key
+    instead, use
+    :class:`~pipecat.audio.filters.krisp_viva_api_filter.KrispVivaApiFilter`.
 
     Optionally supports TTS detection (iPhone screening feature is standalone model) to delay voice isolation until
     bot speech playback has stopped, preventing later real human speech suppression artifacts.
