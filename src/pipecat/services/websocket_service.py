@@ -20,6 +20,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 
 
@@ -316,8 +317,17 @@ class WebsocketService(ABC):
         finally:
             self._reconnect_in_progress = False
 
+    @deprecated(
+        "`WebsocketService.send_with_retry` is deprecated since 1.14.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def send_with_retry(self, message, report_error: ReportErrorCallback):
-        """Attempt to send a message, retrying after reconnect if necessary."""
+        """Attempt to send a message, retrying after reconnect if necessary.
+
+        .. deprecated:: 1.14.0
+            No replacement. Will be removed in 2.0.0. Send on the websocket
+            directly and leave reconnecting to the receive loop.
+        """
         try:
             # If websocket isn't connected/present, treat as a send failure —
             # the broad `except Exception` below will trigger a reconnect

@@ -1,0 +1,1 @@
+- `WebsocketService.send_with_retry` is deprecated and will be removed in 2.0.0. No replacement: send on the websocket directly and leave reconnecting to the receive loop.
