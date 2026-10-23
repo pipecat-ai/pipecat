@@ -16,6 +16,7 @@ frames the service pushes downstream.
 import asyncio
 import io
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from loguru import logger
@@ -97,7 +98,13 @@ def _make_service(
 
 
 async def _setup_service(service: GeminiLiveLLMService) -> None:
-    """Give the service a task manager so it can start the deferral watchdog."""
+    """Give the service a task manager so it can start the deferral watchdog.
+
+    ``setup`` also opens the Live session, so ``_connect`` is stubbed to keep
+    these tests off the network. A real connect with the fake key fails and the
+    reconnect it triggers would discard the held turn under test.
+    """
+    service._connect = AsyncMock()  # type: ignore[method-assign]
     await service.setup(
         FrameProcessorSetup(
             clock=SystemClock(),
