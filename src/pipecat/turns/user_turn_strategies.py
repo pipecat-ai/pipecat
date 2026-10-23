@@ -6,8 +6,10 @@
 
 """Turn start strategy configuration."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -27,6 +29,8 @@ from pipecat.turns.user_stop import (
     deferred,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+
+_S = TypeVar("_S")
 
 
 def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
@@ -56,6 +60,19 @@ def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
     return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
 
 
+class MergeMode(Enum):
+    """How a bot's list of user turn strategies combines with a service's.
+
+    Parameters:
+        EXTEND: The strategies the bot gave are added to the service's list, or
+            to the defaults when no service recommends any.
+        REPLACE: The bot's list is used on its own.
+    """
+
+    EXTEND = "extend"
+    REPLACE = "replace"
+
+
 class StrategyMode(Enum):
     """How a list of user turn strategies reaches a decision.
 
@@ -69,16 +86,33 @@ class StrategyMode(Enum):
 
 
 class UserTurnStrategiesParams(BaseModel):
-    """How the user turn strategies decide.
+    """How the user turn strategies combine with a service's and decide.
+
+    A service with its own turn detection, such as an STT service, can
+    recommend user turn strategies. Only the bot sets these parameters: a
+    service's recommendation contributes its lists.
 
     Parameters:
+        start_merge_mode: How the bot's start strategies combine with the ones a
+            service recommends. Defaults to ``MergeMode.REPLACE``.
+        stop_merge_mode: How the bot's stop strategies combine with the ones a
+            service recommends. Defaults to ``MergeMode.REPLACE``.
         stop_mode: Whether the turn ends once every stop strategy has decided the
             user is done, or on the first one that does. With
             ``StrategyMode.ALL``, the user speaking again clears the decisions
             made so far. Defaults to ``StrategyMode.ALL``.
     """
 
+    start_merge_mode: MergeMode = MergeMode.REPLACE
+    stop_merge_mode: MergeMode = MergeMode.REPLACE
     stop_mode: StrategyMode = StrategyMode.ALL
+
+    @property
+    def replaces_service_strategies(self) -> bool:
+        """Whether the bot's strategies replace both of a service's lists."""
+        return (
+            self.start_merge_mode == MergeMode.REPLACE and self.stop_merge_mode == MergeMode.REPLACE
+        )
 
 
 @dataclass
@@ -90,6 +124,9 @@ class UserTurnStrategies:
         start: [VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]
          stop: [TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]
 
+    A bot's strategies replace the ones a service recommends, unless
+    :class:`UserTurnStrategiesParams` extends a list.
+
     Parameters:
         start: A list of user turn start strategies used to detect when
             the user starts speaking.
@@ -100,12 +137,66 @@ class UserTurnStrategies:
 
     start: list[BaseUserTurnStartStrategy] | None = None
     stop: list[BaseUserTurnStopStrategy] | None = None
+    # What extending a service's lists adds: the strategies given, without the
+    # defaults filled in for a list left out. None means the whole list.
+    _start_extension: list[BaseUserTurnStartStrategy] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _stop_extension: list[BaseUserTurnStopStrategy] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
+        self._start_extension = list(self.start or [])
+        self._stop_extension = list(self.stop or [])
         if not self.start:
             self.start = default_user_turn_start_strategies()
         if not self.stop:
             self.stop = default_user_turn_stop_strategies()
+
+    def merge_with(
+        self, recommended: "UserTurnStrategies | None", params: UserTurnStrategiesParams
+    ) -> "UserTurnStrategies":
+        """Combine these strategies with the ones a service recommends.
+
+        Args:
+            recommended: The strategies a service recommends, or None when no
+                service recommends any, in which case the defaults stand in.
+            params: How each list combines with the service's.
+
+        Returns:
+            The strategies to run.
+        """
+        return UserTurnStrategies(
+            start=self._merge_list(
+                self.start or [],
+                self._start_extension,
+                params.start_merge_mode,
+                recommended.start if recommended else None,
+                default_user_turn_start_strategies,
+            ),
+            stop=self._merge_list(
+                self.stop or [],
+                self._stop_extension,
+                params.stop_merge_mode,
+                recommended.stop if recommended else None,
+                default_user_turn_stop_strategies,
+            ),
+        )
+
+    @staticmethod
+    def _merge_list(
+        own: list[_S],
+        extension: list[_S] | None,
+        mode: MergeMode,
+        recommended: list[_S] | None,
+        defaults: Callable[[], list[_S]],
+    ) -> list[_S]:
+        """Merge one list with the service's, the defaults standing in for none."""
+        if mode == MergeMode.REPLACE:
+            return own
+        added = own if extension is None else extension
+        return (recommended if recommended is not None else defaults()) + added
 
 
 @dataclass
@@ -156,6 +247,10 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     only ``on_user_turn_inference_triggered`` and leave finalization to
     the LLM gate.
 
+    With ``UserTurnStrategiesParams(stop_merge_mode=MergeMode.EXTEND)``, the
+    LLM gate and any stop strategies given join the ones a service
+    recommends instead, such as an STT service's own turn detection.
+
     Parameters:
         config: Optional configuration applied to the LLM via the
             ``filter_incomplete_user_turns`` setting. Customizes the
@@ -173,6 +268,12 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
             stop=[SpeechTimeoutUserTurnStopStrategy(...)],
         )
 
+        # On top of the turn detection a service recommends:
+        user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+        user_turn_strategies_params=UserTurnStrategiesParams(
+            stop_merge_mode=MergeMode.EXTEND,
+        ),
+
         # Custom completion config:
         user_turn_strategies=FilterIncompleteUserTurnStrategies(
             config=UserTurnCompletionConfig(
@@ -189,8 +290,11 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
         # Defer the detector chain so it only fires inference-triggered,
         # then append the LLM gate as the sole finalizer.
         gated: list[BaseUserTurnStopStrategy] = [deferred(s) for s in self.stop or []]
-        gated.append(LLMTurnCompletionUserTurnStopStrategy(config=self.config))
-        self.stop = gated
+        gate = LLMTurnCompletionUserTurnStopStrategy(config=self.config)
+        self.stop = [*gated, gate]
+        # Extending a service's stop strategies adds the LLM gate and the stop
+        # strategies given, never the default ones.
+        self._stop_extension = [*gated, gate] if self._stop_extension else [gate]
 
 
 @dataclass

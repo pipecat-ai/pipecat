@@ -92,11 +92,14 @@ from pipecat.turns.user_start import (
 from pipecat.turns.user_stop import (
     ExternalUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
+    MergeMode,
     UserTurnStrategies,
+    UserTurnStrategiesParams,
 )
 from pipecat.utils.text.base_text_aggregator import TextType
 
@@ -383,6 +386,52 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         strategies = user_aggregator._user_turn_controller._user_turn_strategies
         self.assertEqual(strategies.stop, [existing_stop])
         self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+
+    async def test_an_extending_list_joins_the_service_request(self):
+        """An extending stop list is added to the service's."""
+        existing_stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[existing_stop]),
+                user_turn_strategies_params=UserTurnStrategiesParams(
+                    stop_merge_mode=MergeMode.EXTEND
+                ),
+            ),
+        )
+
+        frame = STTMetadataFrame(
+            service_name="some-stt",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=ExternalUserTurnStrategies(),
+        )
+        await run_test(Pipeline([user_aggregator]), frames_to_send=[frame])
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertEqual(
+            [type(s) for s in strategies.stop or []],
+            [ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy],
+        )
+        self.assertIs((strategies.stop or [])[-1], existing_stop)
+
+    async def test_an_extending_list_joins_the_defaults_without_a_service(self):
+        """With no service recommending strategies, an extending stop list joins the defaults."""
+        existing_stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        user_aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[existing_stop]),
+                user_turn_strategies_params=UserTurnStrategiesParams(
+                    stop_merge_mode=MergeMode.EXTEND
+                ),
+            ),
+        )
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertEqual(
+            [type(s) for s in strategies.stop or []],
+            [TurnAnalyzerUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy],
+        )
 
     async def test_proposed_frames_produce_turn_frames_and_interruption(self):
         """A proposal leaves the decision here, so the aggregator emits."""
