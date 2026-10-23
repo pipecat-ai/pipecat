@@ -7,7 +7,6 @@
 """User turn stop strategy that finalizes on ``UserTurnInferenceCompletedFrame``."""
 
 from pipecat.frames.frames import Frame, UserTurnInferenceCompletedFrame
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.deprecation import deprecated
 
@@ -66,8 +65,7 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
         """Votes on ``UserTurnInferenceCompletedFrame``, which the turn's inference produces."""
         return True
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Fire ``on_user_turn_stopped`` whenever ``UserTurnInferenceCompletedFrame`` is seen."""
         if isinstance(frame, UserTurnInferenceCompletedFrame):
             await self.trigger_user_turn_finalized()
-        return ProcessFrameResult.CONTINUE

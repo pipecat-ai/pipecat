@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
 
@@ -157,14 +156,11 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Process an incoming frame to update the turn analyzer and strategy state.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         await super().process_frame(frame)
 
@@ -193,8 +189,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             # finalizes on silences shorter than the VAD stop_secs — e.g. an
             # aggressive STT endpoint or a manually raised stop_secs.
             self._transcript_finalized = False
-
-        return ProcessFrameResult.CONTINUE
 
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""

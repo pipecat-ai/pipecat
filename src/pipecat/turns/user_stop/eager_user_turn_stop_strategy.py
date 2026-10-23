@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     UserTurnResponseCancelFrame,
 )
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 
@@ -87,14 +87,11 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """The policy deciding whether a speculative response still applies."""
         return self._match_policy
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Start a speculation on an eager end of turn, or withdraw one.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always CONTINUE, so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, EagerTranscriptionFrame):
             await self._speculate(frame)
@@ -103,7 +100,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             # consumer on its own. Only our own state is left to clear.
             await self._forget()
 
-        return await super().process_frame(frame)
+        await super().process_frame(frame)
 
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """End the turn, keeping the speculative response only if it still applies.

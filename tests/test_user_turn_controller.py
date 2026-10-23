@@ -31,6 +31,7 @@ from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
     UserTurnStartedParams,
     VADUserTurnStartStrategy,
+    WakePhraseUserTurnStartStrategy,
 )
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
@@ -51,6 +52,7 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategies,
     UserTurnStrategiesParams,
 )
+from pipecat.utils import deprecation
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -1309,6 +1311,34 @@ class TestStartStrategiesVote(unittest.IsolatedAsyncioTestCase):
 
         _, params = self.starts[0]
         self.assertFalse(params.enable_interruptions)
+
+    async def test_a_first_list_still_honors_a_stop_with_a_warning(self):
+        blocking, other = VotingStartStrategy(ProcessFrameResult.STOP), VotingStartStrategy()
+        await self._start([blocking, other], start_mode=StrategyMode.FIRST)
+        deprecation._warned_sites.clear()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+        self.assertEqual(other.frames, [])
+        self.assertEqual(
+            [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)],
+            [
+                "`ProcessFrameResult` is deprecated since 1.14.0 and will be removed in "
+                "2.0.0. Use `StrategyMode` instead."
+            ],
+        )
+
+    async def test_a_wake_phrase_in_an_all_list_does_not_warn(self):
+        await self._start(
+            [VADUserTurnStartStrategy(), WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])]
+        )
+        deprecation._warned_sites.clear()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await self.controller.process_frame(VADUserStartedSpeakingFrame())
 
     async def test_each_turn_needs_its_own_votes(self):
         first, last = VotingStartStrategy(), VotingStartStrategy()

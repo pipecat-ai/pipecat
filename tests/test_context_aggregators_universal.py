@@ -81,7 +81,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
     FunctionCallUserMuteStrategy,
@@ -118,10 +117,9 @@ class CompletionVoteStopStrategy(BaseUserTurnStopStrategy):
     def votes_on_inference(self) -> bool:
         return True
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         if isinstance(frame, UserTurnInferenceCompletedFrame):
             await self.trigger_user_turn_finalized()
-        return ProcessFrameResult.CONTINUE
 
 
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):

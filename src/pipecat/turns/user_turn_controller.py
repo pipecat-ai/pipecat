@@ -38,6 +38,7 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategiesParams,
 )
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class UserTurnController(BaseObject):
@@ -262,18 +263,26 @@ class UserTurnController(BaseObject):
             result = await strategy.process_frame(frame)
             # A strategy that votes needs every frame to decide on.
             if result == ProcessFrameResult.STOP and not self._start_strategies_vote:
+                self._warn_process_frame_result()
                 break
 
         for strategy in self._user_turn_strategies.stop or []:
             result = await strategy.process_frame(frame)
             # A strategy that votes needs every frame to decide on.
             if result == ProcessFrameResult.STOP and not self._stop_strategies_vote:
+                self._warn_process_frame_result()
                 break
 
         # Handled once the stop strategies have seen it, so an inference started
         # here is the one they then wait for.
         if isinstance(frame, UserTurnResponseCancelFrame):
             await self._handle_user_turn_response_cancel()
+
+    def _warn_process_frame_result(self):
+        warn_deprecated(
+            "`ProcessFrameResult` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+            "Use `StrategyMode` instead."
+        )
 
     @property
     def _start_strategies_vote(self) -> bool:

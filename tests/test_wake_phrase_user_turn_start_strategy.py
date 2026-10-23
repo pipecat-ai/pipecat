@@ -124,12 +124,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Subsequent frames should return CONTINUE.
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         await strategy.cleanup()
 
@@ -294,12 +294,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Subsequent frames should pass through (CONTINUE).
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         await strategy.cleanup()
 
