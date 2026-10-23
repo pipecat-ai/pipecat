@@ -2049,10 +2049,10 @@ class DailyInputTransport(BaseInputTransport):
         via the client's leave counter, so it stays out of cleanup(); the
         audio-in task cancel is also reached from cleanup().
         """
-        # Leave the room.
-        await self._client.leave()
-        # Stop audio thread.
-        await self._stop_audio_in_task()
+        try:
+            await self._client.leave()
+        finally:
+            await self._stop_audio_in_task()
 
     async def _stop_audio_in_task(self):
         """Cancel the audio-in task if running. Idempotent."""
@@ -2224,9 +2224,23 @@ class DailyInputTransport(BaseInputTransport):
         await self._answer_image_requests(requests, f"{participant_id} left.")
 
     async def remove_all_video(self):
-        """Stop sampling video from every participant, e.g. after leaving the room."""
+        """Stop sampling video and complete every waiting image request.
+
+        Callback failures propagate after all remaining requests have been
+        attempted. Multiple failures are raised together as an exception group.
+        Task cancellation propagates immediately.
+        """
         requests = self._video_samplers.clear()
-        await self._answer_image_requests(requests, "The bot left the room.")
+        errors: list[Exception] = []
+        for request in requests:
+            try:
+                await self._answer_image_requests([request], "The bot left the room.")
+            except Exception as error:
+                errors.append(error)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("Error completing image requests after leaving the room", errors)
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
@@ -3051,7 +3065,11 @@ class DailyTransport(BaseTransport):
 
     async def _on_left(self):
         """Handle room left events."""
-        await self._call_event_handler("on_left")
+        try:
+            if self._input:
+                await self._input.remove_all_video()
+        finally:
+            await self._call_event_handler("on_left")
 
     async def _on_before_leave(self):
         """Handle before leave room events."""
