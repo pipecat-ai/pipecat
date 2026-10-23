@@ -629,6 +629,46 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             LLMMessagesAppendFrame([self.get_llm_adapter().create_llm_specific_message(message)])
         )
 
+    async def _report_empty_response(
+        self,
+        response_id: str | None,
+        output: list[dict],
+        *,
+        incremental: bool | None = None,
+    ):
+        """Report a completed response that produced no text and no function call.
+
+        Nothing reaches the TTS for such a response, so the bot stays silent
+        until the user speaks again. The warning lists the response's output
+        items (a message with its content types, e.g. ``message[refusal]``) to
+        show why, and the non-fatal error lets the application react.
+
+        Args:
+            response_id: The response id.
+            output: The response's ``output`` items, as dicts.
+            incremental: Whether the request sent only the new input items via
+                ``previous_response_id``. None for a transport that always sends
+                the full context.
+        """
+        items = []
+        for item in output:
+            item_type = item.get("type", "unknown")
+            if item_type == "message":
+                content_types = ",".join(
+                    c.get("type", "unknown") for c in item.get("content") or []
+                )
+                item_type = f"message[{content_types}]"
+            items.append(item_type)
+        details = f"output: {items}"
+        if incremental is not None:
+            details += f", incremental: {incremental}"
+        logger.warning(
+            f"{self}: Response {response_id} completed with no text or function call ({details})"
+        )
+        await self.push_error(
+            error_msg=f"LLM response {response_id} completed with no text or function call"
+        )
+
 
 # ---------------------------------------------------------------------------
 # WebSocket variant (default / recommended)
@@ -1066,7 +1106,12 @@ class OpenAIResponsesLLMService(
             await self._ensure_connected()
             await self.start_ttfb_metrics()
             await self._ws_send({"type": "response.create", **params})
-            await self._receive_response_events(context, full_input, output_timeout_secs)
+            await self._receive_response_events(
+                context,
+                full_input,
+                output_timeout_secs,
+                incremental="previous_response_id" in params,
+            )
 
         async def cleanup():
             self._clear_previous_response_state()
@@ -1139,7 +1184,12 @@ class OpenAIResponsesLLMService(
         await self.start_llm_usage_metrics(tokens)
 
     async def _receive_response_events(
-        self, context: LLMContext, full_input: list, output_timeout_secs: float | None = None
+        self,
+        context: LLMContext,
+        full_input: list,
+        output_timeout_secs: float | None = None,
+        *,
+        incremental: bool = False,
     ):
         """Receive and process WebSocket events until the response completes.
 
@@ -1151,6 +1201,8 @@ class OpenAIResponsesLLMService(
                 the first output event arrives the wait becomes unbounded, since
                 by then content is already on its way downstream and re-issuing
                 would duplicate it. None waits indefinitely throughout.
+            incremental: Whether the request sent only the new input items via
+                ``previous_response_id``.
 
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
@@ -1162,6 +1214,7 @@ class OpenAIResponsesLLMService(
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
+        has_text = False
 
         deadline = time.monotonic() + output_timeout_secs if output_timeout_secs else None
 
@@ -1191,7 +1244,9 @@ class OpenAIResponsesLLMService(
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
-                await self._push_llm_text(event.get("delta", ""))
+                delta = event.get("delta", "")
+                has_text = has_text or bool(delta.strip())
+                await self._push_llm_text(delta)
 
             elif event_type == "response.reasoning_summary_text.delta":
                 await self.stop_ttfb_metrics()
@@ -1257,9 +1312,14 @@ class OpenAIResponsesLLMService(
                 # Include the response output so the hash covers the assistant's
                 # reply — the server already knows it, so we won't resend it.
                 response_id = response.get("id")
+                response_output = response.get("output") or []
                 if response_id:
-                    response_output = response.get("output") or []
                     self._store_previous_response_state(response_id, full_input, response_output)
+
+                if not has_text and not function_calls:
+                    await self._report_empty_response(
+                        response_id, response_output, incremental=incremental
+                    )
 
                 break  # Response complete
 
@@ -1427,6 +1487,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
         reasoning_summary_open = False
         stream_errored = False
+        has_text = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1453,6 +1514,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             async for event in event_iter:
                 if isinstance(event, ResponseTextDeltaEvent):
                     await self.stop_ttfb_metrics()
+                    has_text = has_text or bool(event.delta.strip())
                     await self._push_llm_text(event.delta)
 
                 elif isinstance(event, ResponseReasoningSummaryTextDeltaEvent):
@@ -1516,6 +1578,11 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
                     self._full_model_name = response.model
+
+                    if not has_text and not function_calls:
+                        await self._report_empty_response(
+                            response.id, [item.model_dump() for item in response.output]
+                        )
 
                 elif isinstance(event, ResponseFailedEvent):
                     await self._report_usage(event.response.usage)
