@@ -283,6 +283,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
+    async def cleanup(self):
+        """Release service resources and close the OpenAI-compatible client."""
+        await super().cleanup()
+        await self._client.close()
+
     def create_client(
         self,
         api_key=None,
