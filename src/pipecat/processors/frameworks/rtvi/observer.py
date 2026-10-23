@@ -169,7 +169,9 @@ class RTVIObserverParams:
             and ``remove_ignored_source()``.
         skip_text_types: List of text types to skip sending as tts/output messages.
             Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
-            later; add ``"backchannel"`` here to keep it from every client.
+            later, and expression events and pauses (``expression_event``,
+            ``expression_pause``) to clients of 2.3.0 or later; add a type here to
+            keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled, and leave llm_raw_text_enabled off, to avoid leaking through
             LLM messages.
@@ -359,6 +361,11 @@ class RTVIObserver(BaseObserver):
     def _client_supports_backchannels(self) -> bool:
         """Return True when the connected client supports the backchannel text type (2.2.0+)."""
         return self._client_is_at_least([2, 2, 0])
+
+    @property
+    def _client_supports_expression(self) -> bool:
+        """Return True when the connected client supports expression events and pauses (2.3.0+)."""
+        return self._client_is_at_least([2, 3, 0])
 
     @property
     def _client_supports_raw_text(self) -> bool:
@@ -938,6 +945,13 @@ class RTVIObserver(BaseObserver):
         # A client that doesn't support backchannels would show one as part of the
         # bot's response.
         if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
+            return True
+        # Expression events and pauses are part of protocol 2.3.0; an earlier client
+        # would take one for part of the bot's response.
+        if (
+            text_type in (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE)
+            and not self._client_supports_expression
+        ):
             return True
         skip_types = self._params.skip_text_types
         return bool(skip_types and text_type in skip_types)

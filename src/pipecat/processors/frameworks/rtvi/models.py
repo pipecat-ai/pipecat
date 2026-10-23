@@ -38,7 +38,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.2.0"
+PROTOCOL_VERSION = "2.3.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -527,7 +527,7 @@ class BotOutputMessageData(TextMessageData):
             with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
-        tones: **(v2+)** The tones of the text just spoken, such as
+        tones: **(2.3.0+)** The tones of the text just spoken, such as
             ``["cheerful", "emphasis"]``, empty for the voice's baseline. They
             change within a segment where its delivery does, so a segment's
             ``"new"`` message has none. Present in expressive conversation (alpha).

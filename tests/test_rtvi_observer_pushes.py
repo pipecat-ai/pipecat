@@ -508,6 +508,17 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         self.observer.send_rtvi_message.assert_not_awaited()
         self.assertEqual(self.observer._skipped_segment_ids, set())
 
+    async def test_an_expression_event_is_kept_from_older_clients(self):
+        for version in ([2, 2, 0], [1, 4, 0]):
+            with self.subTest(version=version):
+                self._connect_client(version)
+                for text_type in (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE):
+                    event = TTSTextFrame("laugh", text_type, context_id="turn")
+                    event.will_be_spoken = True
+                    await self._push(event)
+
+                self.observer.send_rtvi_message.assert_not_awaited()
+
     async def test_a_segment_after_a_backchannel_is_sent_to_older_clients(self):
         self._connect_client([2, 1, 0])
         backchannel = self._segment("Mm-hmm.", TextType.BACKCHANNEL)
