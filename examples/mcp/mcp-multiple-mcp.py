@@ -96,7 +96,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # https://github.com/modelcontextprotocol/servers/tree/main/src/memory
     memory_mcp = MCPClient(
         server_params=StdioServerParameters(
-            command=shutil.which("npx"),
+            command=shutil.which("npx") or "npx",
             args=["-y", "@modelcontextprotocol/server-memory"],
             # env={"MEMORY_FILE_PATH": "/tmp/pipecat_memory.jsonl"}, # Optional: specify MEMORY_FILE_PATH
         ),

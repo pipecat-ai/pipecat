@@ -29,6 +29,7 @@ Usage:
 """
 
 import os
+from typing import cast
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -51,7 +52,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.transports.moq.transport import MOQParams
+from pipecat.transports.moq.transport import MOQParams, MOQTransport
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -191,7 +192,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     try:
         await runner.run()
     finally:
-        await transport.disconnect()
+        await cast(MOQTransport, transport).disconnect()
 
 
 async def bot(runner_args: RunnerArguments):
