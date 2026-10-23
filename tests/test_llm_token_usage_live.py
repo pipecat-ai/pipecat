@@ -235,6 +235,7 @@ _COMPAT_CLASSES = {
     "qwen": "QwenLLMService",
     "sambanova": "SambaNovaLLMService",
     "sarvam": "SarvamLLMService",
+    "smallest": "SmallestLLMService",
     "together": "TogetherLLMService",
 }
 

@@ -35,6 +35,7 @@ from pipecat.services.perplexity.llm import PerplexityLLMService
 from pipecat.services.qwen.llm import QwenLLMService
 from pipecat.services.sambanova.llm import SambaNovaLLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
+from pipecat.services.smallest.llm import SmallestLLMService
 from pipecat.services.together.llm import TogetherLLMService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 from pipecat.services.xai.llm import GrokLLMService
@@ -57,6 +58,7 @@ PROVIDER_SERVICES = [
     QwenLLMService,
     SambaNovaLLMService,
     SarvamLLMService,
+    SmallestLLMService,
     TogetherLLMService,
 ]
 

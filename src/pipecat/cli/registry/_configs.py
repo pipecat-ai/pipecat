@@ -313,6 +313,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "smallest_llm": (
+        "SmallestLLMService(\n"
+        '        api_key=os.getenv("SMALLEST_API_KEY"),\n'
+        "        settings=SmallestLLMService.Settings(\n"
+        '            model=os.getenv("SMALLEST_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "together_llm": (
         "TogetherLLMService(\n"
         '        api_key=os.getenv("TOGETHER_API_KEY"),\n'

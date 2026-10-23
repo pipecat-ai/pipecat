@@ -728,6 +728,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="smallest_llm",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestLLMService"],
+            env_prefix="SMALLEST",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="together_llm",
             label="Together AI",
             package="pipecat-ai[together]",

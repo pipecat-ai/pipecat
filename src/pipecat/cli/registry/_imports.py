@@ -115,6 +115,7 @@ IMPORTS = {
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
+    "smallest_llm": ["from pipecat.services.smallest.llm import SmallestLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],
     # TTS Services
     "asyncai_tts": ["from pipecat.services.asyncai.tts import AsyncAITTSService"],
