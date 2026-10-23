@@ -1544,6 +1544,37 @@ async def test_connected_fires_once_the_session_begins():
 
 
 @pytest.mark.asyncio
+async def test_a_connection_closed_before_the_session_begins_is_not_connected():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    events = []
+
+    async def record_event(name, *_args):
+        events.append(name)
+
+    service._call_event_handler = record_event
+    service._websocket = _FakeWebsocket([])
+
+    await service._receive_messages()
+
+    assert events == []
+    assert not service._connection_established_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_undecodable_messages_are_skipped(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+    monkeypatch.setattr(service, "_call_event_handler", _noop)
+    partial = json.dumps({"event": "transcript.partial", "text": "hello"})
+    service._websocket = _FakeWebsocket([_SESSION_BEGIN, b"\x00\x01", "not json", partial])
+
+    await service._receive_messages()
+
+    assert [f.text for f in pushed if isinstance(f, InterimTranscriptionFrame)] == ["hello"]
+
+
+@pytest.mark.asyncio
 async def test_reconnect_restarts_the_audio_position(monkeypatch):
     """A new session's speech-end position counts from its own start."""
     service = SarvamRealtimeSTTService(api_key="test-key")
