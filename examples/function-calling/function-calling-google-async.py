@@ -174,7 +174,7 @@ You are a helpful assistant who converses with a user and answers questions. Res
 
 Your response will be turned into speech so use only simple words and punctuation.
 
-You have access to three tools: get_current_weather, get_restaurant_recommendation, and get_image.
+You have access to five tools: get_current_weather, get_stock_price, get_restaurant_recommendation, write_report, and get_image.
 
 You can respond to questions about the weather using the get_current_weather tool.
 
