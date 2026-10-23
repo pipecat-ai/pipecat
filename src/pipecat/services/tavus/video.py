@@ -35,6 +35,7 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import ServiceSettings
 from pipecat.transports.tavus.transport import (
     TavusCallbacks,
+    TavusEmotion,
     TavusParams,
     TavusTransportClient,
 )
@@ -195,6 +196,18 @@ class TavusVideoService(AIService):
         frame.transport_source = audio_source
         if self._transport_ready:
             await self.push_frame(frame)
+
+    async def set_emotion(self, emotion: TavusEmotion) -> None:
+        """Set the avatar's facial emotion.
+
+        The avatar keeps the emotion until the next call; an unsupported
+        emotion sets "neutral".
+
+        Args:
+            emotion: The emotion to express, e.g. "neutral", "happiness", "sadness".
+        """
+        if self._client:
+            await self._client.set_emotion(emotion)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

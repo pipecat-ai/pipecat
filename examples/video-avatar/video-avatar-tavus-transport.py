@@ -7,11 +7,14 @@
 import asyncio
 import os
 import sys
+from typing import get_args
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -24,10 +27,15 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.tavus.transport import TavusParams, TavusTransport
+from pipecat.services.llm_service import FunctionCallParams
+from pipecat.transports.tavus.transport import TavusEmotion, TavusParams, TavusTransport
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+# Optional feature, off by default: when enabled, the LLM gets a set_emotion
+# tool to control the facial emotion of the Tavus replica.
+ENABLE_EMOTION_TOOLS = False
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -65,6 +73,32 @@ async def main():
         )
 
         context = LLMContext()
+
+        if ENABLE_EMOTION_TOOLS:
+            set_emotion_schema = FunctionSchema(
+                name="set_emotion",
+                description="Set the facial emotion of your avatar. It stays until you set another one.",
+                properties={
+                    "emotion": {
+                        "type": "string",
+                        "enum": list(get_args(TavusEmotion)),
+                        "description": "The emotion to express.",
+                    },
+                },
+                required=["emotion"],
+            )
+
+            async def set_emotion(params: FunctionCallParams):
+                await transport.set_emotion(params.arguments["emotion"])
+                await params.result_callback({"emotion": params.arguments["emotion"]})
+
+            llm.register_function("set_emotion", set_emotion)
+            context.set_tools(ToolsSchema(standard_tools=[set_emotion_schema]))
+            llm.append_system_instruction(
+                "Call set_emotion to change your facial expression whenever the mood "
+                "of the conversation changes."
+            )
+
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

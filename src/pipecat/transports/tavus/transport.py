@@ -17,7 +17,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 from daily.daily import AudioData
@@ -138,6 +138,12 @@ class TavusApi:
             response = await r.json()
             logger.debug(f"Fetched Tavus persona: {response}")
             return response["persona_name"]
+
+
+TavusEmotion = Literal[
+    "neutral", "happiness", "sadness", "anger", "fear", "surprise", "disgust", "contempt"
+]
+"""A facial emotion the Tavus avatar can express."""
 
 
 class TavusCallbacks(BaseModel):
@@ -456,6 +462,25 @@ class TavusTransportClient:
                 "message_type": "conversation",
                 "event_type": "conversation.interrupt",
                 "conversation_id": self._conversation_id,
+            }
+        )
+        await self.send_message(transport_frame)
+
+    async def set_emotion(self, emotion: TavusEmotion) -> None:
+        """Set the avatar's facial emotion.
+
+        The avatar keeps the emotion until the next call; an unsupported
+        emotion sets "neutral".
+
+        Args:
+            emotion: The emotion to express, e.g. "neutral", "happiness", "sadness".
+        """
+        transport_frame = OutputTransportMessageUrgentFrame(
+            message={
+                "message_type": "conversation",
+                "event_type": "conversation.set_emotion",
+                "conversation_id": self._conversation_id,
+                "properties": {"emotion": emotion},
             }
         )
         await self.send_message(transport_frame)
@@ -969,6 +994,17 @@ class TavusTransport(BaseTransport):
         self._register_event_handler("on_connected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+    async def set_emotion(self, emotion: TavusEmotion) -> None:
+        """Set the avatar's facial emotion.
+
+        The avatar keeps the emotion until the next call; an unsupported
+        emotion sets "neutral".
+
+        Args:
+            emotion: The emotion to express, e.g. "neutral", "happiness", "sadness".
+        """
+        await self._client.set_emotion(emotion)
 
     async def _on_joined(self, data):
         """Handle bot joined room event."""
