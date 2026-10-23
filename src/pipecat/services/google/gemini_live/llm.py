@@ -1050,6 +1050,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
         """Send one result to the API, and say whether the model should answer it."""
         is_final = frame.properties.is_final if frame.properties else True
+        if is_final and self._group_parallel_tools:
+            return
         if not is_final and not self.accepts_intermediate_function_call_results:
             logger.warning(
                 f"{self}: {self._settings.model} takes one result per function call; "
