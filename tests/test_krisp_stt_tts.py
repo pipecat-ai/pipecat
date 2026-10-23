@@ -15,6 +15,7 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
+    EndFrame,
     ErrorFrame,
     InterimTranscriptionFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -302,13 +303,29 @@ async def test_stt_turn_without_speech_pushes_nothing():
 
 
 @pytest.mark.asyncio
-async def test_stt_end_message_flushes_pending_finals():
-    service = _stt([_final(" bye"), {"type": "end"}])
-
+async def test_stt_stop_pushes_the_finals_received_so_far(monkeypatch):
+    service = _stt([_final(" bye")])
     await service._receive_messages()
+    monkeypatch.setattr("pipecat.services.stt_service.WebsocketSTTService.stop", AsyncMock())
+
+    await service.stop(EndFrame())
 
     (frame,) = _pushed(service)
     assert isinstance(frame, TranscriptionFrame) and frame.text == "bye"
+
+
+@pytest.mark.asyncio
+async def test_stt_settings_reconnect_pushes_the_finals_received_so_far(monkeypatch):
+    service = _stt([_final(" hello")])
+    await service._receive_messages()
+    monkeypatch.setattr(
+        "pipecat.services.stt_service.WebsocketSTTService._do_reconnect", AsyncMock()
+    )
+
+    await service._do_reconnect()
+
+    (frame,) = _pushed(service)
+    assert isinstance(frame, TranscriptionFrame) and frame.text == "hello"
 
 
 @pytest.mark.asyncio
@@ -602,3 +619,43 @@ async def test_tts_failed_send_undoes_its_count_and_keeps_the_context():
     assert [type(f) for f in frames] == [ErrorFrame, TTSStoppedFrame]
     assert service._pending_texts == 0
     service.remove_audio_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tts_pauses_frame_processing_while_a_reply_plays():
+    assert KrispTTSService(api_key="k")._pause_frame_processing
+
+
+@pytest.mark.asyncio
+async def test_tts_reconnect_during_a_send_counts_only_the_resent_text():
+    service = _tts()
+    service._pending_texts = 2  # texts on the connection that is about to drop
+
+    async def send_after_reconnect(message, report_error):
+        service._connection_id += 1  # what _connect_websocket does on reconnect
+        service._pending_texts = 0
+
+    service.send_with_retry = send_after_reconnect
+
+    assert await _run_tts(service, "Hello.", "ctx") == [None]
+    assert service._pending_texts == 1
+
+
+@pytest.mark.asyncio
+async def test_tts_new_connection_resets_the_count_and_finishes_a_flushed_reply(monkeypatch):
+    monkeypatch.setattr(krisp_common, "create_session_token", AsyncMock(return_value="tok"))
+
+    async def fake_connect(url, **kwargs):
+        return _FakeWebsocket([{"type": "ready"}])
+
+    monkeypatch.setattr("pipecat.services.websocket_service.websocket_connect", fake_connect)
+    service = _tts()
+    service._websocket = None
+    service._pending_texts = 3  # never answered: their socket is gone
+    service._flushed_context_id = "ctx"
+
+    await service._connect_websocket()
+
+    assert service._pending_texts == 0
+    ((ctx, frame),) = _appended(service)
+    assert ctx == "ctx" and isinstance(frame, TTSStoppedFrame)

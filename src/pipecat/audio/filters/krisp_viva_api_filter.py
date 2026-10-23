@@ -15,6 +15,7 @@ the Krisp VIVA SDK locally with a ``.kef`` model.
 import asyncio
 import json
 import os
+import time
 from typing import Any
 
 from loguru import logger
@@ -37,6 +38,9 @@ KRISP_VIVA_API_URL = "wss://streaming.krisp.ai/voice-isolation"
 _FRAME_MS = 30
 
 _MAX_RECONNECT_DELAY = 10.0
+# A connection must stay up this long before the reconnect backoff resets, so a
+# server that accepts and immediately closes doesn't cause a reconnect loop.
+_STABLE_CONNECTION_SECS = 30.0
 
 
 class KrispVivaApiFilter(BaseAudioFilter):
@@ -203,14 +207,17 @@ class KrispVivaApiFilter(BaseAudioFilter):
         while True:
             try:
                 await self._connect()
-                delay = 1.0
+                connected_at = time.monotonic()
                 await self._receive_audio()
+                if time.monotonic() - connected_at >= _STABLE_CONNECTION_SECS:
+                    delay = 1.0
                 logger.warning(f"{self}: connection closed, reconnecting")
             except asyncio.CancelledError:
                 raise
             except KrispServiceError as e:
                 if e.is_permanent:
                     logger.error(f"{self}: {e}; passing audio through unfiltered")
+                    await self._close_websocket()
                     return
                 logger.warning(f"{self}: {e}; retrying in {delay:.0f}s")
             except Exception as e:

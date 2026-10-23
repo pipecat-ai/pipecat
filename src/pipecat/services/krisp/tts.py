@@ -121,12 +121,13 @@ class KrispTTSService(InterruptibleTTSService):
         )
         if settings is not None:
             default_settings.apply_update(settings)
-        if isinstance(default_settings.language, Language):
-            default_settings.language = language_to_krisp_tts_language(default_settings.language)
 
+        # pause_frame_processing: audio carries no context ID, so the next
+        # reply's text waits until the previous reply has finished playing.
         super().__init__(
             push_start_frame=True,
             push_stop_frames=True,
+            pause_frame_processing=True,
             sample_rate=KRISP_TTS_SAMPLE_RATE,
             settings=default_settings,
             **kwargs,
@@ -141,6 +142,9 @@ class KrispTTSService(InterruptibleTTSService):
         # context whose text is complete (set by ``flush_audio``).
         self._pending_texts = 0
         self._flushed_context_id: str | None = None
+        # Incremented on every new connection; texts sent on an earlier one
+        # will never be answered.
+        self._connection_id = 0
         # Set when a settings change arrives while the bot is speaking; the
         # reconnect that applies it waits until the bot stops.
         self._reconnect_after_turn = False
@@ -228,12 +232,10 @@ class KrispTTSService(InterruptibleTTSService):
             self._receive_task = None
 
         await self._disconnect_websocket()
-        # Turn state belongs to this teardown, not to every reconnect: a
-        # reconnect inside ``send_with_retry`` keeps the reply going.
+        # The reply is torn down here, not on every reconnect: a reconnect
+        # inside ``send_with_retry`` keeps the reply going.
         await self.remove_active_audio_context()
-        self._pending_texts = 0
         self._flushed_context_id = None
-        self._reconnect_after_turn = False
 
     def _build_handshake(self) -> dict[str, Any]:
         handshake: dict[str, Any] = {
@@ -261,6 +263,12 @@ class KrispTTSService(InterruptibleTTSService):
                 handshake=self._build_handshake(),
             )
             self._websocket = websocket
+            # Texts sent on the previous connection will never be answered,
+            # and the new connection already uses the current settings.
+            self._connection_id += 1
+            self._pending_texts = 0
+            self._reconnect_after_turn = False
+            await self._maybe_finish_context()
             if ready.get("warning"):
                 logger.warning(f"{self}: {ready['warning']}")
             logger.debug(
@@ -365,6 +373,7 @@ class KrispTTSService(InterruptibleTTSService):
             await self._connect()
 
         # Counted before sending: the receive task can run while the send yields.
+        connection_id = self._connection_id
         self._pending_texts += 1
         try:
             await self.send_with_retry(
@@ -372,9 +381,13 @@ class KrispTTSService(InterruptibleTTSService):
             )
             if not self._websocket:
                 raise ConnectionError("unable to reconnect")
+            if self._connection_id != connection_id:
+                # Reconnected during the send: only the resent text is in flight.
+                self._pending_texts = 1
             await self.start_tts_usage_metrics(text)
         except Exception as e:
-            self._pending_texts = max(0, self._pending_texts - 1)
+            if self._connection_id == connection_id:
+                self._pending_texts = max(0, self._pending_texts - 1)
             yield ErrorFrame(error=f"Krisp TTS send failed: {e}")
             yield TTSStoppedFrame(context_id=context_id)
             return

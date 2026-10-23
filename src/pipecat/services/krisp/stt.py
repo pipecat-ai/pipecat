@@ -21,6 +21,7 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     InterimTranscriptionFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -181,6 +182,17 @@ class KrispSTTService(WebsocketSTTService):
             await self._request_reconnect()
         return changed
 
+    async def stop(self, frame: EndFrame):
+        """Push the turn's finals so far, then end the session.
+
+        Transcripts for audio the server hasn't finalized yet aren't waited for.
+
+        Args:
+            frame: The end frame.
+        """
+        await self._push_pending_finals()
+        await super().stop(frame)
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service and connect.
 
@@ -283,11 +295,23 @@ class KrispSTTService(WebsocketSTTService):
         Returns:
             True if reconnection and verification succeeded.
         """
+        await self._push_pending_finals()
+        return await super()._reconnect_websocket(attempt_number)
+
+    async def _do_reconnect(self):
+        """Push the turn's finals so far, then reconnect with the new settings."""
+        await self._push_pending_finals()
+        await super()._do_reconnect()
+
+    async def _push_pending_finals(self):
+        """Push the finals received so far, keeping an open turn open.
+
+        The server's transcript state goes with the connection, so finals
+        that haven't been pushed yet would otherwise be lost.
+        """
         in_turn = self._in_turn
         await self._push_turn_transcription({})
         self._in_turn = in_turn
-        self._partial_text = ""
-        return await super()._reconnect_websocket(attempt_number)
 
     async def _connect_websocket(self):
         try:
@@ -351,8 +375,6 @@ class KrispSTTService(WebsocketSTTService):
                 await self._on_transcript(msg.get("transcript") or {})
             elif msg_type == "turn":
                 await self._on_turn(msg)
-            elif msg_type == "end":
-                await self._push_turn_transcription(msg)
             elif msg_type == "error":
                 error = KrispServiceError.from_message(msg)
                 await self.push_error(error_msg=f"Krisp STT error: {error}", exception=error)

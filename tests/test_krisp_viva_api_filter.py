@@ -7,6 +7,7 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,7 @@ import websockets
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
+from pipecat.audio.filters import krisp_viva_api_filter
 from pipecat.audio.filters.krisp_viva_api_filter import KrispVivaApiFilter
 from pipecat.frames.frames import FilterEnableFrame
 
@@ -226,6 +228,62 @@ async def test_reconnects_after_the_connection_drops(krisp, monkeypatch):
     await filt.stop()
 
     assert [r["usage_type"] for r in fake.token_requests] == ["viva", "viva"]
+
+
+@pytest.mark.asyncio
+async def test_permanent_error_mid_session_closes_the_socket_and_passes_audio_through(krisp):
+    fake, *_ = krisp
+    filt = _filter(krisp)
+    await filt.start(16000)
+    await _until(lambda: filt._websocket is not None)
+    ws = filt._websocket
+
+    # The server reports a permanent error but leaves the socket open.
+    async def receive_error():
+        from pipecat.services.krisp.common import KrispServiceError
+
+        raise KrispServiceError("unauthorized: expired", code="unauthorized", status_code=403)
+
+    filt._receive_audio = receive_error
+    filt._connection_task.cancel()
+    filt._connection_task = asyncio.create_task(filt._run_connection())
+    await _until(lambda: filt._connection_task.done())
+
+    chunk = b"\x05\x00" * 160
+    assert filt._websocket is None or filt._websocket is not ws
+    assert await filt.filter(chunk) == chunk
+    await filt.stop()
+
+
+async def _backoff_delays(filt, monkeypatch, sessions: int) -> list[float]:
+    """Run the connection loop over sessions that close at once; return its sleeps."""
+    delays = []
+
+    async def record_sleep(delay, *args, **kwargs):
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    filt._connect = AsyncMock()
+    filt._close_websocket = AsyncMock()
+    filt._receive_audio = AsyncMock(side_effect=[None] * sessions + [asyncio.CancelledError()])
+    with pytest.raises(asyncio.CancelledError):
+        await filt._run_connection()
+    return delays
+
+
+@pytest.mark.asyncio
+async def test_quick_disconnects_keep_the_backoff_growing(krisp, monkeypatch):
+    filt = _filter(krisp)
+
+    assert await _backoff_delays(filt, monkeypatch, 4) == [1.0, 2.0, 4.0, 8.0]
+
+
+@pytest.mark.asyncio
+async def test_stable_connections_reset_the_backoff(krisp, monkeypatch):
+    monkeypatch.setattr(krisp_viva_api_filter, "_STABLE_CONNECTION_SECS", 0.0)
+    filt = _filter(krisp)
+
+    assert await _backoff_delays(filt, monkeypatch, 3) == [1.0, 1.0, 1.0]
 
 
 def _fast_sleep(real_sleep):
