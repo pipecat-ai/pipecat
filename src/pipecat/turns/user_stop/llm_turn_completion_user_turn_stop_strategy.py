@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserStartedSpeakingFrame,
     UserTurnCompletionFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.services.settings import LLMSettings
@@ -47,6 +48,10 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     LLM to re-engage them, even when the controller's turn stop timeout ended
     the turn first. When the user speaks again, it waits for the next inference
     instead.
+
+    An eager end of turn answers the turn speculatively, and the strategy
+    votes on that answer too. ◐ or ○ withdraws it, and the committed turn
+    brings an inference of its own.
     """
 
     def __init__(
@@ -65,8 +70,10 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """
         super().__init__(**kwargs)
         self._config = config or UserTurnCompletionConfig()
-        # The inference whose marker decides this strategy's vote.
+        # The inference whose marker decides this strategy's vote, and whether
+        # it answers an eager end of turn.
         self._awaited_id: int | None = None
+        self._awaited_speculation = False
         self._reprompt_task: asyncio.Task | None = None
 
     @property
@@ -106,8 +113,12 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._configure_llm()
         elif isinstance(frame, LLMContextFrame):
             self._awaited_id = frame.id
+            self._awaited_speculation = frame.speculation
         elif isinstance(frame, UserTurnCompletionFrame):
             await self._handle_report(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            # The answer it was waiting for is gone.
+            self._awaited_id = None
         elif isinstance(
             frame,
             (
@@ -141,7 +152,9 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             return
 
         self._awaited_id = None
-        if report.kind in ("short", "long"):
+        if report.kind in ("short", "long") and self._awaited_speculation:
+            await self.trigger_user_turn_speculation_cancelled()
+        elif report.kind in ("short", "long"):
             await self._start_reprompt(report.kind)
         else:
             await self._cancel_reprompt()

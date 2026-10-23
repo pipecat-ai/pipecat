@@ -78,6 +78,9 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         self._speculation_timeout = speculation_timeout
         self._speculation_timeout_task: asyncio.Task | None = None
         self._speculation: UserTurnSpeculation | None = None
+        # The speculation this turn's end confirmed. Other stop strategies
+        # may still be voting, and a stop asked for again confirms it again.
+        self._confirmed: UserTurnSpeculation | None = None
 
     @property
     def match_policy(self) -> EagerMatchPolicy:
@@ -110,7 +113,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn.
         """
-        speculation = await self._take_speculation()
+        speculation = await self._take_speculation() or self._confirmed
         if not speculation:
             await super().trigger_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames
@@ -119,6 +122,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         if self._match_policy.matches(speculation.text, self._text):
             logger.debug(f"{self}: eager end of turn held, keeping the speculative response")
+            self._confirmed = speculation
             # Inference already ran, on the eager transcript. Only finalize:
             # the UserStoppedSpeakingFrame it emits is what releases the
             # response, and the flag stops a second inference answering the
@@ -133,6 +137,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"{self}: eager end of turn missed, discarding the speculative response "
             f"(eager: [{speculation.text}], committed: [{self._text}])"
         )
+        self._confirmed = None
         await self.trigger_user_turn_speculation_cancelled()
         # Inference has to run again, on the committed transcript, so fire both
         # events rather than just finalizing.
@@ -143,6 +148,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
         speculation = await self._take_speculation()
+        self._confirmed = None
         await super()._reset()
         if speculation:
             # The turn ended without resolving the speculation — the stop
@@ -157,6 +163,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         # see, so they're part of what the committed transcript is compared to.
         speculation = UserTurnSpeculation(text=self._text + frame.text)
         self._speculation = speculation
+        self._confirmed = None
         self._speculation_timeout_task = self.task_manager.create_task(
             self._speculation_timeout_handler(speculation),
             f"{self}::_speculation_timeout_handler",
@@ -195,3 +202,4 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def _forget(self):
         """Drop a speculation the service withdrew."""
         await self._take_speculation()
+        self._confirmed = None

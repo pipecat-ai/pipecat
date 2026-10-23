@@ -8,15 +8,20 @@ import asyncio
 import unittest
 
 from pipecat.frames.frames import (
+    EagerTranscriptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserTurnCompletionFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -36,7 +41,12 @@ from pipecat.turns.user_stop import (
     SpeechTimeoutUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_turn_strategies import (
+    EagerUserTurnStrategies,
+    FilterIncompleteUserTurnStrategies,
+    MergeMode,
+    UserTurnStrategiesParams,
+)
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -52,11 +62,16 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
         )
         await self.strategy.setup(frame_processor_setup(TaskManager()))
         self.votes = 0
+        self.withdrawals = 0
         self.pushed = []
 
         @self.strategy.event_handler("on_user_turn_stopped")
         async def on_user_turn_stopped(strategy, params):
             self.votes += 1
+
+        @self.strategy.event_handler("on_user_turn_speculation_cancelled")
+        async def on_user_turn_speculation_cancelled(strategy):
+            self.withdrawals += 1
 
         @self.strategy.event_handler("on_push_frame")
         async def on_push_frame(strategy, frame, direction):
@@ -65,8 +80,8 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
     async def asyncTearDown(self):
         await self.strategy.cleanup()
 
-    async def _infer(self) -> LLMContextFrame:
-        frame = LLMContextFrame(context=LLMContext())
+    async def _infer(self, *, speculation: bool = False) -> LLMContextFrame:
+        frame = LLMContextFrame(context=LLMContext(), speculation=speculation)
         await self.strategy.process_frame(frame)
         return frame
 
@@ -107,6 +122,28 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
 
         self.assertEqual(self.votes, 0)
 
+    async def test_a_cancelled_answer_gets_no_vote(self):
+        inference = await self._infer()
+        await self.strategy.process_frame(UserTurnResponseCancelFrame())
+
+        await self._report("complete", inference)
+
+        self.assertEqual(self.votes, 0)
+
+    async def test_a_complete_speculative_answer_gets_a_vote(self):
+        await self._report("complete", await self._infer(speculation=True))
+
+        self.assertEqual(self.votes, 1)
+
+    async def test_an_incomplete_speculative_answer_is_withdrawn(self):
+        """The committed turn brings an inference of its own, so nothing is re-prompted."""
+        await self._report("short", await self._infer(speculation=True))
+        await asyncio.sleep(0.15)
+
+        self.assertEqual(self.withdrawals, 1)
+        self.assertEqual(self.votes, 0)
+        self.assertEqual(self.pushed, [])
+
     async def test_a_quiet_user_is_re_prompted_after_an_incomplete_turn(self):
         await self._report("short", await self._infer())
         await asyncio.sleep(0.15)
@@ -145,9 +182,11 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
 class ScriptedMarkerLLM(LLMService):
     """Answers each inference with the next scripted reply, read through the marker mixin."""
 
-    def __init__(self, replies: list[str], **kwargs):
+    def __init__(self, replies: list[str], *, delays: list[float] | None = None, **kwargs):
         super().__init__(settings=LLMSettings(model="test-model"), **kwargs)
         self._replies = list(replies)
+        self._delays = list(delays or [])
+        self.inferences = 0
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -155,8 +194,11 @@ class ScriptedMarkerLLM(LLMService):
             await self.push_frame(frame, direction)
             return
 
+        self.inferences += 1
+        reply = self._replies.pop(0)
+        await asyncio.sleep(self._delays.pop(0) if self._delays else 0)
         await self.push_frame(LLMFullResponseStartFrame())
-        await self._push_llm_text(self._replies.pop(0))
+        await self._push_llm_text(reply)
         await self.push_frame(LLMFullResponseEndFrame())
 
 
@@ -245,6 +287,109 @@ class TestFilteringIncompleteTurns(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(recorder.marker_kinds, ["short", "complete"])
+
+
+class TestFilteringIncompleteTurnsWithEagerEndOfTurn(unittest.IsolatedAsyncioTestCase):
+    """The marker strategy votes on an eager answer while the turn commits, in either order."""
+
+    async def _run(
+        self, replies: list[str], frames_to_send: list, *, delays: list[float] | None = None
+    ) -> tuple[OutputRecorder, LLMContext]:
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+                user_turn_strategies_params=UserTurnStrategiesParams(
+                    start_merge_mode=MergeMode.EXTEND, stop_merge_mode=MergeMode.EXTEND
+                ),
+            ),
+        )
+        recorder = OutputRecorder()
+        recommendation = STTMetadataFrame(
+            service_name="flux",
+            ttfs_p99_latency=0.0,
+            user_turn_strategies=EagerUserTurnStrategies(),
+        )
+        self.llm = ScriptedMarkerLLM(replies, delays=delays)
+
+        await run_test(
+            Pipeline(
+                [
+                    user_aggregator,
+                    self.llm,
+                    recorder,
+                    LLMAssistantAggregator(context),
+                ]
+            ),
+            frames_to_send=[recommendation, SleepFrame(), *frames_to_send],
+        )
+        return recorder, context
+
+    def _turn(self, text: str) -> list:
+        return [
+            ProposedUserStartedSpeakingFrame(),
+            SleepFrame(),
+            EagerTranscriptionFrame(text, "user", "now"),
+            SleepFrame(sleep=0.1),
+            TranscriptionFrame(text, "user", "now"),
+            SleepFrame(),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.8),
+        ]
+
+    def _assert_answered_once(self, recorder: OutputRecorder, context: LLMContext):
+        self.assertEqual(recorder.spoken, ["Sure, Boston it is."])
+        self.assertEqual(
+            [(m["role"], m["content"][:1]) for m in context.get_messages()],
+            [("user", "B"), ("assistant", "●")],
+        )
+
+    async def test_a_complete_eager_answer_is_spoken_once_the_turn_commits(self):
+        recorder, context = await self._run(
+            ["● Sure, Boston it is."], self._turn("Book a flight to Boston")
+        )
+
+        self._assert_answered_once(recorder, context)
+
+    async def test_a_slow_complete_eager_answer_is_generated_once(self):
+        # The external stop strategy asks for the stop again while the turn
+        # waits for the marker, and the eager strategy confirms it again.
+        recorder, context = await self._run(
+            ["● Sure, Boston it is."], self._turn("Book a flight to Boston"), delays=[0.8]
+        )
+
+        self._assert_answered_once(recorder, context)
+        self.assertEqual(self.llm.inferences, 1)
+
+    async def test_an_incomplete_eager_answer_is_dropped_and_the_committed_turn_answered(self):
+        recorder, context = await self._run(
+            ["◐", "● Sure, Boston it is."], self._turn("Book a flight to Boston")
+        )
+
+        self._assert_answered_once(recorder, context)
+
+    async def test_an_eager_answer_marked_incomplete_after_the_commit_is_answered_again(self):
+        recorder, context = await self._run(
+            ["◐", "● Sure, Boston it is."],
+            self._turn("Book a flight to Boston"),
+            delays=[0.45, 0],
+        )
+
+        self._assert_answered_once(recorder, context)
+
+    async def test_an_eager_answer_marked_incomplete_as_the_turn_commits_is_answered_again(
+        self,
+    ):
+        # The marker arrives as the turn commits, so the speculation is
+        # withdrawn while the eager strategy confirms it.
+        recorder, context = await self._run(
+            ["◐", "● Sure, Boston it is."],
+            self._turn("Book a flight to Boston"),
+            delays=[0.3, 0],
+        )
+
+        self._assert_answered_once(recorder, context)
 
 
 if __name__ == "__main__":
