@@ -42,8 +42,6 @@ class _Span:
 
     start: int
     end: int
-    # Where the words start, past any mode tags written before them.
-    words_start: int = 0
     modes: list[str] | None = None
     event: tuple[TextType, str] | None = None
     # Whether the event has been reported, as by the markup the service echoed.
@@ -102,24 +100,16 @@ class TTSExpression:
         """
         return self._adapter().capabilities()
 
-    def feed(self, text: str) -> list[Segment]:
-        """Read text of the response being spoken.
+    def parse(self, text: str) -> list[Segment]:
+        """Read a unit of the response being spoken.
 
         Args:
-            text: The next unit of the response.
+            text: The unit, with each of its tags whole.
 
         Returns:
-            The segments complete so far.
+            Its segments.
         """
-        return self._response_parser().feed(text)
-
-    def flush(self) -> list[Segment]:
-        """Return what remains of the response, at its end.
-
-        Returns:
-            The segments left in the response.
-        """
-        return self._response_parser().flush()
+        return self._response_parser().parse(text)
 
     def read_whole(self, text: str) -> list[Segment]:
         """Read text that stands on its own, apart from any response.
@@ -130,22 +120,24 @@ class TTSExpression:
         Returns:
             Its segments.
         """
-        parser = self._new_parser()
-        return parser.feed(text) + parser.flush()
+        return self._new_parser().parse(text)
 
     def restate_modes(self):
         """Have the next request state its modes from its start.
 
-        For the request after a response ends, and for text spoken in a
-        context of its own, such as a ``TTSSpeakFrame``'s.
+        For text spoken in a context of its own, such as a ``TTSSpeakFrame``'s.
         """
         self._rendered_modes = None
 
-    def reset(self):
-        """Drop what remains of the response and what was sent, as on an interruption."""
+    def end_response(self):
+        """Return to the baseline at the end of a response."""
         if self._parser:
             self._parser.reset()
         self._rendered_modes = None
+
+    def reset(self):
+        """Return to the baseline and drop what was sent, as on an interruption."""
+        self.end_response()
         self._spoken.clear()
 
     @staticmethod
@@ -163,24 +155,10 @@ class TTSExpression:
         words = _SPACES.sub(" ", "".join(s.text for s in segments if isinstance(s, Text)))
         return words if text_type == TextType.TOKEN else words.strip()
 
-    @staticmethod
-    def written_text(segments: list[Segment], text_type: TextType | str) -> str:
-        """A unit's text as the LLM wrote it, tags included, for the context.
-
-        Args:
-            segments: The unit's segments.
-            text_type: The unit's text type. A sentence's text is trimmed at
-                both ends; a streamed token keeps its spacing.
-
-        Returns:
-            The text.
-        """
-        text = "".join(s.raw for s in segments)
-        return text if text_type == TextType.TOKEN else text.strip()
-
     async def request(
         self,
         segments: list[Segment],
+        text: str,
         context_id: str,
         text_type: TextType | str,
         transform: Callable[[str, TextType | str], Awaitable[str | None]],
@@ -195,6 +173,7 @@ class TTSExpression:
 
         Args:
             segments: The unit's segments.
+            text: The unit, as the LLM wrote it.
             context_id: The audio context the request is spoken in.
             text_type: The unit's text type.
             transform: Rewrites a run of words for the service, or returns
@@ -211,13 +190,13 @@ class TTSExpression:
             # every service keeps modes from one request to the next.
             self._rendered_modes = None
         spoken = self._spoken.setdefault(context_id, _SpokenText())
+        offset = len(spoken.text)
+        spoken.text += text
         parts: list[str] = []
         first_modes: list[str] | None = None
         trimmed = False
         for segment in segments:
-            start = len(spoken.text)
-            spoken.text += segment.raw
-            span = _Span(start, len(spoken.text))
+            span = _Span(offset + segment.start, offset + segment.end)
             if isinstance(segment, Text):
                 modes = self._performed_modes(list(segment.modes), capabilities)
                 if first_modes is None and segment.text.strip():
@@ -226,19 +205,19 @@ class TTSExpression:
                     # One request takes one set of modes: the ones its words
                     # start in. Clients are told the modes that were requested.
                     modes = first_modes if first_modes is not None else modes
-                span.words_start = start + max(segment.raw.rfind(segment.text.strip()), 0)
                 span.modes = modes
                 spoken.spans.append(span)
                 if not segment.text.strip():
                     parts.append(segment.text)
                     continue
-                text = segment.text
+                words_text: str | None = segment.text
                 if not trimmed:
                     # The unit's first words are trimmed as its text would be, and
                     # a sentence's even after an event or pause written before them.
-                    text = trim(text if text_type == TextType.TOKEN else text.lstrip())
+                    first = segment.text if text_type == TextType.TOKEN else segment.text.lstrip()
+                    words_text = trim(first)
                     trimmed = True
-                words = await transform(text, text_type) if text is not None else None
+                words = await transform(words_text, text_type) if words_text is not None else None
                 if words is not None:
                     parts.append(self._render(words, modes))
             elif _performs(segment, capabilities):
@@ -246,7 +225,7 @@ class TTSExpression:
                 spoken.spans.append(span)
                 parts.append(self._render_event(segment, capabilities))
             else:
-                self._warn_unperformed(segment.raw)
+                self._warn_unperformed(text[segment.start : segment.end])
         if first_modes is not None:
             self._modes = first_modes
         request = _SPACES.sub(" ", "".join(parts))
@@ -282,7 +261,7 @@ class TTSExpression:
             if not spoken.text[i].isalnum():
                 continue
             words = next(
-                (s for s in spoken.spans if s.modes is not None and s.words_start <= i < s.end),
+                (s for s in spoken.spans if s.modes is not None and s.start <= i < s.end),
                 None,
             )
             if words is not None:
@@ -314,7 +293,7 @@ class TTSExpression:
             if span.event:
                 span.reported = True
                 return span.event
-            words = spoken.text[max(spoken.position, span.words_start) : span.end]
+            words = spoken.text[max(spoken.position, span.start) : span.end]
             if any(c.isalnum() for c in words):
                 return None
         return None
@@ -382,7 +361,7 @@ class TTSExpression:
             if supported:
                 performed.append(mode)
             else:
-                self._warn_unperformed("^emphasis^" if mode == EMPHASIS_MODE else f"<<{mode}>>")
+                self._warn_unperformed("^^emphasis^^" if mode == EMPHASIS_MODE else f"<<{mode}>>")
         return performed
 
     def _render_event(

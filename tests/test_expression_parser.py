@@ -8,147 +8,103 @@
 
 import pytest
 
-from pipecat.expressive.parser import Event, ExpressionParser, Pause, Segment, Text
+from pipecat.expressive.parser import EXPRESSION_TAGS, Event, ExpressionParser, Segment, Text
+from pipecat.utils.text.base_text_aggregator import TextType
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
-def merged(segments: list[Segment]) -> list[Segment]:
-    """Join neighbouring Text in the same modes, which streaming splits wherever a chunk ends."""
-    result: list[Segment] = []
-    for segment in segments:
-        last = result[-1] if result else None
-        if isinstance(segment, Text) and isinstance(last, Text) and last.modes == segment.modes:
-            result[-1] = Text(last.text + segment.text, last.modes, last.raw + segment.raw)
-        else:
-            result.append(segment)
-    return result
+def words(text: str, modes: tuple[str, ...]):
+    """A Text segment, compared without its position."""
+    return ("text", text, modes)
 
 
-def parse(text: str, **kwargs) -> list[Segment]:
-    parser = ExpressionParser(**kwargs)
-    return merged(parser.feed(text) + parser.flush())
+def shape(segment: Segment):
+    if isinstance(segment, Text):
+        return words(segment.text, segment.modes)
+    if isinstance(segment, Event):
+        return ("event", segment.name)
+    return ("pause", segment.duration_ms)
 
 
-def parse_in_pieces(pieces: list[str], **kwargs) -> list[Segment]:
-    parser = ExpressionParser(**kwargs)
-    segments: list[Segment] = []
-    for piece in pieces:
-        segments += parser.feed(piece)
-    return merged(segments + parser.flush())
+def parse(text: str, **kwargs) -> list:
+    return [shape(s) for s in ExpressionParser(**kwargs).parse(text)]
 
 
 REPLY = (
     "<<apologetic>> I'm so sorry about the outage. <<enunciate>> Your ticket is 2, 3, 8, 7. "
-    "[[pause 600]] <<cheerful>> The good news is it's ^back up^ now. [[laugh]] Finally!"
+    "[[pause 600]] <<cheerful>> The good news is it's ^^back up^^ now. [[laugh]] Finally!"
 )
 
 
 def test_a_reply_splits_into_words_with_their_modes_and_events():
     assert parse(REPLY) == [
-        Text(
-            " I'm so sorry about the outage. ",
-            ("apologetic",),
-            "<<apologetic>> I'm so sorry about the outage. ",
-        ),
-        Text(
-            " Your ticket is 2, 3, 8, 7. ",
-            ("enunciate",),
-            "<<enunciate>> Your ticket is 2, 3, 8, 7. ",
-        ),
-        Pause(600, "[[pause 600]]"),
-        Text(" ", ("enunciate",), " "),
-        Text(" The good news is it's ", ("cheerful",), "<<cheerful>> The good news is it's "),
-        Text("back up", ("cheerful", "emphasis"), "^back up^"),
-        Text(" now. ", ("cheerful",), " now. "),
-        Event("laugh", "[[laugh]]"),
-        Text(" Finally!", ("cheerful",), " Finally!"),
+        words(" I'm so sorry about the outage. ", ("apologetic",)),
+        words(" Your ticket is 2, 3, 8, 7. ", ("enunciate",)),
+        ("pause", 600),
+        words(" ", ("enunciate",)),
+        words(" The good news is it's ", ("cheerful",)),
+        words("back up", ("cheerful", "emphasis")),
+        words(" now. ", ("cheerful",)),
+        ("event", "laugh"),
+        words(" Finally!", ("cheerful",)),
     ]
 
 
-def test_the_raw_text_joins_up_to_what_the_llm_wrote():
-    assert "".join(s.raw for s in parse(REPLY)) == REPLY
-
-
-STREAMED = [
-    REPLY,
-    "I'm sorry [about] that. <cheerful> Bye [[laugh]] a < b.",
-    "It's ^fixed^, ^really^. 2^10 ^_^ a^b^c ^^ *note* <</warm>> [[ Pause  300 ]]",
-]
-
-
-@pytest.mark.parametrize("text", STREAMED)
-def test_streaming_gives_the_same_result_wherever_the_text_is_cut(text):
-    whole = parse(text, modes=["cheerful"])
-    for cut in range(1, len(text)):
-        assert parse_in_pieces([text[:cut], text[cut:]], modes=["cheerful"]) == whole, cut
-
-
-@pytest.mark.parametrize("text", STREAMED)
-def test_streaming_one_character_at_a_time(text):
-    assert parse_in_pieces(list(text), modes=["cheerful"]) == parse(text, modes=["cheerful"])
+def test_each_segment_says_where_it_was_written():
+    for segment in ExpressionParser().parse(REPLY):
+        written = REPLY[segment.start : segment.end]
+        if isinstance(segment, Text):
+            assert written == segment.text
+        else:
+            assert written.startswith("[[") and written.endswith("]]")
 
 
 def test_text_without_tags_is_in_the_baseline():
-    assert parse("Hello there. How are you?") == [
-        Text("Hello there. How are you?", (), "Hello there. How are you?")
-    ]
+    assert parse("Hello there. How are you?") == [words("Hello there. How are you?", ())]
 
 
 def test_several_modes_are_separated_by_spaces():
-    assert parse("<<cheerful calm>>Hi") == [Text("Hi", ("cheerful", "calm"), "<<cheerful calm>>Hi")]
+    assert parse("<<cheerful calm>>Hi") == [words("Hi", ("cheerful", "calm"))]
 
 
-def test_a_mode_lasts_until_the_next_mode_tag():
-    assert parse("<<calm>>One. <<warm>>Two. Three.") == [
-        Text("One. ", ("calm",), "<<calm>>One. "),
-        Text("Two. Three.", ("warm",), "<<warm>>Two. Three."),
+def test_a_mode_lasts_until_the_next_mode_tag_across_units():
+    parser = ExpressionParser()
+
+    assert [shape(s) for s in parser.parse("<<calm>>One. ")] == [words("One. ", ("calm",))]
+    assert [shape(s) for s in parser.parse("Two. <<warm>>Three.")] == [
+        words("Two. ", ("calm",)),
+        words("Three.", ("warm",)),
     ]
 
 
 def test_neutral_returns_to_the_baseline():
-    assert parse("<<calm>>One. <<neutral>>Two.") == [
-        Text("One. ", ("calm",), "<<calm>>One. "),
-        Text("Two.", (), "<<neutral>>Two."),
-    ]
-
-
-def test_emphasis_is_added_to_the_active_modes():
-    assert parse("<<calm>>It's ^fixed^ now.") == [
-        Text("It's ", ("calm",), "<<calm>>It's "),
-        Text("fixed", ("calm", "emphasis"), "^fixed^"),
-        Text(" now.", ("calm",), " now."),
-    ]
+    assert parse("<<calm>>One. <<neutral>>Two.") == [words("One. ", ("calm",)), words("Two.", ())]
 
 
 def test_the_modes_end_with_the_response():
     parser = ExpressionParser()
-    parser.feed("<<calm>>One.")
-    parser.flush()
-    assert parser.feed("Two") + parser.flush() == [Text("Two", (), "Two")]
+    parser.parse("<<calm>>One.")
+    parser.reset()
+
+    assert [shape(s) for s in parser.parse("Two")] == [words("Two", ())]
 
 
-def test_a_mode_tag_with_nothing_after_it_goes_with_the_next_segment():
-    assert parse("<<calm>>[[laugh]] Hi") == [
-        Event("laugh", "<<calm>>[[laugh]]"),
-        Text(" Hi", ("calm",), " Hi"),
-    ]
-
-
-def test_a_mode_tag_ending_the_response_is_dropped():
-    assert parse("Bye! <<warm>>") == [Text("Bye! ", (), "Bye! ")]
+def test_a_mode_tag_ending_the_text_says_nothing():
+    assert parse("Bye! <<warm>>") == [words("Bye! ", ())]
 
 
 def test_a_pause_is_a_duration_in_milliseconds():
-    assert parse("[[pause 1500]]") == [Pause(1500, "[[pause 1500]]")]
+    assert parse("[[pause 1500]]") == [("pause", 1500)]
 
 
 @pytest.mark.parametrize(
     "text,segment",
     [
-        ("[[pause]]x", Event("pause", "[[pause]]")),
-        ("[[pause 800ms]]x", Event("pause 800ms", "[[pause 800ms]]")),
-        ("[[clear throat]]x", Event("clear throat", "[[clear throat]]")),
-        ("<<pause 500>>x", Text("x", ("pause", "500"), "<<pause 500>>x")),
-        ("<</cheerful>>x", Text("x", ("/cheerful",), "<</cheerful>>x")),
+        ("[[pause]]x", ("event", "pause")),
+        ("[[pause 800ms]]x", ("event", "pause 800ms")),
+        ("[[clear throat]]x", ("event", "clear throat")),
+        ("<<pause 500>>x", words("x", ("pause", "500"))),
+        ("<</cheerful>>x", words("x", ("/cheerful",))),
     ],
 )
 def test_anything_else_between_the_brackets_is_passed_on_as_written(text, segment):
@@ -156,82 +112,81 @@ def test_anything_else_between_the_brackets_is_passed_on_as_written(text, segmen
 
 
 def test_a_declared_mode_in_event_brackets_sets_the_mode():
-    assert parse("[[cheerful]] Hi", modes=["cheerful"]) == [
-        Text(" Hi", ("cheerful",), "[[cheerful]] Hi")
-    ]
+    assert parse("[[cheerful]] Hi", modes=["cheerful"]) == [words(" Hi", ("cheerful",))]
 
 
 def test_a_declared_event_in_mode_brackets_stays_an_event():
-    assert parse("<<laugh>> Hi", events=["laugh"]) == [
-        Event("laugh", "<<laugh>>"),
-        Text(" Hi", (), " Hi"),
-    ]
-
-
-@pytest.mark.parametrize("text", ["He said [sic].", "Hi [cheerful] there.", "a < b", "a <b> c"])
-def test_single_brackets_are_text(text):
-    assert parse(text, modes=["cheerful"]) == [Text(text, (), text)]
-
-
-def test_a_tag_left_unfinished_is_removed():
-    assert parse("Thanks for calling. <<chee") == [
-        Text("Thanks for calling. ", (), "Thanks for calling. ")
-    ]
-    assert parse("Thanks for calling. [[") == [
-        Text("Thanks for calling. ", (), "Thanks for calling. ")
-    ]
-
-
-def test_reset_drops_a_tag_cut_off_by_an_interruption():
-    parser = ExpressionParser()
-    assert parser.feed("<<calm>>Okay. [[la") == [Text("Okay. ", ("calm",), "<<calm>>Okay. ")]
-    parser.reset()
-    assert parser.feed("Hello") == [Text("Hello", (), "Hello")]
+    assert parse("<<laugh>> Hi", events=["laugh"]) == [("event", "laugh"), words(" Hi", ())]
 
 
 @pytest.mark.parametrize(
     "text",
     [
+        "He said [sic].",
+        "Hi [cheerful] there.",
+        "a < b",
+        "a <b> c",
         "Shift it left: a << b.",
         "Brackets [[like this.]] stay text.",
     ],
 )
 def test_text_that_only_looks_like_a_tag_is_spoken(text):
-    assert parse(text) == [Text(text, (), text)]
+    assert parse(text, modes=["cheerful"]) == [words(text, ())]
+
+
+def test_a_tag_left_unfinished_is_removed():
+    assert parse("Thanks for calling. <<chee") == [words("Thanks for calling. ", ())]
+    assert parse("Thanks for calling. [[") == [words("Thanks for calling. ", ())]
+
+
+def test_emphasis_is_added_to_the_active_modes():
+    assert parse("<<calm>>It's ^^fixed^^ now.") == [
+        words("It's ", ("calm",)),
+        words("fixed", ("calm", "emphasis")),
+        words(" now.", ("calm",)),
+    ]
 
 
 @pytest.mark.parametrize(
-    "text,emphasis",
+    "text,stressed",
     [
-        ("It's ^fixed^ now.", Text("fixed", ("emphasis",), "^fixed^")),
-        ("It's ^back up^.", Text("back up", ("emphasis",), "^back up^")),
-        ("The code is ^8492^.", Text("8492", ("emphasis",), "^8492^")),
+        ("It's ^^back up^^.", "back up"),
+        ("The code is ^^8492^^.", "8492"),
+        ("^^Wow^^, nice.", "Wow"),
     ],
 )
-def test_emphasis(text, emphasis):
-    assert emphasis in parse(text)
+def test_emphasis(text, stressed):
+    assert words(stressed, ("emphasis",)) in parse(text)
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "Two to the tenth is 2^10.",
-        "^2^10 is a classic.",
         "a^b^c",
-        "Thanks ^_^ and ^^",
-        "An ^unclosed span",
-        "A ^ spaced ^ span",
-        "It's *fixed* and **done**.",
+        "Thanks ^_^ bye",
+        "It's ^fixed^ and *done*.",
     ],
 )
-def test_carets_that_are_not_emphasis_and_asterisks_are_text(text):
-    assert parse(text) == [Text(text, (), text)]
+def test_single_carets_and_asterisks_are_text(text):
+    assert parse(text) == [words(text, ())]
 
 
-def test_emphasis_is_held_until_it_closes():
+def test_emphasis_that_never_closes_is_spoken_plainly():
+    assert parse("It's ^^back up") == [words("It's back up", ())]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [TextType.TOKEN, TextType.SENTENCE])
+async def test_an_aggregator_keeps_each_tag_in_one_unit(mode):
+    aggregator = SkipTagsAggregator(EXPRESSION_TAGS, aggregation_type=mode)
+    units = []
+    for chunk in ["<<chee", "rful>> It's [[la", "ugh]] ^^back", " up^", "^ now."]:
+        units += [a.text async for a in aggregator.aggregate(chunk)]
+    flushed = await aggregator.flush()
+    units += [flushed.text] if flushed else []
+
     parser = ExpressionParser()
-    assert parser.feed("It's ^back") == [Text("It's ", (), "It's ")]
-    assert parser.feed(" up^ now") == [
-        Text("back up", ("emphasis",), "^back up^"),
-        Text(" now", (), " now"),
-    ]
+    segments = [shape(s) for unit in units for s in parser.parse(unit)]
+    assert ("event", "laugh") in segments
+    assert words("back up", ("cheerful", "emphasis")) in segments

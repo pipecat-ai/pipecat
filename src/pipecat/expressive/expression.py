@@ -9,7 +9,7 @@
 Part of expressive conversation, which lets an agent hear how something was
 said and answer in kind. An LLM writes delivery into its reply as inline tags:
 ``[[event]]`` for a sound or silence at one point, ``<<mode>>`` for how the
-words after it are spoken, and ``^word^`` to stress a word. A mode lasts until
+words after it are spoken, and ``^^word^^`` to stress a word. A mode lasts until
 the next mode tag or the end of the response, and ``<<neutral>>`` returns to
 the voice's baseline.
 
@@ -70,7 +70,7 @@ class ExpressionCapabilities:
             ``modes``, described in a few words.
         pause_range_ms: The shortest and longest pause the service can make,
             in milliseconds, or None when it can't pause.
-        emphasis: Whether the service can stress words marked ``^word^``.
+        emphasis: Whether the service can stress words marked ``^^word^^``.
         mode_scope: Where in a response the service can change mode.
     """
 

@@ -21,7 +21,7 @@ from websockets.protocol import State
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.expressive.parser import Segment
+from pipecat.expressive.parser import EXPRESSION_TAGS, Segment
 from pipecat.expressive.tts_expression import EXPRESSION_TAG_PATTERN, TTSExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -67,6 +67,7 @@ from pipecat.utils.text.base_text_aggregator import Aggregation
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.text.transforms.pronunciations import (
     PronunciationTransform,
     pronunciation_transform,
@@ -588,6 +589,12 @@ class TTSService(AIService):
         if setup.enable_expressive_conversation:
             self._expression = TTSExpression(self.get_expression_adapter, self)
             self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
+            # Each tag reaches the parser whole, however the text streams in.
+            self._text_aggregator = SkipTagsAggregator(
+                EXPRESSION_TAGS,
+                aggregation_type=self._text_aggregation_mode,
+                language=self._text_aggregator.language,
+            )
 
     async def start(self, frame: StartFrame):
         """Start the TTS service.
@@ -1311,13 +1318,7 @@ class TTSService(AIService):
         if remaining:
             await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
         if self._expression:
-            text_type = TextType.TOKEN if self._is_streaming_tokens else TextType.SENTENCE
-            await self._speak_expression(
-                AggregatedTextFrame("", text_type),
-                self._expression.flush(),
-                self.create_context_id(),
-            )
-            self._expression.restate_modes()
+            self._expression.end_response()
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1394,9 +1395,8 @@ class TTSService(AIService):
         text_frame.interruptible = frame.interruptible
         if self._expression and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
-            segments = self._expression.read_whole(frame.text)
             self._expression.restate_modes()
-            await self._speak_expression(text_frame, segments, speak_context_id)
+            await self._speak_expression(text_frame, speak_context_id, whole=True)
             self._expression.restate_modes()
         else:
             await self._handle_aggregated_text(text_frame, speak_context_id)
@@ -1592,27 +1592,37 @@ class TTSService(AIService):
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
         elif self._expression and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
-            await self._speak_expression(
-                src_frame, self._expression.feed(src_frame.text), context_id
-            )
+            await self._speak_expression(src_frame, context_id)
         elif (text := self._trim_text(src_frame.text)) is not None:
             await self._speak_text(src_frame, text, context_id)
 
     async def _speak_expression(
-        self, src_frame: AggregatedTextFrame, segments: list[Segment], context_id: str
+        self, src_frame: AggregatedTextFrame, context_id: str, *, whole: bool = False
     ):
-        """Speak a unit of text whose expression tags have been read.
+        """Speak a unit of text with expression tags in it.
 
         The unit stays one frame: its words without the tags, for clients, and
         its text as the LLM wrote it, for the context. The request is built
         from its segments.
+
+        Args:
+            src_frame: The unit.
+            context_id: The context to speak it in.
+            whole: Whether the text stands on its own, apart from the response,
+                such as a ``TTSSpeakFrame``'s.
         """
-        if not self._expression or not segments:
+        if not self._expression:
+            return
+        text = src_frame.text
+        if src_frame.text_type != TextType.TOKEN:
+            text = text.strip()
+        segments = self._expression.read_whole(text) if whole else self._expression.parse(text)
+        if not segments:
             return
         frame = AggregatedTextFrame(
             self._expression.shown_text(segments, src_frame.text_type),
             src_frame.text_type,
-            raw_text=self._expression.written_text(segments, src_frame.text_type),
+            raw_text=text,
         )
         frame.interruptible = src_frame.interruptible
         await self._speak_text(frame, self._trim_text(frame.text) or "", context_id, segments)
@@ -1657,7 +1667,12 @@ class TTSService(AIService):
 
         if segments is not None and self._expression:
             prepared_text = await self._expression.request(
-                segments, context_id, src_frame.text_type, self._transform_text, self._trim_text
+                segments,
+                src_frame.raw_text or "",
+                context_id,
+                src_frame.text_type,
+                self._transform_text,
+                self._trim_text,
             )
         else:
             prepared_text = await self._transform_text(text, src_frame.text_type)

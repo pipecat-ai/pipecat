@@ -43,8 +43,8 @@ from tests.test_tts_frame_ordering import (
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
-REPLY = ["<<cheerful>> It's [[la", "ugh]] ^back up^ now. [[pause 400]] Bye!"]
-WRITTEN = "<<cheerful>> It's [[laugh]] ^back up^ now. [[pause 400]] Bye!"
+REPLY = ["<<cheerful>> It's [[la", "ugh]] ^^back up^^ now. [[pause 400]] Bye!"]
+WRITTEN = "<<cheerful>> It's [[laugh]] ^^back up^^ now. [[pause 400]] Bye!"
 
 
 class BracketAdapter(BaseExpressionAdapter):
@@ -175,14 +175,14 @@ async def test_word_timestamps_report_each_words_modes_and_the_events_between():
 async def test_a_sentence_is_one_segment_shown_without_its_tags():
     down, _ = await run_test(
         WordTimestampTTSService(),
-        frames_to_send=response("<<calm>> It's ^back up^ now."),
+        frames_to_send=response("<<calm>> It's ^^back up^^ now."),
         pipeline_params=EXPRESSIVE,
     )
 
     segments = [
         (f.text, f.raw_text) for f in down if type(f) is AggregatedTextFrame and f.will_be_spoken
     ]
-    assert segments == [("It's back up now.", "<<calm>> It's ^back up^ now.")]
+    assert segments == [("It's back up now.", "<<calm>> It's ^^back up^^ now.")]
     # Its progress carries the modes of each word as it is spoken.
     progress = [
         (f.accumulated_text, f.modes) for f in down if isinstance(f, AggregatedTextProgressFrame)
@@ -201,7 +201,7 @@ async def test_tags_split_across_tokens_are_read_in_token_mode():
     requests = record_requests(tts)
     context = await context_after(tts, response("<<chee", "rful>> It's", " [[la", "ugh]] fine."))
 
-    assert "".join(requests) == "<cheerful> It's  <laugh> fine."
+    assert "".join(requests) == "<cheerful> It's <laugh> fine."
     assert context == "<<cheerful>> It's [[laugh]] fine."
 
 
@@ -271,7 +271,7 @@ async def test_a_service_without_an_adapter_speaks_only_the_words():
         ("Bye!", []),
     ]
     context = await context_after(MockHttpPushTextTTSService(), response(*REPLY))
-    assert context == "<<cheerful>> It's [[laugh]] ^back up^ now. [[pause 400]] Bye!"
+    assert context == "<<cheerful>> It's [[laugh]] ^^back up^^ now. [[pause 400]] Bye!"
 
 
 @pytest.mark.asyncio
@@ -302,7 +302,7 @@ async def test_each_unperformed_tag_is_warned_about_as_written():
     unperformed = [
         w.split("can't perform ")[1].split(",")[0] for w in warnings if "can't perform" in w
     ]
-    assert unperformed == ["<<cheerful>>", "[[laugh]]", "^emphasis^", "[[pause 400]]"]
+    assert unperformed == ["<<cheerful>>", "[[laugh]]", "^^emphasis^^", "[[pause 400]]"]
 
 
 @pytest.mark.asyncio
@@ -408,7 +408,7 @@ async def test_each_response_starts_from_the_baseline_when_streaming_tokens():
     await run_test(
         tts,
         # The first response ends in text the parser holds until its end.
-        frames_to_send=[*response("<<calm>> One ^two"), *response("<<calm>> Three.")],
+        frames_to_send=[*response("<<calm>> One ^^two"), *response("<<calm>> Three.")],
         pipeline_params=EXPRESSIVE,
     )
 
@@ -448,7 +448,7 @@ def test_the_parser_knows_capabilities_learned_before_first_use():
     adapter.events = ["laugh"]
 
     # A declared event keeps its kind in mode brackets.
-    segments = expression.feed("<<laugh>> Hi.") + expression.flush()
+    segments = expression.parse("<<laugh>> Hi.")
 
     assert isinstance(segments[0], Event) and segments[0].name == "laugh"
     assert isinstance(segments[1], Text)
@@ -457,17 +457,17 @@ def test_the_parser_knows_capabilities_learned_before_first_use():
 @pytest.mark.asyncio
 async def test_a_request_leaves_out_what_the_service_cant_perform():
     expression = TTSExpression(LearnedAdapter, owner="tts")
-    segments = expression.read_whole("<<calm>> Hi. [[laugh]]")
+    text = "<<calm>> Hi. [[laugh]]"
+    segments = expression.read_whole(text)
 
-    async def transform(text, text_type):
-        return text
+    async def transform(words, text_type):
+        return words
 
     request = await expression.request(
-        segments, "context", TextType.SENTENCE, transform, lambda text: text
+        segments, text, "context", TextType.SENTENCE, transform, lambda words: words
     )
 
     assert request == "Hi."
-    assert expression.written_text(segments, TextType.SENTENCE) == "<<calm>> Hi. [[laugh]]"
 
 
 class MarkupAdapter(BaseExpressionAdapter):
@@ -529,9 +529,9 @@ async def test_echoed_mode_markup_is_not_spoken():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service", SERVICES)
 async def test_punctuation_after_emphasis_stays_with_it_in_the_context(service):
-    context = await context_after(service(), response("It's ^back^! ^Wow^, nice."))
+    context = await context_after(service(), response("It's ^^back^^! ^^Wow^^, nice."))
 
-    assert context == "It's ^back^! ^Wow^, nice."
+    assert context == "It's ^^back^^! ^^Wow^^, nice."
 
 
 @pytest.mark.asyncio
@@ -554,7 +554,7 @@ async def test_spacing_between_pieces_is_sent_as_written():
     tts = MockHttpPushTextTTSService()
     requests = record_requests(tts)
     await run_test(
-        tts, frames_to_send=response("That is ^very^ ^good^ news."), pipeline_params=EXPRESSIVE
+        tts, frames_to_send=response("That is ^^very^^ ^^good^^ news."), pipeline_params=EXPRESSIVE
     )
 
     assert requests == ["That is very good news."]
@@ -564,7 +564,9 @@ async def test_spacing_between_pieces_is_sent_as_written():
 async def test_spacing_between_pieces_is_sent_as_written_when_streaming_tokens():
     tts = MockHttpPushTextTTSService(text_aggregation_mode=TextAggregationMode.TOKEN)
     requests = record_requests(tts)
-    await run_test(tts, frames_to_send=response("^Wow^ that's great."), pipeline_params=EXPRESSIVE)
+    await run_test(
+        tts, frames_to_send=response("^^Wow^^ that's great."), pipeline_params=EXPRESSIVE
+    )
 
     assert "".join(requests) == "Wow that's great."
 
@@ -596,22 +598,9 @@ async def test_a_patterns_match_is_spoken_as_it_is():
     assert context == "<spell>ABC</spell>"
 
 
-# The frames a unit's segments become.
-
-
-def test_a_units_words_are_shown_and_its_text_kept_as_written():
+def test_a_units_words_are_shown_without_its_tags():
     expression = TTSExpression(BracketAdapter, owner="tts")
+    segments = expression.read_whole("<<calm>> It's [[laugh]] fine. [[pause 400]]")
 
-    assert expression.shown_text(SEGMENTS, TextType.SENTENCE) == "It's fine."
-    assert expression.shown_text(SEGMENTS, TextType.TOKEN) == " It's fine. "
-    assert expression.written_text(SEGMENTS, TextType.SENTENCE) == (
-        "<<calm>> It's [[laugh]] fine. [[pause 400]]"
-    )
-
-
-SEGMENTS = [
-    Text(" It's ", ("calm",), "<<calm>> It's "),
-    Event("laugh", "[[laugh]]"),
-    Text(" fine. ", ("calm",), " fine. "),
-    Pause(400, "[[pause 400]]"),
-]
+    assert expression.shown_text(segments, TextType.SENTENCE) == "It's fine."
+    assert expression.shown_text(segments, TextType.TOKEN) == " It's fine. "
