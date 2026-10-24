@@ -7,7 +7,17 @@
 """ElevenLabs expression adapter for Pipecat."""
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import EMPHASIS_TONE, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import (
+    EMPHASIS_TONE,
+    FAST_TONE,
+    SLOW_TONE,
+    SPEED_TONES,
+    ExpressionCapabilities,
+    ExpressionTerm,
+)
+
+# The audio tag each speed tone is written as.
+_SPEED_TAGS = {SLOW_TONE: "slowly", FAST_TONE: "quickly"}
 
 # The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
 # into sounds made at one point and deliveries that last. Their guide doesn't
@@ -84,7 +94,8 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
     terms listed are the ones in ElevenLabs' prompting guide, and others
     described in a few words work too. Emphasis is written in capitals. A tone
     tag is written where the tones change; Eleven v3 and v4 have no tag for
-    the voice's baseline, so a return to it writes none. They don't support
+    the voice's baseline, so a return to it writes none. The speed tones are
+    written as ``[slowly]`` and ``[quickly]``. They don't support
     ``<break>``, so a pause is written as a short or long pause cue, which is
     approximate.
     """
@@ -93,7 +104,7 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
         """Free-text audio tags, emphasis and approximate pauses."""
         return ExpressionCapabilities(
             events=list(_AUDIO_TAG_EVENTS),
-            tones=list(_AUDIO_TAG_TONES),
+            tones=[*_AUDIO_TAG_TONES, *SPEED_TONES],
             free_text_events=True,
             free_text_tones=True,
             pause_range_ms=(100, 3000),
@@ -104,8 +115,10 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
         """Prefix audio tags where the tones change, and capitalize emphasis."""
         if EMPHASIS_TONE in tones:
             text = text.upper()
-        tags = [tone for tone in tones if tone != EMPHASIS_TONE]
-        previous = [tone for tone in previous_tones or [] if tone != EMPHASIS_TONE]
+        tags = [_SPEED_TAGS.get(tone, tone) for tone in tones if tone != EMPHASIS_TONE]
+        previous = [
+            _SPEED_TAGS.get(tone, tone) for tone in previous_tones or [] if tone != EMPHASIS_TONE
+        ]
         if tags and tags != previous:
             text = " ".join(f"[{tag}]" for tag in tags) + " " + text
         return text

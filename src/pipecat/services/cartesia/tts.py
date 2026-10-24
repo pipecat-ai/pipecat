@@ -21,6 +21,7 @@ from websockets.protocol import State
 from pipecat.adapters.tts.services.cartesia_adapter import (
     CartesiaEmotion,
     CartesiaExpressionAdapter,
+    cartesia_speed,
 )
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -76,6 +77,17 @@ class GenerationConfig(BaseModel):
     volume: float | None = None
     speed: float | None = None
     emotion: str | None = None
+
+
+def _generation_config(
+    config: GenerationConfig | None, tones: list[str], *, expressive: bool
+) -> dict[str, Any] | None:
+    """A request's generation config: the settings', with the speed its tones ask for."""
+    values = config.model_dump(exclude_none=True) if config else {}
+    speed = cartesia_speed(tones) if expressive else None
+    if speed is not None:
+        values["speed"] = speed
+    return values or None
 
 
 def language_to_cartesia_language(language: Language) -> str:
@@ -580,9 +592,13 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._settings.language:
             msg["language"] = self._settings.language
 
-        generation_config = assert_given(self._settings.generation_config)
+        generation_config = _generation_config(
+            assert_given(self._settings.generation_config),
+            self.expression_tones,
+            expressive=self._expression_formatter is not None,
+        )
         if generation_config:
-            msg["generation_config"] = generation_config.model_dump(exclude_none=True)
+            msg["generation_config"] = generation_config
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
@@ -1035,9 +1051,13 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.language:
                 payload["language"] = self._settings.language
 
-            generation_config = assert_given(self._settings.generation_config)
+            generation_config = _generation_config(
+                assert_given(self._settings.generation_config),
+                self.expression_tones,
+                expressive=self._expression_formatter is not None,
+            )
             if generation_config:
-                payload["generation_config"] = generation_config.model_dump(exclude_none=True)
+                payload["generation_config"] = generation_config
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id

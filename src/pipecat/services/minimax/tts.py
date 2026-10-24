@@ -20,7 +20,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
+from pipecat.adapters.tts.services.minimax_adapter import MINIMAX_SPEEDS, MiniMaxExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -387,8 +387,15 @@ class MiniMaxHttpTTSService(TTSService):
             "vol": self._settings.volume,
             "pitch": self._settings.pitch,
         }
-        # In expressive conversation, the request's tones choose its emotion.
-        emotion = self.expression_tones[0] if self.expression_tones else self._settings.emotion
+        # In expressive conversation, the request's tones choose its emotion and
+        # its speed.
+        tones = self.expression_tones
+        emotion = next((tone for tone in tones if tone not in MINIMAX_SPEEDS), None)
+        if emotion is None:
+            emotion = self._settings.emotion
+        speed = next((MINIMAX_SPEEDS[tone] for tone in tones if tone in MINIMAX_SPEEDS), None)
+        if speed is not None:
+            voice_setting["speed"] = speed
         if emotion is not None:
             voice_setting["emotion"] = emotion
         if self._settings.text_normalization is not None:

@@ -10,7 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaExpressionAdapter,
+    cartesia_speed,
+)
 from pipecat.expressive.expression import ToneScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -21,6 +24,8 @@ from pipecat.frames.frames import (
 from pipecat.services.cartesia.tts import (
     CartesiaHttpTTSService,
     CartesiaTTSService,
+    GenerationConfig,
+    _generation_config,
     language_to_cartesia_language,
 )
 from pipecat.services.settings import TTSSettings
@@ -282,10 +287,32 @@ class TestCartesiaExpressionAdapter:
         assert adapter.format_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/> Hi.'
         assert adapter.format_text("Hi.", ["sad", "tired"], ["sad", "calm"]) == "Hi."
 
+    def test_speed_tones_set_the_speed_not_the_emotion(self):
+        adapter = CartesiaExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().tones}
+        assert adapter.format_text("Hi.", ["slow", "sad"], None) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", ["sad", "slow"], ["sad"]) == "Hi."
+        assert cartesia_speed(["sad", "slow"]) == 0.7
+        assert cartesia_speed(["fast"]) == 1.3
+        assert cartesia_speed(["sad"]) is None
+
     def test_events_and_pauses(self):
         adapter = CartesiaExpressionAdapter()
         assert adapter.format_event("laughter") == " [laughter] "
         assert adapter.format_pause(600) == ' <break time="600ms"/> '
+
+
+def test_a_request_in_a_speed_tone_states_its_speed():
+    assert _generation_config(None, ["calm", "slow"], expressive=True) == {"speed": 0.7}
+    assert _generation_config(GenerationConfig(volume=1.2), ["fast"], expressive=True) == {
+        "volume": 1.2,
+        "speed": 1.3,
+    }
+    # Without a speed tone, the configured speed is kept.
+    assert _generation_config(GenerationConfig(speed=0.9), ["calm"], expressive=True) == {
+        "speed": 0.9
+    }
+    assert _generation_config(None, ["slow"], expressive=False) is None
 
 
 def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():

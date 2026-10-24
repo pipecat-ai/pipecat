@@ -9,7 +9,18 @@
 from enum import StrEnum
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
+from pipecat.expressive.expression import (
+    FAST_TONE,
+    SLOW_TONE,
+    SPEED_TONES,
+    ExpressionCapabilities,
+    ExpressionTerm,
+    ToneScope,
+)
+
+# The speed each speed tone asks for. Cartesia takes speed as guidance, so the
+# steps are large.
+CARTESIA_SPEEDS = {SLOW_TONE: 0.7, FAST_TONE: 1.3}
 
 
 class CartesiaEmotion(StrEnum):
@@ -84,8 +95,9 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
     Part of expressive conversation (alpha). Tones are Cartesia's emotions,
     formatted as ``<emotion>`` tags; Cartesia supports them in English only.
     Cartesia changes emotion reliably only between generations, so a tone can
-    change only between sentences, and a sentence written in several tones is
-    spoken in the first. The one event is ``[laughter]``, and pauses are
+    change only between sentences, and a sentence written in several emotions
+    is spoken in the first. The speed tones set each request's speed (see
+    :data:`CARTESIA_SPEEDS`). The one event is ``[laughter]``, and pauses are
     ``<break>`` tags. Cartesia has no emphasis.
     """
 
@@ -94,9 +106,12 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
         return ExpressionCapabilities(
             events=[ExpressionTerm("laughter")],
             tones=[
-                ExpressionTerm(emotion.value)
-                for emotion in CartesiaEmotion
-                if emotion not in (CartesiaEmotion.NEUTRAL, CartesiaEmotion.JOKING_COMEDIC)
+                *(
+                    ExpressionTerm(emotion.value)
+                    for emotion in CartesiaEmotion
+                    if emotion not in (CartesiaEmotion.NEUTRAL, CartesiaEmotion.JOKING_COMEDIC)
+                ),
+                *SPEED_TONES,
             ],
             pause_range_ms=(100, 5000),
             tone_scope=ToneScope.SENTENCE,
@@ -104,8 +119,8 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
 
     def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
         """Prefix an emotion tag, set apart from the words, where the emotion changes."""
-        emotion = tones[0] if tones else None
-        previous = previous_tones[0] if previous_tones else None
+        emotion = _emotion(tones)
+        previous = _emotion(previous_tones or [])
         if emotion == previous:
             return text
         return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/> {text}'
@@ -117,3 +132,13 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
     def format_pause(self, duration_ms: int) -> str:
         """Format a break, set apart from the words."""
         return f' <break time="{duration_ms}ms"/> '
+
+
+def _emotion(tones: list[str]) -> str | None:
+    """The first of the tones that is an emotion, not a speed."""
+    return next((tone for tone in tones if tone not in CARTESIA_SPEEDS), None)
+
+
+def cartesia_speed(tones: list[str]) -> float | None:
+    """The speed a request in these tones asks for, or None for the voice's own."""
+    return next((CARTESIA_SPEEDS[tone] for tone in tones if tone in CARTESIA_SPEEDS), None)

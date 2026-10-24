@@ -91,3 +91,22 @@ async def test_each_request_sends_the_emotion_of_its_tones():
         ("(laughs)It's back.", "happy"),
         ("Anything else?", "calm"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_each_request_sends_the_speed_of_its_tones():
+    session = _RecordingSession()
+    await run_test(
+        _service(session, emotion="calm", speed=1.0),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("<<calm slow>> It's A B 7 4. <<calm>> Anything else?"),
+            LLMFullResponseEndFrame(),
+        ],
+        pipeline_params=PipelineParams(enable_expressive_conversation=True),
+    )
+
+    assert [
+        (p["text"], p["voice_setting"].get("emotion"), p["voice_setting"]["speed"])
+        for p in session.payloads
+    ] == [("It's A B 7 4.", "calm", 0.75), ("Anything else?", "calm", 1.0)]

@@ -422,6 +422,8 @@ class ExpressionFormatter:
         # was written after them.
         words_at: int | None = None
         event_since_words = False
+        # The tones of the request's last words.
+        last_tones: list[str] | None = None
         for segment in segments:
             if isinstance(segment, Text):
                 tones = self._performed_tones(list(segment.tones), capabilities)
@@ -451,6 +453,7 @@ class ExpressionFormatter:
                 if words is not None:
                     words_at = len(parts)
                     parts.append(self._format(words, tones))
+                    last_tones = tones
             else:
                 event_since_words = True
                 if _performs(segment, capabilities):
@@ -461,6 +464,8 @@ class ExpressionFormatter:
                     self._warn_unperformed(_tag(segment))
         if first_tones is not None:
             self._tones = first_tones
+        if last_tones is not None and text_type != TextType.TOKEN:
+            parts.append(self._adapter().format_end(last_tones))
         request = _SPACES.sub(" ", "".join(parts))
         return (request if text_type == TextType.TOKEN else request.strip()), spans
 

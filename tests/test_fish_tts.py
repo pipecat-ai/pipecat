@@ -155,6 +155,22 @@ class TestS2ExpressionAdapter:
         # A tone tag separates tones by spaces.
         assert all(len(term.name.split()) == 1 for term in capabilities.tones)
 
+    def test_speed_tones_are_written_as_speaking_tags(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().tones}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm][speaking slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], None) == "[speaking quickly] Hi."
+
+    def test_a_pace_is_set_back_where_a_speed_tone_ends(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        # Within a request, the words after the slow ones set the pace back...
+        assert adapter.format_text(", thanks.", ["calm"], ["calm", "slow"]) == (
+            "[normal pace][calm] , thanks."
+        )
+        # ...and a request that ends slow sets it back at its end.
+        assert adapter.format_end(["calm", "slow"]) == " [normal pace]"
+        assert adapter.format_end(["calm"]) == ""
+
     def test_tags_where_modes_change(self):
         adapter = FishAudioS2ExpressionAdapter()
         assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."

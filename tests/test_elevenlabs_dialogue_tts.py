@@ -566,6 +566,12 @@ class TestAudioTagExpressionAdapter:
         assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
         assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
 
+    def test_speed_tones_are_written_as_pace_tags(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().tones}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm] [slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], ["calm"]) == "[quickly] Hi."
+
     def test_return_to_baseline_formats_nothing(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.format_text("Hi.", [], ["excited"]) == "Hi."

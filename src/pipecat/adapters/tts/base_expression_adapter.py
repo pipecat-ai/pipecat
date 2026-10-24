@@ -54,6 +54,20 @@ class BaseExpressionAdapter:
         """
         return text
 
+    def format_end(self, tones: list[str]) -> str:
+        """Close a sentence's request, given the tones its last words are spoken in.
+
+        For a service whose markup lasts past the request it is sent in, so
+        the request can set the delivery back for the text after it.
+
+        Args:
+            tones: The tones of the request's last words.
+
+        Returns:
+            The text to end the request with, or an empty string.
+        """
+        return ""
+
     def format_event(self, name: str) -> str:
         """Format a supported event, such as a laugh, at its place in the text.
 

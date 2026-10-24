@@ -37,6 +37,11 @@ NEUTRAL_TONE = "neutral"
 # The tone of stressed words, written ^^words^^.
 EMPHASIS_TONE = "emphasis"
 
+# The tones that slow the words down and speed them up. Part of the protocol,
+# so every service that performs speed names them the same.
+SLOW_TONE = "slow"
+FAST_TONE = "fast"
+
 
 class ToneScope(Enum):
     """Where in a response a TTS service can change tone.
@@ -113,3 +118,10 @@ class ExpressionCapabilities:
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     tone_scope: ToneScope = ToneScope.ANYWHERE
+
+
+# The speed tones, as a service that performs them declares them.
+SPEED_TONES = [
+    ExpressionTerm(SLOW_TONE, "to say something carefully, such as a number, a code or an address"),
+    ExpressionTerm(FAST_TONE, "to say something in passing"),
+]

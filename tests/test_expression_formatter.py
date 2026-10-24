@@ -303,6 +303,30 @@ async def test_punctuation_after_an_event_closes_the_words_before_it(text, shown
     assert (await expression.format(segments, TextType.SENTENCE, same, lambda w: w))[0] == sent
 
 
+class ClosingAdapter(DeclaredAdapter):
+    """Closes each request with the tones its last words are spoken in."""
+
+    def format_end(self, tones):
+        return f" </{','.join(tones)}>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text_type, ends_with",
+    [(TextType.SENTENCE, "</calm>"), (TextType.TOKEN, " up.")],
+)
+async def test_a_sentence_request_is_closed_by_the_adapter(text_type, ends_with):
+    adapter = ClosingAdapter(tones=["calm"])
+    expression = ExpressionFormatter(lambda: adapter, owner="tts")
+
+    request, _ = await expression.format(
+        expression.parse("<<calm>> It's back up."), text_type, same, lambda w: w
+    )
+
+    # A streamed token is followed by more of the same request, so isn't closed.
+    assert request.endswith(ends_with)
+
+
 @pytest.mark.asyncio
 async def test_a_request_leaves_out_what_the_service_cant_perform():
     expression = formatter()
