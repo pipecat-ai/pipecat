@@ -207,6 +207,7 @@ class SambaNovaLLMService(OpenAILLMService):
                         continue
 
                     if chunk.choices[0].delta.tool_calls:
+                        self._note_tool_call_detected()
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)

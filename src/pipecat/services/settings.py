@@ -39,6 +39,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from loguru import logger
@@ -55,6 +56,20 @@ if TYPE_CHECKING:
 # "this service doesn't support this field". Every delta field defaults to it so
 # deltas stay sparse and ``apply_update`` can skip untouched fields. It must
 # never appear in a store-mode object — see ``validate_complete()``.
+
+
+class ToolCallPolicy(StrEnum):
+    """Policy for handling streamed tool calls.
+
+    Parameters:
+        PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED: Preserve streamed text before and after
+            tool-call detection.
+        SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED: Preserve text before tool-call detection and
+            suppress subsequent text in the same response.
+    """
+
+    PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED = "preserve_text_after_tool_call_detected"
+    SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED = "suppress_text_after_tool_call_detected"
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +351,13 @@ class LLMSettings(ServiceSettings):
             runs at its provider's default. Services that otherwise send each
             model its lowest thinking setting, for the fastest responses, send
             none. ``BackendLLMWorker`` sets it on its LLM. Defaults to False.
+
+        tool_call_text_policy: Policy for text emitted in the same response as a
+            tool call. ``PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED`` keeps streamed text before and after
+            tool-call detection; ``SUPPRESS_TEXT_AFTER_TOOL_CALL_DETECTED`` keeps text before
+            the first tool call and suppresses subsequent text in the same
+            response. Set to ``None`` for services that don't stream
+            TTS-bound text (e.g. realtime speech-to-speech services).
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -351,6 +373,9 @@ class LLMSettings(ServiceSettings):
         default_factory=lambda: NOT_GIVEN
     )
     use_provider_thinking_default: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tool_call_text_policy: ToolCallPolicy | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass

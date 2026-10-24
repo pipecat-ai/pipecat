@@ -43,7 +43,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -330,6 +330,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             user_turn_completion_config=None,
             thinking=None,
             safety_settings=None,
+            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
             extra={},
         )
 
@@ -826,6 +827,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                 # text, so the call itself is what the caller gets
                                 # and TTFAT ends here rather than going unmeasured.
                                 await self.stop_ttfat_metrics()
+                                self._note_tool_call_detected()
                                 function_call = part.function_call
                                 function_call_id = function_call.id or str(uuid.uuid4())
                                 logger.debug(
