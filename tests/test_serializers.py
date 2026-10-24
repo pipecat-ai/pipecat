@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from pipecat.bus.adapters.base import TypeAdapter
 from pipecat.bus.messages import (
     BusActivateWorkerMessage,
     BusCancelMessage,
@@ -20,7 +21,7 @@ from pipecat.bus.messages import (
     BusMessage,
 )
 from pipecat.bus.serializers import JSONMessageSerializer
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import InputImageRawFrame, OutputImageRawFrame, TextFrame
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.processors.frame_processor import FrameDirection
 
@@ -39,6 +40,20 @@ class _UserInfo(BaseModel):
 @dataclass(kw_only=True)
 class _MessageWithNonInit(BusDataMessage):
     tag: str = field(init=False, default="default")
+
+
+class _TupleAdapter(TypeAdapter):
+    def __init__(self):
+        self.serialize_calls = 0
+        self.deserialize_calls = 0
+
+    def serialize(self, obj, serialize_value):
+        self.serialize_calls += 1
+        return {"items": serialize_value(list(obj))}
+
+    def deserialize(self, data, deserialize_value, target_type=None):
+        self.deserialize_calls += 1
+        return tuple(deserialize_value(data["items"]))
 
 
 class TestJSONMessageSerializer(unittest.TestCase):
@@ -145,6 +160,43 @@ class TestJSONMessageSerializer(unittest.TestCase):
         self.assertEqual(restored.frame.text, "hello world")
         self.assertEqual(restored.direction, FrameDirection.DOWNSTREAM)
         self.assertEqual(restored.source, "task_a")
+
+    def test_round_trip_image_frame_dimensions(self):
+        """Network bus serialization preserves built-in image frame dimensions."""
+        for frame_type in (InputImageRawFrame, OutputImageRawFrame):
+            with self.subTest(frame_type=frame_type):
+                frame = frame_type(image=bytes(range(6)), size=(2, 1), format="RGB")
+                message = BusFrameMessage(
+                    source="camera",
+                    frame=frame,
+                    direction=FrameDirection.DOWNSTREAM,
+                )
+
+                restored = self.serializer.deserialize(self.serializer.serialize(message))
+
+                self.assertIsInstance(restored.frame, frame_type)
+                self.assertEqual(restored.frame.image, frame.image)
+                self.assertEqual(restored.frame.size, (2, 1))
+                self.assertIsInstance(restored.frame.size, tuple)
+
+    def test_registered_tuple_adapter_takes_precedence(self):
+        """Registered adapters override built-in tuple serialization."""
+        adapter = _TupleAdapter()
+        self.serializer.register_adapter(tuple, adapter)
+        message = BusJobResponseMessage(
+            source="worker",
+            job_id="tuple-adapter",
+            status=JobStatus.COMPLETED,
+            response={"size": (2, 1)},
+        )
+
+        data = self.serializer.serialize(message)
+        restored = self.serializer.deserialize(data)
+
+        self.assertIn(b'"__type__":"builtins.tuple"', data)
+        self.assertEqual(restored.response["size"], (2, 1))
+        self.assertEqual(adapter.serialize_calls, 1)
+        self.assertEqual(adapter.deserialize_calls, 1)
 
     def test_frame_message_upstream_direction(self):
         """UPSTREAM direction preserved in round-trip."""
