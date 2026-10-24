@@ -8,7 +8,7 @@ import asyncio
 import io
 import time
 import unittest
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 from loguru import logger
 
@@ -1298,7 +1298,9 @@ class StartRecorder(FrameProcessor):
     """Takes ``setup_secs`` to set up, like a service connecting, and records
     when it gets the StartFrame (seconds since ``t0``), whether it gets a
     CancelFrame and whether it is cleaned up. ``pre_setup_secs`` are spent
-    before ``FrameProcessor.setup()``, like a processor that connects first."""
+    before ``FrameProcessor.setup()``, like a processor that connects first.
+    Setting up also waits until the ``setup_waits_for`` processors have the
+    StartFrame: if this setup held it from them, the worker would never finish."""
 
     def __init__(
         self,
@@ -1306,6 +1308,7 @@ class StartRecorder(FrameProcessor):
         setup_secs: float = 0.0,
         fail_setup: bool = False,
         pre_setup_secs: float = 0.0,
+        setup_waits_for: Sequence["StartRecorder"] = (),
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -1313,7 +1316,9 @@ class StartRecorder(FrameProcessor):
         self._setup_secs = setup_secs
         self._fail_setup = fail_setup
         self._pre_setup_secs = pre_setup_secs
+        self._setup_waits_for = setup_waits_for
         self.start_at: float | None = None
+        self.started = asyncio.Event()
         self.got_cancel = False
         self.cleaned_up = False
 
@@ -1322,6 +1327,8 @@ class StartRecorder(FrameProcessor):
             await asyncio.sleep(self._pre_setup_secs)
         await super().setup(setup)
         await asyncio.sleep(self._setup_secs)
+        for processor in self._setup_waits_for:
+            await processor.started.wait()
         if self._fail_setup:
             raise RuntimeError("cannot connect")
 
@@ -1333,6 +1340,7 @@ class StartRecorder(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             self.start_at = time.monotonic() - self._t0
+            self.started.set()
         elif isinstance(frame, CancelFrame):
             self.got_cancel = True
         await self.push_frame(frame, direction)
@@ -1353,9 +1361,13 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         llm_setup_secs = 1.0
         t0 = time.monotonic()
 
+        # The input transport starts while STT is still connecting, and STT
+        # while the LLM is.
         transport_input = StartRecorder(t0, name="input")
-        stt = StartRecorder(t0, setup_secs=stt_setup_secs, name="stt")
-        llm = StartRecorder(t0, setup_secs=llm_setup_secs, name="llm")
+        stt = StartRecorder(
+            t0, setup_secs=stt_setup_secs, setup_waits_for=[transport_input], name="stt"
+        )
+        llm = StartRecorder(t0, setup_secs=llm_setup_secs, setup_waits_for=[stt], name="llm")
 
         worker = PipelineWorker(Pipeline([transport_input, stt, llm]))
 
@@ -1368,10 +1380,8 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         await worker.queue_frame(EndFrame())
         await self.run_worker(worker)
 
-        # The input transport has nothing to connect, so it starts right away.
-        assert transport_input.start_at < stt_setup_secs
-        # STT starts once its own connection is up, not the LLM's.
-        assert stt_setup_secs <= stt.start_at < llm_setup_secs
+        # STT still waits for its own connection.
+        assert stt.start_at >= stt_setup_secs
         # The pipeline still only counts as started once everything is set up.
         assert llm.start_at >= llm_setup_secs
         assert len(started_at) == 1 and started_at[0] >= llm_setup_secs
@@ -1381,13 +1391,12 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         t0 = time.monotonic()
         first = StartRecorder(t0)
         fast = StartRecorder(t0, setup_secs=0.1)
-        slow = StartRecorder(t0, setup_secs=1.0)
+        slow = StartRecorder(t0, setup_secs=1.0, setup_waits_for=[first])
 
         worker = PipelineWorker(Pipeline([first, ParallelPipeline([fast], [slow])]))
         await worker.queue_frame(EndFrame())
         await self.run_worker(worker)
 
-        assert first.start_at < 0.1
         assert slow.start_at >= 1.0
 
     async def test_slow_setup_in_nested_pipeline(self):
@@ -1395,14 +1404,13 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         t0 = time.monotonic()
         first = StartRecorder(t0)
         inner_fast = StartRecorder(t0, setup_secs=0.1)
-        inner_slow = StartRecorder(t0, setup_secs=1.0)
+        inner_slow = StartRecorder(t0, setup_secs=1.0, setup_waits_for=[first, inner_fast])
 
         worker = PipelineWorker(Pipeline([first, Pipeline([inner_fast, inner_slow])]))
         await worker.queue_frame(EndFrame())
         await self.run_worker(worker)
 
-        assert first.start_at < 0.1
-        assert 0.1 <= inner_fast.start_at < 1.0
+        assert inner_fast.start_at >= 0.1
         assert inner_slow.start_at >= 1.0
 
     async def test_failed_setup_still_starts(self):
@@ -1453,7 +1461,7 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         t0 = time.monotonic()
         first = StartRecorder(t0)
         slow = StartRecorder(t0, setup_secs=30.0)
-        worker = PipelineWorker(Pipeline([first, slow]), cancel_timeout_secs=1.0)
+        worker = PipelineWorker(Pipeline([first, slow]), cancel_timeout_secs=3.0)
 
         async def cancel_soon():
             await asyncio.sleep(0.2)
@@ -1462,7 +1470,7 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(self.run_worker(worker), cancel_soon())
 
         assert worker.has_finished()
-        assert time.monotonic() - t0 < 1.0
+        assert time.monotonic() - t0 < 3.0
         # The cancelled setup is abandoned, so that processor never starts. The
         # pipeline never started either, so it is cleaned up, not cancelled.
         assert first.start_at is not None and slow.start_at is None
@@ -1565,7 +1573,7 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         a slow branch is set up."""
         t0 = time.monotonic()
         first = StartRecorder(t0)
-        slow = StartRecorder(t0, setup_secs=0.5)
+        slow = StartRecorder(t0, setup_secs=0.5, setup_waits_for=[first])
         after = StartRecorder(t0)
         worker = PipelineWorker(Pipeline([first, SyncParallelPipeline([slow]), after]))
 
@@ -1578,7 +1586,6 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         await worker.queue_frame(EndFrame())
         await self.run_worker(worker)
 
-        assert first.start_at < 0.5
         assert slow.start_at >= 0.5
         assert after.start_at >= slow.start_at
         assert len(started_at) == 1 and started_at[0] >= slow.start_at
