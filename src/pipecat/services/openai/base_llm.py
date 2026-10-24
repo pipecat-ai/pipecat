@@ -186,6 +186,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         settings: Settings | None = None,
         retry_timeout_secs: float | None = 5.0,
         retry_on_timeout: bool | None = False,
+        max_retries: int | None = None,
+        request_timeout_secs: float | None = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -217,6 +219,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             retry_on_timeout: Whether to re-issue the request once if the first
                 attempt produces no output within ``retry_timeout_secs``. The
                 retry is unbounded.
+            max_retries: How many times the OpenAI client retries a failed request
+                before raising. Each retry may first wait for the server's
+                ``Retry-After``, so a real-time app may set this to 0 to see
+                failures at once and handle them itself. If None, the client's
+                default (2) applies.
+            request_timeout_secs: OpenAI client timeout for each request, in
+                seconds. On a streamed response it also bounds the wait for
+                each chunk. If None, the client's default (600 seconds) applies.
             **kwargs: Additional arguments passed to the parent LLMService.
 
         Raises:
@@ -279,6 +289,12 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             default_headers=default_headers,
             **kwargs,
         )
+        # Applied to the client create_client() built, so subclasses that
+        # override it (e.g. Azure) get these options too.
+        if max_retries is not None:
+            self._client = self._client.with_options(max_retries=max_retries)
+        if request_timeout_secs is not None:
+            self._client = self._client.with_options(timeout=request_timeout_secs)
 
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
