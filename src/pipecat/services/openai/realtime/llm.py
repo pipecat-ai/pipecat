@@ -66,10 +66,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import LLMSettings
-from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
+from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -208,6 +207,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         return instance
 
 
+@traced_realtime_llm
 class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     """OpenAI Realtime LLM service providing real-time audio and text communication.
 
@@ -1054,13 +1054,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             direction=FrameDirection.UPSTREAM,
         )
 
-    @traced_stt
-    async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
     async def handle_evt_input_audio_transcription_completed(self, evt):
         """Handle completion of input audio transcription.
 
@@ -1074,7 +1067,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt),
             FrameDirection.UPSTREAM,
         )
-        await self._handle_user_transcription(evt.transcript, True, Language.EN)
 
     async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
         futures = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
@@ -1087,7 +1079,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._response_active = True
         self._results_awaiting_response = False
 
-    @traced_openai_realtime(operation="llm_response")
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
@@ -1272,7 +1263,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         await self._connect()
 
-    @traced_openai_realtime(operation="llm_request")
     async def _create_response(self):
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True

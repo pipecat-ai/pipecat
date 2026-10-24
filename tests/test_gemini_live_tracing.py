@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Tests for the ``llm_setup`` span of ``traced_gemini_live``.
+
+``llm_setup`` is the one operation left on this decorator: replies and tool
+calls are traced by ``traced_realtime_llm`` (see ``test_traced_realtime_llm``).
+"""
+
 import unittest
 
 try:
@@ -16,56 +22,43 @@ try:
 except ImportError:
     HAS_OPENTELEMETRY = False
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.utils.tracing.service_decorators import traced_gemini_live
 
 
+class _StubSettings:
+    def __init__(self, system_instruction):
+        self.system_instruction = system_instruction
+
+    def given_fields(self):
+        return {}
+
+
 class _StubGeminiLiveService:
-    """Minimal stand-in for the Gemini Live service.
+    """Minimal stand-in exposing only what ``traced_gemini_live`` reads."""
 
-    Exposes only the attributes the ``traced_gemini_live`` decorator reads, and
-    a ``_tool_result`` method decorated exactly as the real service decorates it
-    — same operation, same positional signature ``(tool_call_id, tool_name,
-    tool_result_message)``.
-    """
-
-    def __init__(self):
+    def __init__(self, tools=None, system_instruction=None):
         self._tracing_enabled = True
         self._tracing_context = None
         self._settings = None
+        self.settings = _StubSettings(system_instruction)
         self._model_name = "gemini-live-test"
+        self._tools = tools
+        self._context = None
 
-    @traced_gemini_live(operation="llm_tool_result")
-    async def _tool_result(self, tool_call_id, tool_name, tool_result_message):
-        """No-op body; the decorator is what we're exercising."""
+    @traced_gemini_live(operation="llm_setup")
+    async def _setup(self):
         return None
 
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
-class TestGeminiLiveToolResultTracing(unittest.IsolatedAsyncioTestCase):
-    """Tests for the ``llm_tool_result`` branch of ``traced_gemini_live``.
-
-    Regression coverage for the decorator reading the decorated method's
-    positional arguments (``tool_call_id``, ``tool_call_name``, ``result``).
-    The previous implementation treated ``args[0]`` — actually the
-    ``tool_call_id`` string — as a dict of result fields, so it captured
-    nothing and every ``tool.*`` attribute silently went missing from the span.
-    """
-
+class TestGeminiLiveSetupTracing(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        """Wire an in-memory span exporter into the global tracer provider.
-
-        OpenTelemetry only allows the global tracer provider to be set once per
-        process, and the decorator resolves its tracer via
-        ``trace.get_tracer("pipecat")`` — so we install the provider once and
-        clear the exporter between tests rather than re-setting it.
-        """
         cls._exporter = InMemorySpanExporter()
         processor = SimpleSpanProcessor(cls._exporter)
         existing = trace.get_tracer_provider()
-        # Attach to whatever provider is already installed (another test may
-        # have set one), since it can't be replaced once set; otherwise install
-        # our own.
         if isinstance(existing, TracerProvider):
             existing.add_span_processor(processor)
         else:
@@ -76,67 +69,36 @@ class TestGeminiLiveToolResultTracing(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self._exporter.clear()
 
-    def _tool_result_span(self):
-        spans = self._exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1, "expected exactly one llm_tool_result span")
-        span = spans[0]
-        self.assertEqual(span.name, "llm_tool_result")
-        return span
+    def _setup_span(self):
+        spans = [s for s in self._exporter.get_finished_spans() if s.name == "llm_setup"]
+        self.assertEqual(len(spans), 1)
+        return spans[0]
 
-    async def test_captures_tool_result_attributes(self):
-        """The call_id, function name, and result payload land on the span.
+    async def test_records_tools_and_system_instruction(self):
+        tools = ToolsSchema(
+            standard_tools=[
+                FunctionSchema(
+                    name="get_weather",
+                    description="Weather lookup",
+                    properties={"city": {"type": "string"}},
+                    required=["city"],
+                )
+            ]
+        )
+        service = _StubGeminiLiveService(tools=tools, system_instruction="Be brief.")
 
-        These are passed positionally, exactly as the real service calls
-        ``_tool_result(tool_call_id, tool_name, tool_result_message)``.
-        """
+        await service._setup()
+
+        attrs = self._setup_span().attributes
+        self.assertEqual(attrs["gen_ai.operation.name"], "llm_setup")
+        self.assertEqual(attrs["gen_ai.request.model"], "gemini-live-test")
+        self.assertEqual(attrs["tools.names"], "get_weather")
+        self.assertEqual(attrs["gen_ai.system_instructions"], "Be brief.")
+
+    async def test_tracing_disabled_records_nothing(self):
         service = _StubGeminiLiveService()
+        service._tracing_enabled = False
 
-        await service._tool_result("call-123", "get_weather", {"temperature": 72})
+        await service._setup()
 
-        attrs = self._tool_result_span().attributes
-        self.assertEqual(attrs["tool.call_id"], "call-123")
-        self.assertEqual(attrs["tool.function_name"], "get_weather")
-        self.assertIn('"temperature": 72', attrs["tool.result"])
-        self.assertEqual(attrs["tool.result_status"], "completed")
-
-    async def test_result_status_error(self):
-        """An ``error`` key in the result dict marks the span as errored."""
-        service = _StubGeminiLiveService()
-
-        await service._tool_result("call-err", "lookup", {"error": "not found"})
-
-        self.assertEqual(self._tool_result_span().attributes["tool.result_status"], "error")
-
-    async def test_result_status_success(self):
-        """A ``success`` key in the result dict marks the span as succeeded."""
-        service = _StubGeminiLiveService()
-
-        await service._tool_result("call-ok", "lookup", {"success": True, "value": 1})
-
-        self.assertEqual(self._tool_result_span().attributes["tool.result_status"], "success")
-
-    async def test_long_result_is_truncated(self):
-        """Result payloads over the 2000-char limit are truncated with an ellipsis."""
-        service = _StubGeminiLiveService()
-
-        await service._tool_result("call-big", "dump", {"blob": "x" * 5000})
-
-        result = self._tool_result_span().attributes["tool.result"]
-        self.assertTrue(result.endswith("..."))
-        self.assertLessEqual(len(result), 2003)
-
-    async def test_non_dict_result_omits_result_attribute(self):
-        """A non-dict result still records call_id/name but no result payload."""
-        service = _StubGeminiLiveService()
-
-        await service._tool_result("call-str", "echo", "just a string")
-
-        attrs = self._tool_result_span().attributes
-        self.assertEqual(attrs["tool.call_id"], "call-str")
-        self.assertEqual(attrs["tool.function_name"], "echo")
-        self.assertNotIn("tool.result", attrs)
-        self.assertNotIn("tool.result_status", attrs)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(self._exporter.get_finished_spans(), ())
