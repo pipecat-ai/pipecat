@@ -626,9 +626,15 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
             response = await self._create_message_stream(self._client.beta.messages.create, params)
 
-            # Function calling
-            tool_use_block = None
-            json_accumulator = ""
+            # Function calling. Each tool call streams as its own content block,
+            # identified by index, so tool blocks and argument accumulators are
+            # keyed by that index. Calls are collected as their blocks end and
+            # only dispatched when the terminal stop_reason is "tool_use": a
+            # stream cut short by e.g. max_tokens can end with incomplete tool
+            # input that must not be executed.
+            tool_use_blocks = {}
+            json_accumulators = {}
+            collected_tool_calls = []
 
             function_calls = []
             async for event in response:
@@ -643,8 +649,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                     if hasattr(event.delta, "text"):
                         await self._push_llm_text(event.delta.text)
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
-                    elif hasattr(event.delta, "partial_json") and tool_use_block:
-                        json_accumulator += event.delta.partial_json
+                    elif hasattr(event.delta, "partial_json") and tool_use_blocks:
+                        json_accumulators[event.index] = (
+                            json_accumulators.get(event.index, "") + event.delta.partial_json
+                        )
                         completion_tokens_estimate += self._estimate_tokens(
                             event.delta.partial_json
                         )
@@ -658,8 +666,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
-                        tool_use_block = event.content_block
-                        json_accumulator = ""
+                        tool_use_blocks[event.index] = event.content_block
+                        json_accumulators[event.index] = ""
                     elif event.content_block.type == "thinking":
                         await self.push_frame(
                             LLMThoughtStartFrame(
@@ -667,21 +675,38 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                                 llm=self.get_llm_adapter().id_for_llm_specific_messages,
                             )
                         )
-                elif (
-                    event.type == "message_delta"
-                    and hasattr(event.delta, "stop_reason")
-                    and event.delta.stop_reason == "tool_use"
-                ):
+                elif event.type == "content_block_stop":
+                    tool_use_block = tool_use_blocks.pop(event.index, None)
                     if tool_use_block:
-                        args = json.loads(json_accumulator) if json_accumulator else {}
-                        function_calls.append(
-                            FunctionCallFromLLM(
-                                context=context,
-                                tool_call_id=tool_use_block.id,
-                                function_name=tool_use_block.name,
-                                arguments=args,
+                        collected_tool_calls.append(
+                            (
+                                tool_use_block.id,
+                                tool_use_block.name,
+                                json_accumulators.pop(event.index, ""),
                             )
                         )
+                elif event.type == "message_delta" and getattr(event.delta, "stop_reason", None):
+                    # Only a response that stopped to invoke tools executes the
+                    # collected calls; a stream cut short by e.g. max_tokens
+                    # leaves incomplete tool input undelivered, like the base.
+                    if event.delta.stop_reason == "tool_use":
+                        for tool_call_id, function_name, json_accumulator in collected_tool_calls:
+                            try:
+                                args = json.loads(json_accumulator) if json_accumulator else {}
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"{self}: Failed to parse function call arguments: {json_accumulator}"
+                                )
+                                continue
+                            function_calls.append(
+                                FunctionCallFromLLM(
+                                    context=context,
+                                    tool_call_id=tool_call_id,
+                                    function_name=function_name,
+                                    arguments=args,
+                                )
+                            )
+                    collected_tool_calls.clear()
 
                 if event.type == "message_delta":
                     self._handle_stop_reason(event.delta)
