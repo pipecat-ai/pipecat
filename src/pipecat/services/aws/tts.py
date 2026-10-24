@@ -25,10 +25,8 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     StartFrame,
-    TextType,
     TTSAudioRawFrame,
     TTSStoppedFrame,
-    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
@@ -393,7 +391,7 @@ class AWSPollyTTSService(TTSService):
         arrive as newline-delimited JSON in the ``AudioStream`` body.
 
         This never raises: on any failure it returns an empty list so audio is
-        unaffected and the caller can fall back to whole-text output.
+        unaffected and the sentence is pushed untimed.
 
         Args:
             polly: An open aiobotocore Polly client.
@@ -422,26 +420,6 @@ class AWSPollyTTSService(TTSService):
         except (BotoCoreError, ClientError, ValueError, KeyError) as error:
             logger.warning(f"{self}: Polly speech marks fetch failed: {error}")
             return []
-
-    async def _push_fallback_text(self, text: str, context_id: str):
-        """Push the full text when no word marks were returned.
-
-        Without timestamps no per-word ``TTSTextFrame`` is emitted, so push the
-        whole text directly to keep the assistant conversation context in sync
-        with what was spoken (committed even if the turn is later interrupted).
-
-        Args:
-            text: The text that was synthesized.
-            context_id: The context ID for this TTS request.
-        """
-        text_clean = text.rstrip()
-        if not text_clean:
-            return
-        logger.debug(f"{self}: No speech marks received, pushing fallback text: [{text_clean}]")
-        fallback = TTSTextFrame(text_clean, text_type=TextType.SENTENCE, context_id=context_id)
-        ctx = self._tts_contexts.get(context_id)
-        fallback.append_to_context = ctx.append_to_context if ctx else True
-        await self.push_frame(fallback)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -515,13 +493,13 @@ class AWSPollyTTSService(TTSService):
                     if marks_task is not None:
                         word_marks = await marks_task
                         marks_task = None
+                        # Without marks, the base class pushes the sentence untimed
+                        # when the audio context ends.
                         if word_marks:
                             word_times = [
                                 (word, self._cumulative_time + start) for word, start in word_marks
                             ]
                             await self.add_word_timestamps(word_times, context_id)
-                        else:
-                            await self._push_fallback_text(text, context_id)
                         # Offset the next sentence by this utterance's audio duration.
                         self._cumulative_time += utterance_seconds
                 finally:

@@ -16,10 +16,17 @@ from unittest.mock import patch
 import pytest
 from botocore.exceptions import ClientError
 
-from pipecat.frames.frames import TTSStoppedFrame, TTSTextFrame
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TTSStoppedFrame,
+    TTSTextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.tts import AWSPollyTTSService
-from pipecat.services.tts_service import TTSContext, TTSService
+from pipecat.services.tts_service import TTSService
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 CTX = "ctx-1"
@@ -267,28 +274,22 @@ async def test_cancelling_run_tts_cancels_pending_marks_call():
 
 
 @pytest.mark.asyncio
-async def test_no_marks_pushes_fallback_text():
-    """Empty marks emit a single whole-text frame and add no word timestamps."""
+async def test_no_marks_pushes_sentence_once():
+    """Without word marks the sentence still reaches the context, exactly once."""
     service = _make_service()
-    _stub_for_run_tts(service)
-    captured = _capture_word_timestamps(service)
-    service._tts_contexts[CTX] = TTSContext(append_to_context=True)
-
-    pushed: list = []
-
-    async def _fake_push(frame, direction=FrameDirection.DOWNSTREAM):
-        pushed.append(frame)
-
-    service.push_frame = _fake_push
     service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5), marks=b""))
 
-    await _drain(service, "Hello world")
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello world. "),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=2.5),
+        ],
+    )
 
-    assert captured == []
-    text_frames = [f for f in pushed if isinstance(f, TTSTextFrame)]
-    assert len(text_frames) == 1
-    assert text_frames[0].text == "Hello world"
-    assert text_frames[0].append_to_context is True
+    assert [f.text for f in down if isinstance(f, TTSTextFrame)] == ["Hello world."]
 
 
 @pytest.mark.asyncio
