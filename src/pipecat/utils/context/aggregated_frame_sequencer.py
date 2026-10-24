@@ -6,6 +6,7 @@
 
 """Ordered sequencer for AggregatedTextFrame slots through TTS processing."""
 
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -295,6 +296,9 @@ class AggregatedFrameSequencer:
         """
         self._name = name
         self._streaming = streaming
+        # Tags only the LLM's text carries, such as expressive conversation's,
+        # which word tracking passes over in it. Set by the TTS service.
+        self.llm_markup: re.Pattern[str] | None = None
         self._slots: list[_AggregatedFrameSlot] = []
         self._context_append_to_context: dict[str, bool] = {}
         # Transient per-context pending-sentence state, keyed by context ID. An entry
@@ -362,6 +366,7 @@ class AggregatedFrameSequencer:
                     tts_text,
                     llm_text=frame.raw_text or frame.text,
                     user_facing_text=frame.text,
+                    llm_markup=self.llm_markup,
                 )
                 if build_tracker
                 else None,
@@ -815,7 +820,10 @@ class AggregatedFrameSequencer:
         frame.append_to_context = False
         tracker = (
             WordCompletionTracker(
-                agg.tts_text, llm_text=agg.llm_text or None, user_facing_text=agg.user_facing_text
+                agg.tts_text,
+                llm_text=agg.llm_text or None,
+                user_facing_text=agg.user_facing_text,
+                llm_markup=self.llm_markup,
             )
             if sc.build_tracker
             else None
@@ -824,10 +832,12 @@ class AggregatedFrameSequencer:
         frames: list[Frame] = [frame]
 
         if not sc.build_tracker:
+            # Trimmed like a sentence-mode unit: the context joins its parts with
+            # a space, and a streamed sentence keeps the spaces of its tokens.
             word_frame = TTSTextFrame(
-                agg.user_facing_text,
+                agg.user_facing_text.strip(),
                 sc.text_type,
-                raw_text=agg.llm_text or None,
+                raw_text=agg.llm_text.strip() or None,
                 segment_id=frame.id,
             )
             word_frame.context_id = context_id

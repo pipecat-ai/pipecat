@@ -240,25 +240,25 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
         # (<a>, </a>)
         assert parse_start_end_tags("Hello from <a>Pipecat</a>!", [("<a>", "</a>")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 0) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 6) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
 
         # (spell(, ))
         assert parse_start_end_tags("Hello from spell(Pipecat)!", [("spell(", ")")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from spell(Pipecat", [("spell(", ")")], None, 0) == (
             ("spell(", ")"),
-            24,
+            17,
         )
 
     async def test_multiple(self):
@@ -267,15 +267,26 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             "Hello from <a>Pipecat</a>! Hello <a>World</a>!", [("<a>", "</a>")], None, 0
         ) == (
             None,
-            46,
+            45,
         )
 
         assert parse_start_end_tags(
             "Hello from <a>Pipecat</a>! Hello <a>World", [("<a>", "</a>")], None, 0
         ) == (
             ("<a>", "</a>"),
-            41,
+            36,
         )
+
+    async def test_several_pairs(self):
+        tags = [("<<", ">>"), ("[[", "]]")]
+        # A tag of any pair opens, not only the first pair's.
+        assert parse_start_end_tags("It's [[la", tags, None, 0) == (("[[", "]]"), 7)
+        assert parse_start_end_tags("<<calm>> It's [[laugh]] back", tags, None, 0) == (None, 23)
+
+    async def test_a_pair_with_one_delimiter(self):
+        tags = [("^^", "^^")]
+        assert parse_start_end_tags("It's ^^back", tags, None, 0) == (("^^", "^^"), 7)
+        assert parse_start_end_tags("It's ^^back up^^ now", tags, None, 0) == (None, 16)
 
 
 class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):

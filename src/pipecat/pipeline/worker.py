@@ -173,6 +173,9 @@ class PipelineParams(BaseModel):
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). TTS services then read the
+            expression tags an LLM writes into its reply instead of speaking them.
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
@@ -188,6 +191,7 @@ class PipelineParams(BaseModel):
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
@@ -1409,6 +1413,7 @@ class PipelineWorker(BaseWorker):
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
+            enable_expressive_conversation=self._params.enable_expressive_conversation,
             enable_metrics=self._params.enable_metrics,
             enable_tracing=self._enable_tracing,
             enable_usage_metrics=self._params.enable_usage_metrics,

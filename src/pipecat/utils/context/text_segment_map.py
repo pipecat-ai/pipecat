@@ -224,6 +224,7 @@ class TextSegmentMap:
         tts_text: str,
         original_text: str,
         llm_text: str | None = None,
+        llm_markup: re.Pattern[str] | None = None,
     ):
         """Line the three texts up against each other.
 
@@ -238,10 +239,19 @@ class TextSegmentMap:
             llm_text: The same content as the LLM wrote it, which may add
                 delimiters the other two never see. Rides its own cursor rather
                 than being diffed. Defaults to *original_text*.
+            llm_markup: Tags only *llm_text* carries, beyond ``<...>`` markup,
+                which its cursor passes over without counting their letters.
         """
         self._tts_text = tts_text
         self._original_text = original_text
         self._llm_text = llm_text if llm_text is not None else original_text
+        # The LLM text as its cursor reads it: the extra tags blanked to ``<...>``
+        # of the same length, so positions in it are positions in the LLM text.
+        self._llm_scan = (
+            llm_markup.sub(lambda m: "<" + " " * (len(m.group()) - 2) + ">", self._llm_text)
+            if llm_markup
+            else self._llm_text
+        )
         self._segments: list[TextSegment] = self._build_segments(tts_text, original_text)
         self._reset_state()
 
@@ -715,9 +725,9 @@ class TextSegmentMap:
         the source spells differently -- is still credited to the word that
         crossed it.
         """
-        self._llm_spoken_pos = advance_by_chars(self._llm_text, self._llm_spoken_pos, len(crossed))
+        self._llm_spoken_pos = advance_by_chars(self._llm_scan, self._llm_spoken_pos, len(crossed))
         self._llm_pos = max(
-            advance_by_alnums(self._llm_text, self._llm_pos, n_alnum), self._llm_spoken_pos
+            advance_by_alnums(self._llm_scan, self._llm_pos, n_alnum), self._llm_spoken_pos
         )
 
     def _commit_transformed_span(self, seg: TextSegment) -> None:
@@ -725,7 +735,7 @@ class TextSegmentMap:
         self._user_facing_pos = seg.original_end
         # The original's count, not the TTS side's: llm_text holds "$42.50"
         # (4 alnums), never the spoken "forty two dollars".
-        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, seg.original_alnum_count)
+        self._llm_pos = advance_by_alnums(self._llm_scan, self._llm_pos, seg.original_alnum_count)
         # The span is spoken in full or not at all, so both cursors land together.
         self._llm_spoken_pos = self._llm_pos
 

@@ -354,6 +354,36 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [("new", sentence.id), ("completed", sentence.id)],
         )
 
+    async def test_a_segment_reports_the_modes_of_each_word_as_it_is_spoken(self):
+        segment = self._segment("I'm back", TextType.SENTENCE)
+        first = self._progress(segment, "I'm", " back")
+        first.delivery = ["calm"]
+        second = self._progress(segment, "I'm back", "")
+        second.delivery = ["excited", "emphasis"]
+        await self._push(segment)
+        await self._push(self._word("I'm", segment))
+        await self._push(first)
+        await self._push(self._word("back", segment))
+        await self._push(second)
+
+        self.assertEqual(
+            [(data.spoken_status, data.delivery) for data in self._sent_outputs()],
+            [("new", None), ("in-progress", ["calm"]), ("completed", ["excited", "emphasis"])],
+        )
+
+    async def test_an_expression_sound_is_a_segment_of_its_own_once_performed(self):
+        laugh = TTSTextFrame("laugh", TextType.EXPRESSION_SOUND, context_id="turn")
+        laugh.will_be_spoken = True
+        await self._push(laugh)
+
+        self.assertEqual(
+            [
+                (d.text, d.text_type, d.spoken_status, d.segment_id, d.delivery)
+                for d in self._sent_outputs()
+            ],
+            [("laugh", TextType.EXPRESSION_SOUND, "completed", laugh.id, None)],
+        )
+
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):
         status = self._segment("One moment, please.", "status")
         await self._push(status)
@@ -477,6 +507,17 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
 
         self.observer.send_rtvi_message.assert_not_awaited()
         self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_an_expression_sound_is_kept_from_older_clients(self):
+        for version in ([2, 2, 0], [1, 4, 0]):
+            with self.subTest(version=version):
+                self._connect_client(version)
+                for text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE):
+                    sound = TTSTextFrame("laugh", text_type, context_id="turn")
+                    sound.will_be_spoken = True
+                    await self._push(sound)
+
+                self.observer.send_rtvi_message.assert_not_awaited()
 
     async def test_a_segment_after_a_backchannel_is_sent_to_older_clients(self):
         self._connect_client([2, 1, 0])
