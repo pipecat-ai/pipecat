@@ -13,7 +13,10 @@ from loguru import logger
 from pipecat.frames.frames import (
     EagerTranscriptionFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
+    UserStartedSpeakingFrame,
     UserTurnResponseCancelFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
@@ -88,7 +91,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         return self._match_policy
 
     async def process_frame(self, frame: Frame):
-        """Start a speculation on an eager end of turn, or withdraw one.
+        """Start a speculation on an eager end of turn, withdraw one, or forget one.
 
         Args:
             frame: The frame to be analyzed.
@@ -99,6 +102,17 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             # The service withdrew its prediction, and its frame reaches every
             # consumer on its own. Only our own state is left to clear.
             await self._forget()
+        elif isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+            ),
+        ):
+            # Speech voids the turn's answer, and with it the confirmation of
+            # the speculation that gave it.
+            self._confirmed = None
 
         await super().process_frame(frame)
 

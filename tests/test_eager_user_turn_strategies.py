@@ -19,6 +19,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStoppedSpeakingFrame,
     UserTurnResponseCancelFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -738,3 +740,28 @@ class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSpeechVoidsTheConfirmation(unittest.IsolatedAsyncioTestCase):
+    """Speech after a confirmation voids the turn's answer, and the confirmation with it."""
+
+    async def test_a_decision_after_speech_confirms_nothing(self):
+        strategy = EagerUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        decisions = []
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            decisions.append(params)
+
+        await strategy.handle_user_turn_started()
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(eager("Book a flight"))
+        await strategy.process_frame(final("Book a flight"))
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([d.confirms_speculation for d in decisions], [True, False])
+        await strategy.cleanup()
