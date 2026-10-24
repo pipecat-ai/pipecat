@@ -202,6 +202,29 @@ async def test_fetch_word_marks_parses_ndjson():
 
 
 @pytest.mark.asyncio
+async def test_word_marks_unescape_ssml_characters():
+    """Marks for escaped characters keep every word of the sentence timed."""
+    service = _make_service()
+    marks = _ndjson(
+        [("Call", 0), ("AT&amp;T", 200), ("if", 500), ("x", 600), ("&lt;", 700), ("5.", 800)]
+    )
+    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.0), marks=marks))
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Call AT&T if x < 5. "),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=2.5),
+        ],
+    )
+
+    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
+    assert words == ["Call", "AT&T", "if", "x", "<", "5."]
+
+
+@pytest.mark.asyncio
 async def test_fetch_word_marks_returns_empty_on_failure():
     """A Polly error or a missing AudioStream yields [] and never raises."""
     service = _make_service()

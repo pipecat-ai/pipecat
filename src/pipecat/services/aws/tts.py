@@ -14,7 +14,7 @@ via Polly SpeechMarks.
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 from loguru import logger
 from pydantic import BaseModel
@@ -414,8 +414,10 @@ class AWSPollyTTSService(TTSService):
                     continue
                 mark = json.loads(line)
                 if mark.get("type") == "word":
-                    # Polly reports the start time in milliseconds.
-                    word_times.append((mark["value"], mark["time"] / 1000.0))
+                    # A mark's value is a substring of the SSML input, so undo
+                    # the escaping applied in _construct_ssml. Polly reports the
+                    # start time in milliseconds.
+                    word_times.append((unescape(mark["value"]), mark["time"] / 1000.0))
             return word_times
         except (BotoCoreError, ClientError, ValueError, KeyError) as error:
             logger.warning(f"{self}: Polly speech marks fetch failed: {error}")
