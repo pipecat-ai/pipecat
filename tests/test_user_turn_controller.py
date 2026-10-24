@@ -33,6 +33,7 @@ from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
+    UserTurnStartedParams,
     VADUserTurnStartStrategy,
 )
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
@@ -1278,6 +1279,97 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await on_inference.decide()
         _, params = self.stops[0]
         self.assertFalse(params.confirms_speculation)
+
+
+class DecidingStartStrategy(BaseUserTurnStartStrategy):
+    """A start strategy that decides the user started when a test says so."""
+
+    def __init__(self, result: ProcessFrameResult = ProcessFrameResult.CONTINUE, **kwargs):
+        super().__init__(**kwargs)
+        self.frames: list[Frame] = []
+        self._result = result
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        self.frames.append(frame)
+        return self._result
+
+    async def decide(self, **kwargs):
+        await self.trigger_user_turn_started(**kwargs)
+
+
+class TestStartModeAll(unittest.IsolatedAsyncioTestCase):
+    """With StrategyMode.ALL the turn starts once every start strategy has decided."""
+
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+        self.starts: list[tuple[BaseUserTurnStartStrategy | None, UserTurnStartedParams]] = []
+        self.stop = DecidingStopStrategy()
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _start(
+        self,
+        start: list[BaseUserTurnStartStrategy],
+        *,
+        start_mode: StrategyMode = StrategyMode.ALL,
+    ):
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=start, stop=[self.stop]),
+            user_turn_strategies_params=UserTurnStrategiesParams(start_mode=start_mode),
+        )
+        await self.controller.setup(frame_processor_setup(self.task_manager))
+
+        @self.controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            self.starts.append((strategy, params))
+
+    async def test_the_turn_starts_once_every_strategy_decides(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last])
+
+        await first.decide()
+        self.assertEqual(self.starts, [])
+
+        await last.decide()
+        self.assertEqual([s for s, _ in self.starts], [last])
+
+    async def test_the_first_decision_starts_the_turn_in_first_mode(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last], start_mode=StrategyMode.FIRST)
+
+        await first.decide()
+
+        self.assertEqual([s for s, _ in self.starts], [first])
+
+    async def test_every_strategy_sees_every_frame(self):
+        blocking, other = DecidingStartStrategy(ProcessFrameResult.STOP), DecidingStartStrategy()
+        await self._start([blocking, other])
+
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+        self.assertEqual(len(other.frames), 1)
+
+    async def test_the_turn_start_combines_the_decisions(self):
+        quiet, other = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([quiet, other])
+
+        await quiet.decide(enable_interruptions=False)
+        await other.decide()
+
+        _, params = self.starts[0]
+        self.assertFalse(params.enable_interruptions)
+
+    async def test_each_turn_needs_its_own_decisions(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last])
+        await first.decide()
+        await last.decide()
+        await self.stop.decide()
+
+        await last.decide()
+
+        self.assertEqual(len(self.starts), 1)
 
 
 if __name__ == "__main__":

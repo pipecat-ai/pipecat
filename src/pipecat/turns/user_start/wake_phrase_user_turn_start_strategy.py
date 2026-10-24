@@ -15,8 +15,10 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
     UserSpeakingFrame,
+    UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -34,12 +36,27 @@ class _WakeState(enum.Enum):
 class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     """User turn start strategy that requires a wake phrase before interaction.
 
-    Blocks subsequent strategies until a wake phrase is detected in a final
-    transcription. After detection, allows interaction for a configurable
-    timeout period before requiring the wake phrase again. Use
+    Starts a turn when it hears a wake phrase in a final transcription,
+    and then, until a configurable timeout, whenever the user starts speaking
+    or a final transcription arrives, which covers speech VAD missed. Use
     ``single_activation=True`` to require the wake phrase before every turn.
+    Speech before the wake phrase is dropped from the aggregation.
 
-    This strategy should be placed first in the start strategies list.
+    It starts turns on its own, so use it as the only start strategy::
+
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])],
+            ),
+        )
+
+    To combine it with other start strategies, such as
+    ``MinWordsUserTurnStartStrategy``, put them in a ``StrategyMode.ALL`` list,
+    where it's one more condition a turn needs. In a ``StrategyMode.FIRST``
+    list next to other start strategies it has to come first: until it hears
+    the wake phrase, it keeps the strategies after it from seeing frames, and
+    once awake it starts turns itself, so the strategies after it no longer
+    decide.
 
     Event handlers available:
 
@@ -197,9 +214,21 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def _process_awake(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in AWAKE state.
 
-        Refreshes the timeout on activity frames (timeout mode only). Returns
-        CONTINUE so subsequent strategies can process the frame.
+        Starts a turn when the user starts speaking or a final
+        transcription arrives, and refreshes the timeout on activity frames
+        (timeout mode only). Returns CONTINUE so subsequent strategies can
+        process the frame.
         """
+        if isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                TranscriptionFrame,
+            ),
+        ):
+            await self.trigger_user_turn_started()
         if not self._single_activation:
             if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
                 self._refresh_timeout()

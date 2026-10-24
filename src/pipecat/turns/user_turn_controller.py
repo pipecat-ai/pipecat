@@ -59,12 +59,12 @@ class UserTurnController(BaseObject):
     This class manages user turn state (active/inactive), handles start and stop
     strategies, and emits events when user turns begin, end, or timeout occurs.
 
-    The first start strategy that fires starts a turn. How the turn ends
-    follows the ``stop_mode`` of its
-    :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`:
-    with ``StrategyMode.ALL``, the default, the turn ends once every stop
-    strategy has decided the user is done, and with ``StrategyMode.FIRST``
-    the first stop strategy to decide the user is done ends it. A stop
+    How a turn starts and ends follows the ``start_mode`` and ``stop_mode`` of
+    its :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`.
+    With ``StrategyMode.FIRST`` the first strategy to decide starts or ends
+    the turn. With ``StrategyMode.ALL`` the turn starts or ends once every
+    strategy in the list has decided. Turns start on the first start
+    strategy and end once every stop strategy agrees by default. A stop
     strategy that waits for the turn's inference gets its say in either
     mode: in a ``FIRST`` list, the first stop strategy to decide runs the
     inference, and the turn ends once a strategy waiting for that inference
@@ -153,6 +153,7 @@ class UserTurnController(BaseObject):
         self._user_speaking = False
 
         self._user_turn = False
+        self._user_turn_start_decisions: dict[BaseUserTurnStartStrategy, UserTurnStartedParams] = {}
         self._user_turn_stop_decisions: dict[BaseUserTurnStopStrategy, UserTurnStoppedParams] = {}
         # The inference triggered for the stop decisions made so far, if any.
         self._user_turn_inference = _UserTurnInference.NONE
@@ -227,6 +228,7 @@ class UserTurnController(BaseObject):
         await self._cleanup_strategies()
         self._user_turn_strategies = strategies
         self._user_turn_stop_strategies = self._stop_strategies_of(strategies)
+        self._user_turn_start_decisions.clear()
         self._user_turn_stop_decisions.clear()
         await self._setup_strategies()
 
@@ -275,7 +277,8 @@ class UserTurnController(BaseObject):
 
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
-            if result == ProcessFrameResult.STOP:
+            # Every strategy in an ALL list needs every frame to decide on.
+            if result == ProcessFrameResult.STOP and self._start_mode == StrategyMode.FIRST:
                 break
 
         for strategy in self._user_turn_stop_strategies:
@@ -288,6 +291,10 @@ class UserTurnController(BaseObject):
         # here is the one they then wait for.
         if isinstance(frame, UserTurnResponseCancelFrame):
             await self._handle_user_turn_response_cancel()
+
+    @property
+    def _start_mode(self) -> StrategyMode:
+        return self._user_turn_strategies_params.start_mode
 
     @property
     def _stop_mode(self) -> StrategyMode:
@@ -444,7 +451,10 @@ class UserTurnController(BaseObject):
         strategy: BaseUserTurnStartStrategy,
         params: UserTurnStartedParams,
     ):
-        await self._trigger_user_turn_start(strategy, params)
+        if self._start_mode == StrategyMode.ALL:
+            await self._add_user_turn_start_decision(strategy, params)
+        else:
+            await self._trigger_user_turn_start(strategy, params)
 
     async def _on_user_turn_inference_triggered(
         self, strategy: BaseUserTurnStopStrategy, speculation: UserTurnSpeculation | None
@@ -486,6 +496,26 @@ class UserTurnController(BaseObject):
     async def _on_reset_aggregation(self, strategy: BaseUserTurnStartStrategy):
         await self._call_event_handler("on_reset_aggregation", strategy)
 
+    async def _add_user_turn_start_decision(
+        self, strategy: BaseUserTurnStartStrategy, params: UserTurnStartedParams
+    ):
+        if self._user_turn:
+            return
+
+        self._user_turn_start_decisions[strategy] = params
+
+        if len(self._user_turn_start_decisions) == len(self._user_turn_strategies.start or []):
+            await self._trigger_user_turn_start(strategy, self._user_turn_start_params())
+
+    def _user_turn_start_params(self) -> UserTurnStartedParams:
+        # One decision saying the turn shouldn't interrupt, or was announced
+        # elsewhere, applies to the whole turn.
+        decisions = self._user_turn_start_decisions.values()
+        return UserTurnStartedParams(
+            enable_interruptions=all(d.enable_interruptions for d in decisions),
+            enable_user_speaking_frames=all(d.enable_user_speaking_frames for d in decisions),
+        )
+
     async def _trigger_user_turn_start(
         self, strategy: BaseUserTurnStartStrategy | None, params: UserTurnStartedParams
     ):
@@ -494,6 +524,7 @@ class UserTurnController(BaseObject):
             return
 
         self._user_turn = True
+        self._user_turn_start_decisions.clear()
         self._user_turn_stop_timeout_event.set()
         self._user_turn_enable_interruptions = params.enable_interruptions
 
