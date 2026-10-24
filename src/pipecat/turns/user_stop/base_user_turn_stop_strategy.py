@@ -194,8 +194,9 @@ class BaseUserTurnStopStrategy(BaseObject):
             frame: The frame to be analyzed.
 
         Returns:
-            A ProcessFrameResult indicating the outcome, or None (treated as
-            CONTINUE for backward compatibility).
+            Nothing. A returned :class:`~pipecat.turns.types.ProcessFrameResult`
+            is deprecated: ``STOP`` keeps the strategies after this one from
+            seeing the frame, and only in a ``StrategyMode.FIRST`` list.
         """
         pass
 

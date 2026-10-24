@@ -19,6 +19,12 @@ class ProcessFrameResult(Enum):
     Parameters:
         CONTINUE: Continue to the next strategy in the loop.
         STOP: Stop evaluating further strategies for this frame.
+
+    .. deprecated:: 1.15.0
+        Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead.
+        Every strategy sees every frame, and a list whose strategies all have
+        to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``.
+        Will be removed in 2.0.0.
     """
 
     CONTINUE = "continue"

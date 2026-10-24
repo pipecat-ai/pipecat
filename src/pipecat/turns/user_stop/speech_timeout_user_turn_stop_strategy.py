@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
 
@@ -144,7 +143,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         await super().cleanup()
         await self._cancel_all_tasks()
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Process an incoming frame to update strategy state.
 
         Updates internal transcription text and VAD state. The user end turn
@@ -152,9 +151,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, STTMetadataFrame):
             self._stt_timeout = frame.ttfs_p99_latency
@@ -179,8 +175,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             # on silences shorter than the VAD stop_secs — e.g. an aggressive
             # STT endpoint or a manually raised stop_secs.
             self._transcript_finalized = False
-
-        return ProcessFrameResult.CONTINUE
 
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""

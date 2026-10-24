@@ -43,6 +43,7 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategiesParams,
 )
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class _UserTurnInference(Enum):
@@ -275,22 +276,36 @@ class UserTurnController(BaseObject):
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
 
-        for strategy in self._user_turn_strategies.start or []:
+        start_strategies = self._user_turn_strategies.start or []
+        for strategy in start_strategies:
             result = await strategy.process_frame(frame)
             # Every strategy in an ALL list needs every frame to decide on.
+            # The last strategy's STOP hides the frame from no one.
             if result == ProcessFrameResult.STOP and self._start_mode == StrategyMode.FIRST:
+                if strategy is not start_strategies[-1]:
+                    self._warn_process_frame_result()
                 break
 
-        for strategy in self._user_turn_stop_strategies:
+        stop_strategies = self._user_turn_stop_strategies
+        for strategy in stop_strategies:
             result = await strategy.process_frame(frame)
             # Every strategy in an ALL list needs every frame to decide on.
+            # The last strategy's STOP hides the frame from no one.
             if result == ProcessFrameResult.STOP and self._stop_mode == StrategyMode.FIRST:
+                if strategy is not stop_strategies[-1]:
+                    self._warn_process_frame_result()
                 break
 
         # Handled once the stop strategies have seen it, so an inference started
         # here is the one they then wait for.
         if isinstance(frame, UserTurnResponseCancelFrame):
             await self._handle_user_turn_response_cancel()
+
+    def _warn_process_frame_result(self):
+        warn_deprecated(
+            "`ProcessFrameResult` is deprecated since 1.15.0 and will be removed in 2.0.0. "
+            "Use `StrategyMode` instead."
+        )
 
     @property
     def _start_mode(self) -> StrategyMode:

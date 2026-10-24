@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
 )
 from pipecat.services.settings import LLMSettings
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
@@ -98,14 +97,11 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Forget this turn's inference, keeping a pending re-prompt."""
         self._awaited = None
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Configure the LLM on start, and follow the turn's inference and the user.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always CONTINUE, so the stop strategies after this one see the frame.
         """
         if isinstance(frame, StartFrame):
             await self._configure_llm()
@@ -125,7 +121,6 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             ),
         ):
             await self._handle_user_started_speaking()
-        return ProcessFrameResult.CONTINUE
 
     async def _configure_llm(self):
         await self.push_frame(
