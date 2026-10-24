@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMAssistantPushAggregationFrame,
+    LLMConfigureOutputFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -336,6 +337,10 @@ class TTSService(AIService):
             aggregation_type=TextAggregationMode.SENTENCE,
             language=aggregation_language,
         )
+        # The LLM's output setting (LLMConfigureOutputFrame), so a TTSSpeakFrame
+        # isn't spoken either while LLM replies aren't.
+        self._skip_tts = False
+        self._in_skipped_reply = False
 
         if skip_aggregator_types is not None:
             warn_deprecated(
@@ -1065,9 +1070,14 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
+        # Pushed on below, like any other frame.
+        if isinstance(frame, LLMConfigureOutputFrame):
+            self._skip_tts = frame.skip_tts
+
         # A reply that isn't spoken is queued behind the audio still playing, so
         # it comes out after that audio, its start, sentences and end in order.
         if isinstance(frame, LLMFullResponseStartFrame) and frame.skip_tts:
+            self._in_skipped_reply = True
             await self._audio_context_manager.put_frame(frame)
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             await self._handle_skipped_llm_text(frame)
@@ -1092,6 +1102,8 @@ class TTSService(AIService):
             await self._handle_llm_response_start(frame)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self._handle_llm_response_end(frame, direction)
+        elif isinstance(frame, TTSSpeakFrame) and self._skip_tts:
+            await self._handle_skipped_tts_speak(frame)
         elif isinstance(frame, TTSSpeakFrame):
             await self._handle_tts_speak(frame)
         elif isinstance(frame, TTSUpdateSettingsFrame):
@@ -1237,6 +1249,7 @@ class TTSService(AIService):
         remaining = await self._skipped_text_aggregator.flush()
         if remaining:
             await self._queue_skipped_llm_text(remaining)
+        self._in_skipped_reply = False
         await self._audio_context_manager.put_frame(frame)
 
     async def _queue_skipped_llm_text(self, aggregation: Aggregation):
@@ -1247,6 +1260,33 @@ class TTSService(AIService):
         frame.skip_tts = True
         frame.transport_destination = self._transport_destination
         await self._audio_context_manager.put_frame(frame)
+
+    async def _handle_skipped_tts_speak(self, frame: TTSSpeakFrame):
+        """Push a TTSSpeakFrame as a reply that isn't spoken, like an LLM reply marked skip_tts."""
+        frames: list[Frame] = []
+        # Reported to clients as the reply's LLM text, as an LLM reply's text is.
+        # Only the sentence below reaches the context.
+        llm_text = LLMTextFrame(frame.text)
+        llm_text.skip_tts = True
+        llm_text.append_to_context = False
+        frames.append(llm_text)
+        sentence = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
+        sentence.skip_tts = True
+        sentence.append_to_context = frame.append_to_context
+        sentence.transport_destination = self._transport_destination
+        frames.append(sentence)
+        # Inside a reply that isn't spoken, that reply's own start and end frame it.
+        # The frames keep the speak frame's interruptible setting, so an
+        # uninterruptible one keeps its start and end through an interruption.
+        if not self._in_skipped_reply:
+            start = LLMFullResponseStartFrame()
+            start.skip_tts = True
+            end = LLMFullResponseEndFrame()
+            end.skip_tts = True
+            frames = [start, *frames, end]
+        for f in frames:
+            f.interruptible = frame.interruptible
+            await self._audio_context_manager.put_frame(f)
 
     async def _handle_tts_speak(self, frame: TTSSpeakFrame):
         """Speak a TTSSpeakFrame as a turn of its own, even in the middle of an LLM turn."""
@@ -1314,6 +1354,7 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
+        self._in_skipped_reply = False
         for filter in self._text_filters:
             await filter.handle_interruption()
 
