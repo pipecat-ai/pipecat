@@ -520,15 +520,15 @@ class UserTurnController(BaseObject):
             await self._first_user_turn_stop(strategy, params)
 
     async def _handle_user_turn_response_cancel(self):
-        # The decisions made on the cancelled answer no longer hold. A
-        # decision that confirmed it still says the user is done, so once
-        # every stop strategy that listens to the user has decided, the
-        # turn's answer runs again.
+        # Decisions from strategies that wait for the inference were made on
+        # the cancelled answer, so they no longer hold. The other decisions
+        # still say the user is done, including one that confirmed the answer,
+        # so once they're all in, the turn's answer runs again.
         self._user_turn_inference = _UserTurnInference.NONE
         self._user_turn_stop_decisions = {
             strategy: replace(params, confirms_speculation=False)
             for strategy, params in self._user_turn_stop_decisions.items()
-            if params.confirms_speculation
+            if not strategy.waits_for_inference
         }
         if self._user_turn_stop_decisions and self._ready_for_inference():
             await self._trigger_user_turn_inference_triggered(

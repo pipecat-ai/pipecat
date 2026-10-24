@@ -1062,15 +1062,35 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stops, [])
 
     async def test_a_cancelled_answer_voids_the_decisions_made_on_it(self):
-        first, last = DecidingStopStrategy(), DecidingStopStrategy()
-        await self._start([first, last])
+        """A decision on the inference is about the answer, so it goes with it."""
+        user, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([user, on_inference])
         await self._speak()
-        await first.decide()
+        await user.speculate()
+        await on_inference.decide()
 
         await self.controller.process_frame(UserTurnResponseCancelFrame())
-        await last.decide()
+        await user.decide()
 
         self.assertEqual(self.stops, [])
+
+    async def test_a_cancelled_answer_keeps_the_decisions_on_the_user(self):
+        """A decision on the user says nothing about the answer, so it outlives it."""
+        user, eager, on_inference = (
+            DecidingStopStrategy(),
+            DecidingStopStrategy(),
+            DecidingStopStrategy(on_inference=True),
+        )
+        await self._start([user, eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+        await eager.speculate()
+        await user.decide()
+
+        await self.controller.process_frame(UserTurnResponseCancelFrame())
+        await eager.decide()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
 
     async def test_a_confirmation_outlives_the_answer_it_confirmed(self):
         """The turn's answer runs again for a decision that confirmed a cancelled one."""
