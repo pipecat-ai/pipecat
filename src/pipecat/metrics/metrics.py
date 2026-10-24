@@ -228,6 +228,81 @@ class TurnMetricsData(MetricsData):
     e2e_processing_time_ms: float
 
 
+class AICAudioQualityScores(BaseModel):
+    """Audio quality scores for one window of user audio.
+
+    All scores are in the range 0.0 to 1.0. A higher value means more
+    problematic audio.
+
+    Parameters:
+        risk_score: Likelihood that downstream models (STT, VAD, turn-taking,
+            speech-to-speech) fail on this audio.
+        noise: Ambient or environmental noise.
+        speaker_reverb: Speaker distance and reverberation.
+        speaker_loudness: Level of the main speaker. A neutral level, not a
+            degradation.
+        interfering_speech: Speech from other speakers, live or from a device.
+        packet_loss: Dropouts or discontinuities in the stream.
+        codec_degradation: Artifacts from lossy speech codecs.
+    """
+
+    risk_score: float
+    noise: float
+    speaker_reverb: float
+    speaker_loudness: float
+    interfering_speech: float
+    packet_loss: float
+    codec_degradation: float
+
+
+class AICAudioQualityMetricsData(MetricsData):
+    """Audio quality metrics data for one analysis window.
+
+    Parameters:
+        value: Scores for the window.
+        audio_secs: Seconds of user audio received when the window was
+            analyzed. The window covers the audio just before this point.
+    """
+
+    value: AICAudioQualityScores
+    audio_secs: float
+
+
+class AICAudioQualitySummary(BaseModel):
+    """Summary of the audio quality windows of one call.
+
+    Parameters:
+        windows: Number of analyzed windows.
+        mean: Mean of each score over all windows.
+        p95: 95th percentile of each score over all windows.
+        max: Maximum of each score over all windows.
+        degraded_threshold: ``risk_score`` value at or above which a window
+            counts as degraded.
+        degraded_fraction: Fraction of windows that are degraded.
+        dominant_dimension: Name of the score with the highest mean, without
+            ``risk_score`` and ``speaker_loudness``. It shows the largest
+            degradation, not the cause of the risk score.
+    """
+
+    windows: int
+    mean: AICAudioQualityScores
+    p95: AICAudioQualityScores
+    max: AICAudioQualityScores
+    degraded_threshold: float
+    degraded_fraction: float
+    dominant_dimension: str
+
+
+class AICAudioQualitySummaryMetricsData(MetricsData):
+    """Audio quality metrics data for a full call.
+
+    Parameters:
+        value: Summary of the analyzed windows.
+    """
+
+    value: AICAudioQualitySummary
+
+
 @deprecated(
     "`SmartTurnMetricsData` is deprecated since 0.0.104 and will be removed in 2.0.0. "
     "Use `TurnMetricsData` instead."

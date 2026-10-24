@@ -1143,6 +1143,29 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
         return "".join(b.value for b in self.buttons) if self.buttons else ""
 
 
+@dataclass
+class AudioQualityFrame(DataFrame):
+    """Frame containing the audio quality scores of one window of user audio.
+
+    Audio quality analyzers push this frame downstream, with or without
+    metrics enabled. Example:
+    :class:`~pipecat.processors.audio.aic_tyto_processor.AICTytoProcessor`. All scores are in the range 0.0 to
+    1.0, and a higher value means worse audio.
+
+    Parameters:
+        risk_score: Chance that downstream models (STT, VAD, turn-taking)
+            fail on this audio.
+        degradations: Score for each degradation type. Keys are names that
+            the analyzer defines, such as ``"noise"``.
+        audio_secs: Seconds of user audio received when the window was
+            analyzed.
+    """
+
+    risk_score: float
+    degradations: dict[str, float]
+    audio_secs: float
+
+
 #
 # System frames
 #
