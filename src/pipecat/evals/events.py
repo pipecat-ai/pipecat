@@ -52,9 +52,9 @@ scenario ``event:``             RTVI server message(s)
                                 the LLM
 ``expression``                  ``bot-output`` in expressive conversation (alpha):
                                 expression the bot's TTS performed, in the tags
-                                the LLM writes: ``<<excited>>`` where the tones of
-                                its spoken text change (``<<neutral>>`` back to
-                                the baseline), ``[[laughter]]`` for an event,
+                                the LLM writes: ``<<excited>>`` where the delivery of
+                                its spoken text changes (``<<neutral>>`` back to
+                                the baseline), ``[[laughter]]`` for a sound,
                                 ``[[pause 600]]`` for a pause. A tag the TTS can't
                                 perform is never reported
 ==========================      ==============================================
@@ -137,10 +137,10 @@ class EvalEventStream:
         # buffers toward one (a bot token, a persona sentence).
         self.last_activity = self._t0
         self._llm_text_at: float | None = None
-        # The tones the bot last reported speaking in during the current response,
-        # so an ``expression`` event marks only where the tones change, and the
+        # The delivery the bot last reported speaking in during the current response,
+        # so an ``expression`` event marks only where the delivery changes, and the
         # event and pause segments already reported.
-        self._expression_tones: list[str] = []
+        self._expression_delivery: list[str] = []
         self._expression_segments: set = set()
         # The reply rule's flag: set by a send or an interruption, cleared at the
         # bot's next llm-started. While set, LLM text is dropped: an interrupted
@@ -451,7 +451,7 @@ class EvalEventStream:
             self._awaiting_reply = False
             self._text_buffer = []
             self._llm_text_at = None
-            self._expression_tones = []
+            self._expression_delivery = []
             return {"type": "llm_started"}
         elif isinstance(frame, LLMTextFrame):
             if self._awaiting_reply:
@@ -635,26 +635,26 @@ class EvalEventStream:
         """The expression the bot performed, from a ``bot-output``, written as the LLM writes it.
 
         Only expressive conversation reports it: an event or pause segment,
-        once, or spoken text carrying ``tones``, where they differ from the
-        tones before it in the response. Each is reported as it is spoken
+        once, or spoken text carrying ``delivery``, where it differs from the
+        delivery before it in the response. Each is reported as it is spoken
         rather than announced, so they keep the order they were performed in.
         """
         text_type = data.get("text_type")
         segment_id = data.get("segment_id")
         if not data.get("will_be_spoken") or data.get("spoken_status") == "new":
             return None
-        if text_type in ("expression_event", "expression_pause"):
+        if text_type in ("expression_sound", "expression_pause"):
             if segment_id in self._expression_segments:
                 return None
             self._expression_segments.add(segment_id)
             text = data.get("text", "")
-            tag = f"[[{text}]]" if text_type == "expression_event" else f"[[pause {text}]]"
+            tag = f"[[{text}]]" if text_type == "expression_sound" else f"[[pause {text}]]"
             return {"type": "expression", "text": tag}
-        tones = data.get("tones")
-        if tones is None or tones == self._expression_tones:
+        delivery = data.get("delivery")
+        if delivery is None or delivery == self._expression_delivery:
             return None
-        self._expression_tones = tones
-        return {"type": "expression", "text": f"<<{' '.join(tones) or 'neutral'}>>"}
+        self._expression_delivery = delivery
+        return {"type": "expression", "text": f"<<{' '.join(delivery) or 'neutral'}>>"}
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """One response segment; the text may be empty, as after an interruption."""

@@ -10,17 +10,17 @@ from enum import StrEnum
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import (
-    FAST_TONE,
-    SLOW_TONE,
-    SPEED_TONES,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    SPEED_DELIVERY,
+    DeliveryScope,
     ExpressionCapabilities,
     ExpressionTerm,
-    ToneScope,
 )
 
-# The speed each speed tone asks for. Cartesia takes speed as guidance, so the
+# The speed each speed delivery asks for. Cartesia takes speed as guidance, so the
 # steps are large.
-CARTESIA_SPEEDS = {SLOW_TONE: 0.7, FAST_TONE: 1.3}
+CARTESIA_SPEEDS = {SLOW_DELIVERY: 0.7, FAST_DELIVERY: 1.3}
 
 
 class CartesiaEmotion(StrEnum):
@@ -92,40 +92,42 @@ class CartesiaEmotion(StrEnum):
 class CartesiaExpressionAdapter(BaseExpressionAdapter):
     """Formats expression tags as Cartesia's inline markup.
 
-    Part of expressive conversation (alpha). Tones are Cartesia's emotions,
+    Part of expressive conversation (alpha). Its deliveries are Cartesia's emotions,
     formatted as ``<emotion>`` tags; Cartesia supports them in English only.
-    Cartesia changes emotion reliably only between generations, so a tone can
+    Cartesia changes emotion reliably only between generations, so a delivery can
     change only between sentences, and a sentence written in several emotions
-    is spoken in the first. The speed tones set each request's speed (see
-    :data:`CARTESIA_SPEEDS`). The one event is ``[laughter]``, and pauses are
+    is spoken in the first. Slow and fast set each request's speed (see
+    :data:`CARTESIA_SPEEDS`). The one sound is ``[laughter]``, and pauses are
     ``<break>`` tags. Cartesia has no emphasis.
     """
 
     def capabilities(self) -> ExpressionCapabilities:
         """Cartesia's emotions, laughter and pauses."""
         return ExpressionCapabilities(
-            events=[ExpressionTerm("laughter")],
-            tones=[
+            sounds=[ExpressionTerm("laughter")],
+            delivery=[
                 *(
                     ExpressionTerm(emotion.value)
                     for emotion in CartesiaEmotion
                     if emotion not in (CartesiaEmotion.NEUTRAL, CartesiaEmotion.JOKING_COMEDIC)
                 ),
-                *SPEED_TONES,
+                *SPEED_DELIVERY,
             ],
             pause_range_ms=(100, 5000),
-            tone_scope=ToneScope.SENTENCE,
+            delivery_scope=DeliveryScope.SENTENCE,
         )
 
-    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
+    def format_text(
+        self, text: str, delivery: list[str], previous_delivery: list[str] | None
+    ) -> str:
         """Prefix an emotion tag, set apart from the words, where the emotion changes."""
-        emotion = _emotion(tones)
-        previous = _emotion(previous_tones or [])
+        emotion = _emotion(delivery)
+        previous = _emotion(previous_delivery or [])
         if emotion == previous:
             return text
         return f'<emotion value="{emotion or CartesiaEmotion.NEUTRAL.value}"/> {text}'
 
-    def format_event(self, name: str) -> str:
+    def format_sound(self, name: str) -> str:
         """Format laughter, set apart so Cartesia times it as a word of its own."""
         return f" [{name}] "
 
@@ -134,11 +136,11 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
         return f' <break time="{duration_ms}ms"/> '
 
 
-def _emotion(tones: list[str]) -> str | None:
-    """The first of the tones that is an emotion, not a speed."""
-    return next((tone for tone in tones if tone not in CARTESIA_SPEEDS), None)
+def _emotion(delivery: list[str]) -> str | None:
+    """The first name in the delivery that is an emotion, not a speed."""
+    return next((name for name in delivery if name not in CARTESIA_SPEEDS), None)
 
 
-def cartesia_speed(tones: list[str]) -> float | None:
-    """The speed a request in these tones asks for, or None for the voice's own."""
-    return next((CARTESIA_SPEEDS[tone] for tone in tones if tone in CARTESIA_SPEEDS), None)
+def cartesia_speed(delivery: list[str]) -> float | None:
+    """The speed a request in this delivery asks for, or None for the voice's own."""
+    return next((CARTESIA_SPEEDS[name] for name in delivery if name in CARTESIA_SPEEDS), None)

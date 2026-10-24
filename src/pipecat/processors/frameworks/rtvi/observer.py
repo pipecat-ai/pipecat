@@ -169,7 +169,7 @@ class RTVIObserverParams:
             and ``remove_ignored_source()``.
         skip_text_types: List of text types to skip sending as tts/output messages.
             Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
-            later, and expression events and pauses (``expression_event``,
+            later, and expression sounds and pauses (``expression_sound``,
             ``expression_pause``) to clients of 2.3.0 or later; add a type here to
             keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
@@ -364,7 +364,7 @@ class RTVIObserver(BaseObserver):
 
     @property
     def _client_supports_expression(self) -> bool:
-        """Return True when the connected client supports expression events and pauses (2.3.0+)."""
+        """Return True when the connected client supports expression sounds and pauses (2.3.0+)."""
         return self._client_is_at_least([2, 3, 0])
 
     @property
@@ -927,7 +927,7 @@ class RTVIObserver(BaseObserver):
                         accumulated_text=accumulated,
                         remaining_text=remaining,
                     ),
-                    tones=frame.tones,
+                    delivery=frame.delivery,
                 )
             )
             await self.send_rtvi_message(message)
@@ -946,10 +946,10 @@ class RTVIObserver(BaseObserver):
         # bot's response.
         if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
             return True
-        # Expression events and pauses are part of protocol 2.3.0; an earlier client
+        # Expression sounds and pauses are part of protocol 2.3.0; an earlier client
         # would take one for part of the bot's response.
         if (
-            text_type in (TextType.EXPRESSION_EVENT, TextType.EXPRESSION_PAUSE)
+            text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE)
             and not self._client_supports_expression
         ):
             return True
@@ -1026,7 +1026,7 @@ class RTVIObserver(BaseObserver):
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
-                tones=frame.tones if isinstance(frame, TTSTextFrame) else None,
+                delivery=frame.delivery if isinstance(frame, TTSTextFrame) else None,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)

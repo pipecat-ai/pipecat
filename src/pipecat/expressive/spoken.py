@@ -15,8 +15,8 @@ tags written between two words arrive with the second.
 :class:`SpokenExpression` keeps the text sent in one audio context, with the
 :class:`~pipecat.expressive.formatter.ExpressionSpan` list
 :meth:`~pipecat.expressive.formatter.ExpressionFormatter.format` returned for
-it. Looking up each spoken word's text in it gives the tones the word is
-spoken in and the events performed before it, which the TTS service reports
+it. Looking up each spoken word's text in it gives the delivery the word is
+spoken in and the sounds performed before it, which the TTS service reports
 to clients as the word is spoken.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
@@ -30,18 +30,18 @@ from pipecat.frames.frames import TextType
 
 @dataclass
 class _Span:
-    """What a stretch of the text performs: words in their tones, or an event."""
+    """What a stretch of the text performs: words in their delivery, or a sound."""
 
     start: int
     end: int
-    tones: list[str] | None = None
-    event: tuple[TextType, str] | None = None
-    # Whether the event has been reported, as by markup the service reported.
+    delivery: list[str] | None = None
+    sound: tuple[TextType, str] | None = None
+    # Whether the sound has been reported, as by markup the service reported.
     reported: bool = False
 
 
 class SpokenExpression:
-    """Tells the tones and events of the words a TTS service reports speaking in one audio context.
+    """Tells the delivery and sounds of the words a TTS service reports speaking in one audio context.
 
     Each :class:`~pipecat.services.tts_service.TTSContext` holds one, so it
     lasts as long as its audio context. Units are added as they are sent, and
@@ -56,7 +56,7 @@ class SpokenExpression:
         spoken.spoken("<<cheerful>> It's")
         # (["cheerful"], [])
         spoken.spoken("[[laughs]] ^^back")
-        # (["cheerful", "emphasis"], [(TextType.EXPRESSION_EVENT, "laughs")])
+        # (["cheerful", "emphasis"], [(TextType.EXPRESSION_SOUND, "laughs")])
         spoken.spoken("up.")
         # (["cheerful"], [])
     """
@@ -67,12 +67,12 @@ class SpokenExpression:
         self._spans: list[_Span] = []
         # How far into the text the service has reported speaking.
         self._position = 0
-        self._tones: list[str] = []
+        self._delivery: list[str] = []
 
     @property
-    def tones(self) -> list[str] | None:
-        """The tones of the text last reported spoken, or None when no text was added."""
-        return self._tones if self._text else None
+    def delivery(self) -> list[str] | None:
+        """The delivery of the text last reported spoken, or None when no text was added."""
+        return self._delivery if self._text else None
 
     def add(self, text: str, spans: list[ExpressionSpan]):
         """Keep a unit sent to the service, for the words it reports later.
@@ -87,15 +87,16 @@ class SpokenExpression:
         offset = len(self._text)
         self._text += text
         self._spans.extend(
-            _Span(offset + span.start, offset + span.end, span.tones, span.event) for span in spans
+            _Span(offset + span.start, offset + span.end, span.delivery, span.sound)
+            for span in spans
         )
 
     def spoken(self, text: str | None) -> tuple[list[str] | None, list[tuple[TextType, str]]]:
-        """Read the tones of text the service reports speaking, and the events before it.
+        """Read the delivery of text the service reports speaking, and the sounds before it.
 
-        The text's tones are those of its first letter that falls in words,
-        so a tone tag's own name, such as ``cheerful`` in
-        ``"<<cheerful>> It's"``, isn't taken for a word. An event already
+        The text's delivery is that of its first letter that falls in words,
+        so a delivery tag's own name, such as ``cheerful`` in
+        ``"<<cheerful>> It's"``, isn't taken for a word. A sound already
         reported by :meth:`spoken_markup` isn't reported again, and one
         written after the text's last word, such as the laugh in
         ``"back [[laughs]]!"``, is left for the service's markup or the next
@@ -107,64 +108,64 @@ class SpokenExpression:
                 word timestamps.
 
         Returns:
-            Its tones, or None when no text was added, and the events and
+            Its delivery, or None when no text was added, and the sounds and
             pauses performed since the text before it, each with its text
-            type and its text. Text that can't be found keeps the tones of
+            type and its text. Text that can't be found keeps the delivery of
             the text before it.
         """
         if not self._text or not text:
             return None, []
         start = self._text.find(text, self._position)
         if start < 0:
-            return self._tones, []
+            return self._delivery, []
         end = start + len(text)
         last_word = next(
             (i for i in range(end - 1, start - 1, -1) if self._in_words(i)),
             None,
         )
         position = end
-        events = []
+        sounds = []
         for span in self._spans:
-            if span.event and not span.reported and self._position <= span.start < end:
+            if span.sound and not span.reported and self._position <= span.start < end:
                 if last_word is not None and span.start > last_word:
                     position = min(position, span.start)
                     continue
                 span.reported = True
-                events.append(span.event)
+                sounds.append(span.sound)
         for i in range(start, end):
             if not self._text[i].isalnum():
                 continue
             words = next(
-                (s for s in self._spans if s.tones is not None and s.start <= i < s.end),
+                (s for s in self._spans if s.delivery is not None and s.start <= i < s.end),
                 None,
             )
             if words is not None:
-                self._tones = words.tones or []
+                self._delivery = words.delivery or []
                 break
         self._position = position
-        return self._tones, events
+        return self._delivery, sounds
 
     def unreported(self) -> list[tuple[TextType, str]]:
-        """Read the events and pauses not yet reported, once the context's audio has ended.
+        """Read the sounds and pauses not yet reported, once the context's audio has ended.
 
-        An event after the last words, such as the laugh in ``"Bye
+        A sound after the last words, such as the laugh in ``"Bye
         [[laughs]]"``, has no later text to report it, and a service may not
         report its markup.
 
         Returns:
-            Each such event or pause, with its text type and its text.
+            Each such sound or pause, with its text type and its text.
         """
-        events = []
+        sounds = []
         for span in self._spans:
-            if span.event and not span.reported and span.start >= self._position:
+            if span.sound and not span.reported and span.start >= self._position:
                 span.reported = True
-                events.append(span.event)
-        return events
+                sounds.append(span.sound)
+        return sounds
 
     def _in_words(self, i: int) -> bool:
         """Whether the character at ``i`` is a letter or digit of words, not of a tag."""
         return self._text[i].isalnum() and any(
-            s.tones is not None and s.start <= i < s.end for s in self._spans
+            s.delivery is not None and s.start <= i < s.end for s in self._spans
         )
 
     def spoken_markup(self) -> tuple[TextType, str] | None:
@@ -172,27 +173,27 @@ class SpokenExpression:
 
         Some services include their markup in their word timestamps. It
         covers none of the LLM's text, so it has no ``raw_text``, and is
-        matched by position instead: it stands for the next event or pause
+        matched by position instead: it stands for the next sound or pause
         still to be spoken, which is reported with it, at its time. Markup
-        reached before any event, such as a tone's ``[cheerful]``, stands for
+        reached before any sound, such as a delivery's ``[cheerful]``, stands for
         none, and isn't spoken::
 
             spoken.spoken("<<cheerful>> It's")
             spoken.spoken_markup()       # "[laughs]" reported as a word
-            # (TextType.EXPRESSION_EVENT, "laughs")
+            # (TextType.EXPRESSION_SOUND, "laughs")
             spoken.spoken("[[laughs]] ^^back")
             # (["cheerful", "emphasis"], []): already reported
 
         Returns:
-            The event or pause, with its text type, or None when the markup
+            The sound or pause, with its text type, or None when the markup
             stands for none.
         """
         for span in self._spans:
             if span.end <= self._position or span.reported:
                 continue
-            if span.event:
+            if span.sound:
                 span.reported = True
-                return span.event
+                return span.sound
             words = self._text[max(self._position, span.start) : span.end]
             if any(c.isalnum() for c in words):
                 return None

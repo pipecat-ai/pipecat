@@ -269,12 +269,12 @@ class TestFramesToEvents(unittest.TestCase):
         )
 
     def test_expression_from_messages(self):
-        # Expressive conversation reports what the TTS performed: where the tones
+        # Expressive conversation reports what the TTS performed: where the delivery
         # of the spoken text change, and each event and pause.
         s = _stream(bot_audio=True)
 
         def bot_output(
-            segment_id, text_type="sentence", text="words", tones=None, status="in-progress"
+            segment_id, text_type="sentence", text="words", delivery=None, status="in-progress"
         ):
             data = {
                 "text": text,
@@ -283,8 +283,8 @@ class TestFramesToEvents(unittest.TestCase):
                 "will_be_spoken": True,
                 "spoken_status": status,
             }
-            if tones is not None:
-                data["tones"] = tones
+            if delivery is not None:
+                data["delivery"] = delivery
             return InputTransportMessageFrame(
                 message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
             )
@@ -295,35 +295,35 @@ class TestFramesToEvents(unittest.TestCase):
 
         s.frame_to_event(LLMFullResponseStartFrame())
         # Spoken text counts as it is spoken, not when it is announced.
-        self.assertIsNone(expression(bot_output(1, tones=["excited"], status="new")))
-        self.assertEqual(expression(bot_output(1, tones=["excited"])), "<<excited>>")
-        self.assertIsNone(expression(bot_output(1, tones=["excited"], status="completed")))
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
+        self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="completed")))
         self.assertEqual(
-            expression(bot_output(2, tones=["excited", "emphasis"])), "<<excited emphasis>>"
+            expression(bot_output(2, delivery=["excited", "emphasis"])), "<<excited emphasis>>"
         )
-        # Tones can change within a segment, word by word.
-        self.assertEqual(expression(bot_output(2, tones=["calm"])), "<<calm>>")
+        # Delivery can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, delivery=["calm"])), "<<calm>>")
         # An event counts when it is heard, once.
-        self.assertIsNone(expression(bot_output(3, "expression_event", "laughter", status="new")))
+        self.assertIsNone(expression(bot_output(3, "expression_sound", "laughter", status="new")))
         self.assertEqual(
-            expression(bot_output(3, "expression_event", "laughter", status="completed")),
+            expression(bot_output(3, "expression_sound", "laughter", status="completed")),
             "[[laughter]]",
         )
         self.assertIsNone(
-            expression(bot_output(3, "expression_event", "laughter", status="completed"))
+            expression(bot_output(3, "expression_sound", "laughter", status="completed"))
         )
         self.assertEqual(
             expression(bot_output(4, "expression_pause", "600", status="completed")),
             "[[pause 600]]",
         )
-        self.assertEqual(expression(bot_output(5, tones=["excited"])), "<<excited>>")
-        self.assertIsNone(expression(bot_output(6, tones=["excited"])))
-        self.assertEqual(expression(bot_output(7, tones=[])), "<<neutral>>")
-        # Without expressive conversation, spoken text carries no tones.
+        self.assertEqual(expression(bot_output(5, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, delivery=["excited"])))
+        self.assertEqual(expression(bot_output(7, delivery=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no delivery.
         self.assertIsNone(expression(bot_output(8)))
         # Each response starts from the baseline.
         s.frame_to_event(LLMFullResponseStartFrame())
-        self.assertIsNone(expression(bot_output(9, tones=[])))
+        self.assertIsNone(expression(bot_output(9, delivery=[])))
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the

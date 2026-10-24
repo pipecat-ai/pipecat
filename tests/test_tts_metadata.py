@@ -11,18 +11,18 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
+from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
 from pipecat.frames.frames import Frame, TTSMetadataFrame
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 
 CAPABILITIES = ExpressionCapabilities(
-    events=[ExpressionTerm("laugh", "Something is genuinely funny.")],
-    tones=[ExpressionTerm("cheerful"), ExpressionTerm("whisper")],
+    sounds=[ExpressionTerm("laugh", "Something is genuinely funny.")],
+    delivery=[ExpressionTerm("cheerful"), ExpressionTerm("whisper")],
     pause_range_ms=(100, 3000),
     emphasis=True,
-    tone_scope=ToneScope.SENTENCE,
+    delivery_scope=DeliveryScope.SENTENCE,
 )
 
 

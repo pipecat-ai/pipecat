@@ -550,25 +550,25 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
 class TestAudioTagExpressionAdapter:
     def test_capabilities(self):
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
-        assert capabilities.free_text_tones
-        assert capabilities.free_text_events
+        assert capabilities.free_text_delivery
+        assert capabilities.free_text_sounds
         assert capabilities.emphasis
         assert capabilities.pause_range_ms == (100, 3000)
 
-    def test_modes_are_single_words(self):
-        # A tone tag separates tones by spaces.
+    def test_delivery_names_are_single_words(self):
+        # A delivery tag separates its names by spaces.
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
-        assert all(len(term.name.split()) == 1 for term in capabilities.tones)
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
 
-    def test_tags_formatted_where_modes_change(self):
+    def test_tags_formatted_where_delivery_changes(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
         assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
         assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
 
-    def test_speed_tones_are_written_as_pace_tags(self):
+    def test_slow_and_fast_are_written_as_pace_tags(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()
-        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().tones}
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
         assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm] [slowly] Hi."
         assert adapter.format_text("Hi.", ["fast"], ["calm"]) == "[quickly] Hi."
 
@@ -581,8 +581,8 @@ class TestAudioTagExpressionAdapter:
         assert adapter.format_text("back up", ["emphasis"], None) == "BACK UP"
         assert adapter.format_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
 
-    def test_events(self):
-        assert ElevenLabsAudioTagExpressionAdapter().format_event("laughs") == " [laughs] "
+    def test_sounds(self):
+        assert ElevenLabsAudioTagExpressionAdapter().format_sound("laughs") == " [laughs] "
 
     def test_pauses_are_short_or_long(self):
         adapter = ElevenLabsAudioTagExpressionAdapter()

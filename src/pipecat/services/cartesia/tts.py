@@ -80,11 +80,11 @@ class GenerationConfig(BaseModel):
 
 
 def _generation_config(
-    config: GenerationConfig | None, tones: list[str], *, expressive: bool
+    config: GenerationConfig | None, delivery: list[str], *, expressive: bool
 ) -> dict[str, Any] | None:
-    """A request's generation config: the settings', with the speed its tones ask for."""
+    """A request's generation config: the settings', with the speed its delivery asks for."""
     values = config.model_dump(exclude_none=True) if config else {}
-    speed = cartesia_speed(tones) if expressive else None
+    speed = cartesia_speed(delivery) if expressive else None
     if speed is not None:
         values["speed"] = speed
     return values or None
@@ -594,7 +594,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         generation_config = _generation_config(
             assert_given(self._settings.generation_config),
-            self.expression_tones,
+            self.expression_delivery,
             expressive=self._expression_formatter is not None,
         )
         if generation_config:
@@ -1053,7 +1053,7 @@ class CartesiaHttpTTSService(TTSService):
 
             generation_config = _generation_config(
                 assert_given(self._settings.generation_config),
-                self.expression_tones,
+                self.expression_delivery,
                 expressive=self._expression_formatter is not None,
             )
             if generation_config:

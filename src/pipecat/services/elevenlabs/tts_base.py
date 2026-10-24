@@ -412,7 +412,7 @@ def _join_audio_tags(
 
     Eleven v3 and v4 return the tags they perform as characters in the
     alignment. Without the spaces inside it, a tag reaches the word timestamps
-    as a word of its own, which completes the event or pause it performs. A
+    as a word of its own, which completes the sound or pause it performs. A
     tag can span alignment chunks, so whether one is still open is carried
     from chunk to chunk.
 

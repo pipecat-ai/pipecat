@@ -146,7 +146,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
     Eleven v3 and v4 perform inline audio tags such as ``[laughs]`` and
     ``[excited]``. They come back as characters in the alignment, and reach
-    the word timestamps as words of their own: an event's or a pause's marks
+    the word timestamps as words of their own: a sound's or a pause's marks
     when it is performed, and other markup isn't spoken.
     """
 
@@ -390,7 +390,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             context.alignment_started = True
             joined = alignment
             if self._expression_formatter:
-                # The audio tags expressive conversation sends mark when its events
+                # The audio tags expressive conversation sends mark when its sounds
                 # are performed.
                 joined, context.in_audio_tag = _join_audio_tags(
                     alignment,

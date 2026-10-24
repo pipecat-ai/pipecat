@@ -387,13 +387,13 @@ class MiniMaxHttpTTSService(TTSService):
             "vol": self._settings.volume,
             "pitch": self._settings.pitch,
         }
-        # In expressive conversation, the request's tones choose its emotion and
+        # In expressive conversation, the request's delivery chooses its emotion and
         # its speed.
-        tones = self.expression_tones
-        emotion = next((tone for tone in tones if tone not in MINIMAX_SPEEDS), None)
+        delivery = self.expression_delivery
+        emotion = next((name for name in delivery if name not in MINIMAX_SPEEDS), None)
         if emotion is None:
             emotion = self._settings.emotion
-        speed = next((MINIMAX_SPEEDS[tone] for tone in tones if tone in MINIMAX_SPEEDS), None)
+        speed = next((MINIMAX_SPEEDS[name] for name in delivery if name in MINIMAX_SPEEDS), None)
         if speed is not None:
             voice_setting["speed"] = speed
         if emotion is not None:

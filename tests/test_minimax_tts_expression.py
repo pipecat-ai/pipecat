@@ -47,16 +47,16 @@ def _service(session, **settings) -> MiniMaxHttpTTSService:
 
 
 class TestMiniMaxExpressionAdapter:
-    def test_events_and_pauses(self):
+    def test_sounds_and_pauses(self):
         adapter = MiniMaxExpressionAdapter()
-        assert adapter.format_event("laughs") == "(laughs)"
+        assert adapter.format_sound("laughs") == "(laughs)"
         assert adapter.format_pause(600) == "<#0.6#>"
         assert adapter.format_text("Hi.", ["happy"], None) == "Hi."
 
     def test_vocabulary_is_fixed(self):
         # MiniMax reads an interjection outside its list aloud.
         capabilities = MiniMaxExpressionAdapter().capabilities()
-        assert not capabilities.free_text_events and not capabilities.free_text_tones
+        assert not capabilities.free_text_sounds and not capabilities.free_text_delivery
 
 
 @pytest.mark.parametrize(
@@ -73,7 +73,7 @@ def test_expression_adapter_follows_the_model(model, adapter):
 
 
 @pytest.mark.asyncio
-async def test_each_request_sends_the_emotion_of_its_tones():
+async def test_each_request_sends_the_emotion_of_its_delivery():
     session = _RecordingSession()
     await run_test(
         _service(session, emotion="calm"),
@@ -94,7 +94,7 @@ async def test_each_request_sends_the_emotion_of_its_tones():
 
 
 @pytest.mark.asyncio
-async def test_each_request_sends_the_speed_of_its_tones():
+async def test_each_request_sends_the_speed_of_its_delivery():
     session = _RecordingSession()
     await run_test(
         _service(session, emotion="calm", speed=1.0),

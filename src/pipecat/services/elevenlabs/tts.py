@@ -1182,7 +1182,7 @@ class ElevenLabsHttpTTSService(TTSService):
                             joined = alignment
                             if self._expression_formatter:
                                 # The audio tags expressive conversation sends mark
-                                # when its events are performed.
+                                # when its sounds are performed.
                                 joined, in_audio_tag = _join_audio_tags(
                                     alignment,
                                     (

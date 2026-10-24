@@ -149,19 +149,19 @@ async def test_short_audio_chunks_are_kept():
 class TestS2ExpressionAdapter:
     def test_capabilities(self):
         capabilities = FishAudioS2ExpressionAdapter().capabilities()
-        assert capabilities.free_text_tones and capabilities.free_text_events
+        assert capabilities.free_text_delivery and capabilities.free_text_sounds
         assert capabilities.emphasis
-        assert "laughing" in [term.name for term in capabilities.events]
-        # A tone tag separates tones by spaces.
-        assert all(len(term.name.split()) == 1 for term in capabilities.tones)
+        assert "laughing" in [term.name for term in capabilities.sounds]
+        # A delivery tag separates its names by spaces.
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
 
-    def test_speed_tones_are_written_as_speaking_tags(self):
+    def test_slow_and_fast_are_written_as_speaking_tags(self):
         adapter = FishAudioS2ExpressionAdapter()
-        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().tones}
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
         assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm][speaking slowly] Hi."
         assert adapter.format_text("Hi.", ["fast"], None) == "[speaking quickly] Hi."
 
-    def test_a_pace_is_set_back_where_a_speed_tone_ends(self):
+    def test_a_pace_is_set_back_where_a_speed_delivery_ends(self):
         adapter = FishAudioS2ExpressionAdapter()
         # Within a request, the words after the slow ones set the pace back...
         assert adapter.format_text(", thanks.", ["calm"], ["calm", "slow"]) == (
@@ -171,7 +171,7 @@ class TestS2ExpressionAdapter:
         assert adapter.format_end(["calm", "slow"]) == " [normal pace]"
         assert adapter.format_end(["calm"]) == ""
 
-    def test_tags_where_modes_change(self):
+    def test_tags_where_delivery_changes(self):
         adapter = FishAudioS2ExpressionAdapter()
         assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
         assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
@@ -186,9 +186,9 @@ class TestS2ExpressionAdapter:
         assert adapter.format_text("now", ["emphasis"], None) == "[emphasis] now"
         assert adapter.format_text("now", ["excited", "emphasis"], ["excited"]) == "[emphasis] now"
 
-    def test_events_and_pauses(self):
+    def test_sounds_and_pauses(self):
         adapter = FishAudioS2ExpressionAdapter()
-        assert adapter.format_event("clear throat") == "[clear throat]"
+        assert adapter.format_sound("clear throat") == "[clear throat]"
         assert adapter.format_pause(600) == "[break]"
         assert adapter.format_pause(1200) == "[long-break]"
 

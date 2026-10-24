@@ -9,14 +9,14 @@
 import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
+from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.formatter import (
     EXPRESSION_TAG_PATTERN,
     EXPRESSION_TAGS,
-    Event,
     ExpressionFormatter,
     ExpressionSpan,
     Segment,
+    Sound,
     Text,
 )
 from pipecat.utils.text.base_text_aggregator import TextType
@@ -24,27 +24,27 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
 class DeclaredAdapter(BaseExpressionAdapter):
-    """Declares events and tones, and formats tones as <tones> where they change."""
+    """Declares sounds and delivery, and formats delivery as <delivery> where it changes."""
 
-    def __init__(self, events=(), tones=(), tone_scope=ToneScope.ANYWHERE):
-        self.events = list(events)
-        self.tones = list(tones)
-        self.tone_scope = tone_scope
+    def __init__(self, sounds=(), delivery=(), delivery_scope=DeliveryScope.ANYWHERE):
+        self.sounds = list(sounds)
+        self.delivery = list(delivery)
+        self.delivery_scope = delivery_scope
 
     def capabilities(self):
         return ExpressionCapabilities(
-            events=[ExpressionTerm(name) for name in self.events],
-            tones=[ExpressionTerm(name) for name in self.tones],
+            sounds=[ExpressionTerm(name) for name in self.sounds],
+            delivery=[ExpressionTerm(name) for name in self.delivery],
             pause_range_ms=(100, 1000),
             emphasis=True,
-            tone_scope=self.tone_scope,
+            delivery_scope=self.delivery_scope,
         )
 
-    def format_text(self, text, tones, previous_tones):
-        changed = tones != (previous_tones or [])
-        return f"<{','.join(tones)}> {text}" if changed and tones else text
+    def format_text(self, text, delivery, previous_delivery):
+        changed = delivery != (previous_delivery or [])
+        return f"<{','.join(delivery)}> {text}" if changed and delivery else text
 
-    def format_event(self, name):
+    def format_sound(self, name):
         return f" <{name}> "
 
 
@@ -53,16 +53,16 @@ def formatter(**kwargs) -> ExpressionFormatter:
     return ExpressionFormatter(lambda: adapter, owner="tts")
 
 
-def words(text: str, tones: tuple[str, ...]):
+def words(text: str, delivery: tuple[str, ...]):
     """A Text segment, compared without its position."""
-    return ("text", text, tones)
+    return ("text", text, delivery)
 
 
 def shape(segment: Segment):
     if isinstance(segment, Text):
-        return words(segment.text, segment.tones)
-    if isinstance(segment, Event):
-        return ("event", segment.name)
+        return words(segment.text, segment.delivery)
+    if isinstance(segment, Sound):
+        return ("sound", segment.name)
     return ("pause", segment.duration_ms)
 
 
@@ -76,7 +76,7 @@ REPLY = (
 )
 
 
-def test_a_reply_splits_into_words_with_their_modes_and_events():
+def test_a_reply_splits_into_words_with_their_delivery_and_sounds():
     assert parse(REPLY) == [
         words(" I'm so sorry about the outage. ", ("apologetic",)),
         words(" Your ticket is 2, 3, 8, 7. ", ("enunciate",)),
@@ -85,7 +85,7 @@ def test_a_reply_splits_into_words_with_their_modes_and_events():
         words(" The good news is it's ", ("cheerful",)),
         words("back up", ("cheerful", "emphasis")),
         words(" now. ", ("cheerful",)),
-        ("event", "laugh"),
+        ("sound", "laugh"),
         words(" Finally!", ("cheerful",)),
     ]
 
@@ -103,11 +103,11 @@ def test_text_without_tags_is_in_the_baseline():
     assert parse("Hello there. How are you?") == [words("Hello there. How are you?", ())]
 
 
-def test_several_modes_are_separated_by_spaces():
+def test_several_delivery_names_are_separated_by_spaces():
     assert parse("<<cheerful calm>>Hi") == [words("Hi", ("cheerful", "calm"))]
 
 
-def test_a_tone_lasts_until_the_next_tone_tag_across_units():
+def test_a_delivery_lasts_until_the_next_delivery_tag_across_units():
     parser = formatter()
 
     assert [shape(s) for s in parser.parse("<<calm>>One. ")] == [words("One. ", ("calm",))]
@@ -121,7 +121,7 @@ def test_neutral_returns_to_the_baseline():
     assert parse("<<calm>>One. <<neutral>>Two.") == [words("One. ", ("calm",)), words("Two.", ())]
 
 
-def test_the_modes_end_with_the_response():
+def test_the_delivery_ends_with_the_response():
     parser = formatter()
     parser.parse("<<calm>>One.")
     parser.reset()
@@ -129,7 +129,7 @@ def test_the_modes_end_with_the_response():
     assert [shape(s) for s in parser.parse("Two")] == [words("Two", ())]
 
 
-def test_text_that_stands_on_its_own_leaves_the_responses_tones():
+def test_text_that_stands_on_its_own_leaves_the_responses_delivery():
     parser = formatter()
     parser.parse("<<calm>>One. ")
 
@@ -137,7 +137,7 @@ def test_text_that_stands_on_its_own_leaves_the_responses_tones():
     assert [shape(s) for s in parser.parse("Two.")] == [words("Two.", ("calm",))]
 
 
-def test_a_tone_tag_ending_the_text_says_nothing():
+def test_a_delivery_tag_ending_the_text_says_nothing():
     assert parse("Bye! <<warm>>") == [words("Bye! ", ())]
 
 
@@ -148,9 +148,9 @@ def test_a_pause_is_a_duration_in_milliseconds():
 @pytest.mark.parametrize(
     "text,segment",
     [
-        ("[[pause]]x", ("event", "pause")),
-        ("[[pause 800ms]]x", ("event", "pause 800ms")),
-        ("[[clear throat]]x", ("event", "clear throat")),
+        ("[[pause]]x", ("sound", "pause")),
+        ("[[pause 800ms]]x", ("sound", "pause 800ms")),
+        ("[[clear throat]]x", ("sound", "clear throat")),
         ("<<pause 500>>x", words("x", ("pause", "500"))),
         ("<</cheerful>>x", words("x", ("/cheerful",))),
     ],
@@ -159,12 +159,12 @@ def test_anything_else_between_the_brackets_is_passed_on_as_written(text, segmen
     assert parse(text)[0] == segment
 
 
-def test_a_declared_tone_in_event_brackets_sets_the_tone():
-    assert parse("[[cheerful]] Hi", tones=["cheerful"]) == [words(" Hi", ("cheerful",))]
+def test_a_declared_delivery_in_sound_brackets_sets_the_delivery():
+    assert parse("[[cheerful]] Hi", delivery=["cheerful"]) == [words(" Hi", ("cheerful",))]
 
 
-def test_a_declared_event_in_tone_brackets_stays_an_event():
-    assert parse("<<laugh>> Hi", events=["laugh"]) == [("event", "laugh"), words(" Hi", ())]
+def test_a_declared_sound_in_delivery_brackets_stays_a_sound():
+    assert parse("<<laugh>> Hi", sounds=["laugh"]) == [("sound", "laugh"), words(" Hi", ())]
 
 
 @pytest.mark.parametrize(
@@ -179,10 +179,10 @@ def test_a_declared_event_in_tone_brackets_stays_an_event():
     ],
 )
 def test_text_that_only_looks_like_a_tag_is_spoken(text):
-    assert parse(text, tones=["cheerful"]) == [words(text, ())]
+    assert parse(text, delivery=["cheerful"]) == [words(text, ())]
 
 
-def test_a_span_adds_its_tones_to_just_its_words():
+def test_a_span_adds_its_delivery_to_just_its_words():
     assert parse("<<calm>> Your code is <<slow: A B 7>>. Bye.") == [
         words(" Your code is ", ("calm",)),
         words("A B 7", ("calm", "slow")),
@@ -198,7 +198,7 @@ def test_a_neutral_span_speaks_its_words_in_the_baseline():
     ]
 
 
-def test_emphasis_in_a_span_is_added_to_its_tones():
+def test_emphasis_in_a_span_is_added_to_its_delivery():
     assert parse("It's <<slow: A ^^B^^ 7>>.") == [
         words("It's ", ()),
         words("A ", ("slow",)),
@@ -233,7 +233,7 @@ def test_a_tag_left_unfinished_is_removed():
     assert parse("Thanks for calling. [[") == [words("Thanks for calling. ", ())]
 
 
-def test_emphasis_is_added_to_the_active_tones():
+def test_emphasis_is_added_to_the_active_delivery():
     assert parse("<<calm>>It's ^^fixed^^ now.") == [
         words("It's ", ("calm",)),
         words("fixed", ("calm", "emphasis")),
@@ -271,9 +271,9 @@ def test_emphasis_that_never_closes_is_spoken_plainly():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tone", [TextType.TOKEN, TextType.SENTENCE])
-async def test_an_aggregator_keeps_each_tag_in_one_unit(tone):
-    aggregator = SkipTagsAggregator(EXPRESSION_TAGS, aggregation_type=tone)
+@pytest.mark.parametrize("text_type", [TextType.TOKEN, TextType.SENTENCE])
+async def test_an_aggregator_keeps_each_tag_in_one_unit(text_type):
+    aggregator = SkipTagsAggregator(EXPRESSION_TAGS, aggregation_type=text_type)
     units = []
     for chunk in ["<<chee", "rful>> It's [[la", "ugh]] ^^back", " up^", "^ now."]:
         units += [a.text async for a in aggregator.aggregate(chunk)]
@@ -282,19 +282,19 @@ async def test_an_aggregator_keeps_each_tag_in_one_unit(tone):
 
     parser = formatter()
     segments = [shape(s) for unit in units for s in parser.parse(unit)]
-    assert ("event", "laugh") in segments
+    assert ("sound", "laugh") in segments
     assert words("back up", ("cheerful", "emphasis")) in segments
 
 
 def test_names_declared_after_the_formatter_is_made_are_known():
     adapter = DeclaredAdapter()
     expression = ExpressionFormatter(lambda: adapter, owner="tts")
-    adapter.events = ["laugh"]
+    adapter.sounds = ["laugh"]
 
-    # A declared event keeps its kind in tone brackets.
+    # A declared sound keeps its kind in delivery brackets.
     segments = expression.parse("<<laugh>> Hi.")
 
-    assert isinstance(segments[0], Event) and segments[0].name == "laugh"
+    assert isinstance(segments[0], Sound) and segments[0].name == "laugh"
     assert isinstance(segments[1], Text)
 
 
@@ -311,7 +311,7 @@ async def same(words, text_type):
 
 @pytest.mark.asyncio
 async def test_a_request_formats_what_the_service_performs_and_says_where():
-    expression = formatter(events=["laugh"], tones=["calm"])
+    expression = formatter(sounds=["laugh"], delivery=["calm"])
     text = "<<calm>> Hi. [[laugh]] [[pause 50]]"
 
     request, spans = await expression.format(
@@ -320,10 +320,10 @@ async def test_a_request_formats_what_the_service_performs_and_says_where():
 
     assert request == "<calm> Hi. <laugh>"
     assert spans == [
-        ExpressionSpan(8, 13, tones=["calm"]),
-        ExpressionSpan(13, 22, event=(TextType.EXPRESSION_EVENT, "laugh")),
-        ExpressionSpan(22, 23, tones=["calm"]),
-        ExpressionSpan(23, 35, event=(TextType.EXPRESSION_PAUSE, "100")),
+        ExpressionSpan(8, 13, delivery=["calm"]),
+        ExpressionSpan(13, 22, sound=(TextType.EXPRESSION_SOUND, "laugh")),
+        ExpressionSpan(22, 23, delivery=["calm"]),
+        ExpressionSpan(23, 35, sound=(TextType.EXPRESSION_PAUSE, "100")),
     ]
 
 
@@ -337,18 +337,18 @@ async def test_a_request_formats_what_the_service_performs_and_says_where():
         ("Well [[laugh]]... okay.", "Well... okay.", "Well... <laugh> okay."),
         ("Really [[laugh]]？ Yes.", "Really？ Yes.", "Really？ <laugh> Yes."),
         ("مرحبا [[laugh]]؟", "مرحبا؟", "مرحبا؟ <laugh>"),
-        # An event the service can't perform is removed the same way.
+        # A sound the service can't perform is removed the same way.
         ("Hi [[sigh]], there.", "Hi, there.", "Hi, there."),
         # Spacing the LLM wrote before the punctuation is kept.
         ("Hi [[laugh]] , there.", "Hi , there.", "Hi <laugh> , there."),
         ("It's [[laugh]] back.", "It's back.", "It's <laugh> back."),
-        # So does punctuation after a span or a tone tag.
+        # So does punctuation after a span or a delivery tag.
         ("It's <<slow: A B 7>>, okay.", "It's A B 7, okay.", "It's <slow> A B 7, okay."),
         ("Hi <<calm>>, there.", "Hi, there.", "Hi, <calm> there."),
     ],
 )
 async def test_punctuation_after_a_tag_closes_the_words_before_it(text, shown, sent):
-    expression = formatter(events=["laugh"], tones=["calm", "slow"])
+    expression = formatter(sounds=["laugh"], delivery=["calm", "slow"])
     segments = expression.parse(text)
 
     assert ExpressionFormatter.shown_text(segments, TextType.SENTENCE) == shown
@@ -356,10 +356,10 @@ async def test_punctuation_after_a_tag_closes_the_words_before_it(text, shown, s
 
 
 class ClosingAdapter(DeclaredAdapter):
-    """Closes each request with the tones its last words are spoken in."""
+    """Closes each request with the delivery its last words are spoken in."""
 
-    def format_end(self, tones):
-        return f" </{','.join(tones)}>"
+    def format_end(self, delivery):
+        return f" </{','.join(delivery)}>"
 
 
 @pytest.mark.asyncio
@@ -368,7 +368,7 @@ class ClosingAdapter(DeclaredAdapter):
     [(TextType.SENTENCE, "</calm>"), (TextType.TOKEN, " up.")],
 )
 async def test_a_sentence_request_is_closed_by_the_adapter(text_type, ends_with):
-    adapter = ClosingAdapter(tones=["calm"])
+    adapter = ClosingAdapter(delivery=["calm"])
     expression = ExpressionFormatter(lambda: adapter, owner="tts")
 
     request, _ = await expression.format(
@@ -387,26 +387,26 @@ async def test_a_request_leaves_out_what_the_service_cant_perform():
     request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
 
     assert request == "Hi."
-    assert spans == [ExpressionSpan(8, 13, tones=[])]
+    assert spans == [ExpressionSpan(8, 13, delivery=[])]
 
 
 @pytest.mark.asyncio
-async def test_a_span_sets_the_tones_of_its_whole_request_on_a_sentence_service():
-    expression = formatter(tones=["calm", "slow"], tone_scope=ToneScope.SENTENCE)
+async def test_a_span_sets_the_delivery_of_its_whole_request_on_a_sentence_service():
+    expression = formatter(delivery=["calm", "slow"], delivery_scope=DeliveryScope.SENTENCE)
     segments = expression.parse("<<calm>> Your code is <<slow: A B 7>>, okay.")
 
     request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
 
     assert request == "<calm,slow> Your code is A B 7, okay."
-    assert {tuple(span.tones) for span in spans} == {("calm", "slow")}
+    assert {tuple(span.delivery) for span in spans} == {("calm", "slow")}
 
 
 @pytest.mark.asyncio
 async def test_emphasis_stays_on_its_words_on_a_sentence_service():
-    expression = formatter(tones=["calm"], tone_scope=ToneScope.SENTENCE)
+    expression = formatter(delivery=["calm"], delivery_scope=DeliveryScope.SENTENCE)
     segments = expression.parse("<<calm>> It's ^^back^^ now.")
 
     request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
 
     assert request == "<calm> It's back now."
-    assert {tuple(span.tones) for span in spans} == {("calm",)}
+    assert {tuple(span.delivery) for span in spans} == {("calm",)}

@@ -8,25 +8,25 @@
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import (
-    EMPHASIS_TONE,
-    FAST_TONE,
-    SLOW_TONE,
-    SPEED_TONES,
+    EMPHASIS_DELIVERY,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    SPEED_DELIVERY,
     ExpressionCapabilities,
     ExpressionTerm,
 )
 
-# The tag each speed tone is written as.
-_SPEED_TAGS = {SLOW_TONE: "speaking slowly", FAST_TONE: "speaking quickly"}
+# The tag each speed delivery is written as.
+_SPEED_TAGS = {SLOW_DELIVERY: "speaking slowly", FAST_DELIVERY: "speaking quickly"}
 # The tag that sets the pace back. A pace a tag sets lasts past the input it
 # is sent in, until another tag changes it.
 _NORMAL_PACE_TAG = "[normal pace]"
 
 # The tags in Fish Audio's S2 emotion reference, sorted into sounds made at one
-# point and deliveries that last. Tones are single words, since a tone tag
-# separates tones by spaces, so multi-word tones such as "soft tone" aren't
+# point and deliveries that last. Deliveries are single words, since a delivery tag
+# separates its names by spaces, so multi-word ones such as "soft tone" aren't
 # listed.
-_S2_EVENTS = [
+_S2_SOUNDS = [
     ExpressionTerm("laughing"),
     ExpressionTerm("chuckling"),
     ExpressionTerm("sobbing"),
@@ -43,7 +43,7 @@ _S2_EVENTS = [
     ExpressionTerm("crowd laughing", "sound effect"),
 ]
 
-_S2_TONES = [
+_S2_DELIVERY = [
     ExpressionTerm(name)
     for name in (
         "happy sad angry excited calm nervous confident surprised satisfied delighted "
@@ -59,12 +59,12 @@ _S2_TONES = [
 class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
     """Formats expression tags as Fish Audio S2 bracket tags.
 
-    Part of expressive conversation (alpha). Tones and events are both tags,
+    Part of expressive conversation (alpha). Delivery and sounds are both tags,
     such as ``[excited]`` or ``[laughing]``, written in free text: the terms
     listed are Fish Audio's S2 emotion reference, and others described in a
     few words work too. A tag applies within the input it is sent in, so each
-    sentence states its tones from its start. There is no tag for the voice's
-    baseline, so a return to it writes none. The speed tones are written as
+    sentence states its delivery from its start. There is no tag for the voice's
+    baseline, so a return to it writes none. Slow and fast are written as
     ``[speaking slowly]`` and ``[speaking quickly]``, and since a pace lasts
     until another tag changes it, a ``[normal pace]`` tag ends them, within a
     sentence or at the end of one. Emphasis is an ``[emphasis]`` tag
@@ -75,32 +75,36 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
     def capabilities(self) -> ExpressionCapabilities:
         """Free-text tags, emphasis and approximate pauses."""
         return ExpressionCapabilities(
-            events=list(_S2_EVENTS),
-            tones=[*_S2_TONES, *SPEED_TONES],
-            free_text_events=True,
-            free_text_tones=True,
+            sounds=list(_S2_SOUNDS),
+            delivery=[*_S2_DELIVERY, *SPEED_DELIVERY],
+            free_text_sounds=True,
+            free_text_delivery=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
         )
 
-    def format_text(self, text: str, tones: list[str], previous_tones: list[str] | None) -> str:
-        """Prefix tags where the tones change, and emphasis before stressed words."""
-        tags = [_SPEED_TAGS.get(tone, tone) for tone in tones if tone != EMPHASIS_TONE]
+    def format_text(
+        self, text: str, delivery: list[str], previous_delivery: list[str] | None
+    ) -> str:
+        """Prefix tags where the delivery changes, and emphasis before stressed words."""
+        tags = [_SPEED_TAGS.get(name, name) for name in delivery if name != EMPHASIS_DELIVERY]
         previous = [
-            _SPEED_TAGS.get(tone, tone) for tone in previous_tones or [] if tone != EMPHASIS_TONE
+            _SPEED_TAGS.get(name, name)
+            for name in previous_delivery or []
+            if name != EMPHASIS_DELIVERY
         ]
         prefix = "".join(f"[{tag}]" for tag in tags) if tags and tags != previous else ""
-        if _has_speed(previous_tones or []) and not _has_speed(tones):
+        if _has_speed(previous_delivery or []) and not _has_speed(delivery):
             prefix = _NORMAL_PACE_TAG + prefix
-        if EMPHASIS_TONE in tones:
+        if EMPHASIS_DELIVERY in delivery:
             prefix += "[emphasis]"
         return f"{prefix} {text}" if prefix else text
 
-    def format_end(self, tones: list[str]) -> str:
-        """Set the pace back after a request that ends in a speed tone."""
-        return f" {_NORMAL_PACE_TAG}" if _has_speed(tones) else ""
+    def format_end(self, delivery: list[str]) -> str:
+        """Set the pace back after a request that ends in a speed delivery."""
+        return f" {_NORMAL_PACE_TAG}" if _has_speed(delivery) else ""
 
-    def format_event(self, name: str) -> str:
+    def format_sound(self, name: str) -> str:
         """Format a tag."""
         return f"[{name}]"
 
@@ -109,5 +113,5 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
         return "[break]" if duration_ms < 1000 else "[long-break]"
 
 
-def _has_speed(tones: list[str]) -> bool:
-    return any(tone in _SPEED_TAGS for tone in tones)
+def _has_speed(delivery: list[str]) -> bool:
+    return any(name in _SPEED_TAGS for name in delivery)
