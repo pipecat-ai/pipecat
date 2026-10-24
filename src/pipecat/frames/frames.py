@@ -728,9 +728,11 @@ class LLMContextAssistantTurnFrame(DataFrame):
     """The aggregated text of a completed assistant turn.
 
     Broadcast by the LLM assistant aggregator when a turn ends, carrying the
-    same text that is stored in the LLM context. Processors upstream and
-    downstream (e.g. STT services) can handle this frame to react to each
-    completed bot reply without needing a separate observer.
+    text stored in the LLM context. With expressive conversation on, it is the
+    words alone, while the context keeps the expression tags the LLM wrote.
+    Processors upstream and downstream (e.g. STT services) can handle this
+    frame to react to each completed bot reply without needing a separate
+    observer.
 
     Parameters:
         text: The assistant's aggregated spoken text for this turn.

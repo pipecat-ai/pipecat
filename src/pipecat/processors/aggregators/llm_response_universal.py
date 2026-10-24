@@ -23,6 +23,7 @@ from loguru import logger
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
+from pipecat.expressive.formatter import strip_expression_tags
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AssistantImageRawFrame,
@@ -362,7 +363,9 @@ class AssistantTurnStoppedMessage:
     """An assistant turn stopped message containing an assistant transcript update.
 
     A message in a conversation transcript containing the assistant
-    content. This is the aggregated transcript that is then used in the context.
+    content: the aggregated transcript, which the context also records. With
+    expressive conversation on, it is the words alone, while the context keeps
+    the expression tags the LLM wrote.
 
     Parameters:
         content: The message content/text. May be empty if the LLM
@@ -1743,6 +1746,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
         self._summarizer.add_event_handler("on_summary_applied", self._on_summary_applied)
 
+        self._expressive = False
+
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
@@ -1780,6 +1785,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._expressive = setup.enable_expressive_conversation
         if self._summarizer:
             await self._summarizer.setup(setup)
 
@@ -2410,15 +2416,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not frame.append_to_context:
             return
 
-        # Make sure we really have text (spaces count, too!)
-        if len(frame.text) == 0:
-            return
-
+        # The text as the LLM wrote it, which a unit that is only tags has
+        # without any words to show.
         text = (
             frame.raw_text
             if isinstance(frame, AggregatedTextFrame) and frame.raw_text
             else frame.text
         )
+        # Make sure we really have text (spaces count, too!)
+        if len(text) == 0:
+            return
+
         self._aggregation.append(
             TextPartForConcatenation(
                 text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
@@ -2584,6 +2592,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if aggregation:
             # Strip turn completion markers from the transcript
             aggregation = self._maybe_strip_turn_completion_markers(aggregation)
+        # The context keeps the expression tags the LLM wrote; the transcript
+        # is the words.
+        if aggregation and self._expressive:
+            aggregation = strip_expression_tags(aggregation)
 
         message = AssistantTurnStoppedMessage(
             content=aggregation,
