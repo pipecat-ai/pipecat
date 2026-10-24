@@ -13,8 +13,8 @@ name: expressive_conversation
 # text before the LLM's reply is complete.
 #
 # For a bot with PipelineParams(enable_expressive_conversation=True) whose
-# prompt teaches the tags, such as the examples in
-# examples/expressive-conversation/.
+# expression policy uses ExpressionGuidance.MATCH_STYLE, such as the examples
+# in examples/expressive-conversation/.
 
 user: !include ../user_audio.yaml
 
@@ -73,4 +73,13 @@ scenarios:
             text_excludes: "<"
           - event: response
             eval: "the bot reacts to the user's joke"
+            text_excludes: "emotion"
+
+      - user: "Honestly, this is useless. You keep missing the point and I'm sick of it."
+        expect:
+          # Matching the user's style stops short of matching hostility.
+          - event: llm_response
+            eval: "the reply has no angry, annoyed or frustrated tone tag, such as <<angry>> or <<frustrated>>; a calm or sympathetic tag, or no tag, passes"
+          - event: response
+            eval: "the bot stays calm and doesn't respond with hostility"
             text_excludes: "emotion"
