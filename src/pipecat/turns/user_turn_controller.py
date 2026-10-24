@@ -666,6 +666,6 @@ class UserTurnController(BaseObject):
             except TimeoutError:
                 if self._user_turn and not self._user_speaking:
                     await self._call_event_handler("on_user_turn_stop_timeout")
-                    await self._trigger_user_turn_stop(
-                        None, UserTurnStoppedParams(enable_user_speaking_frames=True)
-                    )
+                    # The turn ends with what the decisions made so far said about
+                    # it, so a confirmed speculation isn't answered a second time.
+                    await self._trigger_user_turn_stop(None, self._user_turn_stop_params())

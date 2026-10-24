@@ -314,6 +314,30 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
 
+    async def test_a_turn_ended_by_the_timeout_keeps_a_confirmation(self):
+        """The stop timeout ends the turn with what the decisions said, a confirmation included."""
+        confirming, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[confirming, on_inference]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops = []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(params)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await confirming.speculate()
+        await confirming.confirm()
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+
+        self.assertEqual(len(stops), 1)
+        self.assertTrue(stops[0].confirms_speculation)
+
     async def test_external_user_turn_strategies_no_timeout_while_speaking(self):
         """Test that timeout does not trigger when user is still speaking with external strategies."""
         controller = UserTurnController(
