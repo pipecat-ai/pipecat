@@ -33,7 +33,7 @@ def test_nothing_is_taught_for_a_service_that_performs_nothing():
 def test_a_fixed_list_is_offered_as_the_only_choices():
     instructions = expression_instructions(FIXED)
 
-    assert "Use only these tones, written exactly as listed: calm, happy, sad." in instructions
+    assert "Use only these deliveries, written exactly as listed: calm, happy, sad." in instructions
     assert "Use only these sounds, written exactly as listed: [[laughter]]." in instructions
 
 
@@ -56,7 +56,7 @@ def test_only_the_controls_a_service_performs_are_taught():
 
 
 def test_a_policy_narrows_a_fixed_list_in_its_own_order():
-    policy = ExpressionPolicy(tones=["sad", "relieved", "calm"], events=[])
+    policy = ExpressionPolicy(delivery=["sad", "relieved", "calm"], sounds=[])
 
     instructions = expression_instructions(FIXED, policy)
 
@@ -64,8 +64,8 @@ def test_a_policy_narrows_a_fixed_list_in_its_own_order():
     assert "[[sound]]" not in instructions
 
 
-def test_a_policy_names_any_tone_for_a_free_text_service():
-    policy = ExpressionPolicy(tones=["whispers", "relieved"])
+def test_a_policy_names_any_delivery_for_a_free_text_service():
+    policy = ExpressionPolicy(delivery=["whispers", "relieved"])
 
     instructions = expression_instructions(FREE_TEXT, policy)
 
@@ -74,7 +74,7 @@ def test_a_policy_names_any_tone_for_a_free_text_service():
 
 def test_nothing_is_taught_when_a_policy_offers_nothing_performable():
     capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm")])
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE], tones=["relieved"])
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE], delivery=["relieved"])
 
     assert expression_instructions(capabilities, policy) is None
 
@@ -92,7 +92,7 @@ def test_guidance_follows_the_tags_in_order():
 
 
 def test_unperformable_tags_are_those_a_fixed_list_lacks():
-    policy = ExpressionPolicy(tones=["calm", "relieved"], events=["laughter", "sighs"])
+    policy = ExpressionPolicy(delivery=["calm", "relieved"], sounds=["laughter", "sighs"])
 
     assert unperformable_tags(FIXED, policy) == ["<<relieved>>", "[[sighs]]"]
     assert unperformable_tags(FREE_TEXT, policy) == []
@@ -101,7 +101,7 @@ def test_unperformable_tags_are_those_a_fixed_list_lacks():
 def test_a_service_that_performs_speed_is_offered_slow_with_when_to_use_it():
     capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm"), *SPEED_DELIVERY])
     policy = ExpressionPolicy(
-        guidance=[ExpressionGuidance.SLOW_FOR_DETAILS], tones=["calm", "slow"]
+        guidance=[ExpressionGuidance.SLOW_FOR_DETAILS], delivery=["calm", "slow"]
     )
 
     instructions = expression_instructions(capabilities, policy)

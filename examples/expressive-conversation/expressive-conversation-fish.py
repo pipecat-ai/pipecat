@@ -77,7 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     expression_policy = ExpressionPolicy(
         guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS],
-        tones=[
+        delivery=[
             "slow",
             "happy",
             "excited",
@@ -94,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "sarcastic",
             "whispering",
         ],
-        events=[
+        sounds=[
             "laughing",
             "chuckling",
             "sighing",

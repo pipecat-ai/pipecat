@@ -91,7 +91,7 @@ async def test_a_tts_that_performs_nothing_is_taught_nothing():
 
 @pytest.mark.asyncio
 async def test_the_policy_shapes_what_is_taught():
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE], tones=["calm"])
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE], delivery=["calm"])
     llm = _llm()
 
     await _send_up(llm, _metadata(CALM_HAPPY), params=_expressive(policy))
@@ -123,7 +123,7 @@ async def test_every_llm_in_a_switcher_is_taught_the_policy():
 
 @pytest.mark.asyncio
 async def test_policy_tags_the_tts_cant_perform_are_warned_about():
-    policy = ExpressionPolicy(tones=["calm", "relieved"], events=["sighs"])
+    policy = ExpressionPolicy(delivery=["calm", "relieved"], sounds=["sighs"])
     llm = _llm()
     warnings: list[str] = []
     handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")

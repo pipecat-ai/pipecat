@@ -27,7 +27,7 @@ class ExpressionGuidance:
             hostility.
         SLOW_FOR_DETAILS: Say anything the user may need to write down slowly,
             in a sentence of its own. For a service that performs the
-            ``slow`` tone.
+            ``slow`` delivery.
     """
 
     MATCH_STYLE = (
@@ -51,13 +51,14 @@ class ExpressionPolicy:
         guidance: Lines on when and how much to express, such as
             ``ExpressionGuidance.MATCH_STYLE`` or the developer's own. They are
             joined in order, so a later line can refine an earlier one.
-        tones: The tones to offer, or None for every tone the TTS service
-            declares. Tones a service with a fixed list lacks are left out; a
-            service that accepts any tone is offered these as written.
-        events: The events to offer, or None for every event the TTS service
-            declares, narrowed the same way as ``tones``.
+        delivery: The deliveries to offer, or None for every delivery the TTS
+            service declares. Deliveries a service with a fixed list lacks are
+            left out; a service that accepts any delivery is offered these as
+            written.
+        sounds: The sounds to offer, or None for every sound the TTS service
+            declares, narrowed the same way as ``delivery``.
     """
 
     guidance: list[str] = field(default_factory=list)
-    tones: list[str] | None = None
-    events: list[str] | None = None
+    delivery: list[str] | None = None
+    sounds: list[str] | None = None

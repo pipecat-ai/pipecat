@@ -37,18 +37,19 @@ def expression_instructions(
     policy = policy or ExpressionPolicy()
 
     tags = []
-    tones = _offered(capabilities.delivery, policy.tones, capabilities.free_text_delivery)
-    if tones:
+    delivery = _offered(capabilities.delivery, policy.delivery, capabilities.free_text_delivery)
+    if delivery:
         tags.append(
-            "- <<tone>> at the start of a sentence speaks it, and the sentences after it, in "
-            "that tone, until the next tone tag. <<neutral>> returns to your normal voice. "
-            "A tone is one word. " + _choices("tones", tones, capabilities.free_text_delivery)
+            "- <<delivery>> at the start of a sentence speaks it, and the sentences after it, "
+            "with that delivery, until the next delivery tag. <<neutral>> returns to your "
+            "normal voice. A delivery is one word. "
+            + _choices("deliveries", delivery, capabilities.free_text_delivery)
         )
-    events = _offered(capabilities.sounds, policy.events, capabilities.free_text_sounds)
-    if events:
+    sounds = _offered(capabilities.sounds, policy.sounds, capabilities.free_text_sounds)
+    if sounds:
         tags.append(
             "- [[sound]] makes a sound at that point. "
-            + _choices("sounds", events, capabilities.free_text_sounds, brackets=True)
+            + _choices("sounds", sounds, capabilities.free_text_sounds, brackets=True)
         )
     if capabilities.emphasis:
         tags.append("- ^^word^^ stresses a word.")
@@ -75,12 +76,12 @@ def unperformable_tags(capabilities: ExpressionCapabilities, policy: ExpressionP
     """
     tags = [
         f"<<{name}>>"
-        for name in policy.tones or []
+        for name in policy.delivery or []
         if not _performs(name, capabilities.delivery, capabilities.free_text_delivery)
     ]
     tags += [
         f"[[{name}]]"
-        for name in policy.events or []
+        for name in policy.sounds or []
         if not _performs(name, capabilities.sounds, capabilities.free_text_sounds)
     ]
     return tags

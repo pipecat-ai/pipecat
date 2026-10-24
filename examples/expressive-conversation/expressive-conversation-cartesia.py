@@ -88,11 +88,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         guidance=[
             ExpressionGuidance.MATCH_STYLE,
             ExpressionGuidance.SLOW_FOR_DETAILS,
-            "Some feelings have no tone of their own: for relief, use happy or content; "
+            "Some feelings have no delivery of their own: for relief, use happy or content; "
             "to reassure, comfort or encourage, use calm or sympathetic; for concern or "
             "support, use sympathetic.",
         ],
-        tones=[
+        delivery=[
             "slow",
             "calm",
             "content",
