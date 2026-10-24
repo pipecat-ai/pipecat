@@ -1,0 +1,127 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Tests for the instruction that teaches an LLM to write expression tags."""
+
+from pipecat.expressive.expression import SPEED_DELIVERY, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.instructions import expression_instructions, unperformable_tags
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+
+FIXED = ExpressionCapabilities(
+    sounds=[ExpressionTerm("laughter")],
+    delivery=[ExpressionTerm("calm"), ExpressionTerm("happy"), ExpressionTerm("sad")],
+    pause_range_ms=(100, 5000),
+)
+
+FREE_TEXT = ExpressionCapabilities(
+    sounds=[ExpressionTerm("laughs"), ExpressionTerm("woo", "an excited whoop")],
+    delivery=[ExpressionTerm("excited"), ExpressionTerm("whispers", "speaking in a whisper")],
+    free_text_sounds=True,
+    free_text_delivery=True,
+    emphasis=True,
+)
+
+
+def test_nothing_is_taught_for_a_service_that_performs_nothing():
+    assert expression_instructions(None) is None
+    assert expression_instructions(ExpressionCapabilities()) is None
+
+
+def test_a_fixed_list_is_offered_as_the_only_choices():
+    instructions = expression_instructions(FIXED)
+
+    assert (
+        "Use only these deliveries, written exactly as listed: <<calm>>, <<happy>>, <<sad>>."
+        in instructions
+    )
+    assert "Use only these sounds, written exactly as listed: [[laughter]]." in instructions
+
+
+def test_a_service_that_performs_delivery_is_taught_spans():
+    instructions = expression_instructions(FIXED)
+
+    assert "- <<calm: A B 7>> speaks just the words after the colon, A B 7" in instructions
+    assert "speaks just the words after the colon" not in expression_instructions(
+        ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
+    )
+
+
+def test_a_free_text_list_is_offered_as_examples():
+    instructions = expression_instructions(FREE_TEXT)
+
+    assert "For example: <<excited>>, <<whispers>> (speaking in a whisper). Others" in instructions
+    assert "For example: [[laughs]], [[woo]] (an excited whoop). Others" in instructions
+    assert "exactly as listed" not in instructions
+
+
+def test_only_the_controls_a_service_performs_are_taught():
+    fixed = expression_instructions(FIXED)
+    free_text = expression_instructions(FREE_TEXT)
+
+    assert "^^word^^" not in fixed
+    assert "[[pause 500]]" in fixed
+    assert "^^word^^ stresses a word." in free_text
+    assert "[[pause" not in free_text
+
+
+def test_a_policy_narrows_a_fixed_list_in_its_own_order():
+    policy = ExpressionPolicy(delivery=["sad", "relieved", "calm"], sounds=[])
+
+    instructions = expression_instructions(FIXED, policy)
+
+    assert "exactly as listed: <<sad>>, <<calm>>." in instructions
+    assert "[[sound]]" not in instructions
+
+
+def test_a_policy_names_any_delivery_for_a_free_text_service():
+    policy = ExpressionPolicy(delivery=["whispers", "relieved"])
+
+    instructions = expression_instructions(FREE_TEXT, policy)
+
+    assert "For example: <<whispers>> (speaking in a whisper), <<relieved>>." in instructions
+
+
+def test_nothing_is_taught_when_a_policy_offers_nothing_performable():
+    capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm")])
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE], delivery=["relieved"])
+
+    assert expression_instructions(capabilities, policy) is None
+
+
+def test_guidance_follows_the_tags_in_order():
+    policy = ExpressionPolicy(
+        guidance=[ExpressionGuidance.MATCH_STYLE, "Never laugh while discussing billing."]
+    )
+
+    instructions = expression_instructions(FIXED, policy)
+
+    assert instructions.endswith(
+        f"\n\n{ExpressionGuidance.MATCH_STYLE}\nNever laugh while discussing billing."
+    )
+
+
+def test_unperformable_tags_are_those_a_fixed_list_lacks():
+    policy = ExpressionPolicy(delivery=["calm", "relieved"], sounds=["laughter", "sighs"])
+
+    assert unperformable_tags(FIXED, policy) == ["<<relieved>>", "[[sighs]]"]
+    assert unperformable_tags(FREE_TEXT, policy) == []
+
+
+def test_a_service_that_performs_speed_is_offered_slow_with_when_to_use_it():
+    capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm"), *SPEED_DELIVERY])
+    policy = ExpressionPolicy(
+        guidance=[ExpressionGuidance.SLOW_FOR_DETAILS], delivery=["calm", "slow"]
+    )
+
+    instructions = expression_instructions(capabilities, policy)
+
+    assert (
+        "<<slow>> (to say something carefully, such as a number, a code or an address)"
+        in instructions
+    )
+    # A span is shown slowing a detail, as details are said.
+    assert "- <<slow: A B 7>> speaks just the words after the colon" in instructions
+    assert instructions.endswith(ExpressionGuidance.SLOW_FOR_DETAILS)

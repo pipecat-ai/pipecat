@@ -30,6 +30,9 @@ from websockets.protocol import State
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.instructions import expression_instructions, unperformable_tags
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
     EagerEndOfTurnCancelFrame,
@@ -53,6 +56,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
+    TTSMetadataFrame,
 )
 from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
@@ -416,6 +420,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # The instruction as last composed, so a recomposition that changes
         # nothing (every tool sync recomposes) is not logged again.
         self._composed_system_instruction: str | None = None
+        # With expressive conversation on, the expression the TTS service
+        # downstream performs, from its latest TTSMetadataFrame, and the
+        # pipeline's policy on which tags to offer and when.
+        self._expressive = False
+        self._tts_expression: ExpressionCapabilities | None = None
+        self._expression_policy: ExpressionPolicy | None = None
         # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
         # don't need to spell out the generic parameter just to subclass
         # (backward compatibility for 3rd-party providers outside this repo).
@@ -790,6 +800,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 stacklevel=4,
             )
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._expressive = setup.enable_expressive_conversation
+        self._expression_policy = setup.expression_policy
+
+    def _handle_tts_metadata(self, frame: TTSMetadataFrame):
+        """Teach the expression the TTS service performs, replacing any before it."""
+        self._tts_expression = frame.expression
+        self._warn_unperformable_tags()
+        self._compose_system_instruction()
+
+    def _warn_unperformable_tags(self):
+        if not self._expression_policy or not self._tts_expression:
+            return
+        tags = unperformable_tags(self._tts_expression, self._expression_policy)
+        if tags:
+            logger.warning(
+                f"{self}: the TTS service can't perform {', '.join(tags)} from the "
+                "expression policy, so they aren't offered"
+            )
+
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
 
@@ -825,7 +861,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Joins the user's base system instruction (the single source of truth,
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
-        guide), turn completion instructions (when enabled), and async tool
+        guide), the expression tags the TTS service performs (with expressive
+        conversation on), turn completion instructions (when enabled), and async tool
         cancellation instructions (when enabled). Safe to call repeatedly — it
         always rebuilds from the base, so it never compounds, and it logs the
         result only when it differs from the previous composition.
@@ -833,6 +870,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         base = self._base_system_instruction
         parts = [base] if base else []
         parts.extend(self._appended_system_instructions)
+        expression = expression_instructions(self._tts_expression, self._expression_policy)
+        if expression:
+            parts.append(expression)
         if self._filter_incomplete_user_turns:
             parts.append(self._user_turn_completion_config.completion_instructions)
         if self._cancel_tool_names:
@@ -918,6 +958,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
+        elif isinstance(frame, TTSMetadataFrame) and self._expressive:
+            self._handle_tts_metadata(frame)
 
         if isinstance(frame, LLMContextFrame):
             # Runs before the subclass starts the completion, so the gate knows
