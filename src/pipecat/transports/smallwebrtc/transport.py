@@ -22,6 +22,7 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import apply_half_hann_fade_out
 from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
@@ -145,6 +146,47 @@ class RawAudioTrack(AudioStreamTrack):
             self._chunk_queue.append((chunk, fut))
 
         return future
+
+    def interrupt_audio(self, max_fade_chunks: int = 2):
+        """Release the in-flight audio with a descending half-Hann fade and drop later chunks.
+
+        Args:
+            max_fade_chunks: Maximum number of 10ms chunks to keep for the fade-out
+                envelope (defaults to 2, i.e. 20ms).
+        """
+        if not self._chunk_queue:
+            return
+
+        all_chunks = list(self._chunk_queue)
+        self._chunk_queue.clear()
+
+        # Find any active future in the queued chunks (typically on the last chunk of the in-flight write)
+        active_future = next(
+            (fut for _, fut in all_chunks if fut is not None and not fut.done()), None
+        )
+
+        # Cancel any other futures if multiple writes were queued
+        for _, fut in all_chunks:
+            if fut and fut is not active_future and not fut.done():
+                fut.cancel()
+
+        # Take up to max_fade_chunks (10-20ms) for the micro-fade
+        num_fade = min(len(all_chunks), max_fade_chunks)
+        fade_chunks = all_chunks[:num_fade]
+
+        # Combine audio and apply half-Hann fade out
+        combined_audio = b"".join(chunk for chunk, _ in fade_chunks)
+        faded_audio = apply_half_hann_fade_out(combined_audio)
+
+        # Re-chunk and place back into _chunk_queue
+        # Attach active_future to the very last faded chunk so it completes when fade finishes
+        offset = 0
+        for i, (chunk, _) in enumerate(fade_chunks):
+            chunk_len = len(chunk)
+            faded_chunk = faded_audio[offset : offset + chunk_len]
+            fut = active_future if i == num_fade - 1 else None
+            self._chunk_queue.append((faded_chunk, fut))
+            offset += chunk_len
 
     async def recv(self):
         """Return the next audio frame for WebRTC transmission.
@@ -503,6 +545,11 @@ class SmallWebRTCClient:
             await self._audio_output_track.add_audio_bytes(frame.audio)
             return True
         return False
+
+    def interrupt_audio(self):
+        """Release audio queued in the output track with a smooth fade-out."""
+        if self._audio_output_track:
+            self._audio_output_track.interrupt_audio()
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
@@ -1011,6 +1058,15 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             True if the audio frame was written successfully, False otherwise.
         """
         return await self._client.write_audio_frame(frame)
+
+    async def interrupt_audio(self, destination: str | None):
+        """Handle audio interruption for transport-owned buffers.
+
+        Args:
+            destination: The destination identifier that was interrupted.
+        """
+        if self._client:
+            self._client.interrupt_audio()
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.

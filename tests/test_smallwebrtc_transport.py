@@ -500,5 +500,86 @@ class TestSmallWebRTCTransportNames(unittest.TestCase):
         self.assertEqual(transport.output().name, "webrtc-out")
 
 
+class TestRawAudioTrackInterruption(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupt_audio_fades_head_chunks_to_silence(self):
+        from pipecat.transports.smallwebrtc.transport import RawAudioTrack
+
+        track = RawAudioTrack(sample_rate=16_000)
+        # 16kHz, 10ms is 160 samples (320 bytes). 4 chunks = 640 samples (1280 bytes).
+        samples = np.full(640, 15000, dtype=np.int16)
+        future = track.add_audio_bytes(samples.tobytes())
+
+        self.assertEqual(len(track._chunk_queue), 4)
+
+        # Interrupt with max 2 fade chunks (20ms)
+        track.interrupt_audio(max_fade_chunks=2)
+
+        # Remaining chunks should be 2 (discarded chunks 3 & 4)
+        self.assertEqual(len(track._chunk_queue), 2)
+
+        # Concatenate faded chunks
+        faded_pcm = b"".join(chunk for chunk, _ in track._chunk_queue)
+        faded_samples = np.frombuffer(faded_pcm, dtype=np.int16)
+
+        # First sample preserved, final sample reached exact zero
+        self.assertEqual(faded_samples[0], 15000)
+        self.assertEqual(faded_samples[-1], 0)
+        # Monotonically descending
+        self.assertTrue(np.all(np.diff(faded_samples) <= 0))
+
+        # Check playout via recv()
+        track._start = 0
+        await track.recv()
+        self.assertFalse(future.done())
+        await track.recv()
+        # Active future resolved upon final faded chunk
+        self.assertTrue(future.done())
+
+        # Next frame is pure silence
+        silence_frame = await track.recv()
+        silence_samples = silence_frame.to_ndarray()
+        self.assertTrue(np.all(silence_samples == 0))
+
+    async def test_interrupt_audio_empty_queue(self):
+        from pipecat.transports.smallwebrtc.transport import RawAudioTrack
+
+        track = RawAudioTrack(sample_rate=16_000)
+        track.interrupt_audio()
+        self.assertEqual(len(track._chunk_queue), 0)
+
+    async def test_interrupt_audio_cancels_subsequent_futures(self):
+        from pipecat.transports.smallwebrtc.transport import RawAudioTrack
+
+        track = RawAudioTrack(sample_rate=16_000)
+        samples1 = np.full(160, 10000, dtype=np.int16)
+        samples2 = np.full(160, 20000, dtype=np.int16)
+
+        fut1 = track.add_audio_bytes(samples1.tobytes())
+        fut2 = track.add_audio_bytes(samples2.tobytes())
+
+        # Both writes queued
+        self.assertEqual(len(track._chunk_queue), 2)
+
+        # Interrupt keeps up to 1 fade chunk
+        track.interrupt_audio(max_fade_chunks=1)
+
+        self.assertEqual(len(track._chunk_queue), 1)
+        # fut2 (which was discarded) is cancelled
+        self.assertTrue(fut2.cancelled())
+        # fut1 remains active on the head chunk
+        self.assertFalse(fut1.done())
+
+
+class TestSmallWebRTCOutputTransportInterruption(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupt_audio_delegates_to_client(self):
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCOutputTransport
+
+        client = MagicMock()
+        transport = SmallWebRTCOutputTransport(client=client, params=TransportParams())
+
+        await transport.interrupt_audio(destination=None)
+        client.interrupt_audio.assert_called_once_with()
+
+
 if __name__ == "__main__":
     unittest.main()
