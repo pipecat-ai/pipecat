@@ -1228,6 +1228,74 @@ class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
 
+    async def test_recording_stop_preserves_active_user_speech(self):
+        events = await self._turn_events(
+            [
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                *_bot_run(),
+            ]
+        )
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK)])
+
+    async def test_recording_stop_does_not_include_idle_user_audio(self):
+        events = await self._turn_events(
+            [
+                *_user_run(),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+            ]
+        )
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK)])
+
+    async def test_recording_restart_after_user_stops_excludes_idle_audio(self):
+        events = await self._turn_events(
+            [
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                AudioBufferStartRecordingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+            ]
+        )
+
+        self.assertEqual(events, [])
+
+    async def test_recording_restart_during_user_speech_preserves_audio(self):
+        events = await self._turn_events(
+            [
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+                AudioBufferStartRecordingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                AudioBufferStopRecordingFrame(),
+                SleepFrame(sleep=0.05),
+            ]
+        )
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK)])
+
 
 if __name__ == "__main__":
     unittest.main()
