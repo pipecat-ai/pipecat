@@ -9,6 +9,7 @@
 All Polly calls are mocked, so no live AWS credentials are needed.
 """
 
+import asyncio
 import json
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from pipecat.frames.frames import TTSStoppedFrame, TTSTextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.services.tts_service import TTSContext, TTSService
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 CTX = "ctx-1"
 
@@ -115,6 +117,7 @@ def _ndjson(words: list[tuple[str, int]]) -> bytes:
 def _stub_for_run_tts(service: AWSPollyTTSService):
     """Stub sample rate, resampler and metrics so run_tts can run offline."""
     service._sample_rate = 16000
+    service._task_manager = TaskManager()
 
     async def _aresample(data, in_rate, out_rate):
         return data
@@ -229,6 +232,38 @@ async def test_cumulative_offset_across_sentences():
     await _drain(service, "World")
 
     assert captured == [("Hello", pytest.approx(0.0)), ("World", pytest.approx(1.1))]
+
+
+@pytest.mark.asyncio
+async def test_cancelling_run_tts_cancels_pending_marks_call():
+    """Cancelling run_tts (an interruption) cancels the marks call still in flight."""
+    service = _make_service()
+    _stub_for_run_tts(service)
+    captured = _capture_word_timestamps(service)
+
+    marks_started = asyncio.Event()
+    marks_cancelled = asyncio.Event()
+
+    class _SlowMarksPolly(_FakePolly):
+        async def synthesize_speech(self, **params):
+            if params.get("OutputFormat") == "json":
+                marks_started.set()
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    marks_cancelled.set()
+                    raise
+            return await super().synthesize_speech(**params)
+
+    service._aws_session = _FakeSession(_SlowMarksPolly(pcm=_pcm(1.0)))
+    drain = asyncio.create_task(_drain(service, "Hello"))
+    await marks_started.wait()
+    drain.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await drain
+
+    assert marks_cancelled.is_set()
+    assert captured == []
 
 
 @pytest.mark.asyncio

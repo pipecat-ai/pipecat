@@ -11,7 +11,6 @@ supporting multiple languages, voices, SSML features, and per-word timestamps
 via Polly SpeechMarks.
 """
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -476,7 +475,6 @@ class AWSPollyTTSService(TTSService):
         # Filter out None values
         base_params = {k: v for k, v in base_params.items() if v is not None}
 
-        marks_future = None
         try:
             async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
                 "polly",
@@ -484,50 +482,52 @@ class AWSPollyTTSService(TTSService):
             ) as polly:
                 # Kick off the marks call so it overlaps audio synthesis and
                 # adds no latency on the critical path (TTFB).
+                marks_task = None
                 if self._word_timestamps:
-                    marks_future = asyncio.ensure_future(self._fetch_word_marks(polly, base_params))
+                    marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
+                try:
+                    audio_params = {**base_params, "OutputFormat": "pcm"}
+                    response = await polly.synthesize_speech(**audio_params)  # pyright: ignore[reportGeneralTypeIssues]
+                    if "AudioStream" not in response:
+                        logger.error(f"{self} No audio stream in response")
+                        return
 
-                audio_params = {**base_params, "OutputFormat": "pcm"}
-                response = await polly.synthesize_speech(**audio_params)  # pyright: ignore[reportGeneralTypeIssues]
-                if "AudioStream" not in response:
-                    logger.error(f"{self} No audio stream in response")
-                    return
+                    pcm = await response["AudioStream"].read()
+                    # Marks carry only start times, so derive the utterance duration
+                    # from the PCM length (16-bit mono at 16000 Hz).
+                    utterance_seconds = len(pcm) / (16000 * 2)
 
-                pcm = await response["AudioStream"].read()
-                # Marks carry only start times, so derive the utterance duration
-                # from the PCM length (16-bit mono at 16000 Hz).
-                utterance_seconds = len(pcm) / (16000 * 2)
+                    audio = await self._resampler.resample(pcm, 16000, self.sample_rate)
 
-                audio = await self._resampler.resample(pcm, 16000, self.sample_rate)
+                    await self.start_tts_usage_metrics(text)
 
-                await self.start_tts_usage_metrics(text)
+                    # Yield audio first so the first chunk stops TTFB and anchors the
+                    # word-timestamp baseline.
+                    for i in range(0, len(audio), self.chunk_size):
+                        chunk = audio[i : i + self.chunk_size]
+                        if len(chunk) > 0:
+                            await self.stop_ttfb_metrics()
+                            yield TTSAudioRawFrame(
+                                chunk, self.sample_rate, 1, context_id=context_id
+                            )
 
-                # Yield audio first so the first chunk stops TTFB and anchors the
-                # word-timestamp baseline.
-                for i in range(0, len(audio), self.chunk_size):
-                    chunk = audio[i : i + self.chunk_size]
-                    if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
-
-                # Feed the word marks (already in flight) and advance the offset.
-                if marks_future is not None:
-                    word_marks = await marks_future
-                    marks_future = None
-                    if word_marks:
-                        word_times = [
-                            (word, self._cumulative_time + start) for word, start in word_marks
-                        ]
-                        await self.add_word_timestamps(word_times, context_id)
-                    else:
-                        await self._push_fallback_text(text, context_id)
-                    # Offset the next sentence by this utterance's audio duration.
-                    self._cumulative_time += utterance_seconds
-
+                    # Feed the word marks (already in flight) and advance the offset.
+                    if marks_task is not None:
+                        word_marks = await marks_task
+                        marks_task = None
+                        if word_marks:
+                            word_times = [
+                                (word, self._cumulative_time + start) for word, start in word_marks
+                            ]
+                            await self.add_word_timestamps(word_times, context_id)
+                        else:
+                            await self._push_fallback_text(text, context_id)
+                        # Offset the next sentence by this utterance's audio duration.
+                        self._cumulative_time += utterance_seconds
+                finally:
+                    # Cancel a marks call still in flight (audio call failed, or the
+                    # generator was closed by an interruption) while the client is open.
+                    if marks_task is not None:
+                        await self.cancel_task(marks_task)
         except (BotoCoreError, ClientError) as error:
             yield ErrorFrame(error=f"AWS Polly TTS error: {str(error)}")
-        finally:
-            # Make sure a still-pending marks call doesn't dangle if the audio
-            # call failed or the generator was closed early (e.g. interruption).
-            if marks_future is not None:
-                marks_future.cancel()
