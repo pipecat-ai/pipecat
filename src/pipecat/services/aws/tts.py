@@ -463,7 +463,8 @@ class AWSPollyTTSService(TTSService):
                 # Kick off the marks call so it overlaps audio synthesis and
                 # adds no latency on the critical path (TTFB).
                 marks_task = None
-                if self._word_timestamps:
+                # Polly has no speech marks for the generative engine.
+                if self._word_timestamps and self._settings.engine != "generative":
                     marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
                 try:
                     audio_params = {**base_params, "OutputFormat": "pcm"}

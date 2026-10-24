@@ -330,6 +330,21 @@ async def test_word_timestamps_disabled_skips_marks_call():
     assert all(call.get("OutputFormat") != "json" for call in polly.calls)
 
 
+@pytest.mark.asyncio
+async def test_generative_engine_skips_marks_call():
+    """The generative engine has no speech marks, so run_tts doesn't request them."""
+    service = _make_service(settings=AWSPollyTTSService.Settings(engine="generative"))
+    _stub_for_run_tts(service)
+    captured = _capture_word_timestamps(service)
+    polly = _FakePolly(pcm=_pcm(0.5), marks=MARKS_SAMPLE)
+    service._aws_session = _FakeSession(polly)
+
+    await _drain(service, "Hello world")
+
+    assert captured == []
+    assert all(call.get("OutputFormat") != "json" for call in polly.calls)
+
+
 # --------------------------------------------------------------------------- #
 # Offset reset
 # --------------------------------------------------------------------------- #
