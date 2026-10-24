@@ -11,11 +11,11 @@ import asyncio
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     Frame,
+    UserTurnResponseCancelFrame,
 )
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 
@@ -34,8 +34,8 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     - the committed transcript differs from the eager one, per ``match_policy``
     - the turn never commits within ``speculation_timeout``
 
-    Every one of those leaves as an
-    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` from here, so a
+    Every one of those leaves as a
+    :class:`~pipecat.frames.frames.UserTurnResponseCancelFrame` from here, so a
     response is never dropped somewhere the rest of the pipeline cannot see.
 
     Nothing the speculation produces reaches the user or the context. The
@@ -78,29 +78,29 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         self._speculation_timeout = speculation_timeout
         self._speculation_timeout_task: asyncio.Task | None = None
         self._speculation: UserTurnSpeculation | None = None
+        # The speculation this turn's end confirmed. Other stop strategies
+        # may still be voting, and a stop asked for again confirms it again.
+        self._confirmed: UserTurnSpeculation | None = None
 
     @property
     def match_policy(self) -> EagerMatchPolicy:
         """The policy deciding whether a speculative response still applies."""
         return self._match_policy
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Start a speculation on an eager end of turn, or withdraw one.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always CONTINUE, so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, EagerTranscriptionFrame):
             await self._speculate(frame)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+        elif isinstance(frame, UserTurnResponseCancelFrame):
             # The service withdrew its prediction, and its frame reaches every
             # consumer on its own. Only our own state is left to clear.
             await self._forget()
 
-        return await super().process_frame(frame)
+        await super().process_frame(frame)
 
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """End the turn, keeping the speculative response only if it still applies.
@@ -110,7 +110,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn.
         """
-        speculation = await self._take_speculation()
+        speculation = await self._take_speculation() or self._confirmed
         if not speculation:
             await super().trigger_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames
@@ -119,6 +119,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         if self._match_policy.matches(speculation.text, self._text):
             logger.debug(f"{self}: eager end of turn held, keeping the speculative response")
+            self._confirmed = speculation
             # Inference already ran, on the eager transcript. Only finalize:
             # the UserStoppedSpeakingFrame it emits is what releases the
             # response, and the flag stops a second inference answering the
@@ -133,6 +134,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"{self}: eager end of turn missed, discarding the speculative response "
             f"(eager: [{speculation.text}], committed: [{self._text}])"
         )
+        self._confirmed = None
         await self.trigger_user_turn_speculation_cancelled()
         # Inference has to run again, on the committed transcript, so fire both
         # events rather than just finalizing.
@@ -143,6 +145,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
         speculation = await self._take_speculation()
+        self._confirmed = None
         await super()._reset()
         if speculation:
             # The turn ended without resolving the speculation — the stop
@@ -157,6 +160,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         # see, so they're part of what the committed transcript is compared to.
         speculation = UserTurnSpeculation(text=self._text + frame.text)
         self._speculation = speculation
+        self._confirmed = None
         self._speculation_timeout_task = self.task_manager.create_task(
             self._speculation_timeout_handler(speculation),
             f"{self}::_speculation_timeout_handler",
@@ -195,3 +199,4 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def _forget(self):
         """Drop a speculation the service withdrew."""
         await self._take_speculation()
+        self._confirmed = None

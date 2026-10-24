@@ -32,7 +32,6 @@ from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectF
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -53,6 +52,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
@@ -394,9 +394,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         self._reports_ttfat: bool | None = None
-        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
-        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
-        self._filter_incomplete_user_turns: bool = False
         self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
@@ -897,8 +894,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
-            await self._handle_eager_end_of_turn_cancel(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            await self._handle_user_turn_response_cancel(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
         elif isinstance(frame, LLMUpdateSettingsFrame):
@@ -947,6 +944,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
+        await self._track_pushed_frame(frame)
+
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is
         # pushed past it — routing that back through here would re-gate it.
@@ -979,7 +978,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
 
-    async def _handle_eager_end_of_turn_cancel(self, frame: EagerEndOfTurnCancelFrame):
+    async def _handle_user_turn_response_cancel(self, frame: UserTurnResponseCancelFrame):
         """Stop generating a response whose user turn turned out to be unfinished.
 
         The tokens are wasted either way; stopping keeps us from paying for the
@@ -1753,7 +1752,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             # A turn confirmed before the call was reached leaves nothing
             # pending, and the call runs as an ordinary one.
             logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
-            await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+            await self.broadcast_frame(UserTurnResponseCancelFrame)
             return
 
         # Exclude the built-in cancel tool — it's an internal mechanism and

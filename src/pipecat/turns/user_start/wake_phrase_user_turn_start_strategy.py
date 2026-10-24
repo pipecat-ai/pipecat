@@ -15,8 +15,10 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
     UserSpeakingFrame,
+    UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -34,12 +36,29 @@ class _WakeState(enum.Enum):
 class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     """User turn start strategy that requires a wake phrase before interaction.
 
-    Blocks subsequent strategies until a wake phrase is detected in a final
-    transcription. After detection, allows interaction for a configurable
-    timeout period before requiring the wake phrase again. Use
-    ``single_activation=True`` to require the wake phrase before every turn.
+    Votes to start a turn when it hears a wake phrase in a final transcription,
+    and then, until a configurable timeout, whenever the user starts speaking.
+    Use ``single_activation=True`` to require the wake phrase before every
+    turn. Speech before the wake phrase is dropped from the aggregation.
 
-    This strategy should be placed first in the start strategies list.
+    Use it with ``start_mode=StrategyMode.ALL`` next to a strategy that starts
+    turns on speech, so a turn needs both::
+
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[
+                    VADUserTurnStartStrategy(),
+                    WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"]),
+                ],
+            ),
+            user_turn_strategies_params=UserTurnStrategiesParams(
+                start_mode=StrategyMode.ALL
+            ),
+        )
+
+    In a ``StrategyMode.FIRST`` list it has to come first: until it hears the
+    wake phrase, it keeps the strategies after it from seeing frames. That is
+    deprecated, along with :class:`~pipecat.turns.types.ProcessFrameResult`.
 
     Event handlers available:
 
@@ -159,23 +178,23 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             if not self._single_activation:
                 self._refresh_timeout()
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame for wake phrase detection or passthrough.
 
         Args:
             frame: The frame to be processed.
 
         Returns:
-            STOP when the wake phrase is detected or when in IDLE state
-            (blocks subsequent strategies), CONTINUE when in AWAKE state
-            (allows subsequent strategies to proceed).
+            ``ProcessFrameResult.STOP`` until the wake phrase is heard, which
+            keeps the strategies after this one in a ``StrategyMode.FIRST``
+            list from seeing the frame. That gating is deprecated.
         """
         await super().process_frame(frame)
 
         if self._state == _WakeState.IDLE:
             return await self._process_idle(frame)
-        else:
-            return await self._process_awake(frame)
+        await self._process_awake(frame)
+        return None
 
     async def _process_idle(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in IDLE state.
@@ -184,7 +203,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         matches. When a match is found, a user turn start is triggered.
         Transcription frames that don't match have their text cleared so that
         pre-wake-phrase speech is not added to the LLM context. All frames
-        return STOP to block subsequent strategies.
+        return STOP, for a ``StrategyMode.FIRST`` list.
         """
         if isinstance(frame, TranscriptionFrame):
             if self._check_wake_phrase(frame.text):
@@ -194,12 +213,21 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         return ProcessFrameResult.STOP
 
-    async def _process_awake(self, frame: Frame) -> ProcessFrameResult:
+    async def _process_awake(self, frame: Frame):
         """Process a frame while in AWAKE state.
 
-        Refreshes the timeout on activity frames (timeout mode only). Returns
-        CONTINUE so subsequent strategies can process the frame.
+        Votes to start a turn when the user starts speaking, and refreshes the
+        timeout on activity frames (timeout mode only).
         """
+        if isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+            ),
+        ):
+            await self.trigger_user_turn_started()
         if not self._single_activation:
             if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
                 self._refresh_timeout()
@@ -207,8 +235,6 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 self._refresh_timeout()
             elif isinstance(frame, VADUserStartedSpeakingFrame):
                 self._refresh_timeout()
-
-        return ProcessFrameResult.CONTINUE
 
     @staticmethod
     def _strip_punctuation(text: str) -> str:

@@ -41,7 +41,6 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start import ExternalUserTurnStartStrategy
 from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -76,11 +75,11 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         self._grace_period = grace_period
         self._pending: asyncio.Task | None = None
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Cancel any pending finalization when the user starts speaking again."""
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
             await self._cancel_pending(resumed=True)
-        return await super().process_frame(frame)
+        await super().process_frame(frame)
 
     async def handle_user_turn_stopped(self):
         """Drop the pending finalization once the turn has ended."""

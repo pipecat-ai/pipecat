@@ -949,6 +949,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "EagerEndOfTurnCancelFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UserTurnResponseCancelFrame",
+      "message": "`EagerEndOfTurnCancelFrame` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `UserTurnResponseCancelFrame` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "EndTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -5107,6 +5118,17 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "ProcessFrameResult",
+      "module": "pipecat.turns.types",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.turns.user_turn_strategies.StrategyMode",
+      "message": "Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead. Every strategy sees every frame, and a list whose strategies all have to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/types.py"
+    },
+    {
       "subject": "BaseUserTurnStartStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
       "kind": "parameter",
@@ -5149,6 +5171,39 @@
       "replacement": "handle_user_turn_started",
       "message": "Use :meth:`handle_user_turn_started` and :meth:`handle_user_turn_stopped` instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "DeferredUserTurnStopStrategy",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`DeferredUserTurnStopStrategy` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "deferred",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "function",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`deferred` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "ExternalUserTurnCompletionStopStrategy",
+      "module": "pipecat.turns.user_stop.external_user_turn_completion_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "ExternalUserTurnStopStrategy",
+      "message": "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `ExternalUserTurnStopStrategy` instead.",
+      "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
     },
     {
       "subject": "TaskManager.setup",

@@ -6,12 +6,19 @@
 
 """Wrapper that defers a stop strategy's finalization to another strategy."""
 
+import warnings
+
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`DeferredUserTurnStopStrategy` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "No replacement."
+)
 class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     """Wraps a stop strategy and suppresses its ``on_user_turn_stopped`` event.
 
@@ -22,12 +29,22 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     unchanged; finalization is left to another strategy in the chain
     such as ``LLMTurnCompletionUserTurnStopStrategy``.
 
+    This only matters when the first stop strategy to decide ends the turn
+    (``StrategyMode.FIRST``). By default every stop strategy votes, and a
+    deferred one votes as the strategy it wraps.
+
     Use the :func:`deferred` helper for ergonomic construction::
 
         stop=[
             deferred(TurnAnalyzerUserTurnStopStrategy(turn_analyzer=...)),
             LLMTurnCompletionUserTurnStopStrategy(),
         ]
+
+    .. deprecated:: 1.14.0
+        No replacement. Every stop strategy votes before a turn ends, the default
+        ``stop_mode`` of
+        :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`, so
+        pass the wrapped strategy itself. Will be removed in 2.0.0.
     """
 
     def __init__(self, inner: BaseUserTurnStopStrategy, **kwargs):
@@ -55,6 +72,11 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         not who decides it.
         """
         return self._inner.resolves_proposed_turn_stop_frames
+
+    @property
+    def votes_on_inference(self) -> bool:
+        """Report whether the inner strategy votes on the turn's inference."""
+        return self._inner.votes_on_inference
 
     def add_event_handler(self, event_name: str, handler):
         """Forward event subscriptions to the inner strategy.
@@ -91,6 +113,7 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         return await self._inner.process_frame(frame)
 
 
+@deprecated("`deferred` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.")
 def deferred(strategy: BaseUserTurnStopStrategy) -> DeferredUserTurnStopStrategy:
     """Defer this stop strategy's finalization to another strategy.
 
@@ -113,5 +136,14 @@ def deferred(strategy: BaseUserTurnStopStrategy) -> DeferredUserTurnStopStrategy
     Returns:
         A wrapper that exposes the inner strategy's behavior with
         finalization suppressed.
+
+    .. deprecated:: 1.14.0
+        No replacement. Every stop strategy votes before a turn ends, the default
+        ``stop_mode`` of
+        :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`, so
+        pass the wrapped strategy itself. Will be removed in 2.0.0.
     """
-    return DeferredUserTurnStopStrategy(strategy)
+    # This call already warned; the wrapper it builds would warn again.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return DeferredUserTurnStopStrategy(strategy)

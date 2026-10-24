@@ -123,6 +123,17 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         return False
 
+    @property
+    def votes_on_inference(self) -> bool:
+        """Whether this strategy votes on the turn's inference rather than on the user.
+
+        In a ``StrategyMode.ALL`` list, the turn's inference runs once every
+        other stop strategy has voted, and this strategy then votes on it.
+        Override to True in a strategy that votes on the turn's answer, such
+        as one reading the LLM's turn-completion marker.
+        """
+        return False
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the strategy.
 
@@ -183,8 +194,9 @@ class BaseUserTurnStopStrategy(BaseObject):
             frame: The frame to be analyzed.
 
         Returns:
-            A ProcessFrameResult indicating the outcome, or None (treated as
-            CONTINUE for backward compatibility).
+            Nothing. A returned :class:`~pipecat.turns.types.ProcessFrameResult`
+            is deprecated: ``STOP`` keeps the strategies after this one from
+            seeing the frame, and only in a ``StrategyMode.FIRST`` list.
         """
         pass
 
@@ -219,11 +231,7 @@ class BaseUserTurnStopStrategy(BaseObject):
     async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
         """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
 
-        Most strategies call this when they decide a turn has ended. To
-        defer finalization to another strategy (so this strategy fires
-        only the inference-triggered event), wrap this strategy with
-        :func:`~pipecat.turns.user_stop.deferred` instead of changing
-        the trigger call.
+        Most strategies call this when they decide a turn has ended.
 
         Args:
             enable_user_speaking_frames: Whether to emit
