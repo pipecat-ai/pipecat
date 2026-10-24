@@ -39,6 +39,7 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
@@ -522,9 +523,14 @@ class TTSTextFrame(AggregatedTextFrame):
         segment_id: ID of the AggregatedTextFrame this text is part of, when the
             TTS service built it from one. A word reported by the TTS carries the
             ID of the sentence or other segment it was spoken in.
+        delivery: The delivery this text is spoken in, such as ``["cheerful"]``, and
+            ``"emphasis"`` for stressed words; empty for the voice's baseline.
+            None when the text carries no delivery. Part of expressive
+            conversation (alpha).
     """
 
     segment_id: int | None = None
+    delivery: list[str] | None = field(default=None, kw_only=True)
 
 
 @renamed_init_field(
@@ -549,6 +555,8 @@ class AggregatedTextProgressFrame(DataFrame):
         text_type: Text type of the source AggregatedTextFrame.
         accumulated_text: Text already spoken in this slot (including the current word).
         remaining_text: Text not yet spoken in this slot.
+        delivery: The delivery of the word just spoken, which changes within the
+            text where its delivery does. Part of expressive conversation (alpha).
     """
 
     segment_id: int
@@ -557,6 +565,7 @@ class AggregatedTextProgressFrame(DataFrame):
     text_type: TextType | str
     accumulated_text: str
     remaining_text: str
+    delivery: list[str] | None = field(default=None, kw_only=True)
 
     @property
     @deprecated(
@@ -2087,6 +2096,18 @@ class LLMServiceMetadataFrame(ServiceMetadataFrame):
     """
 
     is_realtime_service: bool = False
+
+
+@dataclass
+class TTSMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a TTS service at pipeline start.
+
+    Parameters:
+        expression: The expression tags the service can perform, or None when
+            it performs none. Part of expressive conversation (alpha).
+    """
+
+    expression: ExpressionCapabilities | None = None
 
 
 @dataclass

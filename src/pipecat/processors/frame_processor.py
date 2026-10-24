@@ -78,6 +78,9 @@ class FrameProcessorSetup:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         clock: The clock instance for timing operations.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.enable_expressive_conversation`.
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
@@ -103,6 +106,7 @@ class FrameProcessorSetup:
     pipeline_worker: PipelineWorker
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
