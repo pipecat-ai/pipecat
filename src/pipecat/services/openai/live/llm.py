@@ -19,13 +19,12 @@ from openai._types import NotGiven as OpenAINotGiven
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.services.open_ai_live_adapter import (
+from pipecat.adapters.llm.services.open_ai_live_adapter import (
     OpenAILiveLLMAdapter,
     OpenAILiveLLMInvocationParams,
 )
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
@@ -42,6 +41,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     SpeechOutputAudioRawFrame,
+    TextType,
     TranscriptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -101,9 +101,15 @@ class OpenAILiveLLMSettings(LLMSettings):
         voice: Output voice name (for example ``marin`` or ``cedar``). ``None``
             leaves the choice to the API. Cannot be changed once the session
             has started.
+        store: Whether the API keeps the session, making it available for 30
+            days as a stereo recording from ``GET /v1/live/sessions/{id}/content``
+            and as a source a later session can fork from. ``False`` by default
+            at the API, and requires a project whose data policy permits
+            persistence. Cannot be changed once the session has started.
     """
 
     voice: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    store: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -292,8 +298,9 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         Args:
             api_key: OpenAI project API key.
             base_url: WebSocket base URL of the Live API.
-            settings: Runtime-updatable settings. ``model``, ``voice`` and
-                ``system_instruction`` are fixed once the session has started.
+            settings: Runtime-updatable settings. ``model``, ``voice``,
+                ``store`` and ``system_instruction`` are fixed once the
+                session has started.
             delegation: Where the model's delegated work runs. ``None`` selects
                 client delegation with no backend configured.
             **kwargs: Additional arguments passed to the parent LLMService.
@@ -311,6 +318,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             voice=None,
+            store=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -598,6 +606,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             ),
             delegation=self._delegation_config(params["tools"], params["tool_choice"]),
             input=history or None,
+            store=assert_given(self._settings.store),
         )
         self._sent_tools_snapshot = self._tools_snapshot(params)
         self._needs_session_config = False
@@ -961,7 +970,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
 
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 

@@ -10,10 +10,10 @@ import pytest
 from openai import NotGiven
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMInvocationParams
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMInvocationParams
-from pipecat.adapters.services.gemini_adapter import GeminiLLMInvocationParams
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMInvocationParams
+from pipecat.adapters.llm.services.bedrock_adapter import AWSBedrockLLMInvocationParams
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService
@@ -118,7 +118,9 @@ async def test_openai_run_inference_client_exception():
 async def test_openrouter_run_inference_converts_developer_messages_to_user():
     """Test OpenRouter requests convert developer messages for broad model compatibility."""
     with patch.object(OpenRouterLLMService, "create_client"):
-        service = OpenRouterLLMService(settings=OpenRouterLLMService.Settings(model="gpt-4"))
+        service = OpenRouterLLMService(
+            api_key="test-key", settings=OpenRouterLLMService.Settings(model="gpt-4")
+        )
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)

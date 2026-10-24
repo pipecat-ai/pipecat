@@ -24,10 +24,9 @@ from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
 from pipecat.frames.frames import (
-    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -46,6 +45,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -848,7 +848,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         if "session_properties" in changed and input_rate and output_rate:
             self._ensure_audio_config(input_rate, output_rate)
 
-        handled = {"session_properties", "system_instruction", "model"}
+        handled = {"session_properties", "system_instruction", "model", "temperature"}
         if changed.keys() & handled:
             await self._send_session_update()
         self._warn_unhandled_updated_settings(changed.keys() - handled)
@@ -1100,7 +1100,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         await self.push_frame(llm_text_frame)
 
         # Push TTSTextFrame for output aggregation
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 

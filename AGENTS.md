@@ -15,7 +15,7 @@ uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 # Install pre-commit hooks
 uv run pre-commit install
 
-# Run all tests
+# Run all tests (in parallel, one worker per CPU core; `-n 0` runs them in one process)
 uv run pytest
 
 # Run a single test file
@@ -27,11 +27,14 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
-# Run a behavioral eval scenario against a running bot (bot started with `-t eval`)
-pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860
+# Run a behavioral eval scenario against a running bot (started with `python bot.py`)
+pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
 # Run the full release-eval suite (spawns bots from a manifest, runs scenarios in parallel)
 pipecat eval suite evals/release/manifest.yaml -p <bot-pattern> -s <scenario>
+
+# Judge saved simulation conversations (<stem>.conversation.json) again, without the bot
+pipecat eval judge scenarios/<name>.yaml -s <scenario> logs/*.conversation.json -o judged.jsonl
 
 # Lint and format check
 uv run ruff check
@@ -105,7 +108,9 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone. A frame that must act after the bot speaks, such as a transfer, needs `interruptible = False` on both it and the `TTSSpeakFrame` before it, so the user talking over the bot can't drop either one.
+
+- **Frames are the primary public interface**: Some classes have public methods that do the same work as a frame. When the frame gets the job done, prefer it, and don't add a new method that duplicates it. Use the method only when the work has to happen outside the frame order: a method acts at once, ahead of frames already queued. A method that duplicates a frame says so in its docstring and names the frame.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
@@ -133,7 +138,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
-| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/adapters/`    | LLM adapters (`llm/`): context/tools conversion    |
 | `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
@@ -228,8 +233,10 @@ There are two kinds of scenario, told apart by the scenario's keys:
 
 To confirm a behavior while developing:
 
-1. Run the bot with its eval transport: `python bot.py -t eval --port 7860`
-2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860 -v`
+1. Run the bot with the dev runner: `python bot.py --port 7860`
+2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws -v`
+
+Every simulation run saves its conversation (what each side said and the bot's function calls) to `<stem>.conversation.json`, in the format the `pipecat.evals.conversation` module docstring describes. `pipecat eval judge <scenario.yaml> -s <name> <files...>` judges saved conversations again against the simulation's `success` and judged metrics, with a reason for every verdict and without the bot; from Python, `EvalSimulationJudge(simulation).judge(messages)` (`src/pipecat/evals/simulation_judge.py`) does the same. Use it to tune a criterion's wording on runs you already have. `EvalConversationObserver` (`pipecat.evals.conversation_observer`) records the same file from a bot's own pipeline, so a real call is judged the same way.
 
 For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 

@@ -12,7 +12,7 @@ scenarios_dir: scenarios         # scenario names resolve to <dir>/<name>.yaml
 concurrency: 4
 runs_dir: test-runs              # logs + recordings -> test-runs/<timestamp>/
 record: true                     # set true (or pass -a) to record conversation audio
-spawn: "{python} {bot} -t eval --port {port}"
+spawn: "{python} {bot} --port {port}"
 
 suite:
   #
@@ -132,6 +132,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-rime-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-rime-v1.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-sarvam.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-sarvam-vad-http.py
@@ -155,6 +157,8 @@ suite:
   - bot: voice/voice-xai.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-xai-http.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-zoom-ai.py
     scenarios: [scripted/capital_question]
 
   #
@@ -240,15 +244,15 @@ suite:
       - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-openrouter.py
     scenarios: [scripted/weather_function_call]
-  # Perplexity's completions API doesn't support tool calling, so this bot
-  # answers from web-grounded search instead of invoking a function.
   - bot: function-calling/function-calling-perplexity.py
-    scenarios: [scripted/weather_no_function_call]
+    scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-qwen.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sambanova.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sarvam.py
+    scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-smallest.py
     scenarios: [scripted/weather_function_call]
 
   #

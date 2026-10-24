@@ -13,7 +13,7 @@ from typing import Any, Literal
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
@@ -48,14 +48,15 @@ class SarvamLLMService(OpenAILLMService):
     supports_developer_role = False
 
     _SUPPORTED_MODELS = frozenset(
-        {"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b", "sarvam-105b-conversations"}
+        {"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b", "sarvam-105b-conversations"}
     )
     _VISION_MODELS = frozenset({"gemma4"})
-    _REASONING_MODELS = frozenset({"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b"})
+    _REASONING_MODELS = frozenset({"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b"})
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     _DEFAULT_BASE_URL = "https://api.sarvam.ai"
 

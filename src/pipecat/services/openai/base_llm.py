@@ -32,8 +32,11 @@ from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    OpenAILLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -97,6 +100,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     Settings = OpenAILLMSettings
     _settings: Settings
+
+    # Set by services for providers other than OpenAI. Without a key the OpenAI
+    # client falls back to OPENAI_API_KEY and would send it to that provider.
+    _requires_api_key = False
 
     supports_developer_role: bool = True
     """Whether this service's API supports the "developer" message role.
@@ -211,7 +218,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 attempt produces no output within ``retry_timeout_secs``. The
                 retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
+
+        Raises:
+            ValueError: If the service is for a provider other than OpenAI and
+                ``api_key`` is empty.
         """
+        if self._requires_api_key and not api_key:
+            raise ValueError(f"{type(self).__name__} requires an api_key.")
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-4.1",

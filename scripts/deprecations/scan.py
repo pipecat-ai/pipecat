@@ -65,6 +65,8 @@ _SECTION_RE = re.compile(
 )
 # A parameter/field entry within an Args/Parameters section ("voice: The voice ...").
 _PARAM_ENTRY_RE = re.compile(r"^([A-Za-z_]\w*):\s")
+# An event entry in a class docstring's event list ("- on_connected: Called when ...").
+_EVENT_ENTRY_RE = re.compile(r"^- (on_\w+):\s")
 
 
 @dataclass
@@ -91,9 +93,10 @@ class Directive:
 
     relpath: str
     owner: str  # qualname of the symbol the docstring belongs to, or "<module>"
-    param: str | None  # parameter/field name when the directive is nested under one
+    param: str | None  # parameter/field/event name when the directive is nested under one
     version: str | None
     body: str
+    param_kind: str = "parameter"  # what ``param`` names: "parameter" or "event"
 
     @property
     def location(self) -> str:
@@ -133,11 +136,13 @@ class Scan:
 
 
 def iter_directives(docstring: str):
-    """Yield ``(version, body, param)`` for each ``.. deprecated::`` block.
+    """Yield ``(version, body, param, param_kind)`` for each ``.. deprecated::`` block.
 
-    ``param`` is the name of the ``Args:``/``Parameters:`` entry the directive
-    is nested under (a parameter/field deprecation), or ``None`` when the
-    directive sits at the docstring's top level (the symbol itself is deprecated).
+    ``param`` is the name of the entry the directive is nested under, or ``None``
+    when the directive sits at the docstring's top level (the symbol itself is
+    deprecated). ``param_kind`` says what that entry is: ``"parameter"`` for an
+    ``Args:``/``Parameters:`` entry (a parameter/field deprecation), ``"event"``
+    for an entry of the docstring's event list.
     """
     if not docstring:
         return
@@ -150,7 +155,7 @@ def iter_directives(docstring: str):
             continue
         base_indent = len(match.group(1))
         version = match.group(2).strip() or None
-        param = _enclosing_param(lines, i, base_indent)
+        param, param_kind = _enclosing_param(lines, i, base_indent)
         body: list[str] = []
         j = i + 1
         while j < len(lines):
@@ -167,12 +172,17 @@ def iter_directives(docstring: str):
                 break
             body.append(lines[j].strip())
             j += 1
-        yield version, " ".join(body).strip(), param
+        yield version, " ".join(body).strip(), param, param_kind
         i = j
 
 
-def _enclosing_param(lines: list[str], directive_index: int, directive_indent: int) -> str | None:
-    """The parameter entry a directive is nested under, scanning upward, or None."""
+def _enclosing_param(
+    lines: list[str], directive_index: int, directive_indent: int
+) -> tuple[str | None, str]:
+    """The entry a directive is nested under and its kind, scanning upward.
+
+    Returns ``(None, "parameter")`` when the directive is top-level.
+    """
     for k in range(directive_index - 1, -1, -1):
         stripped = lines[k].strip()
         if not stripped:
@@ -183,10 +193,12 @@ def _enclosing_param(lines: list[str], directive_index: int, directive_indent: i
         # A less-indented line: either the param entry that owns the directive,
         # or a section header / prose that means the directive is top-level.
         if _SECTION_RE.match(stripped):
-            return None
+            return None, "parameter"
+        if entry := _EVENT_ENTRY_RE.match(stripped):
+            return entry.group(1), "event"
         entry = _PARAM_ENTRY_RE.match(stripped)
-        return entry.group(1) if entry else None
-    return None
+        return (entry.group(1) if entry else None), "parameter"
+    return None, "parameter"
 
 
 def directive_parses(version: str | None, body: str) -> bool:
@@ -343,8 +355,8 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
             continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
 
-        for version, body, param in iter_directives(ast.get_docstring(tree) or ""):
-            scan.directives.append(Directive(relpath, "<module>", param, version, body))
+        for version, body, param, param_kind in iter_directives(ast.get_docstring(tree) or ""):
+            scan.directives.append(Directive(relpath, "<module>", param, version, body, param_kind))
 
         def visit(node, prefix: str, parent_is_class: bool, relpath: str = relpath) -> None:
             for child in ast.iter_child_nodes(node):
@@ -381,8 +393,10 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
                             decorator_message=message,
                         )
                     )
-                    for version, body, param in iter_directives(docstring):
-                        scan.directives.append(Directive(relpath, qualname, param, version, body))
+                    for version, body, param, param_kind in iter_directives(docstring):
+                        scan.directives.append(
+                            Directive(relpath, qualname, param, version, body, param_kind)
+                        )
                     visit(child, qualname, isinstance(child, ast.ClassDef))
                 else:
                     visit(child, prefix, parent_is_class)
@@ -455,10 +469,14 @@ def build_records(scan: Scan) -> list[dict]:
         if directive.owner == "<module>" and directive.param is None:
             subject = module_path(directive.relpath)
             kind = "module"
+        elif directive.owner == "<module>":
+            # An entry of the module docstring's Attributes section, such as an alias.
+            subject = directive.param
+            kind = "attribute"
         elif directive.param is not None:
             owner = directive.owner.removesuffix(".__init__")
             subject = f"{owner}.{directive.param}" if owner else directive.param
-            kind = "parameter"
+            kind = directive.param_kind
         else:
             # A directive on a non-decorated symbol (a method/function deprecated
             # via directive + manual warn rather than @deprecated).

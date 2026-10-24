@@ -318,7 +318,7 @@ async def test_keepalive_does_not_stamp_context_before_init():
     # Simulate the start of an LLM turn: TTSService sets the turn context id on
     # LLMFullResponseStartFrame, before run_tts sends the voice_settings init.
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     assert "ctx-1" not in service._context_init_sent
 
     await service._send_keepalive()
@@ -335,7 +335,7 @@ async def test_keepalive_stamps_context_after_init():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = "ctx-1"
-    service._playing_context_id = None
+    service.reset_active_audio_context()
     # run_tts records the context once its voice_settings init has gone out.
     service._context_init_sent.add("ctx-1")
 
@@ -351,7 +351,7 @@ async def test_keepalive_without_active_context_sends_empty():
     ws = _FakeWebSocket()
     service._websocket = ws
     service._turn_context_id = None
-    service._playing_context_id = None
+    service.reset_active_audio_context()
 
     await service._send_keepalive()
 
@@ -478,6 +478,7 @@ def test_language_code_is_gated_by_model():
     assert elevenlabs_language_code("eleven_v3", "de") == "de"
     # Cantonese is v4-only.
     assert elevenlabs_language_code("eleven_v4_turbo", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v4", "yue") == "yue"
     assert elevenlabs_language_code("eleven_v3", "yue") is None
 
 
@@ -504,3 +505,39 @@ def test_every_mapped_language_is_accepted_by_some_model():
             assert elevenlabs_language_code("eleven_v3", code) == code
         if code in ELEVENLABS_V4_LANGUAGES:
             assert elevenlabs_language_code("eleven_v4_turbo", code) == code
+
+
+class _MessagesWebSocket:
+    """Yields the given server messages, then ends."""
+
+    def __init__(self, messages: list[dict]):
+        self.state = State.OPEN
+        self._messages = [json.dumps(m) for m in messages]
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for message in self._messages:
+            yield message
+
+
+@pytest.mark.asyncio
+async def test_wordless_alignment_still_advances_the_clock():
+    """Trailing punctuation can arrive on its own; its span must not be dropped."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word_times)
+
+    service.add_word_timestamps = _record
+    service._websocket = _MessagesWebSocket(
+        [{"contextId": "ctx-1", "alignment": _chunk(text)} for text in ("Hi there", "!", " Bye ")]
+    )
+
+    await service._receive_messages()
+
+    assert [word for word, _ in reported] == ["Hi", "there!", "Bye"]
+    # "Bye" starts after the 8 characters of the first chunk, the "!", and its space.
+    assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)

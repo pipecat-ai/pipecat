@@ -8,7 +8,7 @@ import asyncio
 import unittest
 from typing import TypedDict
 
-from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.services.llm_service import FunctionCallParams
 
 

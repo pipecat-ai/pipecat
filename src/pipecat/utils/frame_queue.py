@@ -85,3 +85,12 @@ class FrameQueue(asyncio.Queue):
     def _is_uninterruptible(self, item: Any) -> bool:
         frame = self._frame_getter(item)
         return frame is not None and not frame.interruptible
+
+
+class FramePriorityQueue(FrameQueue, asyncio.PriorityQueue):
+    """A priority queue with frame-aware interruption handling.
+
+    Uses the ordering of ``asyncio.PriorityQueue`` and the frame inspection and
+    reset operations of ``FrameQueue``. For ``(priority, sequence, frame)`` items,
+    pass ``frame_getter=lambda item: item[2]``.
+    """

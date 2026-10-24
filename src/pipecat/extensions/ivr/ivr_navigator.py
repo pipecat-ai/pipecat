@@ -156,7 +156,7 @@ class IVRProcessor(FrameProcessor):
             async for result in self._aggregator.aggregate(frame.text):
                 # Push aggregated text that doesn't contain XML patterns
                 await self.push_frame(
-                    AggregatedTextFrame(text=result.text, aggregated_by=result.type),
+                    AggregatedTextFrame(text=result.text, text_type=result.type),
                     direction,
                 )
 
@@ -165,7 +165,7 @@ class IVRProcessor(FrameProcessor):
             remaining = await self._aggregator.flush()
             if remaining:
                 await self.push_frame(
-                    AggregatedTextFrame(text=remaining.text, aggregated_by=remaining.type),
+                    AggregatedTextFrame(text=remaining.text, text_type=remaining.type),
                     direction,
                 )
             # Push the end frame

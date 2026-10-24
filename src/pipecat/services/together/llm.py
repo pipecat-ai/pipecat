@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.types import NOT_GIVEN, NotGiven
@@ -45,6 +45,7 @@ class TogetherLLMService(OpenAILLMService):
 
     Settings = TogetherLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,

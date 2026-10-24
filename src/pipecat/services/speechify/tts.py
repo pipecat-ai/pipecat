@@ -257,18 +257,24 @@ class SpeechifyTTSSettings(TTSSettings):
             Adds latency.
         text_normalization: Whether to spell out numbers, dates and similar tokens
             before synthesis. Adds latency.
+        safety_identifier: Stable, opaque identifier for the end user a request is
+            synthesized for, so Speechify can rate-limit or block that user instead of
+            the whole workspace. 1 to 64 characters of letters, digits and
+            ``. _ - : | + / =`` — a keyed hash of an internal user id, never personal
+            data such as an email address, which Speechify rejects.
     """
 
     loudness_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    safety_identifier: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SpeechifyHttpTTSService(TTSService):
     """Speechify HTTP-based TTS service with word timestamps.
 
     Streams PCM audio and word-level speech marks over Server-Sent Events from
-    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint, using the streaming-native
-    models ``simba-3.2`` (English) and ``simba-3.0`` (multilingual).
+    Speechify's ``/v1/audio/stream/with-timestamps`` endpoint. Defaults to ``simba-3.5``,
+    which covers 48 languages, English included, under one model id.
 
     Requests pin Speechify's API version to :data:`SPEECHIFY_API_VERSION` rather than
     letting the workspace default decide it. The legacy ``simba-english`` and
@@ -302,11 +308,12 @@ class SpeechifyHttpTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
-            model="simba-3.2",
+            model="simba-3.5",
             voice="geffen_32",
             language=None,
             loudness_normalization=None,
             text_normalization=None,
+            safety_identifier=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -406,6 +413,10 @@ class SpeechifyHttpTTSService(TTSService):
         language = assert_given(self._settings.language)
         if language:
             payload["language"] = language
+
+        safety_identifier = assert_given(self._settings.safety_identifier)
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
 
         options: dict[str, Any] = {}
         loudness_normalization = assert_given(self._settings.loudness_normalization)

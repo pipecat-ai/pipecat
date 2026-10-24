@@ -28,7 +28,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 # Long enough for a verdict to reach the delayed voicemail handler, which
 # fires VOICEMAIL_DELAY after the verdict.
@@ -53,7 +53,7 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def _ask(self, state, questions):
+    async def _ask(self, state, questions, images=()):
         self.asked.append(state)
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
@@ -407,7 +407,7 @@ class TestVoicemailDetectorGating(unittest.IsolatedAsyncioTestCase):
             Pipeline([detector, detector.gate()]),
             frames_to_send=[
                 TTSStartedFrame(),
-                TTSTextFrame("Hi, this is Alex.", aggregated_by=AggregationType.SENTENCE),
+                TTSTextFrame("Hi, this is Alex.", text_type=TextType.SENTENCE),
                 SleepFrame(0.2),
                 _said("Hello?"),
                 SleepFrame(VERDICT_SETTLE),
@@ -424,7 +424,7 @@ class TestVoicemailDetectorGating(unittest.IsolatedAsyncioTestCase):
             Pipeline([detector, detector.gate()]),
             frames_to_send=[
                 TTSStartedFrame(),
-                TTSTextFrame("Hi, this is Alex.", aggregated_by=AggregationType.SENTENCE),
+                TTSTextFrame("Hi, this is Alex.", text_type=TextType.SENTENCE),
                 SleepFrame(0.2),
                 _said("Please leave a message."),
                 SleepFrame(VERDICT_SETTLE),

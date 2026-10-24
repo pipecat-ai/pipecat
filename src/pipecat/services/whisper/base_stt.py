@@ -130,6 +130,10 @@ class BaseWhisperSTTService(SegmentedSTTService):
     Settings = BaseWhisperSTTSettings
     _settings: Settings
 
+    # Set by services for providers other than OpenAI. Without a key the OpenAI
+    # client falls back to OPENAI_API_KEY and would send it to that provider.
+    _requires_api_key = False
+
     def __init__(
         self,
         *,
@@ -196,7 +200,14 @@ class BaseWhisperSTTService(SegmentedSTTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
+
+        Raises:
+            ValueError: If the service is for a provider other than OpenAI and
+                ``api_key`` is empty.
         """
+        if self._requires_api_key and not api_key:
+            raise ValueError(f"{type(self).__name__} requires an api_key.")
+
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
             model=None,

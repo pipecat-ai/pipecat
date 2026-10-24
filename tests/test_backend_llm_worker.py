@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.frames.frames import (
     Frame,
@@ -781,6 +781,24 @@ def test_the_model_is_told_how_what_it_writes_reaches_the_user():
     told = llm._settings.system_instruction or ""
     assert BACKEND_PAIRING_INSTRUCTION in told
     assert SPOKEN_MARK in BACKEND_PAIRING_INSTRUCTION
+
+
+def test_the_llm_runs_at_its_providers_default_thinking():
+    llm = _ScriptedLLM([])
+    assert llm.settings.use_provider_thinking_default is False
+
+    BackendLLMWorker(llm=llm)
+
+    assert llm.settings.use_provider_thinking_default is True
+
+
+def test_an_llm_that_declines_the_backend_role_is_refused():
+    llm = _ScriptedLLM([])
+    llm.llm_with_backend_role_objection = lambda role: f"cannot be the {role}"
+
+    with pytest.raises(ValueError, match="cannot be the backend"):
+        BackendLLMWorker(llm=llm)
+    assert llm.settings.use_provider_thinking_default is False
 
 
 def test_an_app_can_replace_the_backends_pairing_instruction():

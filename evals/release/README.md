@@ -6,9 +6,9 @@ evals run each example for us.
 
 ## How it works
 
-Each example is a Pipecat **bot**. We run it with its eval transport
-(`-t eval`). The **eval harness** (`pipecat.evals`) connects to it as an RTVI
-client, plays the user's side of a conversation, listens to what the bot says,
+Each example is a Pipecat **bot**. We run it with the dev runner, as for any
+local run. The **eval harness** (`pipecat.evals`) connects to its eval transport
+as an RTVI client, plays the user's side of a conversation, listens to what the bot says,
 and judges it.
 
 A **scenario** is one check: a conversation to have with the bot and how to
@@ -37,11 +37,22 @@ classifier from TypeSafe. It answers each check in a few hundred milliseconds
 and says how sure it is. The judge is picked in `judge_text.yaml`,
 `judge_audio.yaml` and the audio scenario of `language_switch.yaml` through a
 factory we keep in `evals/judges.py` (`factory: evals.judges.typesafe_classifier`).
-It needs the `jev` extra and `TYPESAFE_API_KEY` exported in the shell that runs
+It needs the `typesafe` extra and `TYPESAFE_API_KEY` exported in the shell that runs
 the suite. The harness doesn't read `.env`; only the bots do.
 
-Jev gives verdicts but not reasons. So a local LLM, the **explainer**, writes
-the reason for every `no` and for every verdict Jev is not sure about. Jev's
+To judge with Cloudflare's [Clef](https://developers.cloudflare.com/workers-ai/models/clef/)
+instead, set `factory: evals.judges.cloudflare_classifier` (add
+`model: clef-flash` for faster answers). It needs the `cloudflare` extra, and
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_KEY` exported.
+
+To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
+extra and `OPENAI_API_KEY` exported.
+
+These classifiers give verdicts but not reasons. So a local LLM, the
+**explainer**, is told every `no` and every verdict the classifier is not sure
+about, and points to what in the conversation supports it. That is evidence to
+check the verdict against, not how the classifier reached it. The classifier's
 verdict always stands.
 
 **A local LLM.** The explainer, and the caller in simulations, run `gemma4:12b`
@@ -125,13 +136,16 @@ Each run writes to `test-runs/<name>/`, a timestamp unless you pass `-n`:
   here when a run fails.
 - `logs/<bot>__<scenario>.debug.log`: the full logs of every pipeline the
   harness ran (user speech, transcription, judge, harness).
+- `logs/<bot>__<scenario>.conversation.json`: a simulation's conversation,
+  what each side said and the calls the bot made, one bot turn per
+  `assistant` message (see `pipecat.evals.conversation`).
 - `recordings/<bot>__<scenario>.wav`: the conversation audio of an audio
   scenario. The manifest sets `record: true`; `-a` forces it on.
 
 Other flags: `-c` for concurrency, `-t` for the default timeout of an
 expectation without its own `within_ms`, and `--no-cache` to synthesize the
 user's audio again instead of reusing it. The suite keeps `concurrency` runs
-going, taking the next one in manifest order, so a bot's scenarios finish
+going, taking the next one in manifest order, so an entry's scenarios finish
 together. An entry whose provider rate-limits sets its own `concurrency:`, and
 never has more than that many runs going at once.
 
@@ -192,12 +206,12 @@ runs on the CPU by default and takes `device: cuda` if you have room.
 
 ## One scenario against a running bot
 
-If a bot is already running with `-t eval`, run a scenario against it
+If a bot is already running (`python bot.py`), run a scenario against it
 directly. This is handy while working on a scenario or a bot:
 
 ```sh
-pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860
-pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860 -v
+pipecat eval run scenarios/scripted/capital_question.yaml --bot-url ws://localhost:7860/ws
+pipecat eval run scenarios/simulated/capital_curious.yaml --bot-url ws://localhost:7860/ws -v
 ```
 
 ## Scripted scenarios
@@ -368,8 +382,46 @@ scripted audio scenario, so `capital_curious/audio` exercises the bot's STT,
 TTS and turn taking against a caller of its own. The file format is in the
 [`pipecat.evals.simulation`](../../src/pipecat/evals/simulation.py) module
 docstring. Run one by hand with `pipecat eval run
-scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860 -v`, which prints
+scenarios/simulated/<name>.yaml --bot-url ws://localhost:7860/ws -v`, which prints
 the conversation as it happens.
+
+### Judging a conversation again
+
+Every simulation run saves its conversation to
+`logs/<bot>__<scenario>.conversation.json`. `pipecat eval judge` judges saved
+conversations against a simulation's `success` and its judged metrics, without
+running the bot again, so you can change the wording of either and see what
+the judge makes of the same conversations:
+
+```sh
+uv run python -m pipecat.evals judge evals/release/scenarios/simulated/book_table.yaml \
+    -s available evals/release/test-runs/<name>/logs/*__book_table__available.conversation.json
+```
+
+Each conversation gets one line in `judged.jsonl` (`-o` to change it):
+whether the goal was met and every metric's score, with a reason for every
+verdict, passes included, and the text of the turn each one is about. The line
+keeps the `success` and every `criterion` as they were worded, so you can tell
+which wording each verdict was judged on. Measured metrics are left out, since
+a conversation has nothing to measure. Run it from the repository root, as
+above, where a judge `factory:` such as `evals.judges` resolves.
+
+A real call is judged the same way. `EvalConversationObserver` records a bot's
+conversation in the same format and reports it once the pipeline is done:
+
+```python
+from pipecat.evals.conversation_observer import EvalConversationObserver
+
+observer = EvalConversationObserver()
+
+
+@observer.event_handler("on_conversation_ended")
+async def on_conversation_ended(observer, message):
+    Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2))
+
+
+worker = PipelineWorker(pipeline, observers=[observer])
+```
 
 ## Adding coverage
 

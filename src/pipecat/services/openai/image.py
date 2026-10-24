@@ -36,11 +36,12 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 # `openai.types.image_generate_params.ImageGenerateParams`). The OpenAI SDK
 # does not export this as a named alias, so we redeclare it here.
 #
-# We cast `_settings.image_size` (a plain `str`) to this Literal at the API
-# boundary so callers can still pass any size string (e.g. a newer value the
-# SDK accepts before this list is updated). Invalid values surface as an
-# OpenAI API error at runtime. Keep in sync on a best-effort basis when
-# bumping the openai dep.
+# Settings fields use this alias in unions like `OpenAIImageSize | str`, so
+# pyright shows these values as completion hints without rejecting other
+# strings. If OpenAI adds a size before this list is updated, callers can still
+# pass it and we forward it through (with a cast at the API boundary). Invalid
+# values surface as an OpenAI API error at runtime. Keep in sync on a
+# best-effort basis when bumping the openai dep.
 OpenAIImageSize = Literal[
     "auto",
     "1024x1024",
@@ -52,6 +53,19 @@ OpenAIImageSize = Literal[
     "1024x1792",
 ]
 
+# Hint set for the `quality` argument to `images.generate`, redeclared and used
+# the same way as `OpenAIImageSize` above.
+OpenAIImageQuality = Literal[
+    "auto",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "standard",
+    "hd",
+]
+
 
 @dataclass
 class OpenAIImageGenSettings(ImageGenSettings):
@@ -60,9 +74,13 @@ class OpenAIImageGenSettings(ImageGenSettings):
     Parameters:
         model: Image generation model identifier.
         image_size: Target size for generated images.
+        quality: Rendering quality for generated images. Lower tiers generate
+            faster at the cost of detail. ``None`` lets OpenAI pick the best
+            quality for the model.
     """
 
-    image_size: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    image_size: OpenAIImageSize | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    quality: OpenAIImageQuality | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -111,6 +129,7 @@ class OpenAIImageGenService(ImageGenService):
         default_settings = self.Settings(
             model="gpt-image-2.5-flare",
             image_size=None,
+            quality=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -142,11 +161,13 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         size = cast(OpenAIImageSize | None, assert_given(self._settings.image_size))
+        quality = cast(OpenAIImageQuality | None, assert_given(self._settings.quality))
         image = await self._client.images.generate(
             prompt=prompt,
             model=assert_given(self._settings.model),
             n=1,
             size=size,
+            quality=quality,
         )
 
         if not image.data:

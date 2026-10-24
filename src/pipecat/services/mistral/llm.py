@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.adapters.services.mistral_adapter import MistralLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.mistral_adapter import MistralLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import FunctionCallFromLLM
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -40,6 +40,7 @@ class MistralLLMService(OpenAILLMService):
 
     Settings = MistralLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -176,7 +177,7 @@ class MistralLLMService(OpenAILLMService):
 
         # Handle Mistral-specific parameter mapping
         # Mistral uses "random_seed" instead of "seed"
-        if self._settings.seed:
+        if isinstance(self._settings.seed, int):
             params["random_seed"] = self._settings.seed
 
         # Add any extra parameters

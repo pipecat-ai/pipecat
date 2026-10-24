@@ -6,6 +6,7 @@
 
 """Tests for DeepgramFluxTTSService."""
 
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -15,6 +16,9 @@ import pytest
 import websockets
 from loguru import logger
 from websockets.asyncio.server import serve
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -28,7 +32,9 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     TTSUpdateSettingsFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
 from pipecat.services.tts_service import TextAggregationMode, TTSService
@@ -44,6 +50,7 @@ def _flux_server_handler(
     warning_first: bool = False,
     end_turn: bool = True,
     reject_configure: bool = False,
+    audio_delay: float = 0,
 ):
     """Build a fake Flux TTS server handler following the documented turn flow.
 
@@ -95,6 +102,7 @@ def _flux_server_handler(
                         )
                     )
                 elif msg.get("type") == "Flush":
+                    await asyncio.sleep(audio_delay)
                     # Flux sends the flush ack before the turn's remaining
                     # audio; SpeechMetadata arrives only after all audio.
                     await ws.send(AUDIO_CHUNK_1)
@@ -137,10 +145,8 @@ async def test_flux_tts_protocol_roundtrip():
             frames_to_send=[
                 TTSSpeakFrame(text="Hello from Flux."),
                 SleepFrame(sleep=0.3),
-                # With pause_frame_processing=True the transport's
-                # BotStoppedSpeakingFrame resumes frame processing; there is no
-                # transport in run_test, so send it explicitly (it is a system
-                # frame, so it bypasses the paused queue).
+                # The output transport sends this once playback ends; run_test
+                # has no transport.
                 BotStoppedSpeakingFrame(),
             ],
         )
@@ -168,6 +174,40 @@ async def test_flux_tts_protocol_roundtrip():
     speak_msg = next(m for m in captured["messages"] if m.get("type") == "Speak")
     # In the default token streaming mode, text is sent verbatim.
     assert speak_msg["text"] == "Hello from Flux."
+
+
+@pytest.mark.asyncio
+async def test_flux_uninterruptible_speech_waits_for_audio_after_interruption():
+    """An uninterruptible utterance survives barge-in before Flux returns its audio."""
+    captured: dict = {"messages": []}
+    async with serve(_flux_server_handler(captured, audio_delay=0.2), "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = DeepgramFluxTTSService(
+            api_key="test-key", url=f"ws://{host}:{port}/v2/speak", sample_rate=24000
+        )
+        speech = TTSSpeakFrame("Mm-hmm.", append_to_context=False)
+        speech.interruptible = False
+        down, up = await asyncio.wait_for(
+            run_test(
+                tts,
+                frames_to_send=[
+                    speech,
+                    SleepFrame(sleep=0.05),
+                    VADUserStartedSpeakingFrame(),
+                    InterruptionFrame(),
+                    SleepFrame(sleep=0.3),
+                    BotStoppedSpeakingFrame(),
+                ],
+            ),
+            timeout=5,
+        )
+    assert not any(message["type"] == "Interrupt" for message in captured["messages"])
+    assert not any(isinstance(frame, ErrorFrame) for frame in down + up)
+    audio = [frame for frame in down if isinstance(frame, TTSAudioRawFrame)]
+    assert b"".join(frame.audio for frame in audio) == AUDIO_CHUNK_1 + AUDIO_CHUNK_2
+    text = [frame for frame in down if isinstance(frame, TTSTextFrame)]
+    assert [frame.text for frame in text] == ["Mm-hmm."]
+    assert all(not frame.interruptible for frame in audio + text)
 
 
 @pytest.mark.asyncio
@@ -517,6 +557,55 @@ async def test_flux_tts_unsupported_sample_rate_warns():
     assert any("22050" in str(call.args[0]) for call in warning_spy.call_args_list)
     query = parse_qs(urlparse(captured["request_path"]).query)
     assert query["sample_rate"] == ["22050"]
+
+
+def _websocket_rejection(status_code: int, reason: str | None = None) -> InvalidStatus:
+    """Build the exception `websockets` raises when a handshake is rejected."""
+    headers = Headers({"dg-error": reason}) if reason else Headers()
+    return InvalidStatus(Response(status_code, "", headers))
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_refused_setting_makes_the_service_unusable(monkeypatch):
+    """A setting Deepgram refuses won't be accepted on a retry, so the service gives up."""
+    reason = "'expressivity' must be between -2 and 2. Got: 99."
+
+    async def fake_websocket_connect(*args, **kwargs):
+        raise _websocket_rejection(400, reason)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = DeepgramFluxTTSService(api_key="test-key", sample_rate=24000)
+    connection_errors = []
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    assert not service.is_usable
+    assert connection_errors == [f"Deepgram refused the connection (HTTP 400): {reason}"]
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_server_error_leaves_the_service_usable(monkeypatch):
+    async def fake_websocket_connect(*args, **kwargs):
+        raise _websocket_rejection(503)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = DeepgramFluxTTSService(api_key="test-key", sample_rate=24000)
+
+    await service._connect_websocket()
+
+    assert service.is_usable
 
 
 if __name__ == "__main__":

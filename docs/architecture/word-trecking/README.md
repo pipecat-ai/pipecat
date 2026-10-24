@@ -61,7 +61,7 @@ them**. The feature quietly decays.
 ### 2.2 Skipped frames arrived out of order
 
 A frame that is never sent to the TTS — a code block, with
-`skip_aggregator_types=["code"]` — has no audio and no word events to wait for. It was
+`skip_text_types=["code"]` — has no audio and no word events to wait for. It was
 **pushed the moment it appeared**, so it landed *before* the sentence that precedes it:
 
 ```
@@ -77,8 +77,8 @@ was never spoken could still be recorded as if it had been**.
 
 ### 2.3 Highlighting spoken words was not possible
 
-The UI receives sentence-level frames (`AggregationType.SENTENCE`) to render, and
-word-level frames (`AggregationType.WORD`) as speech progresses. There was **no
+The UI receives sentence-level frames (`TextType.SENTENCE`) to render, and
+word-level frames (`TextType.WORD`) as speech progresses. There was **no
 correspondence between them** — a word frame carried no indication of which sentence
 frame it belonged to, or where inside it. **The client could not turn a stream of words
 into a highlight moving through a rendered sentence.**
@@ -166,8 +166,9 @@ aggregator and one by the TTS service's transformers:
  ┌───────────────────────────────────────────────┐
  │  LLMTextProcessor  (or TTSService itself)     │   SPLIT 1 — the aggregator
  │  BaseTextAggregator, e.g.                     │   decides where segments end
- │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter
- └───────────────────────────────────────────────┘
+ │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter;
+ │  text transformers (LLMTextProcessor only)    │   transformers here rewrite
+ └───────────────────────────────────────────────┘   every text below
         │
         ├──────── raw_text ─────────▶  ① LLM TEXT        → conversation context
         │
@@ -175,9 +176,9 @@ aggregator and one by the TTS service's transformers:
                                             │                (the AggregatedTextFrame)
                                             ▼
                                   ┌──────────────────────┐
-                                  │  TTSService          │   SPLIT 2 — filters and
-                                  │  text filters        │   per-type transformers
-                                  │  text transformers   │   rewrite for speech only
+                                  │  TTSService          │   SPLIT 2 — per-type
+                                  │  text transformers   │   transformers rewrite
+                                  │                      │   for speech only
                                   └──────────────────────┘
                                             │
                                             ▼
@@ -187,14 +188,18 @@ aggregator and one by the TTS service's transformers:
 Both `text` and `raw_text` come off the same aggregation: `raw_text` is its `full_match`
 when the aggregator produced a `PatternMatch`, and identical to `text` otherwise. SPLIT 2
 is where the transforms listed in [§2.6](#26-and-a-feature-text-transformations) run.
+The same transforms registered on `LLMTextProcessor` run before SPLIT 1 hands the
+aggregation on, so they rewrite the LLM text and the segment text too (a `PatternMatch`
+keeps its delimiters around the rewritten content). That is the place for a rewrite the
+context should record as well, such as a habit the LLM keeps repeating.
 
 Three properties fall out of this shape:
 
 - **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
   **segment text**, because that is what it is — `frame.text`, the segment as the
   aggregator produced it.
-- **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
-  the TTS; `frame.text` keeps what the aggregator produced.
+- **It is never rewritten past SPLIT 1.** The TTS service's transformers operate on a
+  *copy* on its way to the provider; `frame.text` keeps what the aggregator produced.
 - **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
   transformers, all three are the same string.
 
@@ -203,7 +208,7 @@ Three properties fall out of this shape:
 The `PatternPairAggregator` splits that one response into **six** frames — each tagged
 span becomes its own segment, with its own type:
 
-| # | `aggregated_by` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
+| # | `text_type` | ① LLM text (`raw_text`) | ② Segment text (`text`) | ③ TTS text |
 | --- | --- | --- | --- | --- |
 | 1 | `sentence` | `Your card is ` | `Your card is` | `Your card is` |
 | 2 | **`credit_card`** | `<card>1234-5678-9012-3456</card>` | `1234-5678-9012-3456` | `<spell>1234-5678-9012-3456</spell>` |
@@ -219,9 +224,9 @@ spoken at all — which is what creates the ordering problem in
 [§2.2](#22-skipped-frames-arrived-out-of-order). The four `sentence` frames are identical
 in all three columns.
 
-`aggregated_by` is **the routing key throughout**: it selects which transformer applies
+`text_type` is **the routing key throughout**: it selects which transformer applies
 (`tts.add_text_transformer(fn, "credit_card")`), whether the frame is spoken at all
-(`skip_aggregator_types=["code"]`), and which RTVI transform redacts it
+(`skip_text_types=["code"]`), and which RTVI transform redacts it
 (`bot_output_transforms=[("credit_card", …)]`).
 
 ### 3.3 The guarantee that makes it useful
@@ -295,8 +300,8 @@ service owns one `AggregatedFrameSequencer`; the sequencer builds a
 
 | `TTSService` | Sequencer method | When |
 | --- | --- | --- |
-| `_push_tts_frames` | `register_spoken` | A frame is dispatched to the TTS |
-| `_push_tts_frames` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
+| `_handle_aggregated_text` | `register_spoken` | A frame is dispatched to the TTS |
+| `_handle_aggregated_text` | `register_skipped` | A frame bypasses TTS (e.g. a code block) |
 | `_add_word_timestamps` | `process_word` | A word-timestamp event arrives |
 | `_apply_force_complete` | `force_complete` | An audio context ends |
 | end of text input | `finalize` | No more tokens for this context |
@@ -307,7 +312,7 @@ about queues the sequencer cannot see:
 
 | `TTSService` | What it does                                                                            | Why |
 | --- |-----------------------------------------------------------------------------------------| --- |
-| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
+| `push_frame` | Stamps the `will_be_spoken` anchor with `max(_word_timestamp_tracker.last_pts, clock.now())`              | Progress frames carry a PTS and travel the transport's clock queue. |
 | `_push_sequencer_frames` | Routes all the frames received from the AggregatedFrameSequencer through the audio-context queue when streaming | Keeps a single consumer emitting anchors, words and audio in order, rather than racing the audio-context task |
 
 ### 3.6 End to end: the code-helper example
@@ -323,7 +328,7 @@ llm_text_aggregator.add_pattern(
 )
 
 # 2. Never speak code blocks
-tts = CartesiaTTSService(..., skip_aggregator_types=["code"])
+tts = CartesiaTTSService(..., skip_text_types=["code"])
 
 # 3. Rewrite what the TTS receives, per segment type
 tts.add_text_transformer(spell_out_text, "credit_card")  # wraps in <spell> tags

@@ -20,11 +20,11 @@ from typing import (
     Literal,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    AggregationType,
+    TextType,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
@@ -505,19 +505,33 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
-        aggregated_by: What form the text is in (e.g., sentence, code, etc.).
+        output_type: What form the text is in (e.g., sentence, code, etc.).
+        text_type: What form the text is in, always the same as ``output_type``.
+
+            .. deprecated:: 1.14.0
+                Use ``output_type`` instead.
+                Will be removed in 2.0.0.
+
+        aggregated_by: What form the text is in, always the same as ``output_type``.
+
+            .. deprecated:: 1.13.0
+                Use ``output_type`` instead.
+                Will be removed in 2.0.0.
+
         segment_id: ID of the source AggregatedTextFrame.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
-        spoken_status: **(v2+)** Lifecycle status of the segment:
-            ``"new"`` on first emit, ``"in-progress"`` during word playback,
-            ``"completed"`` when the last word is spoken (or immediately for
-            non-spoken segments).
+        spoken_status: **(v2+)** Lifecycle status of the segment: ``"new"`` on
+            its first message, the only one for text that isn't spoken;
+            ``"in-progress"`` as each of its words is spoken, for TTS services
+            with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
     """
 
-    aggregated_by: AggregationType | str
+    output_type: TextType | str
+    text_type: TextType | str | None = None
+    aggregated_by: TextType | str | None = None
     segment_id: int | None = None
     # v1 field (protocol 1.4.x)
     spoken: bool | None = None
@@ -525,6 +539,17 @@ class BotOutputMessageData(TextMessageData):
     will_be_spoken: bool | None = None
     spoken_status: SpokenStatus | None = None
     spoken_progress: SpokenProgressData | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_output_type(cls, data: Any) -> Any:
+        """Fill whichever of ``output_type`` and its deprecated names are missing."""
+        if isinstance(data, dict):
+            names = ("output_type", "text_type", "aggregated_by")
+            given = [data[name] for name in names if name in data]
+            if given:
+                data = {**dict.fromkeys(names, given[0]), **data}
+        return data
 
 
 class BotOutputMessage(BaseModel):
@@ -554,6 +579,9 @@ class BotLLMTextMessage(BaseModel):
     """Message containing bot LLM text output.
 
     Sent when the bot's LLM generates text.
+
+    .. deprecated:: 1.13.0
+        Use :class:`LLMRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -598,6 +626,9 @@ class BotTTSTextMessage(BaseModel):
     """Message containing bot TTS text output.
 
     Sent when text is being processed by TTS.
+
+    .. deprecated:: 1.13.0
+        Use :class:`TTSRawTextMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
@@ -631,6 +662,9 @@ class UserTranscriptionMessageData(BaseModel):
     """Data for user transcription messages.
 
     Contains transcription text and metadata.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.
     """
 
     text: str
@@ -643,11 +677,54 @@ class UserTranscriptionMessage(BaseModel):
     """Message containing user transcription.
 
     Sent when user speech is transcribed.
+
+    .. deprecated:: 1.13.0
+        Use :class:`STTRawTextMessage` instead, or :class:`UserInputMessage` for what
+        the user said. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["user-transcription"] = "user-transcription"
     data: UserTranscriptionMessageData
+
+
+UserInputType = Literal["transcription", "chat", "backchannel"]
+
+
+class UserInputMessageData(BaseModel):
+    """Data for user input messages.
+
+    Parameters:
+        text: What the user said or typed.
+        input_type: What kind of input it is: ``"transcription"`` for speech
+            transcribed by the STT, ``"chat"`` for text the client sent, or
+            ``"backchannel"`` for a short acknowledgment the user said while the
+            bot talks, such as "mhm".
+        timestamp: When the user said or sent it.
+        final: Whether the text is final. Only an interim transcription isn't.
+        user_id: Identifier for the user who spoke or typed. For chat, set only
+            when the transport knows the sender, such as Daily and LiveKit.
+        msg_id: For chat, the id of the client's ``send-text`` message.
+    """
+
+    text: str
+    input_type: UserInputType
+    timestamp: str
+    final: bool
+    user_id: str | None = None
+    msg_id: str | None = None
+
+
+class UserInputMessage(BaseModel):
+    """Message containing what the user said or typed.
+
+    The user's counterpart of ``bot-output``. A backchannel doesn't interrupt the
+    bot or reach the LLM.
+    """
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["user-input"] = "user-input"
+    data: UserInputMessageData
 
 
 class UserLLMTextMessage(BaseModel):
@@ -658,6 +735,46 @@ class UserLLMTextMessage(BaseModel):
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["user-llm-text"] = "user-llm-text"
+    data: TextMessageData
+
+
+class STTRawTextMessageData(BaseModel):
+    """Data for STT raw text messages.
+
+    Parameters:
+        text: The transcribed text.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+        final: Whether the transcription is final, as opposed to interim.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+    final: bool
+
+
+class STTRawTextMessage(BaseModel):
+    """Message reporting a transcription as the STT produced it, interim ones included."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["stt-raw-text"] = "stt-raw-text"
+    data: STTRawTextMessageData
+
+
+class LLMRawTextMessage(BaseModel):
+    """Message reporting a chunk of text as the LLM streamed it."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["llm-raw-text"] = "llm-raw-text"
+    data: TextMessageData
+
+
+class TTSRawTextMessage(BaseModel):
+    """Message reporting text the TTS speaks, as it is spoken."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["tts-raw-text"] = "tts-raw-text"
     data: TextMessageData
 
 

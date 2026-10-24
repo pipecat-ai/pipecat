@@ -18,7 +18,7 @@ from pipecat.utils.string import (
     longest_trailing_partial_match,
     parse_start_end_tags,
 )
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.base_text_aggregator import Aggregation, TextType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -68,7 +68,7 @@ class SkipTagsAggregator(SimpleTextAggregator):
             Aggregation objects containing text up to a sentence boundary,
             marked as SENTENCE type (or TOKEN type in TOKEN mode).
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             # In TOKEN mode, process chars for tag tracking but yield the
             # full input as a single token when not inside a tag.
             for char in text:
@@ -93,7 +93,7 @@ class SkipTagsAggregator(SimpleTextAggregator):
                     content = self._text[:yield_length]
                     self._text = self._text[yield_length:]
                     self._current_tag_index = 0
-                    yield Aggregation(text=content, type=AggregationType.TOKEN)
+                    yield Aggregation(text=content, type=TextType.TOKEN)
             return
 
         # Process text character by character
@@ -109,10 +109,26 @@ class SkipTagsAggregator(SimpleTextAggregator):
             if self._current_tag:
                 continue
 
-            # Otherwise, use parent's lookahead logic for sentence detection
-            result = await super()._check_sentence_with_lookahead(char)
+            # Otherwise, use parent's lookahead logic for sentence detection,
+            # ignoring boundaries inside tags that have already closed.
+            result = await super()._check_sentence_with_lookahead(
+                char, protected_end=self._closed_tags_offset()
+            )
             if result:
+                # The buffer was trimmed, so rescan it from the start for tags.
+                self._current_tag_index = 0
                 yield result
+
+    def _closed_tags_offset(self) -> int:
+        """Return the buffer offset just past the last closing tag, or 0 if none."""
+        return max(
+            (
+                self._text.rfind(end_tag) + len(end_tag)
+                for _, end_tag in self._tags
+                if end_tag in self._text
+            ),
+            default=0,
+        )
 
     async def flush(self) -> Aggregation | None:
         """Flush any remaining text in the buffer.
@@ -125,11 +141,11 @@ class SkipTagsAggregator(SimpleTextAggregator):
         Returns:
             Any remaining text, or None if the buffer is empty.
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             if self._text:
                 result = self._text
                 await self.reset()
-                return Aggregation(text=result, type=AggregationType.TOKEN)
+                return Aggregation(text=result, type=TextType.TOKEN)
             return None
         return await super().flush()
 

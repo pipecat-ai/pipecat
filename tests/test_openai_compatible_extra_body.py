@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.deepseek.llm import DeepSeekLLMService
 from pipecat.services.inception.llm import InceptionLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
