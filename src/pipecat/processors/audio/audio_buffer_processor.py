@@ -256,6 +256,8 @@ class AudioBufferProcessor(FrameProcessor):
         """
         if not self._recording:
             return
+        self._user_audio_buffer.extend(await self._input_resampler.flush())
+        self._bot_audio_buffer.extend(await self._output_resampler.flush())
         await self._call_on_audio_data_handler()
         self._reset_recording(clear_turn_audio=False)
         self._recording = False
