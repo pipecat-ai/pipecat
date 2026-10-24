@@ -13,7 +13,7 @@ and release in frame processing pipelines.
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame, SystemFrame
+from pipecat.frames.frames import EndFrame, Frame, StopFrame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -64,6 +64,15 @@ class GatedAggregator(FrameProcessor):
 
         # Ignore frames that are not following the direction of this gate.
         if direction != self._direction:
+            await self.push_frame(frame, direction)
+            return
+
+        # The pipeline doesn't finish until EndFrame or StopFrame reaches its end,
+        # so they are never held. Whatever the closed gate held goes out first.
+        if isinstance(frame, (EndFrame, StopFrame)):
+            for f, d in self._accumulator:
+                await self.push_frame(f, d)
+            self._accumulator = []
             await self.push_frame(frame, direction)
             return
 
