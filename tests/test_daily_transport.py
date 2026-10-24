@@ -197,6 +197,7 @@ def _make_session_client(*, dial_out: str = "", dial_in: str = ""):
 
     client._client.send_dtmf = MagicMock(side_effect=_complete)
     client._client.sip_refer = MagicMock(side_effect=_complete)
+    client._client.sip_call_transfer = MagicMock(side_effect=_complete)
     return client
 
 
@@ -331,6 +332,28 @@ async def test_failing_callback_keeps_daily_events_flowing():
     next_event.assert_awaited_once_with({"id": "caller"})
     assert not task.done()
     task.cancel()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method, settings",
+    [
+        ("send_dtmf", {"tones": "1"}),
+        ("sip_refer", {"toEndPoint": "sip:agent@example.com"}),
+        ("sip_call_transfer", {"toEndPoint": "+15551234567"}),
+    ],
+)
+async def test_reused_settings_follow_the_current_session(method, settings):
+    client = _make_session_client(dial_in="first-session")
+
+    assert await getattr(client, method)(settings) is None
+    client._dial_in_session_id = "second-session"
+    assert await getattr(client, method)(settings) is None
+
+    assert "sessionId" not in settings
+    first, second = getattr(client._client, method).call_args_list
+    assert first.args[0]["sessionId"] == "first-session"
+    assert second.args[0]["sessionId"] == "second-session"
 
 
 @pytest.mark.asyncio
