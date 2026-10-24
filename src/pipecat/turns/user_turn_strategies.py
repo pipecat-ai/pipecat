@@ -24,6 +24,7 @@ from pipecat.turns.user_stop import (
     deferred,
 )
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.utils.deprecation import deprecated
 
 
 def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
@@ -111,9 +112,18 @@ class ExternalUserTurnStrategies(UserTurnStrategies):
         self.stop = [ExternalUserTurnStopStrategy()]
 
 
+@deprecated(
+    "`FilterIncompleteUserTurnStrategies` is deprecated since 1.14.0 and will be removed in "
+    "2.0.0. Use `IncompleteUserTurnFilter` instead."
+)
 @dataclass
 class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     """Stop strategies gated on the LLM's turn-completion verdict.
+
+    .. deprecated:: 1.14.0
+        Use :class:`~pipecat.turns.user_turn_filter.IncompleteUserTurnFilter` instead,
+        set as ``user_turn_filter`` next to ``user_turn_strategies``. Will be
+        removed in 2.0.0.
 
     The LLM is asked to begin every response with one of three markers:
     ● (complete), ◐ (incomplete short), or ○ (incomplete long). Only ●

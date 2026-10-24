@@ -7,9 +7,9 @@
 import unittest
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     Frame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
@@ -44,7 +44,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         assert isinstance(prediction, EagerTranscriptionFrame)
         assert prediction.text == "book a flight"
         assert prediction.user_id == "user"
-        assert isinstance(withdrawal, EagerEndOfTurnCancelFrame)
+        assert isinstance(withdrawal, UserTurnResponseCancelFrame)
         assert not service.eager_end_of_turn_pending
 
     async def test_a_committed_turn_resolves_the_prediction_without_withdrawing_it(self):
@@ -56,7 +56,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         # afterwards would discard a response the committed transcript may keep.
         await service._cancel_eager_end_of_turn()
 
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in service.pushed)
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in service.pushed)
         assert not service.eager_end_of_turn_pending
 
     async def test_withdrawing_without_a_prediction_does_nothing(self):

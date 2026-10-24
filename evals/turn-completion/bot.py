@@ -10,7 +10,7 @@ The suite spawns this bot once per model and scenario. The runner body (the
 manifest entry's ``runner_body.data``) names the service class, its
 constructor arguments, the model and its settings; the bot builds the service,
 turns on ``filter_incomplete_user_turns`` through
-``FilterIncompleteUserTurnStrategies``, and advertises the two tools the tool
+``IncompleteUserTurnFilter``, and advertises the two tools the tool
 scenarios expect. There is no STT or TTS: the harness sends text turns and
 reads the LLM's text and marker events back.
 
@@ -56,7 +56,7 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_INCOMPLETE_SHORT_MARKER,
     UserTurnCompletionConfig,
 )
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_turn_filter import IncompleteUserTurnFilter
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -181,7 +181,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            user_turn_strategies=FilterIncompleteUserTurnStrategies(config=completion_config()),
+            user_turn_filter=IncompleteUserTurnFilter(config=completion_config()),
         ),
     )
 

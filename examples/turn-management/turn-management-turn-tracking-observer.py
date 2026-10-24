@@ -33,7 +33,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_turn_filter import IncompleteUserTurnFilter
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+            user_turn_filter=IncompleteUserTurnFilter(),
         ),
     )
 

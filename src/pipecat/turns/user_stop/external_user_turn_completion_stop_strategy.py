@@ -9,10 +9,20 @@
 from pipecat.frames.frames import Frame, UserTurnInferenceCompletedFrame
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.14.0 and will be removed "
+    "in 2.0.0. Use `BaseUserTurnFilter` instead."
+)
 class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     """Finalize the user turn whenever a ``UserTurnInferenceCompletedFrame`` arrives.
+
+    .. deprecated:: 1.14.0
+        Use :class:`~pipecat.turns.user_turn_filter.BaseUserTurnFilter` instead: a
+        custom judge of turn completeness implements a user turn filter. Will be
+        removed in 2.0.0.
 
     Generic stop strategy for pipelines where some external component
     (LLM with completion markers, STT with built-in turn detection, a

@@ -37,10 +37,12 @@ from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
+    EagerEndOfTurnCancelFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
     StartFrame,
     StopTaskFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
@@ -249,11 +251,18 @@ def test_task_frame_aliases_warn(frame_cls):
         frame_cls()
 
 
+def test_eager_end_of_turn_cancel_frame_warns():
+    with pytest.warns(DeprecationWarning, match="`EagerEndOfTurnCancelFrame` is deprecated"):
+        frame = EagerEndOfTurnCancelFrame()
+    assert isinstance(frame, UserTurnResponseCancelFrame)
+
+
 def test_no_deprecation_warnings_at_import_time():
     """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
     Guards the suppression of @deprecated subclassing warnings for the task frame
-    aliases defined inside pipecat.frames.frames. Done in a subprocess for a
+    aliases defined inside pipecat.frames.frames and the deprecated stop
+    strategies in pipecat.turns.user_stop. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
     "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
     e.g. ``audioop`` on Python 3.12 — don't trip it.
@@ -265,6 +274,7 @@ def test_no_deprecation_warnings_at_import_time():
         "    import pipecat.frames.frames\n"
         "    import pipecat.pipeline.worker\n"
         "    import pipecat.pipeline.runner\n"
+        "    import pipecat.turns.user_stop\n"
         "bad = [str(w.message) for w in caught\n"
         "       if issubclass(w.category, DeprecationWarning)\n"
         "       and ' is deprecated since ' in str(w.message)]\n"

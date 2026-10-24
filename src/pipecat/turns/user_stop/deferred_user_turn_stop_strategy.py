@@ -10,10 +10,20 @@ from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`DeferredUserTurnStopStrategy` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "Use `LLMUserAggregatorParams.user_turn_filter` instead."
+)
 class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
     """Wraps a stop strategy and suppresses its ``on_user_turn_stopped`` event.
+
+    .. deprecated:: 1.14.0
+        Use :attr:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams.user_turn_filter`
+        instead: a user turn filter decides whether a stop strategy's turn end
+        stands. Will be removed in 2.0.0.
 
     Event subscriptions added to the wrapper are forwarded directly to
     the inner strategy, except for ``on_user_turn_stopped``, which is
@@ -91,8 +101,17 @@ class DeferredUserTurnStopStrategy(BaseUserTurnStopStrategy):
         return await self._inner.process_frame(frame)
 
 
+@deprecated(
+    "`deferred` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "Use `LLMUserAggregatorParams.user_turn_filter` instead."
+)
 def deferred(strategy: BaseUserTurnStopStrategy) -> DeferredUserTurnStopStrategy:
     """Defer this stop strategy's finalization to another strategy.
+
+    .. deprecated:: 1.14.0
+        Use :attr:`~pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams.user_turn_filter`
+        instead: a user turn filter decides whether a stop strategy's turn end
+        stands. Will be removed in 2.0.0.
 
     Wraps ``strategy`` in a :class:`DeferredUserTurnStopStrategy`: the
     inner strategy continues to drive inference-triggered events, but

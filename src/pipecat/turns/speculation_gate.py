@@ -11,7 +11,6 @@ from enum import Enum
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
@@ -20,6 +19,8 @@ from pipecat.frames.frames import (
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.frame_queue import FrameQueue
@@ -54,8 +55,8 @@ class SpeculationGate:
     turn that may not have ended, and the response that follows is held from its
     :class:`~pipecat.frames.frames.LLMFullResponseStartFrame` onward. A
     :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` releases it — the
-    turn it answers has ended — and an
-    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` discards it.
+    turn it answers has ended — and a
+    :class:`~pipecat.frames.frames.UserTurnResponseCancelFrame` discards it.
     Neither names a response: only one speculation is ever in flight, since
     producing one takes a whole user turn.
 
@@ -114,6 +115,10 @@ class SpeculationGate:
         # confirmed. Set when the inference starts, cleared when the turn
         # settles it either way — so it outlives any one response frame.
         self._speculating = False
+        # Whether the inference in flight waits for its turn to end while a user
+        # turn filter judges it. Held like a speculation, but not speculative:
+        # it runs on the conversation itself, so its tool calls go ahead.
+        self._held = False
         # Whether the turn ended since it was last seen to start. A speculation
         # registered while this is set answers a turn that is already over, so
         # it is not held. Starts False, so a gate that never sees turn frames
@@ -141,7 +146,7 @@ class SpeculationGate:
         """
         return self._speculating
 
-    def begin_speculation(self, speculation: bool):
+    def begin_speculation(self, speculation: bool, *, held: bool = False):
         """Take note of an inference whose turn may not have ended.
 
         Called when the inference starts rather than when its first response
@@ -151,10 +156,13 @@ class SpeculationGate:
         Args:
             speculation: Whether the inference answers a turn that may still be
                 open, rather than an ordinary one against a turn that has ended.
+            held: Whether the response waits for its turn to end while a user
+                turn filter judges it, without being speculative.
         """
         # A turn that ended before the inference reached us leaves nothing to
         # hold for: the response answers a turn that is already over.
         self._speculating = speculation and not self._turn_ended
+        self._held = held and not self._turn_ended
 
     def process(self, frame: Frame, direction: FrameDirection) -> list[GatedFrame]:
         """Decide what a frame passing through the gate releases.
@@ -169,13 +177,16 @@ class SpeculationGate:
             held behind it.
         """
         if direction != FrameDirection.DOWNSTREAM:
-            return [(frame, direction)]
+            # A turn completion that keeps the turn open releases the held
+            # response before the frame goes upstream, so the filter's
+            # rejection finds nothing left to drop.
+            return self._release_on_turn_completion(frame) + [(frame, direction)]
 
         if isinstance(frame, SystemFrame):
             # Emitted before the verdict is applied, so a released response
             # still follows the frame that ended the turn it answers.
             emitted = [(frame, direction)]
-            if isinstance(frame, (EagerEndOfTurnCancelFrame, InterruptionFrame)):
+            if isinstance(frame, (UserTurnResponseCancelFrame, InterruptionFrame)):
                 emitted += self._discard()
             elif isinstance(frame, UserStoppedSpeakingFrame):
                 emitted += self._release()
@@ -236,9 +247,9 @@ class SpeculationGate:
             # be queued behind this frame, so there is no tail left to drop.
             emitted += self._drop_held("superseded by a new response", keep_dropping=False)
 
-        # Whether this response is speculative was settled when its inference
-        # started, so a turn confirmed since then already cleared it.
-        if not self._speculating:
+        # Whether this response is held was settled when its inference started,
+        # so a turn confirmed since then already cleared it.
+        if not (self._speculating or self._held):
             return emitted
 
         self._state = SpeculationState.HOLDING
@@ -257,6 +268,7 @@ class SpeculationGate:
         # Nothing this inference still produces is speculative either —
         # including a tool call it has yet to reach.
         self._speculating = False
+        self._held = False
 
         if self._state != SpeculationState.HOLDING:
             return []
@@ -279,8 +291,33 @@ class SpeculationGate:
         # The speculation is void, so nothing the inference still produces
         # answers a turn worth holding for.
         self._speculating = False
+        self._held = False
 
         return self._drop_held("withdrawn", keep_dropping=True)
+
+    def _release_on_turn_completion(self, frame: Frame) -> list[GatedFrame]:
+        """Release a held response the LLM judged to leave the turn open.
+
+        Such a response has nothing left to hold: the LLM service mutes
+        everything after ◐ or ○. Letting it through, as it would go without a hold,
+        writes the marker to the context, so the LLM keeps seeing its own
+        markers, and gives observers the whole response. Only a speculation
+        waits, since its turn may never be confirmed.
+
+        Returns:
+            The frames the release lets through, in arrival order.
+        """
+        if not (
+            isinstance(frame, UserTurnCompletionFrame)
+            and frame.kind in ("short", "long")
+            and self._state == SpeculationState.HOLDING
+            and not self._speculating
+        ):
+            return []
+
+        self._held = False
+        self._end_hold(SpeculationState.OPEN)
+        return self._flush()
 
     def _drop_held(self, reason: str, *, keep_dropping: bool) -> list[GatedFrame]:
         """Drop the held response.

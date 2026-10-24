@@ -4,14 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
-
-from loguru import logger
+from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
     Frame,
@@ -20,12 +16,15 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -121,7 +120,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         gate = SpeculationGate()
 
         assert speculate(gate, True, "Cancelling ", "your booking.", end=False) == []
-        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
 
         # Straggling frames of the withdrawn response, still queued behind the
         # cancellation, which overtook them.
@@ -137,7 +136,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         # frames it withdraws.
         gate = SpeculationGate()
 
-        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
         assert speculate(gate, True, "Cancelling.") == []
         assert types(speculate(gate, False, "Rescheduling instead.")) == [
             LLMFullResponseStartFrame,
@@ -151,7 +150,7 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
         audio = TTSAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1)
 
         assert speculate(gate, True, "Hi.", end=False, then=(audio,)) == []
-        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
 
     async def test_interruption_discards_the_speculation(self):
         gate = SpeculationGate()
@@ -175,6 +174,71 @@ class TestSpeculationGate(unittest.IsolatedAsyncioTestCase):
 
         speculate(gate, True, "Booking.", end=False, then=(tool_result(),))
         assert types(emit(gate, EndFrame())) == [FunctionCallResultFrame, EndFrame]
+
+
+class TestHeldResponses(unittest.IsolatedAsyncioTestCase):
+    """A response a user turn filter is judging: held, but not speculative."""
+
+    def _hold(self, gate: SpeculationGate, *frames: Frame) -> list[Frame]:
+        gate.begin_speculation(False, held=True)
+        return emit(gate, *frames)
+
+    async def test_a_held_response_waits_for_the_turn_to_end(self):
+        gate = SpeculationGate()
+
+        assert self._hold(gate, *response("Sure.")) == []
+        assert types(emit(gate, UserStoppedSpeakingFrame())) == [
+            UserStoppedSpeakingFrame,
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
+            LLMFullResponseEndFrame,
+        ]
+
+    async def test_a_rejected_response_is_dropped(self):
+        gate = SpeculationGate()
+
+        self._hold(gate, *response("Sure."))
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
+        assert types(emit(gate, UserStoppedSpeakingFrame())) == [UserStoppedSpeakingFrame]
+
+    async def test_a_held_response_is_not_speculative(self):
+        gate = SpeculationGate()
+
+        gate.begin_speculation(False, held=True)
+        assert not gate.is_speculating
+
+    def _complete(self, gate: SpeculationGate, kind: str, marker: str) -> list[Frame]:
+        completion = UserTurnCompletionFrame(kind=kind, marker=marker)
+        return [f for f, _ in gate.process(completion, FrameDirection.UPSTREAM)]
+
+    async def test_an_incomplete_turn_completion_lets_its_response_through(self):
+        gate = SpeculationGate()
+
+        assert self._hold(gate, LLMFullResponseStartFrame()) == []
+        assert types(self._complete(gate, "short", "◐")) == [
+            LLMFullResponseStartFrame,
+            UserTurnCompletionFrame,
+        ]
+        assert types(emit(gate, LLMMarkerFrame("◐"))) == [LLMMarkerFrame]
+        # The rejection that follows finds nothing held.
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
+        assert types(emit(gate, LLMFullResponseEndFrame())) == [LLMFullResponseEndFrame]
+
+    async def test_a_complete_turn_completion_leaves_its_response_held(self):
+        gate = SpeculationGate()
+
+        self._hold(gate, LLMFullResponseStartFrame())
+        assert types(self._complete(gate, "complete", "●")) == [UserTurnCompletionFrame]
+        marker = LLMMarkerFrame("●", append_to_context_immediately=False)
+        assert emit(gate, marker, LLMTextFrame("Sure.")) == []
+
+    async def test_a_speculation_holds_its_incomplete_marker(self):
+        gate = SpeculationGate()
+
+        gate.begin_speculation(True)
+        assert emit(gate, LLMFullResponseStartFrame()) == []
+        assert types(self._complete(gate, "short", "◐")) == [UserTurnCompletionFrame]
+        assert emit(gate, LLMMarkerFrame("◐")) == []
 
 
 class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
@@ -231,7 +295,7 @@ class TestPendingSpeculation(unittest.IsolatedAsyncioTestCase):
         gate = SpeculationGate()
 
         speculate(gate, True, "Booking.", end=False)
-        emit(gate, EagerEndOfTurnCancelFrame())
+        emit(gate, UserTurnResponseCancelFrame())
 
         assert not gate.is_speculating
 
@@ -282,7 +346,7 @@ class TestSpeculationGateOrdering(unittest.IsolatedAsyncioTestCase):
         gate = SpeculationGate()
 
         speculate(gate, True, "Cancelling.", end=False)
-        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
         assert types(emit(gate, UserStoppedSpeakingFrame())) == [UserStoppedSpeakingFrame]
 
     async def test_confirmation_arriving_before_the_response(self):
@@ -303,7 +367,7 @@ class TestSupersededSpeculation(unittest.IsolatedAsyncioTestCase):
         # turn instead supersedes it.
         gate = SpeculationGate()
 
-        emit(gate, EagerEndOfTurnCancelFrame())
+        emit(gate, UserTurnResponseCancelFrame())
         assert speculate(gate, True, "Cancelling.", end=False) == []
         assert types(speculate(gate, False, "Rescheduling instead.")) == [
             LLMFullResponseStartFrame,
@@ -341,9 +405,9 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         gate = SpeculationGate()
 
         speculate(gate, True, "Booking.", end=False, then=(tool_result(),))
-        emitted = emit(gate, EagerEndOfTurnCancelFrame())
+        emitted = emit(gate, UserTurnResponseCancelFrame())
 
-        assert types(emitted) == [EagerEndOfTurnCancelFrame, FunctionCallResultFrame]
+        assert types(emitted) == [UserTurnResponseCancelFrame, FunctionCallResultFrame]
         assert [f.result for f in emitted if isinstance(f, FunctionCallResultFrame)] == ["booked"]
 
     async def test_a_tool_result_is_held_in_order_with_the_response(self):
@@ -365,7 +429,7 @@ class TestUninterruptibleFrames(unittest.IsolatedAsyncioTestCase):
         gate = SpeculationGate()
 
         speculate(gate, True, "Booking.", end=False)
-        assert types(emit(gate, EagerEndOfTurnCancelFrame())) == [EagerEndOfTurnCancelFrame]
+        assert types(emit(gate, UserTurnResponseCancelFrame())) == [UserTurnResponseCancelFrame]
         # Still queued behind the withdrawal, which overtook it.
         assert types(emit(gate, LLMTextFrame(" Done."), tool_result())) == [FunctionCallResultFrame]
 
