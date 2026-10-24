@@ -78,15 +78,23 @@ from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
 EXPRESSION_TAGS: list[StartEndTags] = [("<<", ">>"), ("[[", "]]"), ("^^", "^^")]
 
 # The tone and event tags in the LLM's text, which word tracking passes over so
-# their names aren't matched against spoken words. Emphasis has no letters in
-# its delimiters, so it needs none.
-EXPRESSION_TAG_PATTERN = re.compile(r"<<[^<>\n]*>>|\[\[[^\[\]\n]*\]\]")
+# their names aren't matched against spoken words: a span's opening and its
+# closing ``>>``, not the words between them, then whole tone and event tags.
+# Emphasis has no letters in its delimiters, so it needs none.
+EXPRESSION_TAG_PATTERN = re.compile(
+    r"<<[\w '\-/]+?:[ \t]*(?=[^<>\n]+?>>)|<<[^<>\n]*>>|>>|\[\[[^\[\]\n]*\]\]"
+)
 
 # A tag holds words, digits and a little punctuation; anything else is text.
-_TAG = re.compile(r"<<([\w '\-:/]*)>>|\[\[([\w '\-:/]*)\]\]|\^\^([^\n]+?)\^\^")
+# A span holds tones before its colon, then the words it delivers.
+_TAG = re.compile(
+    r"<<([\w '\-/]+?):[ \t]*([^<>\n]+?)>>"
+    r"|<<([\w '\-:/]*)>>|\[\[([\w '\-:/]*)\]\]|\^\^([^\n]+?)\^\^"
+)
+_EMPHASIS = re.compile(r"\^\^([^\n]+?)\^\^")
 # What is left of a tag the unit ended in the middle of, and an emphasis that
 # never closed.
-_UNFINISHED = re.compile(r"(?:<<|\[\[)(?:[\w'\-:/][\w '\-:/]*)?$")
+_UNFINISHED = re.compile(r"(?:<<|\[\[)(?:[\w'\-:/][\w '\-:/]*)?$|<<[\w '\-/]+:[^<>\n]*$")
 _UNCLOSED_EMPHASIS = "^^"
 _PAUSE = re.compile(r"pause (\d+)")
 
@@ -117,12 +125,15 @@ class Text:
             baseline.
         start: Where the words start in the unit.
         end: Where they end.
+        span: The tones a span such as ``<<slow: A B 7>>`` or ``^^B^^`` adds
+            for just these words, empty for words outside one.
     """
 
     text: str
     tones: tuple[str, ...]
     start: int
     end: int
+    span: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -301,10 +312,11 @@ class ExpressionFormatter:
         position = 0
         for match in _TAG.finditer(text):
             self._add_text(segments, text, position, match.start())
-            tone_tag, event_tag, stressed = match.groups()
-            if stressed is not None:
-                stressed_tones = (*self._active_tones, EMPHASIS_TONE)
-                segments.append(Text(stressed, stressed_tones, match.start(3), match.end(3)))
+            span_tones, span_words, tone_tag, event_tag, stressed = match.groups()
+            if span_words is not None:
+                self._add_span(segments, tuple(span_tones.split()), span_words, match.start(2))
+            elif stressed is not None:
+                self._add_span(segments, (EMPHASIS_TONE,), stressed, match.start(5))
             else:
                 self._add_tag(segments, tone_tag, event_tag, match, events, tones)
             position = match.end()
@@ -339,9 +351,9 @@ class ExpressionFormatter:
             ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
             # "It's back up."
 
-        An event or pause is removed as a word, with the space before it when
-        punctuation follows it: ``"Hi [[laughs]], there."`` is shown as
-        ``"Hi, there."``.
+        A tag is removed as a word, with the space before it when punctuation
+        follows it: ``"Hi [[laughs]], there."`` is shown as ``"Hi, there."``,
+        and so is ``"Hi <<calm>>, there."``.
 
         Args:
             segments: The unit's segments.
@@ -352,17 +364,22 @@ class ExpressionFormatter:
             The words, with one space where a tag stood between two.
         """
         words = ""
-        event_since_words = False
+        tag_since_words = False
+        end = None
         for segment in segments:
             if not isinstance(segment, Text):
-                event_since_words = bool(words)
+                tag_since_words = bool(words)
                 continue
-            # An event is removed as a word, with the space before it when
+            # A gap between two runs of words is where a tag stood.
+            if end is not None and segment.start > end:
+                tag_since_words = bool(words)
+            # A tag is removed as a word, with the space before it when
             # punctuation follows it.
-            if event_since_words and _CLOSING_PUNCTUATION.match(segment.text):
+            if tag_since_words and _CLOSING_PUNCTUATION.match(segment.text):
                 words = words.rstrip()
             words += segment.text
-            event_since_words = False
+            tag_since_words = False
+            end = segment.end
         words = _SPACES.sub(" ", words)
         return words if text_type == TextType.TOKEN else words.strip()
 
@@ -418,31 +435,37 @@ class ExpressionFormatter:
         spans: list[ExpressionSpan] = []
         first_tones: list[str] | None = None
         trimmed = False
-        # Where the request's last words are, and whether an event or pause
-        # was written after them.
+        # Where the request's last words are, whether a tag was written after
+        # them, and where the last run of words ends in the unit.
         words_at: int | None = None
-        event_since_words = False
+        tag_since_words = False
+        text_end: int | None = None
         # The tones of the request's last words.
         last_tones: list[str] | None = None
+        sentence_tones = None
+        if capabilities and capabilities.tone_scope == ToneScope.SENTENCE:
+            sentence_tones = self._sentence_tones(segments, capabilities)
         for segment in segments:
             if isinstance(segment, Text):
                 tones = self._performed_tones(list(segment.tones), capabilities)
+                if sentence_tones is not None:
+                    tones = sentence_tones
                 if first_tones is None and segment.text.strip():
                     first_tones = tones
-                if capabilities and capabilities.tone_scope == ToneScope.SENTENCE:
-                    # One request takes one set of tones: the ones its words
-                    # start in. Clients are told the tones that were requested.
-                    tones = first_tones if first_tones is not None else tones
                 spans.append(ExpressionSpan(segment.start, segment.end, tones=tones))
+                # A gap between two runs of words is where a tag stood.
+                if text_end is not None and segment.start > text_end:
+                    tag_since_words = True
+                text_end = segment.end
                 if not segment.text.strip():
                     parts.append(segment.text)
                     continue
                 words_text: str | None = segment.text
                 closing = _CLOSING_PUNCTUATION.match(segment.text)
-                if closing and words_at is not None and event_since_words:
+                if closing and words_at is not None and tag_since_words:
                     parts[words_at] = parts[words_at].rstrip() + closing.group()
                     words_text = segment.text[closing.end() :] or None
-                event_since_words = False
+                tag_since_words = False
                 if not trimmed and words_text is not None:
                     # The unit's first words are trimmed as its text would be, and
                     # a sentence's even after an event or pause written before them.
@@ -455,7 +478,7 @@ class ExpressionFormatter:
                     parts.append(self._format(words, tones))
                     last_tones = tones
             else:
-                event_since_words = True
+                tag_since_words = True
                 if _performs(segment, capabilities):
                     event = _event_text(segment, capabilities)
                     spans.append(ExpressionSpan(segment.start, segment.end, event=event))
@@ -481,6 +504,55 @@ class ExpressionFormatter:
         words = words.replace(_UNCLOSED_EMPHASIS, "")
         if words:
             segments.append(Text(words, self._active_tones, start, end))
+
+    def _sentence_tones(
+        self, segments: list[Segment], capabilities: ExpressionCapabilities
+    ) -> list[str] | None:
+        """The one set of tones a request takes on a service that changes tones between requests.
+
+        They are the tones its words start in, and any span's, which such a
+        service can perform only over the whole request: ``"Your code is
+        <<slow: A B 7>>."`` is spoken slowly. Emphasis is the exception, as
+        stress over a whole sentence stresses nothing. Clients are told the
+        tones that were requested.
+        """
+        words = [s for s in segments if isinstance(s, Text) and s.text.strip()]
+        if not words:
+            return None
+        tones = list(words[0].tones)
+        for segment in words:
+            spread = (t for t in segment.span if t != EMPHASIS_TONE and t not in tones)
+            tones += spread
+        return self._performed_tones(tones, capabilities)
+
+    def _add_span(
+        self,
+        segments: list[Segment],
+        span: tuple[str, ...],
+        text: str,
+        start: int,
+        around: tuple[str, ...] | None = None,
+    ):
+        """Add a span's words, in the tones around it and its own, or in the baseline for neutral.
+
+        ``^^B^^`` is a span of emphasis, written short, and can stand within
+        another span: ``<<slow: A ^^B^^ 7>>`` stresses B on top of slow.
+        """
+        around = self._active_tones if around is None else around
+        if span == (NEUTRAL_TONE,):
+            tones, span = (), ()
+        else:
+            tones = (*around, *(t for t in span if t not in around))
+        position = 0
+        for match in _EMPHASIS.finditer(text):
+            if match.start() > position:
+                words = text[position : match.start()]
+                segments.append(Text(words, tones, start + position, start + match.start(), span))
+            stressed = (*span, EMPHASIS_TONE)
+            self._add_span(segments, stressed, match.group(1), start + match.start(1), tones)
+            position = match.end()
+        if position < len(text):
+            segments.append(Text(text[position:], tones, start + position, start + len(text), span))
 
     def _add_tag(
         self,

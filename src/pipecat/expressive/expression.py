@@ -49,7 +49,8 @@ class ToneScope(Enum):
     In ``"<<calm>> Sure, <<excited>> it worked!"``, a service with
     ``ANYWHERE`` speaks "it worked!" excited. One with ``SENTENCE`` speaks the
     whole sentence calm, the tones its words start in, and the next sentence
-    excited.
+    excited. A span's tones are the exception: ``SENTENCE`` speaks the whole of
+    ``"Your code is <<slow: A B 7>>."`` slowly, so the span's words still are.
 
     Parameters:
         ANYWHERE: A tone takes effect where its tag appears.

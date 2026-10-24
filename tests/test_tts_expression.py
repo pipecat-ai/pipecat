@@ -416,6 +416,18 @@ async def test_each_response_starts_from_the_baseline_when_streaming_tokens():
 
 
 @pytest.mark.asyncio
+async def test_a_span_sets_the_tones_of_its_whole_request():
+    tts = StyleTTSService()
+    await run_test(
+        tts,
+        frames_to_send=response("Your code is <<calm: A B 7>>. Anything else?"),
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert tts.styles == [("Your code is A B 7.", "calm"), ("Anything else?", "plain")]
+
+
+@pytest.mark.asyncio
 async def test_a_request_is_spoken_in_the_modes_its_words_start_in():
     tts = StyleTTSService()
     down, _ = await run_test(
@@ -486,6 +498,28 @@ async def test_reported_tone_markup_is_not_spoken():
 
     assert [text for text, _ in words] == ["It's", "laugh", "back."]
     assert not [w for w in warnings if "Dropping word" in w]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", [ReportingTTSService, WordTimestampTTSService])
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        (
+            "<<calm>> It's <<neutral: A B 7>>, okay.",
+            [("It's", ["calm"]), ("A", []), ("B", []), ("7,", []), ("okay.", ["calm"])],
+        ),
+        (
+            "Email <<calm: docs@acme.com>> today.",
+            [("Email", []), ("docs@acme.com", ["calm"]), ("today.", [])],
+        ),
+    ],
+)
+async def test_a_spans_words_are_spoken_in_its_tones(service, text, spoken):
+    down, _ = await run_test(service(), frames_to_send=response(text), pipeline_params=EXPRESSIVE)
+
+    assert [(f.text, f.tones) for f in down if isinstance(f, TTSTextFrame)] == spoken
+    assert await context_after(service(), response(text)) == text
 
 
 @pytest.mark.asyncio

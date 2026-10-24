@@ -9,8 +9,9 @@
 import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm, ToneScope
 from pipecat.expressive.formatter import (
+    EXPRESSION_TAG_PATTERN,
     EXPRESSION_TAGS,
     Event,
     ExpressionFormatter,
@@ -25,9 +26,10 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 class DeclaredAdapter(BaseExpressionAdapter):
     """Declares events and tones, and formats tones as <tones> where they change."""
 
-    def __init__(self, events=(), tones=()):
+    def __init__(self, events=(), tones=(), tone_scope=ToneScope.ANYWHERE):
         self.events = list(events)
         self.tones = list(tones)
+        self.tone_scope = tone_scope
 
     def capabilities(self):
         return ExpressionCapabilities(
@@ -35,6 +37,7 @@ class DeclaredAdapter(BaseExpressionAdapter):
             tones=[ExpressionTerm(name) for name in self.tones],
             pause_range_ms=(100, 1000),
             emphasis=True,
+            tone_scope=self.tone_scope,
         )
 
     def format_text(self, text, tones, previous_tones):
@@ -179,6 +182,52 @@ def test_text_that_only_looks_like_a_tag_is_spoken(text):
     assert parse(text, tones=["cheerful"]) == [words(text, ())]
 
 
+def test_a_span_adds_its_tones_to_just_its_words():
+    assert parse("<<calm>> Your code is <<slow: A B 7>>. Bye.") == [
+        words(" Your code is ", ("calm",)),
+        words("A B 7", ("calm", "slow")),
+        words(". Bye.", ("calm",)),
+    ]
+
+
+def test_a_neutral_span_speaks_its_words_in_the_baseline():
+    assert parse("<<calm>> Say <<neutral: hi there>>, okay.") == [
+        words(" Say ", ("calm",)),
+        words("hi there", ()),
+        words(", okay.", ("calm",)),
+    ]
+
+
+def test_emphasis_in_a_span_is_added_to_its_tones():
+    assert parse("It's <<slow: A ^^B^^ 7>>.") == [
+        words("It's ", ()),
+        words("A ", ("slow",)),
+        words("B", ("slow", "emphasis")),
+        words(" 7", ("slow",)),
+        words(".", ()),
+    ]
+
+
+def test_emphasis_is_a_span_written_short():
+    assert parse("Now ^^that's^^ it.") == parse("Now <<emphasis: that's>> it.")
+
+
+def test_each_span_segment_says_where_it_was_written():
+    text = "<<calm>> Your code is <<slow: A ^^B^^ 7>>, okay."
+    for segment in formatter().parse(text):
+        assert text[segment.start : segment.end] == segment.text
+
+
+def test_a_span_left_unfinished_is_removed():
+    assert parse("Your code is <<slow: A B") == [words("Your code is ", ())]
+
+
+def test_word_tracking_passes_over_a_spans_markup_but_not_its_words():
+    masked = EXPRESSION_TAG_PATTERN.sub("#", "Code <<slow: A B>>, ok. <<calm>> [[laugh]] Bye.")
+
+    assert masked == "Code #A B#, ok. # # Bye."
+
+
 def test_a_tag_left_unfinished_is_removed():
     assert parse("Thanks for calling. <<chee") == [words("Thanks for calling. ", ())]
     assert parse("Thanks for calling. [[") == [words("Thanks for calling. ", ())]
@@ -293,10 +342,13 @@ async def test_a_request_formats_what_the_service_performs_and_says_where():
         # Spacing the LLM wrote before the punctuation is kept.
         ("Hi [[laugh]] , there.", "Hi , there.", "Hi <laugh> , there."),
         ("It's [[laugh]] back.", "It's back.", "It's <laugh> back."),
+        # So does punctuation after a span or a tone tag.
+        ("It's <<slow: A B 7>>, okay.", "It's A B 7, okay.", "It's <slow> A B 7, okay."),
+        ("Hi <<calm>>, there.", "Hi, there.", "Hi, <calm> there."),
     ],
 )
-async def test_punctuation_after_an_event_closes_the_words_before_it(text, shown, sent):
-    expression = formatter(events=["laugh"])
+async def test_punctuation_after_a_tag_closes_the_words_before_it(text, shown, sent):
+    expression = formatter(events=["laugh"], tones=["calm", "slow"])
     segments = expression.parse(text)
 
     assert ExpressionFormatter.shown_text(segments, TextType.SENTENCE) == shown
@@ -336,3 +388,25 @@ async def test_a_request_leaves_out_what_the_service_cant_perform():
 
     assert request == "Hi."
     assert spans == [ExpressionSpan(8, 13, tones=[])]
+
+
+@pytest.mark.asyncio
+async def test_a_span_sets_the_tones_of_its_whole_request_on_a_sentence_service():
+    expression = formatter(tones=["calm", "slow"], tone_scope=ToneScope.SENTENCE)
+    segments = expression.parse("<<calm>> Your code is <<slow: A B 7>>, okay.")
+
+    request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
+
+    assert request == "<calm,slow> Your code is A B 7, okay."
+    assert {tuple(span.tones) for span in spans} == {("calm", "slow")}
+
+
+@pytest.mark.asyncio
+async def test_emphasis_stays_on_its_words_on_a_sentence_service():
+    expression = formatter(tones=["calm"], tone_scope=ToneScope.SENTENCE)
+    segments = expression.parse("<<calm>> It's ^^back^^ now.")
+
+    request, spans = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
+
+    assert request == "<calm> It's back now."
+    assert {tuple(span.tones) for span in spans} == {("calm",)}
