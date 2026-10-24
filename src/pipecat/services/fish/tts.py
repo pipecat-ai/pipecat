@@ -17,6 +17,8 @@ from typing import Any, Literal, Self
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -224,6 +226,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
+        self._s2_expression_adapter = FishAudioS2ExpressionAdapter()
         self._websocket = None
         self._receive_task = None
 
@@ -238,6 +241,17 @@ class FishAudioTTSService(InterruptibleTTSService):
             True, as Fish Audio service supports metrics generation.
         """
         return True
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: S2 tags on S2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("s2"):
+            return self._s2_expression_adapter
+        return super().get_expression_adapter()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if needed.
