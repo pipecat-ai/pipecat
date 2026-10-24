@@ -70,13 +70,13 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
     def _initialize(self, in_rate: float, out_rate: float):
         self._in_rate = in_rate
         self._out_rate = out_rate
-        self._last_resample_time = time.time()
+        self._last_resample_time = time.monotonic()
         self._soxr_stream = soxr.ResampleStream(
             in_rate=in_rate, out_rate=out_rate, num_channels=1, quality=self._quality, dtype="int16"
         )
 
     def _maybe_clear_internal_state(self):
-        current_time = time.time()
+        current_time = time.monotonic()
         if self._clear_after_secs is not None:
             if current_time - self._last_resample_time > self._clear_after_secs:
                 if self._soxr_stream:
@@ -130,11 +130,11 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
 
         tail = self._soxr_stream.resample_chunk(_EMPTY_AUDIO, last=True)
         self._soxr_stream.clear()
-        self._last_resample_time = time.time()
+        self._last_resample_time = time.monotonic()
         return tail.astype(np.int16).tobytes()
 
     async def reset(self):
         """Discard the audio held in the filter and reset it for the next stream."""
         if self._soxr_stream:
             self._soxr_stream.clear()
-            self._last_resample_time = time.time()
+            self._last_resample_time = time.monotonic()
