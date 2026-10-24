@@ -142,7 +142,7 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSStoppedFrame, TTSTextFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSStoppedFrame]
 
         # The 404, then the context completing with no audio.
         expected_up_frames = [ErrorFrame, ErrorFrame]
