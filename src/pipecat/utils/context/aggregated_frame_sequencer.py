@@ -824,10 +824,12 @@ class AggregatedFrameSequencer:
         frames: list[Frame] = [frame]
 
         if not sc.build_tracker:
+            # Trimmed like a sentence-mode unit: the context joins its parts with
+            # a space, and a streamed sentence keeps the spaces of its tokens.
             word_frame = TTSTextFrame(
-                agg.user_facing_text,
+                agg.user_facing_text.strip(),
                 sc.text_type,
-                raw_text=agg.llm_text or None,
+                raw_text=agg.llm_text.strip() or None,
                 segment_id=frame.id,
             )
             word_frame.context_id = context_id
