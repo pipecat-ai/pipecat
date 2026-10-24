@@ -25,9 +25,9 @@ class ExpressionGuidance:
     Parameters:
         MATCH_STYLE: Answer in the user's mood and energy, but stay calm with
             hostility.
-        SLOW_FOR_DETAILS: Say anything the user may need to write down slowly,
-            in a sentence of its own. For a service that performs the
-            ``slow`` delivery.
+        SLOW_FOR_DETAILS: Say just what the user may need to write down
+            slowly, in a span. For a service that performs the ``slow``
+            delivery.
     """
 
     MATCH_STYLE = (
@@ -38,8 +38,7 @@ class ExpressionGuidance:
 
     SLOW_FOR_DETAILS = (
         "When you give the user something to write down, such as a code, a phone number or an "
-        "email address, say it slowly in a sentence of its own, then start the next sentence "
-        "with the tone you want: <<slow>> It's A B 7 4 9. <<neutral>> Anything else?"
+        "email address, say just that slowly: Your code is <<slow: A B 7 4 9>>. Anything else?"
     )
 
 

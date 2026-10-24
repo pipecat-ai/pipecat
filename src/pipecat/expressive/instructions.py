@@ -45,6 +45,10 @@ def expression_instructions(
             "normal voice. A delivery is one word. "
             + _choices("deliveries", delivery, capabilities.free_text_delivery)
         )
+        tags.append(
+            "- <<delivery: some words>> speaks just those words with that delivery, on top of "
+            "the delivery around them, and then goes back to it. Keep it to a few words."
+        )
     sounds = _offered(capabilities.sounds, policy.sounds, capabilities.free_text_sounds)
     if sounds:
         tags.append(

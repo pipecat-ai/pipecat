@@ -37,6 +37,15 @@ def test_a_fixed_list_is_offered_as_the_only_choices():
     assert "Use only these sounds, written exactly as listed: [[laughter]]." in instructions
 
 
+def test_a_service_that_performs_delivery_is_taught_spans():
+    instructions = expression_instructions(FIXED)
+
+    assert "- <<delivery: some words>> speaks just those words with that delivery" in instructions
+    assert "<<delivery: some words>>" not in expression_instructions(
+        ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
+    )
+
+
 def test_a_free_text_list_is_offered_as_examples():
     instructions = expression_instructions(FREE_TEXT)
 
