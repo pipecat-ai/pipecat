@@ -352,6 +352,7 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         )
         # Applying a settings delta reports the service usable again.
         service._is_usable = True
+        service._expression_formatter = None
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)
         service._aggregated_frame_sequencer = seq

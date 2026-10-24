@@ -19,6 +19,8 @@ from websockets.protocol import State
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import TTSMetadataFrame, TTSUpdateSettingsFrame
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
@@ -35,6 +37,7 @@ from pipecat.services.elevenlabs.tts_base import (
     elevenlabs_language_code,
     language_to_elevenlabs_language,
 )
+from pipecat.tests.utils import run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
@@ -563,6 +566,29 @@ def test_http_expression_adapter_follows_the_model(model, adapter):
         settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
     )
     assert type(service.get_expression_adapter()) is adapter
+
+
+@pytest.mark.asyncio
+async def test_http_model_change_to_one_without_audio_tags_is_broadcast():
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_FakeHttpSession(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+
+    _, up = await run_test(
+        service,
+        frames_to_send=[
+            TTSUpdateSettingsFrame(
+                delta=ElevenLabsHttpTTSService.Settings(model="eleven_flash_v2_5")
+            )
+        ],
+        pipeline_params=PipelineParams(enable_expressive_conversation=True),
+    )
+
+    metadata = [f for f in up if isinstance(f, TTSMetadataFrame)]
+    assert metadata[0].expression is not None
+    assert metadata[-1].expression is None
 
 
 class _StreamingHttpResponse:
