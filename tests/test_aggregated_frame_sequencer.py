@@ -2085,6 +2085,16 @@ class TestParallelSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.tts_text, " I'm your friendly assistant, here to")
 
+    async def test_thai_chunk_splits_at_space_and_punctuation(self):
+        # Thai ends a sentence with a space instead of punctuation; a chunk holding
+        # that space and a "?" confirms both sentences, in order.
+        agg = _ParallelSentenceAggregator()
+        out = await _agg_feed(agg, "ได้เลยค่ะ ตรวจสอบให้แล้วนะคะ ต้องการอะไรเพิ่มไหมคะ? ถ้า")
+        self.assertEqual([e[0] for e in out], ["ได้เลยค่ะ ตรวจสอบให้แล้วนะคะ", " ต้องการอะไรเพิ่มไหมคะ?"])
+        f = await agg.flush()
+        self.assertIsNotNone(f)
+        self.assertEqual(f.tts_text, " ถ้า")
+
     async def test_single_chunk_with_two_boundaries_splits_both(self):
         # One chunk containing two full sentence endings plus the lookahead of a
         # third confirms both completed sentences at once, sliced cleanly.
