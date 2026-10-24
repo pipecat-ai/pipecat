@@ -13,11 +13,9 @@ the HTTP request has to be handed back to the loop that owns the aiohttp session
 import numpy as np
 import pytest
 
-pytest.importorskip("onnxruntime")  # BaseSmartTurn pulls in the audio turn package
-
-from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState  # noqa: E402
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams  # noqa: E402
-from pipecat.audio.turn.smart_turn.http_smart_turn import HttpSmartTurnAnalyzer  # noqa: E402
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.http_smart_turn import HttpSmartTurnAnalyzer
 
 
 class _FakeResponse:
