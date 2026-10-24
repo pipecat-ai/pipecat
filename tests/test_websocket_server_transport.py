@@ -242,5 +242,47 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output._websocket.send.await_count, 3)
 
 
+class _AlwaysEmitsSerializer(FrameSerializer):
+    """Emits a payload for every frame, so every write reaches the socket."""
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit a fixed payload."""
+        return "payload"
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+class TestWriteFrameIsBounded(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #5789.
+
+    A peer that stops reading leaves the send waiting on socket buffers that
+    never drain, so a write that never returns parks the task handling the
+    frame along with the `EndFrame` queued behind it.
+    """
+
+    async def test_wedged_send_gives_up_and_writes_the_peer_off(self):
+        """The bound covers this transport too, not only the FastAPI one."""
+        never_returns = asyncio.Event()
+
+        async def wedged(*args, **kwargs):
+            await never_returns.wait()
+
+        params = SingleClientWebsocketServerParams(
+            serializer=_AlwaysEmitsSerializer(),
+            audio_out_enabled=True,
+            audio_out_write_timeout_secs=0.1,
+        )
+        output = SingleClientWebsocketServerTransport(params=params).output()
+        output._websocket = AsyncMock()
+        output._websocket.send = AsyncMock(side_effect=wedged)
+
+        written = await asyncio.wait_for(output._write_frame(EndFrame()), timeout=5.0)
+
+        self.assertFalse(written)
+        self.assertFalse(output.is_usable)
+
+
 if __name__ == "__main__":
     unittest.main()

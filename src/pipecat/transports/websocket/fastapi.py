@@ -585,10 +585,11 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                     while len(self._audio_send_buffer) >= packet_bytes:
                         chunk = bytes(self._audio_send_buffer[:packet_bytes])
                         del self._audio_send_buffer[:packet_bytes]
-                        await self._client.send(chunk)
+                        if not await self._write_within_timeout(self._client.send(chunk)):
+                            return False
                     return True
 
-                await self._client.send(payload)
+                success = await self._write_within_timeout(self._client.send(payload))
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
             success = False
