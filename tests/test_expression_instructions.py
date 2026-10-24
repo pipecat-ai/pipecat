@@ -33,15 +33,18 @@ def test_nothing_is_taught_for_a_service_that_performs_nothing():
 def test_a_fixed_list_is_offered_as_the_only_choices():
     instructions = expression_instructions(FIXED)
 
-    assert "Use only these deliveries, written exactly as listed: calm, happy, sad." in instructions
+    assert (
+        "Use only these deliveries, written exactly as listed: <<calm>>, <<happy>>, <<sad>>."
+        in instructions
+    )
     assert "Use only these sounds, written exactly as listed: [[laughter]]." in instructions
 
 
 def test_a_service_that_performs_delivery_is_taught_spans():
     instructions = expression_instructions(FIXED)
 
-    assert "- <<delivery: some words>> speaks just those words with that delivery" in instructions
-    assert "<<delivery: some words>>" not in expression_instructions(
+    assert "- <<calm: A B 7>> speaks just the words after the colon, A B 7" in instructions
+    assert "speaks just the words after the colon" not in expression_instructions(
         ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
     )
 
@@ -49,7 +52,7 @@ def test_a_service_that_performs_delivery_is_taught_spans():
 def test_a_free_text_list_is_offered_as_examples():
     instructions = expression_instructions(FREE_TEXT)
 
-    assert "For example: excited, whispers (speaking in a whisper). Others" in instructions
+    assert "For example: <<excited>>, <<whispers>> (speaking in a whisper). Others" in instructions
     assert "For example: [[laughs]], [[woo]] (an excited whoop). Others" in instructions
     assert "exactly as listed" not in instructions
 
@@ -69,7 +72,7 @@ def test_a_policy_narrows_a_fixed_list_in_its_own_order():
 
     instructions = expression_instructions(FIXED, policy)
 
-    assert "exactly as listed: sad, calm." in instructions
+    assert "exactly as listed: <<sad>>, <<calm>>." in instructions
     assert "[[sound]]" not in instructions
 
 
@@ -78,7 +81,7 @@ def test_a_policy_names_any_delivery_for_a_free_text_service():
 
     instructions = expression_instructions(FREE_TEXT, policy)
 
-    assert "For example: whispers (speaking in a whisper), relieved." in instructions
+    assert "For example: <<whispers>> (speaking in a whisper), <<relieved>>." in instructions
 
 
 def test_nothing_is_taught_when_a_policy_offers_nothing_performable():
@@ -116,6 +119,9 @@ def test_a_service_that_performs_speed_is_offered_slow_with_when_to_use_it():
     instructions = expression_instructions(capabilities, policy)
 
     assert (
-        "slow (to say something carefully, such as a number, a code or an address)" in instructions
+        "<<slow>> (to say something carefully, such as a number, a code or an address)"
+        in instructions
     )
+    # A span is shown slowing a detail, as details are said.
+    assert "- <<slow: A B 7>> speaks just the words after the colon" in instructions
     assert instructions.endswith(ExpressionGuidance.SLOW_FOR_DETAILS)

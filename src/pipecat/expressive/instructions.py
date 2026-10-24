@@ -15,7 +15,7 @@ the developer's guidance on when to use them, from an
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import SLOW_DELIVERY, ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.policy import ExpressionPolicy
 
 
@@ -43,17 +43,22 @@ def expression_instructions(
             "- <<delivery>> at the start of a sentence speaks it, and the sentences after it, "
             "with that delivery, until the next delivery tag. <<neutral>> returns to your "
             "normal voice. A delivery is one word. "
-            + _choices("deliveries", delivery, capabilities.free_text_delivery)
+            + _choices("deliveries", delivery, capabilities.free_text_delivery, "<<{}>>")
         )
+        # A real span shows that its delivery comes before the colon and the
+        # words to speak after it. Written with placeholders, a span reads as a
+        # label and its value, as in <<delivery: sympathetic>>.
+        example = _span_example(delivery)
         tags.append(
-            "- <<delivery: some words>> speaks just those words with that delivery, on top of "
-            "the delivery around them, and then goes back to it. Keep it to a few words."
+            f"- <<{example}: A B 7>> speaks just the words after the colon, A B 7, with the "
+            f"delivery before it, {example}, on top of the delivery around them, and then goes "
+            "back to it. Keep it to a few words."
         )
     sounds = _offered(capabilities.sounds, policy.sounds, capabilities.free_text_sounds)
     if sounds:
         tags.append(
             "- [[sound]] makes a sound at that point. "
-            + _choices("sounds", sounds, capabilities.free_text_sounds, brackets=True)
+            + _choices("sounds", sounds, capabilities.free_text_sounds, "[[{}]]")
         )
     if capabilities.emphasis:
         tags.append("- ^^word^^ stresses a word.")
@@ -107,11 +112,17 @@ def _offered(
     return [by_name[name] for name in names if name in by_name]
 
 
-def _choices(
-    kind: str, terms: list[ExpressionTerm], free_text: bool, *, brackets: bool = False
-) -> str:
+def _span_example(delivery: list[ExpressionTerm]) -> str:
+    """The delivery a span is shown with: slow, which details are said in, if offered."""
+    names = [term.name for term in delivery]
+    return SLOW_DELIVERY if SLOW_DELIVERY in names else names[0]
+
+
+def _choices(kind: str, terms: list[ExpressionTerm], free_text: bool, tag: str) -> str:
+    """The terms offered, each written as its tag, as in ``<<calm>>`` or ``[[laughs]]``."""
+
     def term_text(term: ExpressionTerm) -> str:
-        name = f"[[{term.name}]]" if brackets else term.name
+        name = tag.format(term.name)
         return f"{name} ({term.description})" if term.description else name
 
     listed = ", ".join(term_text(term) for term in terms)
