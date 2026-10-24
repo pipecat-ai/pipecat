@@ -2269,7 +2269,19 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
         seq = await self._seq_past_the_tag()
         self.assertEqual(seq.process_word("whenx", pts=20, context_id="ctx1"), [])
 
-    async def test_resync_carries_the_closing_delimiter_into_context(self):
+    async def test_the_closing_delimiter_goes_into_context_with_the_word_it_touches(self):
+        seq = _seq()
+        frame = _spoken_frame(self.USER_FACING, raw_text=self.LLM)
+        await seq.register_spoken(frame, "ctx1", self.TTS, append_to_context=True)
+        seq.process_word("Call", pts=10, context_id="ctx1")
+        words = [
+            f
+            for f in seq.process_word("4111", pts=20, context_id="ctx1")
+            if isinstance(f, TTSTextFrame)
+        ]
+        self.assertEqual(words[0].raw_text, "<card>4111</card>")
+
+    async def test_resync_carries_the_skipped_words_into_context(self):
         seq = await self._seq_past_the_tag()
         seq.process_word("whenx", pts=20, context_id="ctx1")
         words = [
@@ -2278,7 +2290,7 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
             if isinstance(f, TTSTextFrame)
         ]
         self.assertEqual([f.text for f in words], ["when it is"])
-        self.assertEqual(words[0].raw_text, "</card> when it is")
+        self.assertEqual(words[0].raw_text, "when it is")
 
     async def test_slot_completes_after_the_resync(self):
         seq = await self._seq_past_the_tag()
