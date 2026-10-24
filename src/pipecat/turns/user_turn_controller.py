@@ -307,18 +307,6 @@ class UserTurnController(BaseObject):
             "Use `StrategyMode` instead."
         )
 
-    @property
-    def _start_mode(self) -> StrategyMode:
-        return self._user_turn_strategies_params.start_mode
-
-    @property
-    def _stop_mode(self) -> StrategyMode:
-        return self._user_turn_strategies_params.stop_mode
-
-    @property
-    def _user_turn_inference_triggered(self) -> bool:
-        return self._user_turn_inference != _UserTurnInference.NONE
-
     async def _setup_strategies(self):
         if not self._setup:
             raise RuntimeError(f"{self} was not properly set up")
@@ -365,14 +353,21 @@ class UserTurnController(BaseObject):
             )
             s.remove_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
-    @staticmethod
-    def _stop_strategies_of(strategies: UserTurnStrategies) -> list[BaseUserTurnStopStrategy]:
-        # The controller runs the turn's inference, so a deferred strategy is
-        # just the strategy it wraps.
-        return [
-            s.inner if isinstance(s, DeferredUserTurnStopStrategy) else s
-            for s in strategies.stop or []
-        ]
+    async def _on_push_frame(
+        self,
+        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        await self._call_event_handler("on_push_frame", frame, direction)
+
+    async def _on_broadcast_frame(
+        self,
+        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
+        frame_cls: type[Frame],
+        **kwargs,
+    ):
+        await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def _handle_user_started_speaking(
         self, frame: UserStartedSpeakingFrame | ProposedUserStartedSpeakingFrame
@@ -402,22 +397,6 @@ class UserTurnController(BaseObject):
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
-    async def _handle_user_turn_response_cancel(self):
-        # The decisions made on the cancelled answer no longer hold. A
-        # decision that confirmed it still says the user is done, so once
-        # every stop strategy that listens to the user has decided, the
-        # turn's answer runs again.
-        self._user_turn_inference = _UserTurnInference.NONE
-        self._user_turn_stop_decisions = {
-            strategy: replace(params, confirms_speculation=False)
-            for strategy, params in self._user_turn_stop_decisions.items()
-            if params.confirms_speculation
-        }
-        if self._user_turn_stop_decisions and self._ready_for_inference():
-            await self._trigger_user_turn_inference_triggered(
-                next(iter(self._user_turn_stop_decisions))
-            )
-
     async def _handle_speech_started(self):
         # Speech in an open turn clears the stop decisions made so far, and
         # the inference triggered for them. It resumes the turn when the user had
@@ -439,27 +418,9 @@ class UserTurnController(BaseObject):
         # We have received a transcription, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
-    async def _on_push_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
-    ):
-        await self._call_event_handler("on_push_frame", frame, direction)
-
-    async def _on_broadcast_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame_cls: type[Frame],
-        **kwargs,
-    ):
-        await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
-
-    async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
-        await self._call_event_handler("on_user_turn_speculation_cancelled")
-        # Every strategy learns the speculation is gone, as when its service
-        # withdraws it.
-        await self.process_frame(UserTurnResponseCancelFrame())
+    @property
+    def _start_mode(self) -> StrategyMode:
+        return self._user_turn_strategies_params.start_mode
 
     async def _on_user_turn_started(
         self,
@@ -470,43 +431,6 @@ class UserTurnController(BaseObject):
             await self._add_user_turn_start_decision(strategy, params)
         else:
             await self._trigger_user_turn_start(strategy, params)
-
-    async def _on_user_turn_inference_triggered(
-        self, strategy: BaseUserTurnStopStrategy, speculation: UserTurnSpeculation | None
-    ):
-        # The controller runs the turn's inference itself once the stop
-        # strategies have decided. A strategy only starts one to speculate.
-        if not speculation:
-            return
-
-        await self._trigger_user_turn_inference_triggered(strategy, speculation)
-
-    async def _on_user_turn_stopped(
-        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
-    ):
-        if self._stop_mode == StrategyMode.ALL:
-            await self._add_user_turn_stop_decision(strategy, params)
-        else:
-            await self._first_user_turn_stop(strategy, params)
-
-    async def _first_user_turn_stop(
-        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
-    ):
-        if not self._user_turn:
-            return
-
-        # The first decision runs the turn's inference and ends the turn. A
-        # stop strategy that waits for that inference still gets its say: the
-        # turn then ends on its decision instead, keeping what the earlier
-        # decisions said about the turn end.
-        self._user_turn_stop_decisions[strategy] = params
-        if not strategy.waits_for_inference and not self._user_turn_inference_triggered:
-            await self._trigger_user_turn_inference_triggered(strategy)
-        turn_waits_for_inference = any(
-            s.waits_for_inference for s in self._user_turn_stop_strategies
-        )
-        if strategy.waits_for_inference or not turn_waits_for_inference:
-            await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
 
     async def _on_reset_aggregation(self, strategy: BaseUserTurnStartStrategy):
         await self._call_event_handler("on_reset_aggregation", strategy)
@@ -554,6 +478,63 @@ class UserTurnController(BaseObject):
 
         await self._call_event_handler("on_user_turn_started", strategy, params)
 
+    @property
+    def _stop_mode(self) -> StrategyMode:
+        return self._user_turn_strategies_params.stop_mode
+
+    @property
+    def _user_turn_inference_triggered(self) -> bool:
+        return self._user_turn_inference != _UserTurnInference.NONE
+
+    @staticmethod
+    def _stop_strategies_of(strategies: UserTurnStrategies) -> list[BaseUserTurnStopStrategy]:
+        # The controller runs the turn's inference, so a deferred strategy is
+        # just the strategy it wraps.
+        return [
+            s.inner if isinstance(s, DeferredUserTurnStopStrategy) else s
+            for s in strategies.stop or []
+        ]
+
+    async def _on_user_turn_inference_triggered(
+        self, strategy: BaseUserTurnStopStrategy, speculation: UserTurnSpeculation | None
+    ):
+        # The controller runs the turn's inference itself once the stop
+        # strategies have decided. A strategy only starts one to speculate.
+        if not speculation:
+            return
+
+        await self._trigger_user_turn_inference_triggered(strategy, speculation)
+
+    async def _on_user_turn_speculation_cancelled(self, strategy: BaseUserTurnStopStrategy):
+        await self._call_event_handler("on_user_turn_speculation_cancelled")
+        # Every strategy learns the speculation is gone, as when its service
+        # withdraws it.
+        await self.process_frame(UserTurnResponseCancelFrame())
+
+    async def _on_user_turn_stopped(
+        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
+    ):
+        if self._stop_mode == StrategyMode.ALL:
+            await self._add_user_turn_stop_decision(strategy, params)
+        else:
+            await self._first_user_turn_stop(strategy, params)
+
+    async def _handle_user_turn_response_cancel(self):
+        # The decisions made on the cancelled answer no longer hold. A
+        # decision that confirmed it still says the user is done, so once
+        # every stop strategy that listens to the user has decided, the
+        # turn's answer runs again.
+        self._user_turn_inference = _UserTurnInference.NONE
+        self._user_turn_stop_decisions = {
+            strategy: replace(params, confirms_speculation=False)
+            for strategy, params in self._user_turn_stop_decisions.items()
+            if params.confirms_speculation
+        }
+        if self._user_turn_stop_decisions and self._ready_for_inference():
+            await self._trigger_user_turn_inference_triggered(
+                next(iter(self._user_turn_stop_decisions))
+            )
+
     async def _trigger_user_turn_inference_triggered(
         self,
         strategy: BaseUserTurnStopStrategy | None,
@@ -573,6 +554,25 @@ class UserTurnController(BaseObject):
         self._user_turn_stop_timeout_event.set()
 
         await self._call_event_handler("on_user_turn_inference_triggered", strategy, speculation)
+
+    async def _first_user_turn_stop(
+        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
+    ):
+        if not self._user_turn:
+            return
+
+        # The first decision runs the turn's inference and ends the turn. A
+        # stop strategy that waits for that inference still gets its say: the
+        # turn then ends on its decision instead, keeping what the earlier
+        # decisions said about the turn end.
+        self._user_turn_stop_decisions[strategy] = params
+        if not strategy.waits_for_inference and not self._user_turn_inference_triggered:
+            await self._trigger_user_turn_inference_triggered(strategy)
+        turn_waits_for_inference = any(
+            s.waits_for_inference for s in self._user_turn_stop_strategies
+        )
+        if strategy.waits_for_inference or not turn_waits_for_inference:
+            await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
 
     async def _add_user_turn_stop_decision(
         self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
