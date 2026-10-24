@@ -852,6 +852,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_external_strategy(self):
         strategy = ExternalUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         should_start = None
 
@@ -879,6 +880,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
+        await strategy.cleanup()
 
     async def test_proposal_finalizes_with_emission_enabled(self):
         strategy = ExternalUserTurnStopStrategy()
@@ -904,11 +906,10 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(params.enable_user_speaking_frames)
         await strategy.cleanup()
 
-    async def test_no_timer_driven_finalization_while_no_turn_is_open(self):
-        """The idle timer must stay quiet between turns.
+    async def test_no_decisions_while_no_turn_is_open(self):
+        """The strategy stays quiet between turns, with wait_for_transcript off too.
 
-        With wait_for_transcript off (how realtime mode configures this
-        strategy) the timer path would otherwise fire on every tick forever.
+        That's how realtime mode configures this strategy.
         """
         strategy = ExternalUserTurnStopStrategy(timeout=0.05, wait_for_transcript=False)
         await strategy.setup(frame_processor_setup(self.task_manager))
@@ -920,11 +921,11 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
             nonlocal fired
             fired += 1
 
-        # Never started a turn: several timer ticks should pass in silence.
+        # Never started a turn: nothing decides.
         await asyncio.sleep(0.3)
         self.assertEqual(fired, 0)
 
-        # Once a turn opens, the timer finalizes it as before.
+        # Once a turn opens, the stop signal ends it.
         await strategy.handle_user_turn_started()
         await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
         self.assertEqual(fired, 1)
@@ -940,7 +941,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         """Finalization from the transcript timeout carries the right flags.
 
         A transcript that arrives after the stop signal closes the turn from
-        the internal timeout, long after the signal that determined whether
+        the transcript timer, long after the signal that determined whether
         emission is suppressed. This ordering happens with services whose
         stop signal and transcript come from independent events; a service
         that pushes the transcript before proposing the stop takes the
@@ -961,7 +962,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.handle_user_turn_started()
 
         # Stop signal first, transcript after: the stop resolves from the
-        # timeout in the strategy's task handler.
+        # transcript timer.
         await strategy.process_frame(UserStartedSpeakingFrame())
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertIsNone(params)
@@ -970,6 +971,90 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.15)
         self.assertIsNotNone(params)
         self.assertFalse(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def _open_turn(self, strategy) -> list:
+        decisions = []
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            decisions.append(params)
+
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.handle_user_turn_started()
+        return decisions
+
+    async def _say(self, strategy, text: str):
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text=text, user_id="", timestamp="now"))
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+    async def test_it_decides_once_while_the_turn_stays_open(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+
+        await self._say(strategy, "Hello!")
+        await asyncio.sleep(0.3)
+
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
+    async def test_speech_the_service_did_not_hear_lets_it_decide_again(self):
+        """VAD hearing a cough clears the controller's decisions, so it decides again after it."""
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Hello!")
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_speech_the_service_heard_waits_for_its_stop(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Hello!")
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 1)
+
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_new_text_after_the_decision_gets_a_decision_of_its_own(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Book a flight")
+
+        await strategy.process_frame(
+            TranscriptionFrame(text=" to Boston", user_id="", timestamp="now")
+        )
+        await asyncio.sleep(0.15)
+
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_a_transcription_in_pieces_after_the_stop_gets_one_decision(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.1)
+        decisions = await self._open_turn(strategy)
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="Book a flight", user_id="", timestamp="now")
+        )
+        await asyncio.sleep(0.05)
+        await strategy.process_frame(
+            TranscriptionFrame(text=" to Boston", user_id="", timestamp="now")
+        )
+        self.assertEqual(decisions, [])
+
+        await asyncio.sleep(0.2)
+        self.assertEqual(len(decisions), 1)
         await strategy.cleanup()
 
     async def test_subclass_can_delay_finalization(self):
