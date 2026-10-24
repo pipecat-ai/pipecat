@@ -380,8 +380,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 presigned_url,
                 additional_headers=additional_headers,
                 subprotocols=[Subprotocol("mqtt")],
-                ping_interval=None,
-                ping_timeout=None,
                 compression=None,
             )
 
