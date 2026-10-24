@@ -505,11 +505,17 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
-        text_type: What form the text is in (e.g., sentence, code, etc.).
-        aggregated_by: What form the text is in, always the same as ``text_type``.
+        output_type: What form the text is in (e.g., sentence, code, etc.).
+        text_type: What form the text is in, always the same as ``output_type``.
+
+            .. deprecated:: 1.14.0
+                Use ``output_type`` instead.
+                Will be removed in 2.0.0.
+
+        aggregated_by: What form the text is in, always the same as ``output_type``.
 
             .. deprecated:: 1.13.0
-                Use ``text_type`` instead.
+                Use ``output_type`` instead.
                 Will be removed in 2.0.0.
 
         segment_id: ID of the source AggregatedTextFrame.
@@ -523,7 +529,8 @@ class BotOutputMessageData(TextMessageData):
             Present when ``will_be_spoken`` is ``True``.
     """
 
-    text_type: TextType | str
+    output_type: TextType | str
+    text_type: TextType | str | None = None
     aggregated_by: TextType | str | None = None
     segment_id: int | None = None
     # v1 field (protocol 1.4.x)
@@ -535,13 +542,13 @@ class BotOutputMessageData(TextMessageData):
 
     @model_validator(mode="before")
     @classmethod
-    def _sync_text_type(cls, data: Any) -> Any:
-        """Fill whichever of ``text_type`` and ``aggregated_by`` is missing from the other."""
+    def _sync_output_type(cls, data: Any) -> Any:
+        """Fill whichever of ``output_type`` and its deprecated names are missing."""
         if isinstance(data, dict):
-            if "text_type" not in data and "aggregated_by" in data:
-                data = {**data, "text_type": data["aggregated_by"]}
-            elif "aggregated_by" not in data and "text_type" in data:
-                data = {**data, "aggregated_by": data["text_type"]}
+            names = ("output_type", "text_type", "aggregated_by")
+            given = [data[name] for name in names if name in data]
+            if given:
+                data = {**dict.fromkeys(names, given[0]), **data}
         return data
 
 

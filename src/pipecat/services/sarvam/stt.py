@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.exceptions import ConnectionClosedError
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -897,6 +898,10 @@ SUPPORTED_SAMPLE_RATES = {8000, 16000}
 # transcript latency doesn't scale with the chosen profile.
 _CLIENT_CHUNK_MS = 50
 
+# Sarvam closes a connection with this code when it rejects a connection
+# parameter (model, language, VAD tuning) or the account isn't enabled for it.
+_REJECTED_SETTINGS_CLOSE_CODE = 4000
+
 # Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
 # `language_code`; the rest share their `Settings` names. Of these,
 # `language_code`, `stream_type`, `mode`, and `prompt` are boundary-gated: the
@@ -1040,13 +1045,22 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     every other STT service reports. Under ``manual`` those same frames also mark
     the turn for Sarvam, reaching it as ``speech_start`` and ``speech_end``.
 
-    A dropped socket is reopened with backoff unless
-    ``reconnect_on_error=False``. Once the service stops trying it is no longer
-    usable, so a ``ServiceSwitcher`` can move on.
+    A dropped socket is reopened with backoff in the background unless
+    ``reconnect_on_error=False``; audio that arrives while it is down isn't
+    transcribed. An utterance lives in one connection, so one cut short by a
+    drop ends with the transcript received so far, and speech that continues on
+    the new connection is transcribed as a new utterance. Settings Sarvam
+    rejects are a permanent invalid-request error rather than retried. Once the
+    service stops trying it is no longer usable, so a ``ServiceSwitcher`` can
+    move on.
     """
 
     Settings = SarvamRealtimeSTTSettings
     _settings: Settings
+
+    # How long to wait for the server's ``session.begin`` after the handshake
+    # before treating the connection as failed.
+    _CONNECTION_TIMEOUT = 10.0
 
     def __init__(
         self,
@@ -1130,8 +1144,12 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._prefix_padding_ms = prefix_padding_ms
         self._should_interrupt = should_interrupt
         self._receive_task: asyncio.Task | None = None
+        self._connection_established_event = asyncio.Event()
         self._audio_buffer = bytearray()
         self._request_id: str | None = None
+        # The latest partial transcript with no final after it yet, pushed if
+        # its connection closes before the final arrives.
+        self._pending_partial: dict[str, Any] | None = None
         self._provider_speech_active = False
         self._speech_end_audio_position_s: float | None = None
         self._audio_position_bytes = 0
@@ -1264,11 +1282,16 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Open the Sarvam realtime websocket."""
+        """Open the Sarvam realtime websocket.
+
+        The server confirms the session with ``session.begin``, which the
+        receive loop waits for (see ``_receive_messages``).
+        """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
+            self._connection_established_event.clear()
             url = self._build_ws_url()
             headers = {"API-SUBSCRIPTION-KEY": self._api_key}
             logger.debug(f"Connecting to Sarvam realtime STT WebSocket: {url}")
@@ -1277,7 +1300,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 additional_headers=headers,
                 user_agent_header=sdk_headers()["User-Agent"],
             )
-            await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
             # Left on the category the failure earns: `_try_reconnect` skips a
@@ -1302,33 +1324,26 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_disconnected")
 
     async def _receive_task_handler(self, report_error: ReportErrorCallback):
-        """Close out the active utterance once the receive loop is done.
+        """Mark the service unusable once the receive loop is done.
 
         The loop exits for good only when reconnection is off or has given up,
-        so no further server event can arrive. An utterance still open at that
-        point would leave downstream turn aggregation waiting on a boundary
-        that is never coming, and the service has no transcripts left to give,
-        so it also stops being usable.
+        so the service has no transcripts left to give.
 
         Cancellation is left alone: that only happens during an intentional
         disconnect, where teardown is already under way.
         """
         await super()._receive_task_handler(report_error)
-        await self._complete_active_utterance()
         if not self._disconnecting:
             await self.set_usable(False)
 
     async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Carry the turn in progress across the socket swap.
+        """Carry an open manual turn across the socket swap.
 
-        The new session starts with no knowledge of the old one's utterance.
-        Under ``vad`` its ``vad.speech_end`` would never arrive, so the
-        utterance is closed here. Under ``manual`` the pipeline's turn is still
-        open, and Sarvam ignores a ``speech_end`` without a matching
-        ``speech_start``, so the new session is told the turn has started.
-        Audio positions count from the start of the new session.
+        Under ``manual`` the pipeline's turn is still open, and Sarvam ignores
+        a ``speech_end`` without a matching ``speech_start``, so the new session
+        is told the turn has started. Audio positions count from the start of
+        the new session.
         """
-        await self._complete_active_utterance()
         reconnected = await super()._reconnect_websocket(attempt_number)
         if reconnected:
             self._audio_position_bytes = 0
@@ -1337,19 +1352,85 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         return reconnected
 
     async def _receive_messages(self):
-        """Receive Sarvam realtime server events."""
+        """Receive Sarvam realtime server events.
+
+        Waits for the server to confirm the session with ``session.begin``,
+        then processes VAD, transcript, and error events.
+
+        Raises:
+            ConnectionError: If ``session.begin`` doesn't arrive within
+                ``_CONNECTION_TIMEOUT``.
+            ConnectionClosedError: If the connection closes with an error. A
+                close rejecting the connection's settings is also reported as
+                a permanent invalid-request error, so it isn't retried.
+        """
         if not self._websocket:
             raise Exception("Websocket not connected")
-        async for message in self._websocket:
-            if not isinstance(message, str):
-                logger.trace(f"{self} ignored non-text Sarvam server message")
-                continue
-            try:
-                data = json.loads(message)
-            except json.JSONDecodeError:
-                logger.warning(f"{self} received non-JSON Sarvam message: {message}")
-                continue
-            await self._handle_message(data)
+        messages = aiter(self._websocket)
+        try:
+            if not await self._receive_until_confirmed(
+                messages,
+                self._connection_established_event,
+                self._process_message,
+                self._CONNECTION_TIMEOUT,
+            ):
+                # Closed before confirming; the receive loop treats it as a drop.
+                return
+
+            await self._call_event_handler("on_connected")
+
+            async for message in messages:
+                await self._process_message(message)
+        except ConnectionClosedError as e:
+            if e.rcvd is not None and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE:
+                await self.push_error(
+                    error_msg=f"Sarvam realtime STT rejected the connection: {e.rcvd.reason}",
+                    exception=e,
+                    category=ErrorCategory.INVALID_REQUEST,
+                )
+            raise
+        finally:
+            # An utterance lives in one connection, so it ends when the
+            # connection does, unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_utterance_cut_short()
+
+    async def _process_message(self, message: str | bytes):
+        """Decode and handle one message from the WebSocket."""
+        if not isinstance(message, str):
+            logger.trace(f"{self} ignored non-text Sarvam server message")
+            return
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            logger.warning(f"{self} received non-JSON Sarvam message: {message}")
+            return
+        await self._handle_message(data)
+
+    async def _end_utterance_cut_short(self):
+        """End an utterance whose connection closed before its final transcript.
+
+        The new session never sends the old one's ``vad.speech_end`` or
+        ``transcript.final``, so the utterance is closed here, and the latest
+        partial transcript is pushed as its transcription, unfinalized since
+        the server never committed it. Without this, downstream turn
+        aggregation would wait on a boundary that is never coming, and what
+        the user said would be lost.
+        """
+        await self._complete_active_utterance()
+        partial, self._pending_partial = self._pending_partial, None
+        if not partial:
+            return
+        logger.debug(f"{self}: connection closed before the final transcript, using the partial")
+        await self.emit_stt_usage_metrics()
+        text = (partial.get("text") or "").strip()
+        language = self._language_for_frame(partial.get("language"))
+        result = self._result_payload(partial)
+        result["speech_end_audio_position_s"] = self._speech_end_audio_position_s
+        await self.push_frame(
+            TranscriptionFrame(text, self._user_id, time_now_iso8601(), language, result=result)
+        )
+        await self._trace_transcription(text, True, language)
 
     async def _handle_message(self, message: dict[str, Any]):
         """Handle a parsed Sarvam realtime server event."""
@@ -1357,6 +1438,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if event == "session.begin":
             self._request_id = message.get("request_id")
             logger.info(f"{self} Sarvam realtime session.begin request_id={self._request_id}")
+            self._connection_established_event.set()
         # Only the endpointer in charge gets to set turn boundaries. Under
         # manual endpointing the pipeline owns them, so server VAD telemetry
         # would compete with the boundaries it is already producing.
@@ -1445,9 +1527,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _complete_active_utterance(self):
         """End the in-flight utterance.
 
-        Runs on ``vad.speech_end`` and on a session ending mid-utterance. Without
-        the latter, downstream turn aggregation would wait forever for a boundary
-        the server is never going to send.
+        Runs on ``vad.speech_end``, and on a session or connection ending
+        mid-utterance, where the server will never send that boundary.
         """
         if not self._provider_speech_active:
             return
@@ -1459,6 +1540,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         text = (message.get("text") or "").strip()
         if not text:
             return
+        self._pending_partial = message
         result = self._result_payload(message)
         language = self._language_for_frame(message.get("language"))
         await self.push_frame(
@@ -1474,6 +1556,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _handle_final_transcript(self, message: dict[str, Any]):
         # Report usage before the transcription frame so tracing can attach it
         # to the STT span the frame closes. A blank final still consumed audio.
+        self._pending_partial = None
         await self.emit_stt_usage_metrics()
         text = (message.get("text") or "").strip()
         if text:

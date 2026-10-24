@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallFromLLM,

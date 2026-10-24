@@ -6,6 +6,9 @@
 
 import json
 import unittest
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -13,7 +16,11 @@ from pipecat.frames.frames import (
     TextType,
     TTSTextFrame,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import (
+    CartesiaHttpTTSService,
+    CartesiaTTSService,
+    language_to_cartesia_language,
+)
 from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
@@ -26,6 +33,86 @@ def _service(language: str) -> CartesiaTTSService:
     service = CartesiaTTSService.__new__(CartesiaTTSService)
     service._settings = TTSSettings(language=language)
     return service
+
+
+@pytest.mark.parametrize(
+    "language, expected",
+    [
+        (Language.ES, "es"),
+        (Language.ES_MX, "es-MX"),
+        (Language.EN_GB, "en-GB"),
+        (Language.ES_AR, "es-AR"),
+        (Language.ZH_TW, "zh"),
+        (Language.ES_BO, "es"),
+        (Language.DE_CH, "de"),
+        (Language.NB, "no"),
+        (Language.NB_NO, "no-NO"),
+        (Language.FIL, "tl"),
+        (Language.FIL_PH, "tl-PH"),
+    ],
+)
+def test_language_to_cartesia_language_keeps_supported_locales(language, expected):
+    assert language_to_cartesia_language(language) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
+@pytest.mark.parametrize("model", ["sonic-3.6", "sonic-3"])
+@pytest.mark.parametrize(
+    "language, expected",
+    [(Language.ES_MX, "es-MX"), ("en-GB", "en-GB"), (Language.DE_CH, "de"), (None, None)],
+)
+@pytest.mark.parametrize("update", [False, True])
+async def test_requests_send_the_mapped_language(service_cls, model, language, expected, update):
+    service = service_cls(
+        api_key="test",
+        settings=service_cls.Settings(
+            model=model, voice="voice", language="en" if update else language
+        ),
+    )
+    if update:
+        await service._update_settings(service.Settings(language=language))
+    if service_cls is CartesiaTTSService:
+        payload = json.loads(service._build_msg(text="Hello", context_id="ctx"))
+    else:
+        response = MagicMock(status=200, read=AsyncMock(return_value=b"\x00\x00"))
+        service._session = MagicMock()
+        service._session.post.return_value.__aenter__.return_value = response
+        _ = [frame async for frame in service.run_tts("Hello", "ctx")]
+        payload = service._session.post.call_args.kwargs["json"]
+
+    assert payload.get("language") == expected
+    assert "locale" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "language, delta, expected, rotated",
+    [
+        ("en-US", {"language": "en-GB"}, "en-GB", True),
+        ("en-US", {"language": Language.ES_MX}, "es-MX", True),
+        ("en-US", {"language": Language.DE_CH}, "de", True),
+        ("en-US", {"language": "en-US"}, "en-US", False),
+    ],
+)
+async def test_locale_update_rotates_context(language, delta, expected, rotated):
+    service = CartesiaTTSService(
+        api_key="test",
+        settings=CartesiaTTSService.Settings(model="sonic-3.6", voice="voice", language=language),
+    )
+    service._turn_context_id = "old"
+    service.flush_audio = AsyncMock()
+    service.audio_context_available = lambda context_id: True
+
+    await service._update_settings(service.Settings(**delta))
+
+    assert (service._turn_context_id != "old") is rotated
+    if rotated:
+        service.flush_audio.assert_awaited_once_with(context_id="old")
+    else:
+        service.flush_audio.assert_not_awaited()
+    payload = json.loads(service._build_msg(text="Hello", context_id=service._turn_context_id))
+    assert payload["language"] == expected
 
 
 def _process_word_timestamps(

@@ -18,12 +18,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "latest"
+          enable-cache: false
 
       - name: Set up Python
         run: uv python install 3.12
@@ -58,11 +59,10 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          uv run coverage run
-          uv run coverage xml
+          uv run pytest -n 8 --cov --cov-report=xml
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pipecat-ai/pipecat

@@ -434,7 +434,7 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [RTVI.BotOutputMessage, RTVI.BotTTSTextMessage, RTVI.BotOutputMessage],
         )
         self.assertEqual(
-            [(data.text_type, data.spoken_status) for data in self._sent_outputs()],
+            [(data.output_type, data.spoken_status) for data in self._sent_outputs()],
             [(TextType.BACKCHANNEL, "new"), (TextType.BACKCHANNEL, "in-progress")],
         )
         self.assertEqual(messages[1].data.text, "Mm-hmm,")

@@ -32,8 +32,11 @@ from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    OpenAILLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,

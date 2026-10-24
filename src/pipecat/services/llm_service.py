@@ -27,9 +27,9 @@ from typing_extensions import TypeVar
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     CancelFrame,
     EagerEndOfTurnCancelFrame,
@@ -458,7 +458,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if cls.adapter_class is not None:
             return cls.adapter_class
 
-        from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+        from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 
         return OpenAILLMAdapter
 
@@ -1654,9 +1654,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Note:
             This removes the handler but does not stop advertising the tool to
-            the LLM. To remove a tool cleanly, prefer an ``LLMSetToolsFrame`` with
-            the updated tool set — that both stops advertising it and avoids the
-            LLM trying to call a tool that's no longer there.
+            the LLM. To remove a tool, push an ``LLMSetToolsFrame`` without it.
+            That also drops a handler that came with the tool definition (a
+            direct function, or a ``FunctionSchema`` with a ``handler``). A
+            handler added with :meth:`register_function` needs this call too,
+            made after the updated tool set takes effect, since removing the
+            handler of a still-advertised tool leaves the LLM able to call a
+            handler that's gone.
 
         Args:
             function_name: The name of the function handler to remove.

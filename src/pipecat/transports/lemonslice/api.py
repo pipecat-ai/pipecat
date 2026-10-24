@@ -46,6 +46,8 @@ class LemonSliceApi:
         agent_image: Image.Image | None = None,
         agent_prompt: str | None = None,
         idle_timeout: int | None = None,
+        audio_sample_rate: int | None = None,
+        model: str | None = None,
         daily_room_url: str | None = None,
         daily_token: str | None = None,
         connection_properties: dict[str, Any] | None = None,
@@ -61,6 +63,9 @@ class LemonSliceApi:
             agent_prompt: A high-level system prompt that subtly influences the avatar's
                 movements, expressions, and emotional demeanor.
             idle_timeout: Idle timeout in seconds.
+            audio_sample_rate: Sample rate the avatar captures and plays back the audio at.
+                One of 16000, 22050, 24000, 44100 or 48000.
+            model: The LemonSlice model to run the avatar on. Uses the default model when None.
             daily_room_url: Daily room URL to use for the session.
             daily_token: Daily token for authenticating with the room.
             connection_properties: Additional connection properties to pass to the session.
@@ -95,6 +100,10 @@ class LemonSliceApi:
             payload["agent_prompt"] = agent_prompt
         if idle_timeout is not None:
             payload["idle_timeout"] = idle_timeout
+        if audio_sample_rate is not None:
+            payload["audio_sample_rate"] = audio_sample_rate
+        if model is not None:
+            payload["model"] = model
         properties_dict: dict[str, Any] = (
             dict(connection_properties) if connection_properties else {}
         )

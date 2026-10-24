@@ -913,7 +913,7 @@ class RTVIObserver(BaseObserver):
                 data=RTVI.BotOutputMessageData(
                     text=text,
                     will_be_spoken=True,
-                    text_type=text_type,
+                    output_type=text_type,
                     segment_id=frame.segment_id,
                     spoken_status=spoken_status,
                     spoken_progress=RTVI.SpokenProgressData(
@@ -1007,7 +1007,7 @@ class RTVIObserver(BaseObserver):
                 text=text,
                 spoken=isTTS,
                 will_be_spoken=will_be_spoken,
-                text_type=text_type,
+                output_type=text_type,
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,

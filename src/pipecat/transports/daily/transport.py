@@ -1860,8 +1860,14 @@ class DailyTransportClient(EventHandler):
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
-            await callback(*args)
-            queue.task_done()
+            # A failing callback must not end this task, or every later
+            # callback on this queue would be dropped.
+            try:
+                await callback(*args)
+            except Exception:
+                logger.exception(f"{self} uncaught exception in callback {callback.__name__}")
+            finally:
+                queue.task_done()
 
     async def _flush_join_messages(self):
         """Send any messages that were queued before join completed."""
@@ -2721,6 +2727,10 @@ class DailyTransport(BaseTransport):
     async def send_dtmf(self, settings) -> CallClientError | None:
         """Send DTMF tones during a call.
 
+        Sends at once, ahead of audio still queued in the pipeline. To send the
+        tones after queued audio has played, push a :class:`DailyOutputDTMFFrame`
+        instead.
+
         Args:
             settings: DTMF settings including tones and target session.
 
@@ -2769,6 +2779,10 @@ class DailyTransport(BaseTransport):
     async def sip_call_transfer(self, settings) -> CallClientError | None:
         """Transfer a SIP call to another destination.
 
+        Transfers at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To transfer after
+        queued audio has played, push a :class:`DailySIPTransferFrame` instead.
+
         Args:
             settings: SIP call transfer settings.
 
@@ -2784,6 +2798,10 @@ class DailyTransport(BaseTransport):
 
     async def sip_refer(self, settings) -> CallClientError | None:
         """Send a SIP REFER request.
+
+        Sends at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To send it after
+        queued audio has played, push a :class:`DailySIPReferFrame` instead.
 
         Args:
             settings: SIP REFER settings.
@@ -2983,6 +3001,10 @@ class DailyTransport(BaseTransport):
     ) -> CallClientError | None:
         """Update settings for remote participants.
 
+        Applies at once, ahead of audio still queued in the pipeline. To apply
+        the update after queued audio has played, push a
+        :class:`DailyUpdateRemoteParticipantsFrame` instead.
+
         Args:
             remote_participants: Remote participant configuration settings.
 
@@ -3168,9 +3190,16 @@ class DailyTransport(BaseTransport):
         logger.debug(f"{self} DTMF event: {data}")
         await self._call_event_handler("on_dtmf_event", data)
 
-        if self._input:
-            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
-            await self._input.push_frame(frame)
+        if not self._input:
+            return
+
+        try:
+            button = KeypadEntry(data["tone"])
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {data['tone']!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""

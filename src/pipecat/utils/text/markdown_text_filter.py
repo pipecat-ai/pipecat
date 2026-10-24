@@ -34,7 +34,7 @@ class MarkdownTextFilter(BaseTextFilter):
     blocks and tables based on configuration.
 
     .. deprecated:: 1.14.0
-        Use :func:`~pipecat.utils.text.transforms.strip_markdown` instead, registered
+        Use :data:`~pipecat.utils.text.transforms.strip_markdown` instead, registered
         with ``text_transforms``. In place of ``filter_code`` and ``filter_tables``,
         give the block its own text type with
         :class:`~pipecat.utils.text.pattern_pair_aggregator.PatternPairAggregator` and
