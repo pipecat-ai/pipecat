@@ -9,8 +9,13 @@
 from pipecat.frames.frames import Frame, UserTurnInferenceCompletedFrame
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.deprecation import deprecated
 
 
+@deprecated(
+    "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.15.0 and will be removed "
+    "in 2.0.0. Use `ExternalUserTurnStopStrategy` instead."
+)
 class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     """Finalize the user turn whenever a ``UserTurnInferenceCompletedFrame`` arrives.
 
@@ -46,6 +51,14 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     controller's ``user_turn_stop_timeout`` watchdog finalizes the
     turn after no activity. Tune that timeout if your producer can
     take longer than the default to respond.
+
+    .. deprecated:: 1.15.0
+        Use :class:`~pipecat.turns.user_stop.ExternalUserTurnStopStrategy`
+        instead, and push a
+        :class:`~pipecat.frames.frames.ProposedUserStoppedSpeakingFrame` once
+        the user is done. For the LLM's turn-completion markers,
+        use :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`.
+        Will be removed in 2.0.0.
     """
 
     @property
@@ -56,5 +69,5 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Fire ``on_user_turn_stopped`` whenever ``UserTurnInferenceCompletedFrame`` is seen."""
         if isinstance(frame, UserTurnInferenceCompletedFrame):
-            await self.trigger_user_turn_finalized()
+            await self.trigger_user_turn_stopped()
         return ProcessFrameResult.CONTINUE

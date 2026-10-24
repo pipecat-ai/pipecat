@@ -12,7 +12,7 @@ from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 
 @dataclass
@@ -248,9 +248,16 @@ class BaseUserTurnStopStrategy(BaseObject):
                 turn ending already answers it, so inference should not run
                 again.
         """
-        await self.trigger_user_turn_finalized(
-            enable_user_speaking_frames=enable_user_speaking_frames,
-            confirms_speculation=confirms_speculation,
+        await self._call_event_handler(
+            "on_user_turn_stopped",
+            UserTurnStoppedParams(
+                enable_user_speaking_frames=(
+                    self._enable_user_speaking_frames
+                    if enable_user_speaking_frames is None
+                    else enable_user_speaking_frames
+                ),
+                confirms_speculation=confirms_speculation,
+            ),
         )
 
     async def trigger_user_turn_inference_triggered(
@@ -270,13 +277,21 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_user_turn_inference_triggered", speculation)
 
+    @deprecated(
+        "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 "
+        "and will be removed in 2.0.0. Use `trigger_user_turn_stopped` instead."
+    )
     async def trigger_user_turn_finalized(
         self,
         *,
         enable_user_speaking_frames: bool | None = None,
         confirms_speculation: bool = False,
     ):
-        """Trigger only the `on_user_turn_stopped` event.
+        """Fire only ``on_user_turn_stopped``.
+
+        .. deprecated:: 1.15.0
+            Use :meth:`trigger_user_turn_stopped` instead, which fires the same
+            event. Will be removed in 2.0.0.
 
         Args:
             enable_user_speaking_frames: Whether to emit
@@ -287,14 +302,10 @@ class BaseUserTurnStopStrategy(BaseObject):
                 turn ending already answers it, so inference should not run
                 again.
         """
-        await self._call_event_handler(
-            "on_user_turn_stopped",
-            UserTurnStoppedParams(
-                enable_user_speaking_frames=(
-                    self._enable_user_speaking_frames
-                    if enable_user_speaking_frames is None
-                    else enable_user_speaking_frames
-                ),
-                confirms_speculation=confirms_speculation,
-            ),
+        # The base method, so an override of trigger_user_turn_stopped() doesn't
+        # change what this fires.
+        await BaseUserTurnStopStrategy.trigger_user_turn_stopped(
+            self,
+            enable_user_speaking_frames=enable_user_speaking_frames,
+            confirms_speculation=confirms_speculation,
         )

@@ -120,7 +120,7 @@ class CompletionStopStrategy(BaseUserTurnStopStrategy):
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         if isinstance(frame, UserTurnInferenceCompletedFrame):
-            await self.trigger_user_turn_finalized()
+            await self.trigger_user_turn_stopped()
         return ProcessFrameResult.CONTINUE
 
 
@@ -1115,17 +1115,15 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         update would emit no markers, leaving user turns to the stop timeout.
         """
         from pipecat.frames.frames import LLMUpdateSettingsFrame
-        from pipecat.turns.user_stop import LLMTurnCompletionUserTurnStopStrategy, deferred
+        from pipecat.turns.user_stop import LLMTurnCompletionUserTurnStopStrategy
 
         user_aggregator = LLMUserAggregator(
             LLMContext(),
             params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
                     stop=[
-                        deferred(
-                            SpeechTimeoutUserTurnStopStrategy(
-                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
-                            )
+                        SpeechTimeoutUserTurnStopStrategy(
+                            user_speech_timeout=TRANSCRIPTION_TIMEOUT
                         ),
                         LLMTurnCompletionUserTurnStopStrategy(),
                     ],

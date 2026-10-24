@@ -5162,6 +5162,50 @@
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_finalized",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "trigger_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `trigger_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "DeferredUserTurnStopStrategy",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`DeferredUserTurnStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "deferred",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "function",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`deferred` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "ExternalUserTurnCompletionStopStrategy",
+      "module": "pipecat.turns.user_stop.external_user_turn_completion_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "ExternalUserTurnStopStrategy",
+      "message": "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `ExternalUserTurnStopStrategy` instead.",
+      "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
+    },
+    {
       "subject": "TaskManager.setup",
       "module": "pipecat.utils.asyncio.task_manager",
       "kind": "method",

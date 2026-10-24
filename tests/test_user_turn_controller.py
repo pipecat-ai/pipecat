@@ -644,7 +644,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """handle_user_turn_stopped() also runs when the stop watchdog ends the turn."""
         finalized = 0
 
-        class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
+        class SpyNeverStopStrategy(BaseUserTurnStopStrategy):
             async def handle_user_turn_stopped(self):
                 nonlocal finalized
                 await super().handle_user_turn_stopped()
@@ -702,7 +702,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):  # the deprecated hook
                     nonlocal resets
                     resets += 1
@@ -716,7 +716,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """Overriding the deprecated reset() warns when the class is defined."""
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):
                     pass
 
@@ -762,7 +762,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
 
-            class Migrated(ExternalUserTurnCompletionStopStrategy):
+            class Migrated(BaseUserTurnStopStrategy):
                 async def handle_user_turn_stopped(self):
                     pass
 
@@ -942,7 +942,7 @@ class DecidingStopStrategy(BaseUserTurnStopStrategy):
         await self.trigger_user_turn_inference_triggered(speculation=UserTurnSpeculation("Hi"))
 
     async def confirm(self):
-        await self.trigger_user_turn_finalized(confirms_speculation=True)
+        await self.trigger_user_turn_stopped(confirms_speculation=True)
 
 
 class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
@@ -1235,6 +1235,16 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(resumes), 1)
 
+    async def test_the_deprecated_finalized_trigger_still_decides(self):
+        strategy = DecidingStopStrategy()
+        await self._start([strategy])
+        await self._speak()
+
+        with self.assertWarns(DeprecationWarning):
+            await strategy.trigger_user_turn_finalized()
+
+        self.assertEqual([s for s, _ in self.stops], [strategy])
+
     async def test_the_turn_end_combines_the_decisions(self):
         """A turn end announced elsewhere, or confirming a speculation, applies to the whole turn."""
         announced, confirming = DecidingStopStrategy(), DecidingStopStrategy()
@@ -1242,7 +1252,7 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await self._speak()
 
         await confirming.speculate()
-        await announced.trigger_user_turn_finalized(enable_user_speaking_frames=False)
+        await announced.trigger_user_turn_stopped(enable_user_speaking_frames=False)
         await confirming.confirm()
 
         _, params = self.stops[0]
