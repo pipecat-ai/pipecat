@@ -45,8 +45,10 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     call, or on a response with no marker. ◐ and ○ leave the turn open. If
     the user then stays quiet for the configured timeout, the strategy
     decides the user is done and asks the LLM to re-engage them, even when
-    the controller's turn stop timeout ended the turn first. When the user
-    speaks again, it waits for the next inference instead.
+    the controller's turn stop timeout ended the turn first. Another
+    inference answering the user in the meantime, such as one for words
+    transcribed after the turn's inference, cancels the re-prompt. When the
+    user speaks again, it waits for the next inference instead.
 
     An eager end of turn answers the turn speculatively, and the strategy
     decides on that answer too. ◐ or ○ withdraws it, and the committed turn
@@ -106,7 +108,9 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if isinstance(frame, StartFrame):
             await self._configure_llm()
         elif isinstance(frame, LLMContextFrame):
+            # An inference answering the user makes a pending re-prompt redundant.
             self._awaited = frame
+            await self._cancel_reprompt()
         elif isinstance(frame, UserTurnCompletionFrame):
             await self._handle_report(frame)
         elif isinstance(frame, UserTurnResponseCancelFrame):
@@ -141,6 +145,9 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_report(self, report: UserTurnCompletionFrame):
         if self._awaited is None or report.context_frame_id != self._awaited.id:
+            # Another inference is answering the user, so a pending re-prompt
+            # would answer them twice.
+            await self._cancel_reprompt()
             return
 
         speculation = self._awaited.speculation
@@ -169,11 +176,14 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._reprompt_task = None
         logger.debug(f"{self}: user quiet for {timeout}s after an incomplete turn, re-prompting")
         await self.trigger_user_turn_stopped()
-        await self.push_frame(
-            LLMMessagesAppendFrame(
-                messages=[{"role": "developer", "content": prompt}], run_llm=True
+        # The turn end runs an inference of its own for words transcribed after
+        # the turn's inference, and that inference answers the user instead.
+        if not self._awaited:
+            await self.push_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": prompt}], run_llm=True
+                )
             )
-        )
 
     async def _cancel_reprompt(self):
         if self._reprompt_task:

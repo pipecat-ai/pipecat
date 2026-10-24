@@ -171,6 +171,20 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
         (reprompt,) = self.pushed
         self.assertIsInstance(reprompt, LLMMessagesAppendFrame)
 
+    async def test_another_inference_cancels_the_re_prompt(self):
+        await self._report("short", await self._infer())
+        await self._infer()
+        await asyncio.sleep(0.15)
+
+        self.assertEqual(self.pushed, [])
+
+    async def test_a_report_from_another_inference_cancels_the_re_prompt(self):
+        await self._report("short", await self._infer())
+        await self._report(None, LLMContextFrame(context=LLMContext()))
+        await asyncio.sleep(0.15)
+
+        self.assertEqual(self.pushed, [])
+
     async def test_a_later_complete_marker_cancels_the_re_prompt(self):
         await self._report("short", await self._infer())
         await self._report("complete", await self._infer())
@@ -299,6 +313,23 @@ class TestFilteringIncompleteTurns(unittest.IsolatedAsyncioTestCase):
                 )
 
                 self.assertEqual(recorder.spoken, ["Are you still there?"])
+
+    async def test_words_after_the_inference_are_answered_without_a_re_prompt(self):
+        recorder, _ = await self._run(
+            ["◐", "● Sure, Boston it is.", "● Are you still there?"],
+            [
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="Book a flight", user_id="", timestamp="now"),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=SPEECH_TIMEOUT + 0.05),
+                TranscriptionFrame(text="to Boston", user_id="", timestamp="now"),
+                SleepFrame(sleep=0.6),
+            ],
+            config=UserTurnCompletionConfig(incomplete_short_timeout=0.3),
+        )
+
+        self.assertEqual(recorder.spoken, ["Sure, Boston it is."])
 
     async def test_every_response_reports_its_marker(self):
         recorder, _ = await self._run(
