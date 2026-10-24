@@ -40,6 +40,7 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
@@ -605,6 +606,9 @@ class TranscriptionFrame(TextFrame):
         result: Raw result from the STT service.
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
+        perception: How the user said these words, as a perception producer
+            read them, or None. Set by an STT service that perceives, or by a
+            processor after it. Part of expressive conversation (alpha).
     """
 
     user_id: str
@@ -612,6 +616,7 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
     result: Any | None = None
     finalized: bool = False
+    perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -630,12 +635,15 @@ class InterimTranscriptionFrame(TextFrame):
         timestamp: When the interim transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        perception: A provisional reading of how the user said these words, or
+            None. Part of expressive conversation (alpha).
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -2108,6 +2116,21 @@ class TTSMetadataFrame(ServiceMetadataFrame):
     """
 
     expression: ExpressionCapabilities | None = None
+
+
+@dataclass
+class PerceptionMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast at start by a processor that perceives how the user spoke.
+
+    The processor may be an STT service or a processor of its own, so the
+    signals it reports have a frame of their own. Part of expressive
+    conversation (alpha).
+
+    Parameters:
+        perception: The signals the processor reports.
+    """
+
+    perception: PerceptionCapabilities
 
 
 @dataclass

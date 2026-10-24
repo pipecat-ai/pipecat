@@ -4,38 +4,90 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The instruction that teaches an LLM to write expression tags.
+"""The instruction that teaches an LLM to take part in expressive conversation.
 
-Part of expressive conversation (alpha). The instruction has two parts: the
-protocol, which describes the tags the active TTS service can perform, built
-from its :class:`~pipecat.expressive.expression.ExpressionCapabilities`; and
-the developer's guidance on when to use them, from an
+Part of expressive conversation (alpha). The instruction has three parts: how
+to read what was perceived of how the user spoke, built from a perception
+producer's :class:`~pipecat.expressive.perception.PerceptionCapabilities`; the
+tags the active TTS service can perform, built from its
+:class:`~pipecat.expressive.expression.ExpressionCapabilities`; and the
+developer's guidance on how to answer, from an
 :class:`~pipecat.expressive.policy.ExpressionPolicy`.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
 from pipecat.expressive.expression import SLOW_DELIVERY, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.perception import (
+    PerceptionCapabilities,
+    PerceptionSignal,
+    PerceptionTerm,
+    format_perception,
+)
 from pipecat.expressive.policy import ExpressionPolicy
 
 
 def expression_instructions(
-    capabilities: ExpressionCapabilities | None, policy: ExpressionPolicy | None = None
+    capabilities: ExpressionCapabilities | None,
+    policy: ExpressionPolicy | None = None,
+    *,
+    perception: PerceptionCapabilities | None = None,
 ) -> str | None:
-    """Build the instruction for an LLM whose replies a TTS service speaks.
+    """Build the instruction for an LLM in an expressive conversation.
 
     Args:
-        capabilities: What the TTS service can perform, or None for nothing.
-        policy: Which tags to offer, and guidance on when to use them.
+        capabilities: What the TTS service that speaks the LLM's replies can
+            perform, or None for nothing.
+        policy: Which tags to offer, and guidance on how to answer.
+        perception: The signals perceived of how the user spoke, or None when
+            nothing is perceived.
 
     Returns:
-        The instruction, or None when the service can perform none of the
-        tags offered.
+        The instruction, or None when nothing is perceived and the TTS service
+        can perform none of the tags offered.
     """
+    policy = policy or ExpressionPolicy()
+    parts = [
+        part
+        for part in (_perception_section(perception), _tags_section(capabilities, policy))
+        if part
+    ]
+    if not parts:
+        return None
+    if policy.guidance:
+        parts.append("\n".join(policy.guidance))
+    return "\n\n".join(parts)
+
+
+def _perception_section(perception: PerceptionCapabilities | None) -> str | None:
+    if not perception or not perception.signals:
+        return None
+    such_as = ""
+    example = next((term for term in perception.signals if len(term.labels) >= 2), None)
+    if example:
+        labels = [(example.labels[0], 0.86), (example.labels[1], 0.10)]
+        such_as = f" such as {format_perception([PerceptionSignal(example.name, labels)])},"
+    signals = "\n".join(_signal_line(term) for term in perception.signals)
+    return (
+        f"A user message may start with how the user sounded,{such_as} each signal with its "
+        "likeliest labels and how sure the reading is, from 0 to 1, or with a measure. The "
+        "reading can be wrong, so weigh it against their words. A reading below 0.5 is a "
+        f"guess: don't act on it. Never write it yourself. The signals are:\n{signals}"
+    )
+
+
+def _signal_line(term: PerceptionTerm) -> str:
+    if not term.labels:
+        return f"- {term.name}: {(term.description or 'a measure').rstrip('.')}."
+    line = f"- {term.name}: {', '.join(term.labels)}."
+    return f"{line} {term.description}" if term.description else line
+
+
+def _tags_section(
+    capabilities: ExpressionCapabilities | None, policy: ExpressionPolicy
+) -> str | None:
     if capabilities is None:
         return None
-    policy = policy or ExpressionPolicy()
-
     tags = []
     delivery = _offered(capabilities.delivery, policy.delivery, capabilities.free_text_delivery)
     if delivery:
@@ -66,11 +118,7 @@ def expression_instructions(
         tags.append("- [[pause 500]] pauses for about that many milliseconds.")
     if not tags:
         return None
-
-    parts = ["You can direct how your words are spoken with tags:\n" + "\n".join(tags)]
-    if policy.guidance:
-        parts.append("\n".join(policy.guidance))
-    return "\n\n".join(parts)
+    return "You can direct how your words are spoken with tags:\n" + "\n".join(tags)
 
 
 def unperformable_tags(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:

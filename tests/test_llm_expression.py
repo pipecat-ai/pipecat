@@ -11,8 +11,14 @@ from loguru import logger
 
 from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.instructions import expression_instructions
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.frames.frames import Frame, ManuallySwitchServiceFrame, TTSMetadataFrame
+from pipecat.frames.frames import (
+    Frame,
+    ManuallySwitchServiceFrame,
+    PerceptionMetadataFrame,
+    TTSMetadataFrame,
+)
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
@@ -144,3 +150,35 @@ def test_a_policy_without_expressive_conversation_is_warned_about():
         logger.remove(handler_id)
 
     assert any("expression_policy has no effect" in w for w in warnings)
+
+
+TONE = PerceptionCapabilities(
+    [PerceptionTerm("tone", labels=["positive", "neutral", "frustrated"])]
+)
+
+
+@pytest.mark.asyncio
+async def test_the_perception_upstream_is_taught_with_the_tts_expression():
+    llm = _llm()
+
+    await run_test(
+        llm,
+        frames_to_send=[PerceptionMetadataFrame(service_name="tone", perception=TONE)],
+        pipeline_params=EXPRESSIVE,
+    )
+    await _send_up(llm, _metadata(CALM_HAPPY))
+
+    assert llm._settings.system_instruction == (
+        f"APP\n\n{expression_instructions(CALM_HAPPY, perception=TONE)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_perception_is_not_taught_without_expressive_conversation():
+    llm = _llm()
+
+    await run_test(
+        llm, frames_to_send=[PerceptionMetadataFrame(service_name="tone", perception=TONE)]
+    )
+
+    assert llm._settings.system_instruction == "APP"
