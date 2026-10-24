@@ -1,0 +1,1 @@
+- Fixed required fields in direct-function tool schemas for TypedDict inheritance and Required/NotRequired annotations.

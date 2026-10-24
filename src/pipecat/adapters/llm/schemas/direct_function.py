@@ -18,7 +18,10 @@ import types
 from collections.abc import Awaitable, Callable, Mapping
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
+    NotRequired,
+    Required,
     TypeAlias,
     Union,
     get_args,
@@ -234,14 +237,23 @@ class BaseDirectFunctionWrapper:
             properties = {}
             required = []
 
-            # NOTE: this does not yet support some fields being required and others not, which could happen when:
-            # - the base class is a TypedDict with required fields (total=True or not specified) and the derived class has optional fields (total=False)
-            # - Python 3.11+ NotRequired is used
             all_fields_required = getattr(type_hint, "__total__", True)
+            required_keys = getattr(type_hint, "__required_keys__", None)
+            annotations = get_type_hints(type_hint, include_extras=True)
 
             for field_name, field_type in get_type_hints(type_hint).items():
                 properties[field_name] = self._typehint_to_jsonschema(field_type)
-                if all_fields_required:
+                annotation = annotations[field_name]
+                while get_origin(annotation) is Annotated:
+                    annotation = get_args(annotation)[0]
+                qualifier = get_origin(annotation)
+                # Postponed annotations can leave TypedDict's key sets inaccurate.
+                field_required = (
+                    field_name in required_keys
+                    if required_keys is not None
+                    else all_fields_required
+                )
+                if qualifier is Required or (qualifier is not NotRequired and field_required):
                     required.append(field_name)
 
             schema = {"type": "object", "properties": properties}
