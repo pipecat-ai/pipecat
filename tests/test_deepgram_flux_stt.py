@@ -263,6 +263,20 @@ async def test_update_settings_configures_without_reconnecting():
 
 
 @pytest.mark.asyncio
+async def test_update_settings_reconnects_at_once_without_connection():
+    """With no live connection, an update Flux must receive reconnects at once."""
+    service = _make_fake_flux_service()
+    service._active = False
+    service._reconnect_audio_buffer = []
+
+    await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
+    await service._update_settings(DeepgramFluxSTTSettings(redact="numbers"))
+
+    assert service.connection_events == ["disconnect", "connect", "disconnect", "connect"]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
 async def test_update_settings_configures_numerals():
     """Numerals are toggled over the live connection rather than by reconnecting."""
     service = _make_fake_flux_service()
