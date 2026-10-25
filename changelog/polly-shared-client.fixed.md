@@ -1,1 +1,0 @@
-- Fixed `AWSPollyTTSService` opening a new Polly client for every sentence. It now keeps one client per service and closes it when the service stops, so each sentence reuses the connection instead of opening a new one, which cuts the gap between sentences.

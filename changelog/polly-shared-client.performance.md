@@ -1,0 +1,1 @@
+- `AWSPollyTTSService` now keeps one Polly client for the life of the service instead of opening one per sentence, so later sentences in a reply start sooner.
