@@ -105,6 +105,94 @@ TRANSCRIPTION_TIMEOUT = 0.1
 
 
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_intermediate_tool_result_defers_idle_until_final_result(self):
+        aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_idle_timeout=0.05, user_turn_strategies=ExternalUserTurnStrategies()
+            ),
+        )
+        idle_events = []
+
+        @aggregator.event_handler("on_user_turn_idle")
+        async def on_idle(_aggregator):
+            idle_events.append("idle")
+
+        await run_test(
+            Pipeline([aggregator]),
+            frames_to_send=[
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="search", tool_call_id="real", arguments={}, context=None
+                        )
+                    ]
+                ),
+                BotStartedSpeakingFrame(),
+                FunctionCallResultFrame(
+                    function_name="search",
+                    tool_call_id="real",
+                    arguments={},
+                    result="still working",
+                    properties=FunctionCallResultProperties(is_final=False),
+                ),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+                FunctionCallResultFrame(
+                    function_name="search", tool_call_id="real", arguments={}, result="done"
+                ),
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        )
+
+        self.assertEqual(idle_events, ["idle"])
+
+    async def test_untracked_tool_result_defers_idle_until_tracked_call_finishes(self):
+        aggregator = LLMUserAggregator(
+            LLMContext(),
+            params=LLMUserAggregatorParams(
+                user_idle_timeout=0.05, user_turn_strategies=ExternalUserTurnStrategies()
+            ),
+        )
+        idle_events = []
+
+        @aggregator.event_handler("on_user_turn_idle")
+        async def on_idle(_aggregator):
+            idle_events.append("idle")
+
+        await run_test(
+            Pipeline([aggregator]),
+            frames_to_send=[
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="search", tool_call_id="real", arguments={}, context=None
+                        )
+                    ]
+                ),
+                BotStartedSpeakingFrame(),
+                FunctionCallResultFrame(
+                    function_name="cancel_search", tool_call_id="cancel-1", arguments={}, result={}
+                ),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+                FunctionCallResultFrame(
+                    function_name="search", tool_call_id="real", arguments={}, result="done"
+                ),
+                SleepFrame(sleep=0.05),
+                BotStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+        )
+
+        self.assertEqual(idle_events, ["idle"])
+
     async def test_llm_run(self):
         context = LLMContext()
 
