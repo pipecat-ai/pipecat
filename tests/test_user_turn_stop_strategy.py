@@ -9,6 +9,8 @@ import unittest
 import warnings
 from unittest.mock import patch
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
@@ -1149,6 +1151,30 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
 
         await strategy.trigger_user_turn_stopped()
         self.assertTrue(captured[0].enable_user_speaking_frames)
+
+
+class TestInferenceWithoutSpeculation(unittest.IsolatedAsyncioTestCase):
+    async def test_a_call_without_a_speculation_warns_once_and_is_ignored(self):
+        strategy = BaseUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        fired = []
+
+        @strategy.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(strategy, speculation):
+            fired.append(speculation)
+
+        messages = []
+        sink = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+        try:
+            await strategy.trigger_user_turn_inference_triggered()
+            await strategy.trigger_user_turn_inference_triggered()
+        finally:
+            logger.remove(sink)
+
+        self.assertEqual(fired, [])
+        warned = [m for m in messages if "without a speculation" in m]
+        self.assertEqual(len(warned), 1)
+        await strategy.cleanup()
 
 
 if __name__ == "__main__":

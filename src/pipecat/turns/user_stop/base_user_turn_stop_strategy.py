@@ -8,6 +8,8 @@
 
 from dataclasses import dataclass
 
+from loguru import logger
+
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
@@ -92,6 +94,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         self._enable_user_speaking_frames = (
             True if enable_user_speaking_frames is None else enable_user_speaking_frames
         )
+        self._warned_inference_without_speculation = False
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
@@ -286,8 +289,20 @@ class BaseUserTurnStopStrategy(BaseObject):
             speculation: The speculation to run, against a provisional context
                 carrying the turn text it names, for a turn that hasn't ended
                 yet. The speculation gate keeps its response back until the turn
-                is confirmed. A call without one is ignored.
+                is confirmed. A call without one is ignored, with a warning the
+                first time.
         """
+        if not speculation:
+            if not self._warned_inference_without_speculation:
+                self._warned_inference_without_speculation = True
+                logger.warning(
+                    f"{self}: trigger_user_turn_inference_triggered() without a speculation "
+                    "does nothing, since the turn controller runs the turn's inference once "
+                    "the stop strategies have decided. Call trigger_user_turn_stopped() "
+                    "when the user is done."
+                )
+            return
+
         await self._call_event_handler("on_user_turn_inference_triggered", speculation)
 
     @deprecated(
