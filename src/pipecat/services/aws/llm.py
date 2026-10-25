@@ -38,7 +38,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, ToolCallPolicy
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -196,6 +196,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
+            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -577,9 +578,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockDelta"]
                         delta = block["delta"]
                         if "text" in delta:
-                            await self._push_llm_text(delta["text"])
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
+                            await self._push_llm_text(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
+                            self._note_tool_call_detected()
                             # Handle partial JSON for tool use
                             index = block["contentBlockIndex"]
                             json_accumulators[index] = (
@@ -598,6 +600,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                             # so the call itself is what the caller gets and TTFAT
                             # ends here rather than going unmeasured.
                             await self.stop_ttfat_metrics()
+                            self._note_tool_call_detected()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),

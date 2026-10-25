@@ -331,6 +331,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     ),
                 ),
             ),
+            tool_call_text_policy=None,
         )
 
         self.Settings._sync_top_level_to_sp(default_settings)
