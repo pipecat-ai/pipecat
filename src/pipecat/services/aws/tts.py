@@ -8,7 +8,7 @@
 
 This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, SSML features, and per-word timestamps
-via Polly SpeechMarks.
+from Polly speech marks.
 """
 
 import json
@@ -163,8 +163,8 @@ class AWSPollyTTSService(TTSService):
     options including prosody controls.
 
     With ``word_timestamps`` enabled, the service makes a second Polly call
-    per sentence for word SpeechMarks and emits one timestamped
-    ``TTSTextFrame`` per word. The generative engine has no SpeechMarks.
+    per sentence for word speech marks and emits one timestamped
+    ``TTSTextFrame`` per word. The generative engine has no speech marks.
     """
 
     Settings = AWSPollyTTSSettings
@@ -229,7 +229,7 @@ class AWSPollyTTSService(TTSService):
 
             sample_rate: Audio sample rate. If None, uses service default.
             word_timestamps: Whether to emit per-word timestamped TTSTextFrames
-                using Polly SpeechMarks. Each sentence then costs a second,
+                from Polly speech marks. Each sentence then costs a second,
                 concurrent Polly request. Defaults to False, which pushes each
                 sentence as one TTSTextFrame with no timing.
             params: Additional input parameters for voice customization.
@@ -433,7 +433,7 @@ class AWSPollyTTSService(TTSService):
         return language.split("-")[0].lower() in {"cmn", "yue", "ja"}
 
     async def _fetch_word_marks(self, polly, base_params: dict) -> list[tuple[str, float]]:
-        """Fetch per-word SpeechMarks from Polly for the same utterance.
+        """Fetch per-word speech marks from Polly for the same utterance.
 
         Makes a second ``synthesize_speech`` call with ``OutputFormat="json"``
         and ``SpeechMarkTypes=["word"]``. Polly's ``OutputFormat`` is
@@ -478,7 +478,7 @@ class AWSPollyTTSService(TTSService):
         """Generate speech from text using AWS Polly.
 
         When word timestamps are enabled, a concurrent second Polly call fetches
-        word SpeechMarks; the parsed timings are fed to the base class via
+        word speech marks; the parsed timings are fed to the base class via
         ``add_word_timestamps`` so it can emit one timestamped ``TTSTextFrame``
         per word, aligned to the audio.
 
