@@ -419,6 +419,47 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stops, [None])
         self.assertEqual(timeouts, [None])
 
+    async def test_external_turn_decided_while_vad_hears_speech_ends_once_vad_stops(self):
+        """The service says the user is done while local VAD still hears a breath."""
+        for stop_mode in (StrategyMode.ALL, StrategyMode.FIRST):
+            with self.subTest(stop_mode=stop_mode):
+                await self._decide_external_turn_while_vad_hears_speech(stop_mode)
+
+    async def _decide_external_turn_while_vad_hears_speech(self, stop_mode: StrategyMode):
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_strategies_params=UserTurnStrategiesParams(stop_mode=stop_mode),
+            user_turn_stop_timeout=3.0,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops, timeouts = [], []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            timeouts.append(None)
+
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello", user_id="", timestamp="now")
+        )
+        # The transcription settles, and the strategy decides while VAD still
+        # hears speech.
+        await asyncio.sleep(0.7)
+        self.assertEqual(stops, [])
+
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(timeouts, [])
+        await controller.cleanup()
+
     async def test_external_user_turn_strategies_no_timeout_while_speaking(self):
         """Test that timeout does not trigger when user is still speaking with external strategies."""
         controller = UserTurnController(
@@ -1177,6 +1218,28 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await last.decide()
 
         self.assertEqual(self.stops, [])
+
+    async def test_a_turn_decided_while_the_user_speaks_ends_once_they_stop(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await first.decide()
+        await last.decide()
+
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([s for s, _ in self.stops], [last])
+
+    async def test_a_first_list_ends_a_turn_decided_while_the_user_speaks_once_they_stop(self):
+        strategy = DecidingStopStrategy()
+        await self._start([strategy], stop_mode=StrategyMode.FIRST)
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.decide()
+        self.assertEqual(self.stops, [])
+
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([s for s, _ in self.stops], [strategy])
 
     async def test_a_cancelled_answer_voids_the_decisions_made_on_it(self):
         """A decision on the inference is about the answer, so it goes with it."""

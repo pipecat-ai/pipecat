@@ -419,6 +419,8 @@ class UserTurnController(BaseObject):
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
+        await self._end_user_turn_if_decided()
+
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         await self._handle_speech_started()
 
@@ -430,6 +432,8 @@ class UserTurnController(BaseObject):
 
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
+
+        await self._end_user_turn_if_decided()
 
     async def _handle_speech_started(self):
         # Speech in an open turn clears the stop decisions made so far, and
@@ -602,10 +606,7 @@ class UserTurnController(BaseObject):
         self._user_turn_stop_decisions[strategy] = params
         if not strategy.waits_for_inference and not self._user_turn_inference_triggered:
             await self._trigger_user_turn_inference_triggered(strategy)
-        turn_waits_for_inference = any(
-            s.waits_for_inference for s in self._user_turn_stop_strategies
-        )
-        if strategy.waits_for_inference or not turn_waits_for_inference:
+        if self._user_turn_stop_decided():
             await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
 
     async def _add_user_turn_stop_decision(
@@ -636,7 +637,23 @@ class UserTurnController(BaseObject):
         if not self._user_turn_inference_triggered and self._ready_for_inference():
             await self._trigger_user_turn_inference_triggered(strategy)
 
-        if len(self._user_turn_stop_decisions) == len(self._user_turn_stop_strategies):
+        if self._user_turn_stop_decided():
+            await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
+
+    def _user_turn_stop_decided(self) -> bool:
+        decided = self._user_turn_stop_decisions
+        if self._stop_mode == StrategyMode.ALL:
+            return len(decided) == len(self._user_turn_stop_strategies)
+        # A FIRST list ends the turn on its first decision, or, when a stop
+        # strategy waits for the inference, on that strategy's decision.
+        waiting = [s for s in self._user_turn_stop_strategies if s.waits_for_inference]
+        return any(s in decided for s in waiting) if waiting else bool(decided)
+
+    async def _end_user_turn_if_decided(self):
+        # Decisions made while the user was speaking end the turn once they
+        # stop. New speech clears them, so they're about the speech just heard.
+        if self._user_turn_stop_decisions and self._user_turn_stop_decided():
+            strategy = next(reversed(self._user_turn_stop_decisions))
             await self._trigger_user_turn_stop(strategy, self._user_turn_stop_params())
 
     def _ready_for_inference(self) -> bool:
@@ -663,12 +680,8 @@ class UserTurnController(BaseObject):
         if not self._user_turn:
             return
 
-        # Never finalize while the user is audibly speaking. A stop strategy can
-        # finalize on a latent signal (e.g. an LLM ● that resolves after the
-        # user resumed), which is stale by the time it arrives. Keep the turn
-        # open so the next inference re-evaluates; the watchdog still finalizes
-        # if the user then falls silent. Detector strategies only finalize once
-        # the user has stopped, so this is a no-op for them.
+        # Never end the turn while the user is audibly speaking. The decisions
+        # stay, and the turn ends once the user stops.
         if self._user_speaking:
             return
 
