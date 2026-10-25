@@ -274,9 +274,7 @@ class AWSPollyTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
-            # push_text_frames=False activates the base word-timestamp path
-            # (per-word TTSTextFrames). When word timestamps are disabled we let
-            # the base push a single whole-sentence TTSTextFrame instead.
+            # With word timestamps, the base pushes one TTSTextFrame per timed word.
             push_text_frames=not word_timestamps,
             push_start_frame=True,
             push_stop_frames=True,
@@ -330,8 +328,6 @@ class AWSPollyTTSService(TTSService):
         """
         await super().push_frame(frame, direction)
         if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
-            # Reset the cumulative offset at end of turn / on barge-in so the
-            # next turn's word timestamps start from zero.
             self._cumulative_time = 0.0
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -463,10 +459,9 @@ class AWSPollyTTSService(TTSService):
                 "polly",
                 **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as polly:
-                # Kick off the marks call so it overlaps audio synthesis and
-                # adds no latency on the critical path (TTFB).
                 marks_task = None
                 if self._word_timestamps:
+                    # The marks call runs alongside the audio call, so it adds no latency.
                     if self._settings.engine != "generative":
                         marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
                     elif not self._warned_generative_untimed:
@@ -501,7 +496,6 @@ class AWSPollyTTSService(TTSService):
                                 chunk, self.sample_rate, 1, context_id=context_id
                             )
 
-                    # Feed the word marks (already in flight) and advance the offset.
                     if marks_task is not None:
                         word_marks = await marks_task
                         marks_task = None
@@ -518,7 +512,6 @@ class AWSPollyTTSService(TTSService):
                                     True if self._language_is_written_without_spaces() else None
                                 ),
                             )
-                        # Offset the next sentence by this utterance's audio duration.
                         self._cumulative_time += utterance_seconds
                 finally:
                     # Cancel a marks call still in flight (audio call failed, or the
