@@ -42,7 +42,7 @@ from tests.test_aws_credentials import _renewing_credentials, no_configured_keys
 
 CTX = "ctx-1"
 
-# A live SpeechMarks response (newline-delimited JSON) captured from Polly for
+# A live speech marks response (newline-delimited JSON) captured from Polly for
 # "Hello world from Pipecat". `time` is the word start offset in milliseconds;
 # `start`/`end` are byte offsets into the input text (unused).
 MARKS_SAMPLE = (
@@ -197,7 +197,7 @@ def test_word_timestamps_enabled_uses_per_word_path():
 
 
 # --------------------------------------------------------------------------- #
-# Speech-marks fetch + parse
+# Speech marks fetch + parse
 # --------------------------------------------------------------------------- #
 
 
@@ -463,9 +463,10 @@ async def test_generative_engine_warns_once_that_words_are_untimed():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("frame", [TTSStoppedFrame(context_id=CTX), InterruptionFrame()])
 @pytest.mark.asyncio
-async def test_cumulative_time_resets_on_tts_stopped():
-    """A TTSStoppedFrame (end of turn) clears the accumulated offset."""
+async def test_cumulative_time_resets_on_end_of_turn_or_interruption(frame):
+    """A TTSStoppedFrame (end of turn) or an interruption clears the accumulated offset."""
     service = _make_service()
 
     async def _noop_super(self, frame, direction=FrameDirection.DOWNSTREAM):
@@ -474,7 +475,7 @@ async def test_cumulative_time_resets_on_tts_stopped():
     service._cumulative_time = 5.0
     # Stub the parent push so the override runs without a wired pipeline.
     with patch.object(TTSService, "push_frame", _noop_super):
-        await service.push_frame(TTSStoppedFrame(context_id=CTX))
+        await service.push_frame(frame)
 
     assert service._cumulative_time == 0.0
 
