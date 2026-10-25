@@ -314,6 +314,7 @@ async def test_cumulative_offset_across_sentences():
     # Sentence 1: 1.0s of audio (32000 bytes), word "Hello" at 0 ms.
     service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.0), marks=_ndjson([("Hello", 0)])))
     await _drain(service, "Hello")
+    await service._close_client()
 
     # Sentence 2: word "World" at 100 ms -> 0.1 + 1.0 (prior duration) = 1.1s.
     service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5), marks=_ndjson([("World", 100)])))
