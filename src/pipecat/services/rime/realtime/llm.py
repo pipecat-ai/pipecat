@@ -422,10 +422,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             await self.push_frame(frame, direction)
-        elif isinstance(frame, EndFrame):
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            # Keep output alive until the shutdown task has collected its receipts.
             pass
-        elif isinstance(frame, CancelFrame):
-            await self.push_frame(frame, direction)
         elif isinstance(frame, AudioPlaybackReportFrame):
             if frame.context_id in self._playback.outputs:
                 if self._closed.is_set():
@@ -676,6 +675,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             try:
                 await self._sdk.set_response_metadata(supplied["response_metadata"] or {})
                 self._settings.response_metadata = copy.deepcopy(supplied["response_metadata"])
+                self._record_policy()
                 await self._result(request, "response_metadata", "accepted")
                 await self._call_event_handler("on_session_updated", self._sdk.info)
             except asyncio.CancelledError:
@@ -822,6 +822,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             if policy is None:
                 raise RuntimeError("Prism response settings revision is unknown or expired")
             response = self._playback.start(payload, *policy)
+            if payload.parent:
+                parent = self._playback.responses.get(payload.parent.response_id)
+                if parent is None:
+                    raise RuntimeError("Prism continuation parent is unknown or expired")
+                response.audio_response = parent.audio_response
+                response.explicit_audio_response = parent.explicit_audio_response
+                response.input_request_id = parent.input_request_id
+                response.client_message_id = parent.client_message_id
             self._ledger.response_epoch += 1
             self._ledger.active_responses.add(payload.response.response_id)
             self._ledger.active_inputs.update(response.input_ids)
@@ -1181,6 +1189,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 await self.push_frame(frame)
             else:
                 await super().cancel(frame)
+                await self.push_frame(frame)
             self._closed.set()
 
     async def _close_resources(self) -> None:

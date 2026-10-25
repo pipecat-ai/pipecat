@@ -738,3 +738,90 @@ async def test_unversioned_policy_change_requires_explicit_recovery():
             )
         )
         assert not service.is_usable
+
+
+async def test_cancel_active_output_sends_terminal_sdk_playback_report():
+    from pipecat.frames.frames import CancelFrame
+
+    async with conversation() as (peer, service, worker, ctx, output, up, down):
+        await worker.queue_frame(LLMRunFrame())
+        ref = await peer.start(await peer.next())
+        await peer.message(ref, samples=1920, done=False)
+        await until(lambda: bool(output.writes))
+        await worker.queue_frame(CancelFrame())
+        receipt = await asyncio.wait_for(peer.receipts.get(), 1)
+        assert receipt["response_id"] == ref
+
+
+async def test_tool_continuation_keeps_typed_text_only_output():
+    from pipecat.services.llm_service import FunctionCallParams
+
+    async def lookup(params: FunctionCallParams):
+        """Get a result."""
+        await params.result_callback({"ok": True})
+
+    async with conversation(context=LLMContext(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        ctx,
+        output,
+        up,
+        down,
+    ):
+        await worker.queue_frame(LLMInputTextFrame("Use lookup", audio_response=False))
+        parent = await peer.start(await peer.next())
+        await peer.emit(
+            "response.function_call_arguments.done",
+            response_id=parent,
+            item_id="call-item",
+            call_id="text-only",
+            name="lookup",
+            arguments="{}",
+        )
+        await peer.end(parent)
+        child = await peer.start(await peer.next())
+        await peer.message(child)
+        await peer.end(child)
+        await until(lambda: peer.receipts.qsize() == 2)
+        receipts = [peer.receipts.get_nowait(), peer.receipts.get_nowait()]
+        assert [receipt["played_ms"] for receipt in receipts] == [0, 0]
+        assert not [frame for frame in output.writes if frame.context_id]
+
+
+async def test_metadata_acknowledgment_revision_can_start_a_reply():
+    async with conversation() as (peer, service, worker, ctx, output, up, down):
+        update = LLMUpdateSettingsFrame(
+            delta=service.Settings(response_metadata={"test": "revision"})
+        )
+        await worker.queue_frame(update)
+        await until(lambda: results(up, update))
+        await worker.queue_frame(LLMRunFrame())
+        ref = await peer.start(await peer.next())
+        await peer.end(ref)
+        await asyncio.wait_for(peer.receipts.get(), 1)
+        assert service.is_usable
+
+
+async def test_cancel_preserves_pending_empty_output_receipt():
+    from pipecat.frames.frames import AudioOutputStartFrame, CancelFrame
+
+    async with conversation() as (peer, service, worker, ctx, output, up, down):
+        started, release = asyncio.Event(), asyncio.Event()
+
+        @output.event_handler("on_before_process_frame")
+        async def delay_output_start(processor, frame):
+            if isinstance(frame, AudioOutputStartFrame):
+                started.set()
+                await release.wait()
+
+        await worker.queue_frame(LLMInputTextFrame("Text only", audio_response=False))
+        ref = await peer.start(await peer.next())
+        await peer.message(ref, samples=0, done=False)
+        await asyncio.wait_for(started.wait(), 1)
+        await worker.queue_frame(CancelFrame())
+        await asyncio.sleep(0.02)
+        release.set()
+        receipt = await asyncio.wait_for(peer.receipts.get(), 1)
+        assert receipt["response_id"] == ref
+        assert receipt["played_ms"] == 0
