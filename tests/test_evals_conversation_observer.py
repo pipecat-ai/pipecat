@@ -67,6 +67,10 @@ class TestEvalConversationObserver(unittest.IsolatedAsyncioTestCase):
     async def test_the_turns_and_calls_are_reported_as_a_conversation_once_the_pipeline_is_done(
         self,
     ):
+        # A turn answered early is reported once, as written when it ends.
+        await self._push(
+            LLMContextUserTurnFrame(text="a table at six", timestamp="t", speculation=True)
+        )
         await self._push(LLMContextUserTurnFrame(text="A table at six.", timestamp="t"))
         # A broadcast call arrives as two frames: the upstream one is the same call.
         downstream, upstream = _in_progress("check", {"time": "6"}), _in_progress("check", {})
