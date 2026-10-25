@@ -91,22 +91,30 @@ class GracePeriodUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         await self._cancel_pending()
         await super().cleanup()
 
-    # The override point: the base strategy calls this to end the turn, so this
-    # is where this subclass adjusts the timing.
-    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
+    # The override point: the base strategy calls this to report that the user
+    # is done, so this is where this subclass adjusts the timing.
+    async def report_user_turn_stopped(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        confirms_speculation: bool = False,
+    ):
         """Schedule the finalization instead of running it now."""
         if self._pending:
             return
         self._pending = self.create_task(
-            self._finalize_after_grace_period(enable_user_speaking_frames)
+            self._finalize_after_grace_period(enable_user_speaking_frames, confirms_speculation)
         )
 
-    async def _finalize_after_grace_period(self, enable_user_speaking_frames: bool | None):
+    async def _finalize_after_grace_period(
+        self, enable_user_speaking_frames: bool | None, confirms_speculation: bool
+    ):
         await asyncio.sleep(self._grace_period)
         self._pending = None
         logger.debug("Grace period elapsed with no new speech; ending the user turn")
-        await super().trigger_user_turn_stopped(
-            enable_user_speaking_frames=enable_user_speaking_frames
+        await super().report_user_turn_stopped(
+            enable_user_speaking_frames=enable_user_speaking_frames,
+            confirms_speculation=confirms_speculation,
         )
 
     async def _cancel_pending(self, *, resumed: bool = False):

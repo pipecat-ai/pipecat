@@ -52,20 +52,21 @@ class BaseUserTurnStopStrategy(BaseObject):
     Events triggered by strategies:
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
-      - `on_user_turn_inference_triggered`: Signals that enough evidence
-        exists to start LLM inference for the current user turn, carrying a
-        :class:`~pipecat.turns.types.UserTurnSpeculation` when the turn it
-        answers hasn't ended yet. In most cases this fires together with
-        `on_user_turn_stopped`. Strategies
-        that gate finalization on the LLM (e.g.
-        ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
-        upstream and a separate strategy fires `on_user_turn_stopped` once
-        the LLM confirms the turn is complete.
-      - `on_user_turn_stopped`: Signals that the user turn is semantically
-        final. Observers, transcript appenders, and UI indicators should
-        bind this event.
+      - `on_broadcast_frame`: Indicates the strategy wants to broadcast a frame.
+      - `on_user_turn_stopped`: Reports the strategy's decision that the user
+        is done, from :meth:`report_user_turn_stopped`. The turn controller
+        combines the stop strategies' decisions into the turn end.
+      - `on_user_turn_inference_triggered`: Starts a speculative inference for
+        a turn that hasn't ended yet, carrying a
+        :class:`~pipecat.turns.types.UserTurnSpeculation`, from
+        :meth:`start_user_turn_speculation`.
+      - `on_user_turn_speculation_cancelled`: Withdraws that speculation, from
+        :meth:`cancel_user_turn_speculation`.
 
     """
+
+    # Whether a subclass overrides the deprecated trigger_user_turn_stopped().
+    _overrides_trigger_user_turn_stopped = False
 
     def __init__(self, *, enable_user_speaking_frames: bool | None = None, **kwargs):
         """Initialize the base user turn stop strategy.
@@ -73,11 +74,11 @@ class BaseUserTurnStopStrategy(BaseObject):
         Args:
             enable_user_speaking_frames: Whether to emit
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` when a
-                turn ends, unless :meth:`trigger_user_turn_stopped` overrides it
+                turn ends, unless :meth:`report_user_turn_stopped` overrides it
                 for a given turn.
 
                 .. deprecated:: 1.8.0
-                    Use :meth:`trigger_user_turn_stopped`'s
+                    Use :meth:`report_user_turn_stopped`'s
                     ``enable_user_speaking_frames`` argument instead. Will be
                     removed in 2.0.0.
 
@@ -88,7 +89,7 @@ class BaseUserTurnStopStrategy(BaseObject):
             warn_deprecated(
                 "`BaseUserTurnStopStrategy.enable_user_speaking_frames` is deprecated "
                 "since 1.8.0 and will be removed in 2.0.0. Use "
-                "`trigger_user_turn_stopped(enable_user_speaking_frames=...)` instead.",
+                "`report_user_turn_stopped(enable_user_speaking_frames=...)` instead.",
                 stacklevel=2,
             )
         self._enable_user_speaking_frames = (
@@ -103,6 +104,17 @@ class BaseUserTurnStopStrategy(BaseObject):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        # trigger_user_turn_stopped() is deprecated, but an override of it still
+        # gets the reports, as report_user_turn_stopped() says.
+        cls._overrides_trigger_user_turn_stopped = (
+            cls.trigger_user_turn_stopped is not BaseUserTurnStopStrategy.trigger_user_turn_stopped
+        )
+        if cls._overrides_trigger_user_turn_stopped:
+            warn_deprecated(
+                f"`{cls.__name__}.trigger_user_turn_stopped` is deprecated since 1.15.0 and "
+                "will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+                stacklevel=3,
+            )
         # reset() is deprecated. stacklevel=3 steps past ABCMeta.__new__, which
         # calls this hook, so the warning points at the subclass's definition.
         if cls.reset is not BaseUserTurnStopStrategy.reset:
@@ -233,7 +245,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_user_turn_speculation_cancelled(self):
+    async def cancel_user_turn_speculation(self):
         """Withdraw the speculation this strategy has in flight.
 
         Emitted rather than pushed so the host broadcasts it the same way it
@@ -243,7 +255,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         await self._call_event_handler("on_user_turn_speculation_cancelled")
 
-    async def trigger_user_turn_stopped(
+    async def report_user_turn_stopped(
         self,
         *,
         enable_user_speaking_frames: bool | None = None,
@@ -252,8 +264,8 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Report that the user is done, by firing ``on_user_turn_stopped``.
 
         A strategy calls this when it decides the user's turn has ended. The
-        controller runs the turn's inference itself once the stop strategies
-        have decided.
+        controller combines the stop strategies' decisions into the turn end,
+        and runs the turn's inference itself once they have decided.
 
         Args:
             enable_user_speaking_frames: Whether to emit
@@ -264,21 +276,17 @@ class BaseUserTurnStopStrategy(BaseObject):
                 turn ending already answers it, so inference should not run
                 again.
         """
-        await self._call_event_handler(
-            "on_user_turn_stopped",
-            UserTurnStoppedParams(
-                enable_user_speaking_frames=(
-                    self._enable_user_speaking_frames
-                    if enable_user_speaking_frames is None
-                    else enable_user_speaking_frames
-                ),
-                confirms_speculation=confirms_speculation,
-            ),
-        )
+        # Backward compatibility: a custom strategy may still override the
+        # deprecated trigger_user_turn_stopped(), which never confirmed a
+        # speculation, so its override gets every other report.
+        if self._overrides_trigger_user_turn_stopped and not confirms_speculation:
+            await self.trigger_user_turn_stopped(
+                enable_user_speaking_frames=enable_user_speaking_frames
+            )
+        else:
+            await self._fire_user_turn_stopped(enable_user_speaking_frames, confirms_speculation)
 
-    async def trigger_user_turn_inference_triggered(
-        self, *, speculation: UserTurnSpeculation | None = None
-    ):
+    async def start_user_turn_speculation(self, speculation: UserTurnSpeculation):
         """Start a speculative inference, by firing ``on_user_turn_inference_triggered``.
 
         The controller runs a turn's inference itself once the stop strategies
@@ -289,8 +297,66 @@ class BaseUserTurnStopStrategy(BaseObject):
             speculation: The speculation to run, against a provisional context
                 carrying the turn text it names, for a turn that hasn't ended
                 yet. The speculation gate keeps its response back until the turn
-                is confirmed. A call without one is ignored, with a warning the
-                first time.
+                is confirmed.
+        """
+        await self._call_event_handler("on_user_turn_inference_triggered", speculation)
+
+    @deprecated(
+        "`BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled` is deprecated "
+        "since 1.15.0 and will be removed in 2.0.0. Use `cancel_user_turn_speculation` instead."
+    )
+    async def trigger_user_turn_speculation_cancelled(self):
+        """Withdraw the speculation this strategy has in flight.
+
+        .. deprecated:: 1.15.0
+            Use :meth:`cancel_user_turn_speculation` instead. Will be removed in
+            2.0.0.
+        """
+        await self.cancel_user_turn_speculation()
+
+    @deprecated(
+        "`BaseUserTurnStopStrategy.trigger_user_turn_stopped` is deprecated since 1.15.0 and "
+        "will be removed in 2.0.0. Use `report_user_turn_stopped` instead."
+    )
+    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
+        """Report that the user is done.
+
+        .. deprecated:: 1.15.0
+            Use :meth:`report_user_turn_stopped` instead. Will be removed in
+            2.0.0.
+
+        Args:
+            enable_user_speaking_frames: Whether to emit
+                :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
+                turn. Pass False when something else in the pipeline has already
+                emitted it.
+        """
+        # An override of this method reaches here through super(), so this
+        # fires the event rather than handing the report back to it.
+        if self._overrides_trigger_user_turn_stopped:
+            await self._fire_user_turn_stopped(enable_user_speaking_frames, False)
+        else:
+            await self.report_user_turn_stopped(
+                enable_user_speaking_frames=enable_user_speaking_frames
+            )
+
+    @deprecated(
+        "`BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered` is deprecated since "
+        "1.15.0 and will be removed in 2.0.0. Use `start_user_turn_speculation` instead."
+    )
+    async def trigger_user_turn_inference_triggered(
+        self, *, speculation: UserTurnSpeculation | None = None
+    ):
+        """Start a speculative inference.
+
+        .. deprecated:: 1.15.0
+            Use :meth:`start_user_turn_speculation` instead. Will be removed in
+            2.0.0.
+
+        Args:
+            speculation: The speculation to run. A call without one is ignored,
+                with a warning the first time, since the turn controller runs the
+                turn's inference itself.
         """
         if not speculation:
             if not self._warned_inference_without_speculation:
@@ -298,16 +364,16 @@ class BaseUserTurnStopStrategy(BaseObject):
                 logger.warning(
                     f"{self}: trigger_user_turn_inference_triggered() without a speculation "
                     "does nothing, since the turn controller runs the turn's inference once "
-                    "the stop strategies have decided. Call trigger_user_turn_stopped() "
+                    "the stop strategies have decided. Call report_user_turn_stopped() "
                     "when the user is done."
                 )
             return
 
-        await self._call_event_handler("on_user_turn_inference_triggered", speculation)
+        await self.start_user_turn_speculation(speculation)
 
     @deprecated(
         "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 "
-        "and will be removed in 2.0.0. Use `trigger_user_turn_stopped` instead."
+        "and will be removed in 2.0.0. Use `report_user_turn_stopped` instead."
     )
     async def trigger_user_turn_finalized(
         self,
@@ -318,7 +384,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Fire only ``on_user_turn_stopped``.
 
         .. deprecated:: 1.15.0
-            Use :meth:`trigger_user_turn_stopped` instead, which fires the same
+            Use :meth:`report_user_turn_stopped` instead, which fires the same
             event. Will be removed in 2.0.0.
 
         Args:
@@ -330,10 +396,19 @@ class BaseUserTurnStopStrategy(BaseObject):
                 turn ending already answers it, so inference should not run
                 again.
         """
-        # The base method, so an override of trigger_user_turn_stopped() doesn't
-        # change what this fires.
-        await BaseUserTurnStopStrategy.trigger_user_turn_stopped(
-            self,
-            enable_user_speaking_frames=enable_user_speaking_frames,
-            confirms_speculation=confirms_speculation,
+        await self._fire_user_turn_stopped(enable_user_speaking_frames, confirms_speculation)
+
+    async def _fire_user_turn_stopped(
+        self, enable_user_speaking_frames: bool | None, confirms_speculation: bool
+    ):
+        await self._call_event_handler(
+            "on_user_turn_stopped",
+            UserTurnStoppedParams(
+                enable_user_speaking_frames=(
+                    self._enable_user_speaking_frames
+                    if enable_user_speaking_frames is None
+                    else enable_user_speaking_frames
+                ),
+                confirms_speculation=confirms_speculation,
+            ),
         )

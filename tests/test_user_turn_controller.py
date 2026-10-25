@@ -1097,13 +1097,13 @@ class DecidingStopStrategy(BaseUserTurnStopStrategy):
         return self._result
 
     async def decide(self, **kwargs):
-        await self.trigger_user_turn_stopped(**kwargs)
+        await self.report_user_turn_stopped(**kwargs)
 
     async def speculate(self):
-        await self.trigger_user_turn_inference_triggered(speculation=UserTurnSpeculation("Hi"))
+        await self.start_user_turn_speculation(UserTurnSpeculation("Hi"))
 
     async def confirm(self):
-        await self.trigger_user_turn_stopped(confirms_speculation=True)
+        await self.report_user_turn_stopped(confirms_speculation=True)
 
 
 class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
@@ -1297,7 +1297,7 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await self._start([withdrawing, other])
         await self._speak()
 
-        await withdrawing.trigger_user_turn_speculation_cancelled()
+        await withdrawing.cancel_user_turn_speculation()
 
         self.assertIsInstance(other.frames[-1], UserTurnResponseCancelFrame)
 
@@ -1408,7 +1408,7 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await self._speak()
 
         await eager.speculate()
-        await eager.trigger_user_turn_speculation_cancelled()
+        await eager.cancel_user_turn_speculation()
         await eager.decide()
 
         self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
@@ -1472,7 +1472,7 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
         await self._speak()
 
         await confirming.speculate()
-        await announced.trigger_user_turn_stopped(enable_user_speaking_frames=False)
+        await announced.report_user_turn_stopped(enable_user_speaking_frames=False)
         await confirming.confirm()
 
         _, params = self.stops[0]
@@ -1513,7 +1513,7 @@ class DecidingStartStrategy(BaseUserTurnStartStrategy):
         return self._result
 
     async def decide(self, **kwargs):
-        await self.trigger_user_turn_started(**kwargs)
+        await self.report_user_turn_started(**kwargs)
 
 
 class TestStartModeAll(unittest.IsolatedAsyncioTestCase):

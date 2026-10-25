@@ -12,7 +12,7 @@ on every VAD speech event, it collects audio after VAD detects speech and runs
 the IP model to predict whether the speech is a real interruption.
 
 Only when the IP model's probability exceeds the configured threshold is
-``trigger_user_turn_started()`` called. This prevents the bot from being
+``report_user_turn_started()`` called. This prevents the bot from being
 interrupted by brief acknowledgements or filler words.
 """
 
@@ -250,7 +250,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
                     f"threshold={self._threshold})"
                 )
                 self._decision_made = True
-                await self.trigger_user_turn_started()
+                await self.report_user_turn_started()
                 return
 
     async def _handle_reset(self, frame: VADUserStoppedSpeakingFrame | BotStoppedSpeakingFrame):

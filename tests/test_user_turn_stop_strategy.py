@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
@@ -1077,7 +1078,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
                     await self.cancel_task(task)
                 return await super().process_frame(frame)
 
-            async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+            async def report_user_turn_stopped(self, *, enable_user_speaking_frames=None):
                 if self.pending:
                     return
                 self.pending = self.create_task(self._finalize_later(enable_user_speaking_frames))
@@ -1085,7 +1086,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
             async def _finalize_later(self, enable_user_speaking_frames):
                 await asyncio.sleep(0.2)
                 self.pending = None
-                await super().trigger_user_turn_stopped(
+                await super().report_user_turn_stopped(
                     enable_user_speaking_frames=enable_user_speaking_frames
                 )
 
@@ -1140,7 +1141,7 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
             strategy = BaseUserTurnStopStrategy(enable_user_speaking_frames=False)
         captured = await self._capture_params(strategy)
 
-        await strategy.trigger_user_turn_stopped()
+        await strategy.report_user_turn_stopped()
         self.assertFalse(captured[0].enable_user_speaking_frames)
 
     async def test_omitting_enable_user_speaking_frames_is_silent(self):
@@ -1149,8 +1150,53 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
             strategy = BaseUserTurnStopStrategy()
         captured = await self._capture_params(strategy)
 
-        await strategy.trigger_user_turn_stopped()
+        await strategy.report_user_turn_stopped()
         self.assertTrue(captured[0].enable_user_speaking_frames)
+
+    async def test_an_override_of_the_deprecated_trigger_still_gets_reports(self):
+        with self.assertWarns(DeprecationWarning):
+
+            class OldStopStrategy(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    await super().trigger_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = OldStopStrategy()
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped(enable_user_speaking_frames=False)
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual([p.enable_user_speaking_frames for p in captured], [False])
+
+        # The old method never confirmed a speculation, so a confirmation skips it.
+        await strategy.report_user_turn_stopped(confirms_speculation=True)
+        self.assertEqual(strategy.calls, 1)
+        self.assertTrue(captured[-1].confirms_speculation)
+
+    async def test_the_deprecated_speculation_methods_still_fire(self):
+        strategy = BaseUserTurnStopStrategy()
+        speculations, cancels = [], []
+
+        @strategy.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(strategy, speculation):
+            speculations.append(speculation)
+
+        @strategy.event_handler("on_user_turn_speculation_cancelled")
+        async def on_user_turn_speculation_cancelled(strategy):
+            cancels.append(None)
+
+        speculation = UserTurnSpeculation("Hello")
+        await strategy.trigger_user_turn_inference_triggered(speculation=speculation)
+        await strategy.trigger_user_turn_speculation_cancelled()
+
+        self.assertEqual(speculations, [speculation])
+        self.assertEqual(cancels, [None])
 
 
 class TestInferenceWithoutSpeculation(unittest.IsolatedAsyncioTestCase):

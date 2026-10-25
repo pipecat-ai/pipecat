@@ -206,7 +206,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         if isinstance(frame, TranscriptionFrame):
             if self._check_wake_phrase(frame.text):
-                await self.trigger_user_turn_started()
+                await self.report_user_turn_started()
                 return ProcessFrameResult.STOP
             await self.trigger_reset_aggregation()
 
@@ -228,7 +228,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 TranscriptionFrame,
             ),
         ):
-            await self.trigger_user_turn_started()
+            await self.report_user_turn_started()
         if not self._single_activation:
             if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
                 self._refresh_timeout()

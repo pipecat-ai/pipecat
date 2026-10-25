@@ -158,12 +158,12 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         speculation = self._awaited.speculation
         self._awaited = None
         if report.kind in ("short", "long") and speculation:
-            await self.trigger_user_turn_speculation_cancelled()
+            await self.cancel_user_turn_speculation()
         elif report.kind in ("short", "long"):
             await self._start_reprompt(report.kind)
         else:
             await self._cancel_reprompt()
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
 
     async def _start_reprompt(self, kind: str):
         await self._cancel_reprompt()
@@ -180,7 +180,7 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         await asyncio.sleep(timeout)
         self._reprompt_task = None
         logger.debug(f"{self}: user quiet for {timeout}s after an incomplete turn, re-prompting")
-        await self.trigger_user_turn_stopped()
+        await self.report_user_turn_stopped()
         # The turn end runs an inference of its own for words transcribed after
         # the turn's inference, and that inference answers the user instead.
         if not self._awaited:

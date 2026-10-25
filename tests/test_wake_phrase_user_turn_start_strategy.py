@@ -362,7 +362,7 @@ class EndOnDemandStopStrategy(BaseUserTurnStopStrategy):
     """A stop strategy that ends the turn when a test says so."""
 
     async def end(self):
-        await self.trigger_user_turn_stopped()
+        await self.report_user_turn_stopped()
 
 
 class TestWakePhraseWithAllStartMode(unittest.IsolatedAsyncioTestCase):

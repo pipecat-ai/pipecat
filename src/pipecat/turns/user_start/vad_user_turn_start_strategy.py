@@ -25,4 +25,4 @@ class VADUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be analyzed.
         """
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.trigger_user_turn_started()
+            await self.report_user_turn_started()

@@ -116,7 +116,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         await super().process_frame(frame)
 
-    async def trigger_user_turn_stopped(
+    async def report_user_turn_stopped(
         self,
         *,
         enable_user_speaking_frames: bool | None = None,
@@ -134,7 +134,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """
         speculation = await self._take_speculation() or self._confirmed
         if not speculation:
-            await super().trigger_user_turn_stopped(
+            await super().report_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames,
                 confirms_speculation=confirms_speculation,
             )
@@ -147,7 +147,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             # UserStoppedSpeakingFrame the turn end emits is what releases the
             # response, and the flag stops a second inference answering the
             # same turn.
-            await super().trigger_user_turn_stopped(
+            await super().report_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames,
                 confirms_speculation=True,
             )
@@ -158,10 +158,10 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"(eager: [{speculation.text}], committed: [{self._text}])"
         )
         self._confirmed = None
-        await self.trigger_user_turn_speculation_cancelled()
+        await self.cancel_user_turn_speculation()
         # The committed transcript needs an inference of its own, which the
         # controller runs for this decision.
-        await super().trigger_user_turn_stopped(
+        await super().report_user_turn_stopped(
             enable_user_speaking_frames=enable_user_speaking_frames
         )
 
@@ -175,7 +175,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             # watchdog, an interruption, session end. Nothing else will withdraw
             # it, so the response would be held until the gate times out.
             logger.debug(f"{self}: turn ended unresolved, discarding the speculative response")
-            await self.trigger_user_turn_speculation_cancelled()
+            await self.cancel_user_turn_speculation()
 
     async def _speculate(self, frame: EagerTranscriptionFrame):
         """Answer an eager end of turn, leaving the turn open."""
@@ -189,7 +189,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             f"{self}::_speculation_timeout_handler",
         )
         logger.debug(f"{self}: speculating on eager end of turn: [{speculation.text}]")
-        await self.trigger_user_turn_inference_triggered(speculation=speculation)
+        await self.start_user_turn_speculation(speculation)
 
     async def _speculation_timeout_handler(self, speculation: UserTurnSpeculation):
         """Withdraw a prediction the turn never resolved."""
@@ -205,7 +205,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             "discarding the speculative response"
         )
         self._speculation = None
-        await self.trigger_user_turn_speculation_cancelled()
+        await self.cancel_user_turn_speculation()
 
     async def _take_speculation(self) -> UserTurnSpeculation | None:
         """Take the speculation in flight, stopping the clock on it.

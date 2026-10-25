@@ -68,4 +68,4 @@ class ExternalUserTurnCompletionStopStrategy(BaseUserTurnStopStrategy):
     async def process_frame(self, frame: Frame):
         """Fire ``on_user_turn_stopped`` whenever ``UserTurnInferenceCompletedFrame`` is seen."""
         if isinstance(frame, UserTurnInferenceCompletedFrame):
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()

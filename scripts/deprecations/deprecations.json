@@ -5135,8 +5135,8 @@
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_started",
-      "message": "Use :meth:`trigger_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_started",
+      "message": "Use :meth:`report_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
@@ -5151,14 +5151,25 @@
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
+      "subject": "BaseUserTurnStartStrategy.trigger_user_turn_started",
+      "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_started",
+      "message": "`BaseUserTurnStartStrategy.trigger_user_turn_started` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_started` instead.",
+      "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
       "subject": "BaseUserTurnStopStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
       "kind": "parameter",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_stopped",
-      "message": "Use :meth:`trigger_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_stopped",
+      "message": "Use :meth:`report_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {
@@ -5179,8 +5190,41 @@
       "deprecated_in": "1.15.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_stopped",
-      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `trigger_user_turn_stopped` instead.",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "start_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `start_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "cancel_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `cancel_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_stopped",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_stopped` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {

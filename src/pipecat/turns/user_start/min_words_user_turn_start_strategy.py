@@ -106,6 +106,6 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         )
 
         if should_trigger:
-            await self.trigger_user_turn_started()
+            await self.report_user_turn_started()
         else:
             await self.trigger_reset_aggregation()

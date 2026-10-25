@@ -240,7 +240,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # If both waits are already done, the turn was waiting on text —
         # trigger now.
         if self._user_speech_wait_done and self._stt_wait_done:
-            await self._maybe_trigger_user_turn_stopped()
+            await self._maybe_report_user_turn_stopped()
             return
 
         # Fallback: transcript arrived without a VAD stop. Measure inactivity
@@ -276,7 +276,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._user_speech_timeout_task = None
 
         self._user_speech_wait_done = True
-        await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_report_user_turn_stopped()
 
     async def _stt_timeout_handler(self, timeout: float):
         """Wait stt_timeout then attempt to trigger user turn stopped.
@@ -292,9 +292,9 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._stt_timeout_task = None
 
         self._stt_wait_done = True
-        await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_report_user_turn_stopped()
 
-    async def _maybe_trigger_user_turn_stopped(self):
+    async def _maybe_report_user_turn_stopped(self):
         """Trigger user turn stopped if all required conditions are met.
 
         Both timers must be done (stt is marked done immediately on the
@@ -310,7 +310,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             return
 
         if self._user_speech_wait_done and self._stt_wait_done:
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
 
     async def _cancel_all_tasks(self):
         """Cancel any running timer tasks and clear the handles."""

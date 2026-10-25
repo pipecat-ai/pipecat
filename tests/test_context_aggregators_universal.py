@@ -119,7 +119,7 @@ class CompletionStopStrategy(BaseUserTurnStopStrategy):
 
     async def process_frame(self, frame: Frame):
         if isinstance(frame, UserTurnInferenceCompletedFrame):
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
 
 
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):

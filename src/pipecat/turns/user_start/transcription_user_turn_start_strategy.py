@@ -32,6 +32,6 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be processed.
         """
         if isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
-            await self.trigger_user_turn_started()
+            await self.report_user_turn_started()
         elif isinstance(frame, TranscriptionFrame):
-            await self.trigger_user_turn_started()
+            await self.report_user_turn_started()
