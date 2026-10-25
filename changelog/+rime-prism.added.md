@@ -1,1 +1,0 @@
-- Added `RimeRealtimeLLMService` through the `rime-realtime` extra for Prism speech and typed conversations, acknowledged settings and history updates, application tools and fillers, and output playback reports.
