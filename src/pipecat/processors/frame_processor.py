@@ -28,6 +28,7 @@ from loguru import logger
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
+    AudioPlaybackReportFrame,
     CancelFrame,
     ErrorFrame,
     Frame,
@@ -737,8 +738,9 @@ class FrameProcessor(BaseObject):
             direction: The direction of frame flow.
             callback: Optional callback to call after processing.
         """
-        # If we are cancelling we don't want to process any other frame.
-        if self._cancelling:
+        # Output teardown can still produce a terminal receipt needed by its
+        # conversation owner before that owner's cleanup completes.
+        if self._cancelling and not isinstance(frame, AudioPlaybackReportFrame):
             return
 
         if self._enable_direct_mode:
