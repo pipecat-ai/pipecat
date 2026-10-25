@@ -6,10 +6,14 @@
 
 """Tests for how AWSPollyTTSService opens and closes its Polly client."""
 
+from types import SimpleNamespace
+
 import aiobotocore.session
 import pytest
 
+from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import CancelFrame, EndFrame
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.test_aws_credentials import _renewing_credentials, no_configured_keys  # noqa: F401
@@ -49,12 +53,22 @@ class _Session:
         return _ClientContext(self)
 
 
-def _make_service() -> tuple[AWSPollyTTSService, _Session]:
+async def _set_up(service: AWSPollyTTSService):
+    await service.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+
+
+async def _make_service() -> tuple[AWSPollyTTSService, _Session]:
     service = AWSPollyTTSService(api_key="secret", aws_access_key_id="key", region="us-east-1")
-    service._sample_rate = 16000
-    service._task_manager = TaskManager()
     session = _Session()
     service._aws_session = session
+    await _set_up(service)
+    service._sample_rate = 16000
     return service, session
 
 
@@ -64,8 +78,8 @@ async def _speak(service: AWSPollyTTSService, text: str):
 
 @pytest.mark.asyncio
 async def test_sentences_share_one_polly_client():
-    """Every sentence goes through the same Polly client."""
-    service, session = _make_service()
+    """Setup opens one Polly client and every sentence goes through it."""
+    service, session = await _make_service()
 
     for text in ("One.", "Two.", "Three."):
         await _speak(service, text)
@@ -77,8 +91,8 @@ async def test_sentences_share_one_polly_client():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("how", ["stop", "cancel", "cleanup"])
 async def test_stopping_closes_the_polly_client(how):
-    """Stopping, cancelling or cleaning up closes the client; speaking again opens a new one."""
-    service, session = _make_service()
+    """Stopping, cancelling or cleaning up closes the client, once."""
+    service, session = await _make_service()
     await _speak(service, "One.")
 
     if how == "stop":
@@ -87,10 +101,9 @@ async def test_stopping_closes_the_polly_client(how):
         await service.cancel(CancelFrame())
     else:
         await service.cleanup()
-    assert session.closed == 1
+    await service.cleanup()
 
-    await _speak(service, "Two.")
-    assert session.opened == 2
+    assert session.closed == 1
 
 
 @pytest.mark.asyncio
@@ -99,12 +112,13 @@ async def test_shared_client_signs_with_renewed_credentials(no_configured_keys):
     service = AWSPollyTTSService(region="us-east-1")
     service._aws_session = aiobotocore.session.get_session()
     service._aws_session._credentials = _renewing_credentials()
+    await _set_up(service)
 
-    client = await service._get_client()
+    client = service._client
     signing_keys = [
         (await client._request_signer._credentials.get_frozen_credentials()).access_key
         for _ in range(2)
     ]
-    await service._close_client()
+    await service.cleanup()
 
     assert signing_keys[0] != signing_keys[1]

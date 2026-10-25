@@ -127,6 +127,12 @@ def _ndjson(words: list[tuple[str, int]]) -> bytes:
     return b"\n".join(lines) + b"\n"
 
 
+def _use_polly(service: AWSPollyTTSService, polly):
+    """Make ``polly`` the service's client, now and when setup opens one."""
+    service._aws_session = _FakeSession(polly)
+    service._client = polly
+
+
 def _stub_for_run_tts(service: AWSPollyTTSService):
     """Stub sample rate, resampler and metrics so run_tts can run offline."""
     service._sample_rate = 16000
@@ -223,7 +229,7 @@ async def test_word_marks_unescape_ssml_characters():
             ("5", 1800),
         ]
     )
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.0), marks=marks))
+    _use_polly(service, _FakePolly(pcm=_pcm(1.0), marks=marks))
 
     down, _ = await run_test(
         service,
@@ -266,7 +272,7 @@ async def test_word_marks_unescape_ssml_characters():
 async def test_word_marks_keep_the_language_spacing_in_context(language, text, marks, expected):
     """Words of a language written without spaces reach the context unspaced."""
     service = _make_service(settings=AWSPollyTTSService.Settings(language=language))
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.5), marks=_ndjson(marks)))
+    _use_polly(service, _FakePolly(pcm=_pcm(1.5), marks=_ndjson(marks)))
     context = LLMContext()
 
     await run_test(
@@ -312,12 +318,11 @@ async def test_cumulative_offset_across_sentences():
     captured = _capture_word_timestamps(service)
 
     # Sentence 1: 1.0s of audio (32000 bytes), word "Hello" at 0 ms.
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.0), marks=_ndjson([("Hello", 0)])))
+    _use_polly(service, _FakePolly(pcm=_pcm(1.0), marks=_ndjson([("Hello", 0)])))
     await _drain(service, "Hello")
-    await service._close_client()
 
     # Sentence 2: word "World" at 100 ms -> 0.1 + 1.0 (prior duration) = 1.1s.
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5), marks=_ndjson([("World", 100)])))
+    _use_polly(service, _FakePolly(pcm=_pcm(0.5), marks=_ndjson([("World", 100)])))
     await _drain(service, "World")
 
     assert captured == [("Hello", pytest.approx(0.0)), ("World", pytest.approx(1.1))]
@@ -344,7 +349,7 @@ async def test_cancelling_run_tts_cancels_pending_marks_call():
                     raise
             return await super().synthesize_speech(**params)
 
-    service._aws_session = _FakeSession(_SlowMarksPolly(pcm=_pcm(1.0)))
+    _use_polly(service, _SlowMarksPolly(pcm=_pcm(1.0)))
     drain = asyncio.create_task(_drain(service, "Hello"))
     await marks_started.wait()
     drain.cancel()
@@ -359,7 +364,7 @@ async def test_cancelling_run_tts_cancels_pending_marks_call():
 async def test_no_marks_pushes_sentence_once():
     """Without word marks the sentence still reaches the context, exactly once."""
     service = _make_service()
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5), marks=b""))
+    _use_polly(service, _FakePolly(pcm=_pcm(0.5), marks=b""))
 
     down, _ = await run_test(
         service,
@@ -381,7 +386,7 @@ async def test_word_timestamps_disabled_skips_marks_call():
     _stub_for_run_tts(service)
     captured = _capture_word_timestamps(service)
     polly = _FakePolly(pcm=_pcm(0.5), marks=MARKS_SAMPLE)
-    service._aws_session = _FakeSession(polly)
+    _use_polly(service, polly)
 
     await _drain(service, "Hello world")
 
@@ -396,7 +401,7 @@ async def test_generative_engine_skips_marks_call():
     _stub_for_run_tts(service)
     captured = _capture_word_timestamps(service)
     polly = _FakePolly(pcm=_pcm(0.5), marks=MARKS_SAMPLE)
-    service._aws_session = _FakeSession(polly)
+    _use_polly(service, polly)
 
     await _drain(service, "Hello world")
 
@@ -409,7 +414,7 @@ async def test_generative_engine_warns_once_that_words_are_untimed():
     """Asking for word timestamps on the generative engine logs one warning."""
     service = _make_service(settings=AWSPollyTTSService.Settings(engine="generative"))
     _stub_for_run_tts(service)
-    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5)))
+    _use_polly(service, _FakePolly(pcm=_pcm(0.5)))
 
     with patch("pipecat.services.aws.tts.logger") as logger:
         await _drain(service, "Hello")

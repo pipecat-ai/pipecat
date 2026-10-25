@@ -13,7 +13,6 @@ via Polly SpeechMarks.
 
 import json
 from collections.abc import AsyncGenerator
-from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from xml.sax.saxutils import escape, unescape
 
@@ -31,7 +30,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
@@ -307,7 +306,7 @@ class AWSPollyTTSService(TTSService):
 
         # One Polly client for every sentence, so each request reuses its connection.
         self._client = None
-        self._client_stack: AsyncExitStack | None = None
+        self._client_ctx = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -316,6 +315,33 @@ class AWSPollyTTSService(TTSService):
             True, as AWS Polly service supports metrics generation.
         """
         return True
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and open its Polly client.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._client_ctx = self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+            "polly",
+            **self._aws_params,  # pyright: ignore[reportArgumentType]
+        )
+        self._client = await self._client_ctx.__aenter__()
+
+    async def cleanup(self):
+        """Clean up the service and close its Polly client."""
+        await super().cleanup()
+        await self._close_client()
+
+    async def _close_client(self):
+        if self._client_ctx is not None:
+            try:
+                await self._client_ctx.__aexit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"{self}: error closing the Polly client: {e}")
+            self._client_ctx = None
+            self._client = None
 
     async def start(self, frame: StartFrame):
         """Start the service.
@@ -344,11 +370,6 @@ class AWSPollyTTSService(TTSService):
         await super().cancel(frame)
         await self._close_client()
 
-    async def cleanup(self):
-        """Clean up the service and close its Polly client."""
-        await super().cleanup()
-        await self._close_client()
-
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream and reset timing state on interruption or stop.
 
@@ -359,27 +380,6 @@ class AWSPollyTTSService(TTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
             self._cumulative_time = 0.0
-
-    async def _get_client(self):
-        """Return the service's Polly client, opening it on first use."""
-        if self._client is None:
-            stack = AsyncExitStack()
-            self._client = await stack.enter_async_context(
-                self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
-                    "polly",
-                    **self._aws_params,  # pyright: ignore[reportArgumentType]
-                )
-            )
-            self._client_stack = stack
-        return self._client
-
-    async def _close_client(self):
-        stack, self._client_stack, self._client = self._client_stack, None, None
-        if stack is not None:
-            try:
-                await stack.aclose()
-            except Exception as e:
-                logger.debug(f"{self}: error closing the Polly client: {e}")
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to AWS Polly language format.
@@ -506,7 +506,8 @@ class AWSPollyTTSService(TTSService):
         base_params = {k: v for k, v in base_params.items() if v is not None}
 
         try:
-            polly = await self._get_client()
+            assert self._client is not None
+            polly = self._client
             marks_task = None
             if self._word_timestamps:
                 # The marks call runs alongside the audio call, so it adds no latency.
