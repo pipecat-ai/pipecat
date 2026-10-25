@@ -440,8 +440,8 @@ class AWSPollyTTSService(TTSService):
         single-valued, so audio and marks cannot come from one call. The marks
         arrive as newline-delimited JSON in the ``AudioStream`` body.
 
-        This never raises: on any failure it returns an empty list so audio is
-        unaffected and the sentence is pushed untimed.
+        If the request fails or the marks can't be parsed, it returns an empty
+        list so audio is unaffected and the sentence is pushed untimed.
 
         Args:
             polly: An open aiobotocore Polly client.
@@ -469,7 +469,7 @@ class AWSPollyTTSService(TTSService):
                     # start time in milliseconds.
                     word_times.append((unescape(mark["value"]), mark["time"] / 1000.0))
             return word_times
-        except (BotoCoreError, ClientError, ValueError, KeyError) as error:
+        except (BotoCoreError, ClientError, ValueError, KeyError, TypeError) as error:
             logger.warning(f"{self}: Polly speech marks fetch failed: {error}")
             return []
 
@@ -555,9 +555,7 @@ class AWSPollyTTSService(TTSService):
                         await self.add_word_timestamps(
                             word_times,
                             context_id,
-                            includes_inter_frame_spaces=(
-                                True if self._language_is_written_without_spaces() else None
-                            ),
+                            includes_inter_frame_spaces=self._language_is_written_without_spaces(),
                         )
                     self._cumulative_time += utterance_seconds
             finally:
