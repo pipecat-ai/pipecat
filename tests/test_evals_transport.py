@@ -32,6 +32,17 @@ from pipecat.evals.transport import (
     _query_flag,
 )
 from pipecat.frames.frames import LLMConfigureOutputFrame, UserImageRawFrame, UserImageRequestFrame
+from pipecat.processors.frame_processor import FrameDirection
+
+
+def _skip_tts_pushed(push_frame: AsyncMock, direction=FrameDirection.DOWNSTREAM) -> list[bool]:
+    """The ``skip_tts`` of each ``LLMConfigureOutputFrame`` pushed in ``direction``."""
+    return [
+        call.args[0].skip_tts
+        for call in push_frame.await_args_list
+        if isinstance(call.args[0], LLMConfigureOutputFrame)
+        and (call.args[1] if len(call.args) > 1 else FrameDirection.DOWNSTREAM) == direction
+    ]
 
 
 def _ws(path=None, request_path=None):
@@ -95,12 +106,7 @@ class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
 
         @transport.event_handler("on_client_connected")
         async def on_connected(transport, websocket):
-            settings = [
-                call.args[0].skip_tts
-                for call in push_frame.await_args_list
-                if isinstance(call.args[0], LLMConfigureOutputFrame)
-            ]
-            greeting_settings.put_nowait(settings[-1])
+            greeting_settings.put_nowait(_skip_tts_pushed(push_frame)[-1])
 
         observed = []
         for path in ("/?skip_tts=true", audio_path, "/?skip_tts=true"):
@@ -133,8 +139,14 @@ class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._greeting_skip_tts(True), [True])
         self.assertEqual(await self._greeting_skip_tts(False), [False])
 
-    async def _greeting_skip_tts(self, skip_tts: bool) -> list[bool]:
-        """The skip_tts settings pushed by the time ``on_client_connected`` runs."""
+    async def test_skip_tts_is_also_pushed_upstream(self):
+        # So an RTVIProcessor ahead of the input transport restores it after a send-text.
+        self.assertEqual(await self._greeting_skip_tts(True, FrameDirection.UPSTREAM), [True])
+
+    async def _greeting_skip_tts(
+        self, skip_tts: bool, direction=FrameDirection.DOWNSTREAM
+    ) -> list[bool]:
+        """The skip_tts settings pushed in ``direction`` by the time ``on_client_connected`` runs."""
         transport = self._transport(EvalConnectionFlags(skip_tts=skip_tts))
         push_frame = AsyncMock()
         transport.input().push_frame = push_frame
@@ -142,13 +154,7 @@ class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
 
         @transport.event_handler("on_client_connected")
         async def on_connected(transport, websocket):
-            greeting_settings.put_nowait(
-                [
-                    call.args[0].skip_tts
-                    for call in push_frame.await_args_list
-                    if isinstance(call.args[0], LLMConfigureOutputFrame)
-                ]
-            )
+            greeting_settings.put_nowait(_skip_tts_pushed(push_frame, direction))
 
         await transport._on_client_connected(MagicMock())
         return await asyncio.wait_for(greeting_settings.get(), timeout=1)
