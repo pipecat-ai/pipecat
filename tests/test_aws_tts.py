@@ -403,6 +403,20 @@ async def test_generative_engine_skips_marks_call():
     assert all(call.get("OutputFormat") != "json" for call in polly.calls)
 
 
+@pytest.mark.asyncio
+async def test_generative_engine_warns_once_that_words_are_untimed():
+    """Asking for word timestamps on the generative engine logs one warning."""
+    service = _make_service(settings=AWSPollyTTSService.Settings(engine="generative"))
+    _stub_for_run_tts(service)
+    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(0.5)))
+
+    with patch("pipecat.services.aws.tts.logger") as logger:
+        await _drain(service, "Hello")
+        await _drain(service, "World")
+
+    assert logger.warning.call_count == 1
+
+
 # --------------------------------------------------------------------------- #
 # Offset reset
 # --------------------------------------------------------------------------- #

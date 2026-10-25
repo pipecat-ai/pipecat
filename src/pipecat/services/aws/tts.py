@@ -298,6 +298,7 @@ class AWSPollyTTSService(TTSService):
         self._resampler = create_stream_resampler()
 
         self._word_timestamps = word_timestamps
+        self._warned_generative_untimed = False
         # Cumulative time offset (seconds) so each sentence's word timestamps
         # land after the previous sentence on the shared turn timeline. Reset at
         # the start of the service and on interruption / end of turn.
@@ -465,9 +466,15 @@ class AWSPollyTTSService(TTSService):
                 # Kick off the marks call so it overlaps audio synthesis and
                 # adds no latency on the critical path (TTFB).
                 marks_task = None
-                # Polly has no speech marks for the generative engine.
-                if self._word_timestamps and self._settings.engine != "generative":
-                    marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
+                if self._word_timestamps:
+                    if self._settings.engine != "generative":
+                        marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
+                    elif not self._warned_generative_untimed:
+                        logger.warning(
+                            f"{self}: the generative engine has no speech marks, so its "
+                            "words are pushed without timestamps"
+                        )
+                        self._warned_generative_untimed = True
                 try:
                     audio_params = {**base_params, "OutputFormat": "pcm"}
                     response = await polly.synthesize_speech(**audio_params)  # pyright: ignore[reportGeneralTypeIssues]
