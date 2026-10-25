@@ -115,6 +115,27 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
+    def pop_eager(self) -> bool:
+        """Report an eager end of turn reached since the last call, if any.
+
+        An eager end of turn is a verdict the analyzer is not yet ready to
+        commit to: the evidence is good enough to start generating a response,
+        but not yet good enough to end the turn. A strategy that polls this
+        after :meth:`append_audio` and :meth:`analyze_end_of_turn` (see
+        :class:`~pipecat.turns.user_stop.TurnAnalyzerEagerUserTurnStopStrategy`)
+        answers it speculatively, so the response is ready when the turn
+        commits and is discarded if the user resumes speaking instead.
+
+        Analyzers that reach eager ends of turn override this to return True
+        once per eager end of turn and False until the next one. The committed
+        verdict still arrives through :meth:`append_audio` or
+        :meth:`analyze_end_of_turn` as before. The default never reaches one.
+
+        Returns:
+            bool: True if an eager end of turn was reached since the last call.
+        """
+        return False
+
     def update_vad_start_secs(self, vad_start_secs: float):
         """Update the VAD start trigger time.
 

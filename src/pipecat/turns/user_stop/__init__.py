@@ -12,6 +12,9 @@ from .external_user_turn_completion_stop_strategy import ExternalUserTurnComplet
 from .external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 from .llm_turn_completion_user_turn_stop_strategy import LLMTurnCompletionUserTurnStopStrategy
 from .speech_timeout_user_turn_stop_strategy import SpeechTimeoutUserTurnStopStrategy
+from .turn_analyzer_eager_user_turn_stop_strategy import (
+    TurnAnalyzerEagerUserTurnStopStrategy,
+)
 from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
 
 __all__ = [
@@ -26,6 +29,7 @@ __all__ = [
     "NormalizedMatch",
     "SpeechTimeoutUserTurnStopStrategy",
     "UserTurnStoppedParams",
+    "TurnAnalyzerEagerUserTurnStopStrategy",
     "TurnAnalyzerUserTurnStopStrategy",
     "deferred",
 ]
