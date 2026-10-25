@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     FrameProcessorPauseUrgentFrame,
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
+    InterruptionCause,
     InterruptionFrame,
     StartFrame,
     SystemFrame,
@@ -1045,12 +1046,16 @@ class FrameProcessor(BaseObject):
 
         await self._call_event_handler("on_after_push_frame", frame)
 
-    async def broadcast_interruption(self):
-        """Broadcast an `InterruptionFrame` both upstream and downstream."""
+    async def broadcast_interruption(self, *, cause: InterruptionCause = "application"):
+        """Broadcast an `InterruptionFrame` both upstream and downstream.
+
+        Args:
+            cause: Reason for stopping interruptible output.
+        """
         logger.debug(f"{self}: broadcasting interruption")
         self.__reset_process_task()
         await self.stop_all_metrics()
-        await self.broadcast_frame(InterruptionFrame)
+        await self.broadcast_frame(InterruptionFrame, cause=cause)
 
     @deprecated(
         "`FrameProcessor.push_interruption_task_frame_and_wait` is deprecated since 0.0.104 "

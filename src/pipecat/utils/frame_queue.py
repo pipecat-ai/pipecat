@@ -82,6 +82,22 @@ class FrameQueue(asyncio.Queue):
         for item in kept:
             self.put_nowait(item)
 
+    def discard_interruptible(self, predicate: Callable[[Frame], bool]) -> None:
+        """Discard matching interruptible frames while retaining queue order.
+
+        Args:
+            predicate: Selects frames owned by the output being stopped.
+        """
+        kept = []
+        while not self.empty():
+            item = self.get_nowait()
+            frame = self._frame_getter(item)
+            if frame is None or not frame.interruptible or not predicate(frame):
+                kept.append(item)
+            self.task_done()
+        for item in kept:
+            self.put_nowait(item)
+
     def _is_uninterruptible(self, item: Any) -> bool:
         frame = self._frame_getter(item)
         return frame is not None and not frame.interruptible

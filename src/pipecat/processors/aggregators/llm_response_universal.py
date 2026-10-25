@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMInputTextFrame,
     LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
@@ -83,6 +84,10 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators._llm_operation import (
+    _LLMContextBindFrame,
+    _LLMContextOperationFrame,
+)
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -469,9 +474,55 @@ class LLMContextAggregator(FrameProcessor):
         super().__init__(**kwargs)
         self._context = context
         self._role = role
+        self._acknowledges_operations = False
+        self._accepts_input_text = False
         self._add_tool_change_messages = add_tool_change_messages
 
         self._aggregation: list[TextPartForConcatenation] = []
+
+    async def _prepare_provider_operation(self, frame: Frame, direction: FrameDirection) -> bool:
+        """Pass captured mutation intent to a service that commits on acceptance."""
+        if isinstance(frame, LLMServiceMetadataFrame):
+            self._acknowledges_operations = frame.acknowledges_operations
+            self._accepts_input_text = frame.accepts_input_text
+            if frame.acknowledges_operations and self._role == "user":
+                await self.push_frame(_LLMContextBindFrame(self._context))
+        if isinstance(frame, _LLMContextOperationFrame):
+            await self.push_frame(frame, direction)
+            return True
+        if isinstance(frame, LLMInputTextFrame) and not self._accepts_input_text:
+            self.add_messages([{"role": "user", "content": frame.text}])
+            await self.push_context_frame(direction)
+            return True
+        if self._acknowledges_operations and isinstance(
+            frame,
+            (
+                LLMMessagesAppendFrame,
+                LLMMessagesUpdateFrame,
+                LLMMessagesTransformFrame,
+                LLMSetToolsFrame,
+                LLMSetToolChoiceFrame,
+                LLMRunFrame,
+                LLMInputTextFrame,
+            ),
+        ):
+            await self.push_frame(
+                _LLMContextOperationFrame.capture(frame, self._context), direction
+            )
+            return True
+        if frame.metadata.get("provider_managed_context") and isinstance(
+            frame,
+            (
+                TranscriptionFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallsStartedFrame,
+                FunctionCallCancelFrame,
+            ),
+        ):
+            await self.push_frame(frame, direction)
+            return True
+        return False
 
     def _maybe_add_tool_change_messages(self, new_tools: ToolsSchema | NotGiven) -> None:
         """Append a developer message describing tool add/remove deltas.
@@ -904,6 +955,9 @@ class LLMUserAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        if await self._prepare_provider_operation(frame, direction):
+            return
 
         if await self._maybe_mute_frame(frame):
             return
@@ -1492,7 +1546,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
         if params.enable_interruptions:
-            await self.broadcast_interruption()
+            await self.broadcast_interruption(cause="user")
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
@@ -1901,6 +1955,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        if await self._prepare_provider_operation(frame, direction):
+            return
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
