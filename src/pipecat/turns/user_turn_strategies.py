@@ -225,8 +225,8 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     user-supplied) and adds
     :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
     which waits for the turn's inference. Once the other stop strategies
-    have decided, the inference runs, and the turn ends once the LLM marks it
-    complete. This relies on ``StrategyMode.ALL``, the default ``stop_mode``.
+    decide the user stopped, the inference runs, and the turn ends once the
+    LLM marks it complete. This works with either ``stop_mode``.
 
     With ``UserTurnStrategiesParams(stop_merge_mode=MergeMode.EXTEND)``, the
     LLM gate and any stop strategies given join the ones a service
