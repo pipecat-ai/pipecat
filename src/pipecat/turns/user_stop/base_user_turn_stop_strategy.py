@@ -134,6 +134,18 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         return False
 
+    @property
+    def decision_scheduled(self) -> bool:
+        """Whether this strategy has a decision of its own scheduled.
+
+        While a stop strategy has one, the turn controller's stop timeout
+        waits for it instead of ending the turn. Override to return True only
+        while the strategy is sure to decide soon on its own, as when a timer
+        of its own will fire, so a turn whose decision never comes still
+        times out.
+        """
+        return False
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the strategy.
 

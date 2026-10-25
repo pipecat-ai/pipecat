@@ -151,8 +151,8 @@ class LLMUserAggregatorParams:
         user_turn_strategies_params: How the user turn strategies combine with
             the ones a service recommends, and how they decide.
         user_mute_strategies: List of user mute strategies.
-        user_turn_stop_timeout: Time in seconds to wait before considering the
-            user's turn finished.
+        user_turn_stop_timeout: Seconds without user activity before an open user
+            turn is ended, unless a stop strategy has a decision scheduled.
         user_idle_timeout: Timeout in seconds for detecting user idle state.
             The aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to 0 to disable
@@ -640,7 +640,8 @@ class LLMUserAggregator(LLMContextAggregator):
 
     - on_user_turn_started: Called when the user turn starts
     - on_user_turn_stopped: Called when the user turn ends
-    - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
+    - on_user_turn_stop_timeout: Called when the stop timeout ends a user turn its
+      stop strategies didn't end.
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
     - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is

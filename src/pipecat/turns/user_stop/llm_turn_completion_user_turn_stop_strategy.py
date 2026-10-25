@@ -44,8 +44,8 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     sets up. It decides the user is done on that inference's ●, on a tool
     call, or on a response with no marker. ◐ and ○ leave the turn open. If
     the user then stays quiet for the configured timeout, the strategy
-    decides the user is done and asks the LLM to re-engage them, even when
-    the controller's turn stop timeout ended the turn first. Another
+    decides the user is done and asks the LLM to re-engage them, and the
+    controller's turn stop timeout waits for that decision. Another
     inference answering the user in the meantime, such as one for words
     transcribed after the turn's inference, cancels the re-prompt. When the
     user speaks again, it waits for the next inference instead.
@@ -79,6 +79,11 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     def config(self) -> UserTurnCompletionConfig:
         """Return the configured ``UserTurnCompletionConfig``."""
         return self._config
+
+    @property
+    def decision_scheduled(self) -> bool:
+        """Whether a re-prompt is scheduled, which decides when it fires."""
+        return self._reprompt_task is not None
 
     @property
     def waits_for_inference(self) -> bool:

@@ -90,7 +90,8 @@ class UserTurnController(BaseObject):
       an open turn, after they stopped or after the turn's inference was
       triggered. Its `UserTurnResumedParams` say whether that inference
       was triggered, since the new speech voids the answer it started.
-    - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
+    - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
+      its stop strategies didn't end.
     - on_push_frame: Emitted when a strategy wants to push a frame.
     - on_broadcast_frame: Emitted when a strategy wants to broadcast a frame.
 
@@ -138,8 +139,8 @@ class UserTurnController(BaseObject):
             user_turn_strategies: Configured strategies for starting and stopping user turns.
             user_turn_strategies_params: How the strategies decide. Defaults to
                 :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`.
-            user_turn_stop_timeout: Timeout in seconds to automatically stop a user turn
-                if no activity is detected.
+            user_turn_stop_timeout: Seconds without user activity before an open
+                user turn is ended, unless a stop strategy has a decision scheduled.
         """
         super().__init__()
 
@@ -664,7 +665,12 @@ class UserTurnController(BaseObject):
                 )
                 self._user_turn_stop_timeout_event.clear()
             except TimeoutError:
-                if self._user_turn and not self._user_speaking:
+                # A stop strategy with a decision of its own scheduled ends the
+                # turn when it fires, so the timeout waits for it.
+                decision_scheduled = any(
+                    s.decision_scheduled for s in self._user_turn_stop_strategies
+                )
+                if self._user_turn and not self._user_speaking and not decision_scheduled:
                     await self._call_event_handler("on_user_turn_stop_timeout")
                     # The turn ends with what the decisions made so far said about
                     # it, so a confirmed speculation isn't answered a second time.

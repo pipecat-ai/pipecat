@@ -48,7 +48,8 @@ class UserTurnProcessor(FrameProcessor):
       most strategies; fires alone when a downstream strategy gates
       finalization on the LLM's verdict.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
-    - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
+    - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
+      its stop strategies didn't end.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
 
     Example::
@@ -90,8 +91,8 @@ class UserTurnProcessor(FrameProcessor):
             user_turn_strategies: Configured strategies for starting and stopping user turns.
             user_turn_strategies_params: How the strategies decide. Defaults to
                 :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`.
-            user_turn_stop_timeout: Timeout in seconds to automatically stop a user turn
-                if no activity is detected.
+            user_turn_stop_timeout: Seconds without user activity before an open
+                user turn is ended, unless a stop strategy has a decision scheduled.
             user_idle_timeout: Timeout in seconds for detecting user idle state.
                 The processor will emit an `on_user_turn_idle` event when the user
                 has been idle (not speaking) for this duration. Set to 0 to disable

@@ -13,17 +13,20 @@ from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     Frame,
+    LLMContextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnInferenceCompletedFrame,
     UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.types import (
     ProcessFrameResult,
     UserTurnResumedParams,
@@ -44,11 +47,13 @@ from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
     ExternalUserTurnStopStrategy,
+    LLMTurnCompletionUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
     UserTurnStoppedParams,
     deferred,
 )
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
@@ -337,6 +342,80 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(stops), 1)
         self.assertTrue(stops[0].confirms_speculation)
+
+    async def test_the_stop_timeout_waits_for_a_scheduled_decision(self):
+        scheduled = ScheduledDecisionStopStrategy()
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[scheduled]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops = []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2 + 0.1)
+        self.assertEqual(stops, [])
+
+        scheduled.scheduled = False
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(stops, [None])
+
+    async def _start_with_the_marker(self) -> tuple[list, list]:
+        user = DecidingStopStrategy()
+        marker = LLMTurnCompletionUserTurnStopStrategy(
+            config=UserTurnCompletionConfig(incomplete_long_timeout=USER_TURN_STOP_TIMEOUT * 3)
+        )
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[user, marker]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops, timeouts = [], []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            timeouts.append(None)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await user.decide()
+        self.controller, self.marker = controller, marker
+        return stops, timeouts
+
+    async def test_a_turn_the_llm_needs_more_time_on_waits_for_the_marker(self):
+        """After ○, the turn stays open until the marker strategy's own timeout decides."""
+        stops, timeouts = await self._start_with_the_marker()
+        inference = LLMContextFrame(context=LLMContext())
+        await self.controller.process_frame(inference)
+        await self.controller.process_frame(
+            UserTurnCompletionFrame(kind="long", context_frame_id=inference.id)
+        )
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2)
+        self.assertEqual(stops, [])
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2)
+        self.assertEqual(stops, [self.marker])
+        self.assertEqual(timeouts, [])
+
+    async def test_a_marker_that_never_comes_still_times_out(self):
+        stops, timeouts = await self._start_with_the_marker()
+        await self.controller.process_frame(LLMContextFrame(context=LLMContext()))
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(stops, [None])
+        self.assertEqual(timeouts, [None])
 
     async def test_external_user_turn_strategies_no_timeout_while_speaking(self):
         """Test that timeout does not trigger when user is still speaking with external strategies."""
@@ -938,6 +1017,18 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(released.wait(), timeout=1.0)
 
         await strategy.cleanup()
+
+
+class ScheduledDecisionStopStrategy(BaseUserTurnStopStrategy):
+    """A stop strategy with a decision of its own scheduled while ``scheduled``."""
+
+    def __init__(self):
+        super().__init__()
+        self.scheduled = True
+
+    @property
+    def decision_scheduled(self) -> bool:
+        return self.scheduled
 
 
 class DecidingStopStrategy(BaseUserTurnStopStrategy):
