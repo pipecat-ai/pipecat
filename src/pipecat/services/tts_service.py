@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import (
     Any,
@@ -113,6 +113,9 @@ class _AudioContextPlayback:
 
     received_audio: bool = False
     stop_frame_due: bool = False
+    # TTSTextFrames, and any frames queued behind them that arrived before audio,
+    # are held until the audio confirms that the text was actually spoken.
+    held_frames: list[Frame] = field(default_factory=list)
 
 
 class TTSService(AIService):
@@ -1832,7 +1835,7 @@ class TTSService(AIService):
                 self._word_timestamp_tracker.last_pts = f.pts
             await self.push_frame(f)
 
-    async def _apply_force_complete(self, context_id: str):
+    async def _apply_force_complete(self, context_id: str, received_audio: bool):
         """Force-complete a context's spoken slots and push any unblocked skipped frames.
 
         Called at end-of-context to handle TTS providers that silently drop word-timestamp
@@ -1842,12 +1845,48 @@ class TTSService(AIService):
 
         Args:
             context_id: The audio context that has ended.
+            received_audio: Whether any audio arrived for the context. Without
+                audio nothing was spoken, so the remaining text is dropped.
         """
         await self._push_word_frames(
             self._aggregated_frame_sequencer.force_complete(
-                context_id, self._word_timestamp_tracker.last_pts
+                context_id,
+                self._word_timestamp_tracker.last_pts,
+                emit_remaining=received_audio,
             )
         )
+
+    def _should_hold_frame(self, item: Frame, playback: _AudioContextPlayback) -> bool:
+        """Whether a frame waits for the context's first audio before being pushed."""
+        if playback.received_audio or isinstance(item, (TTSAudioRawFrame, TTSStoppedFrame)):
+            return False
+        # Spoken text is queued as soon as it is sent for synthesis, often
+        # before its audio, and only belongs in the context once audio shows it
+        # was spoken. Frames queued behind it wait too, so they keep their order.
+        return isinstance(item, TTSTextFrame) or bool(playback.held_frames)
+
+    async def _push_held_frames(self, playback: _AudioContextPlayback):
+        """Push the frames held back until the context's first audio."""
+        for frame in playback.held_frames:
+            await self.push_frame(frame)
+        playback.held_frames.clear()
+
+    async def _release_held_frames_without_audio(
+        self, context_id: str, playback: _AudioContextPlayback
+    ):
+        """Drop the held spoken text of a context without audio, and push the rest."""
+        dropped_text = ""
+        for frame in playback.held_frames:
+            if isinstance(frame, TTSTextFrame):
+                dropped_text += frame.text
+            else:
+                await self.push_frame(frame)
+        playback.held_frames.clear()
+        if dropped_text:
+            logger.warning(
+                f"{self} audio context {context_id} produced no audio, "
+                f"not adding [{dropped_text}] to the context"
+            )
 
     #
     # Audio context playback
@@ -1929,12 +1968,15 @@ class TTSService(AIService):
             )
         elif isinstance(item, ErrorFrame):
             await self.push_error_frame(item)
+        elif self._should_hold_frame(item, playback):
+            playback.held_frames.append(item)
         else:
             if isinstance(item, TTSAudioRawFrame):
                 # Set the word-timestamp baseline once, on the first audio chunk.
                 if not playback.received_audio:
                     await self.stop_ttfb_metrics()
                     await self.start_word_timestamps()
+                    await self._push_held_frames(playback)
                 playback.received_audio = True
                 await self.process_ttfa_metrics(item)
             elif isinstance(item, TTSStartedFrame):
@@ -1947,7 +1989,8 @@ class TTSService(AIService):
                     item.append_to_context = tts_context.append_to_context
             elif isinstance(item, TTSStoppedFrame):
                 # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-                await self._apply_force_complete(context_id)
+                await self._release_held_frames_without_audio(context_id, playback)
+                await self._apply_force_complete(context_id, playback.received_audio)
                 playback.stop_frame_due = False
                 # Setting the last word timestamp as the TTSStoppedFrame PTS
                 if not item.pts:
@@ -1957,7 +2000,8 @@ class TTSService(AIService):
     async def _end_audio_context(self, context_id: str, playback: _AudioContextPlayback):
         """Finish the playing audio context once it ends or goes quiet."""
         # Words the provider never timed come before the stop frame.
-        await self._apply_force_complete(context_id)
+        await self._release_held_frames_without_audio(context_id, playback)
+        await self._apply_force_complete(context_id, playback.received_audio)
         if playback.stop_frame_due:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
         await self.reset_word_timestamps()
