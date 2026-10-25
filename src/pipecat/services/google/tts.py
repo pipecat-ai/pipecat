@@ -1670,6 +1670,20 @@ class GeminiTTSService(GoogleBaseTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Gemini GCP TTS generation error: {str(e)}")
 
+    def _genai_voice_config(self) -> "genai.types.VoiceConfig":
+        """Build the Gemini API voice config for the configured voice.
+
+        Custom voice IDs (``voice_...``) go in ``VoiceConfig.voice``: the API
+        rejects them as prebuilt voice names with "No matching speaker voice
+        found". Every other voice is a prebuilt voice name.
+        """
+        voice = assert_given(self._settings.voice)
+        if voice and voice.startswith("voice_"):
+            return genai.types.VoiceConfig(voice=voice)
+        return genai.types.VoiceConfig(
+            prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(voice_name=voice)
+        )
+
     async def _run_genai_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating GenAI TTS [{text}]")
 
@@ -1682,11 +1696,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 "response_modalities": ["AUDIO"],
                 "speech_config": genai.types.SpeechConfig(
                     language_code=assert_given(self._settings.language),
-                    voice_config=genai.types.VoiceConfig(
-                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
-                            voice_name=assert_given(self._settings.voice)
-                        )
-                    ),
+                    voice_config=self._genai_voice_config(),
                 ),
             }
 
