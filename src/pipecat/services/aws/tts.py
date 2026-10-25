@@ -344,6 +344,11 @@ class AWSPollyTTSService(TTSService):
         await super().cancel(frame)
         await self._close_client()
 
+    async def cleanup(self):
+        """Clean up the service and close its Polly client."""
+        await super().cleanup()
+        await self._close_client()
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream and reset timing state on interruption or stop.
 

@@ -75,16 +75,18 @@ async def test_sentences_share_one_polly_client():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frame", [EndFrame(), CancelFrame()], ids=["stop", "cancel"])
-async def test_stopping_closes_the_polly_client(frame):
-    """Stopping or cancelling the service closes its client; speaking again opens a new one."""
+@pytest.mark.parametrize("how", ["stop", "cancel", "cleanup"])
+async def test_stopping_closes_the_polly_client(how):
+    """Stopping, cancelling or cleaning up closes the client; speaking again opens a new one."""
     service, session = _make_service()
     await _speak(service, "One.")
 
-    if isinstance(frame, EndFrame):
-        await service.stop(frame)
+    if how == "stop":
+        await service.stop(EndFrame())
+    elif how == "cancel":
+        await service.cancel(CancelFrame())
     else:
-        await service.cancel(frame)
+        await service.cleanup()
     assert session.closed == 1
 
     await _speak(service, "Two.")
