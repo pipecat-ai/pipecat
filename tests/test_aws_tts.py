@@ -4,19 +4,24 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for AWSPollyTTSService word-timestamp handling (issue #1015).
+"""Tests for AWSPollyTTSService word timestamps and its Polly client (issue #1015).
 
 All Polly calls are mocked, so no live AWS credentials are needed.
 """
 
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import aiobotocore.session
 import pytest
 from botocore.exceptions import ClientError
 
+from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -26,12 +31,13 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.test_aws_credentials import _renewing_credentials, no_configured_keys  # noqa: F401
 
 CTX = "ctx-1"
 
@@ -79,24 +85,28 @@ class _FakePolly:
 class _FakeClientCtx:
     """Async context manager returned by session.create_client()."""
 
-    def __init__(self, polly):
-        self._polly = polly
+    def __init__(self, session: "_FakeSession"):
+        self._session = session
 
     async def __aenter__(self):
-        return self._polly
+        self._session.opened += 1
+        return self._session.polly
 
     async def __aexit__(self, *exc):
+        self._session.closed += 1
         return False
 
 
 class _FakeSession:
-    """Fake aiobotocore session whose create_client yields a fake Polly."""
+    """Fake aiobotocore session that counts the fake Polly clients it opens and closes."""
 
     def __init__(self, polly):
-        self._polly = polly
+        self.polly = polly
+        self.opened = 0
+        self.closed = 0
 
     def create_client(self, *args, **kwargs):
-        return _FakeClientCtx(self._polly)
+        return _FakeClientCtx(self)
 
 
 # --------------------------------------------------------------------------- #
@@ -442,3 +452,75 @@ async def test_cumulative_time_resets_on_tts_stopped():
         await service.push_frame(TTSStoppedFrame(context_id=CTX))
 
     assert service._cumulative_time == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Polly client lifecycle
+# --------------------------------------------------------------------------- #
+
+
+async def _set_up(service: AWSPollyTTSService):
+    await service.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=TaskManager(),
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+
+
+async def _make_set_up_service() -> tuple[AWSPollyTTSService, _FakeSession]:
+    service = _make_service(word_timestamps=False)
+    session = _FakeSession(_FakePolly(pcm=_pcm(0.1)))
+    service._aws_session = session
+    await _set_up(service)
+    service._sample_rate = 16000
+    return service, session
+
+
+@pytest.mark.asyncio
+async def test_sentences_share_one_polly_client():
+    """Setup opens one Polly client and every sentence goes through it."""
+    service, session = await _make_set_up_service()
+
+    for text in ("One.", "Two.", "Three."):
+        await _drain(service, text)
+
+    assert session.opened == 1
+    assert session.closed == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["stop", "cancel", "cleanup"])
+async def test_stopping_closes_the_polly_client(how):
+    """Stopping, cancelling or cleaning up closes the client, once."""
+    service, session = await _make_set_up_service()
+    await _drain(service, "One.")
+
+    if how == "stop":
+        await service.stop(EndFrame())
+    elif how == "cancel":
+        await service.cancel(CancelFrame())
+    else:
+        await service.cleanup()
+    await service.cleanup()
+
+    assert session.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_client_signs_with_renewed_credentials(no_configured_keys):  # noqa: F811
+    """Without configured keys, the shared client still renews its credentials."""
+    service = AWSPollyTTSService(region="us-east-1")
+    service._aws_session = aiobotocore.session.get_session()
+    service._aws_session._credentials = _renewing_credentials()
+    await _set_up(service)
+
+    client = service._client
+    signing_keys = [
+        (await client._request_signer._credentials.get_frozen_credentials()).access_key
+        for _ in range(2)
+    ]
+    await service.cleanup()
+
+    assert signing_keys[0] != signing_keys[1]
