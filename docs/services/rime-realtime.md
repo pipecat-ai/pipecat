@@ -1,6 +1,16 @@
 # Rime Prism realtime
 
-`RimeRealtimeLLMService` uses one Rime SDK session for microphone audio, live typed turns, transcripts, replies, and application tools. It calls `Rime.realtime.connect`, consumes session events, and sends session operations directly. Pipecat owns the pipeline and tool execution. It does not use the SDK's conversation runners. Install `pipecat-ai[rime-realtime]`. Set `RIME_API_KEY`, or pass a caller-owned `rimelabs_sdk.Rime` client with `client=`. The service closes clients that it creates. Existing Rime TTS services use the separate `rime` extra.
+`RimeRealtimeLLMService` handles speech input, typed turns, transcripts, generated speech, and application tools in one Prism conversation. It uses the Rime SDK's direct session interface. Pipecat owns the pipeline, tool execution, and playback.
+
+Install `pipecat-ai[rime-realtime]` and set `RIME_API_KEY`. You can also pass a caller-owned `rimelabs_sdk.Rime` client with `client=`. The service closes only clients it creates. Existing Rime TTS services use the separate `rime` extra.
+
+Use one service instance per conversation and a shared `LLMContextAggregatorPair`:
+
+```text
+transport.input() → user aggregator → RimeRealtimeLLMService → transport.output() → assistant aggregator
+```
+
+For a complete bot, see [realtime-rime.py](../../examples/realtime/realtime-rime.py). This excerpt uses its `lookup_invoice` handler. Queue frames after adding `llm` to the worker's pipeline:
 
 ```python
 from rimelabs_sdk.realtime import PrismFiller
@@ -26,84 +36,110 @@ await worker.queue_frame(
 )
 ```
 
-Put the service between the user aggregator and the output transport. Put the assistant aggregator after the output transport. Use a shared `LLMContextAggregatorPair`. Prism requires server turn detection. Its service metadata recommends external turn strategies. Application strategy settings still control interruption permission. `turn_detection=` accepts SDK `TurnDetection` timing settings at construction only. `interrupt_on_speech=False` keeps turn detection and speech announcements enabled.
+## Connection and audio
 
-Omit `endpoint` for the SDK's Prism endpoint. Pass an endpoint only for a deployment that supports the SDK's authentication and realtime API. Endpoint validation belongs to the SDK. Use one service instance per conversation. Configure mono output. Tracked audio rejects incompatible output channel settings. Input uses PCM16. The SDK converts 8, 16, 24, and 48 kHz mono or stereo input. The service downmixes and resamples other PCM16 input within 8 to 192 kHz and 1 to 32 channels.
+Omit `endpoint` to use the SDK's default Prism endpoint. Custom deployments must support the SDK's authentication and realtime interface; the SDK validates the endpoint.
+
+Input uses PCM16. The SDK converts 8, 16, 24, and 48 kHz mono or stereo input. The service downmixes and resamples other PCM16 input within 8 to 192 kHz and 1 to 32 channels. Configure mono output; tracked audio rejects incompatible output channels.
+
+Prism detects turns on the server. Service metadata recommends external turn strategies, and application strategies still control interruption permission. Set `turn_detection=` with SDK `TurnDetection` timing options at construction. `interrupt_on_speech=False` disables interruption while keeping turn detection and speech announcements.
 
 ## Input and accepted operations
 
-`LLMInputTextFrame` submits one live user turn and requests its reply. It carries optional `user_id`, `audio_response`, and `client_message_id` values. RTVI `send-text` uses this frame when Prism is active. The immediate option interrupts first and preserves pipeline order. A non-immediate Prism typed turn waits for SDK admission and still requests a reply. Other providers retain their existing RTVI behavior.
+Live text uses `LLMInputTextFrame`, which submits one user turn and requests its reply. Optional fields are `user_id`, `audio_response`, and `client_message_id`. RTVI `send-text` uses this frame when Prism is active. Immediate input interrupts first; non-immediate input waits for SDK admission. Other providers keep their existing RTVI behavior.
 
-`LLMRunFrame` requests a reply to accepted context. `LLMMessagesAppendFrame`, `LLMMessagesUpdateFrame`, and `LLMMessagesTransformFrame` edit history. They do not submit a typed turn. Set `run_llm=True` to request a reply after the history edit is accepted. Initial history imports do not execute tools or generate a reply.
+Use `LLMRunFrame` to request a reply to current context. The append, update, and transform message frames edit history; `run_llm=True` requests a reply after acceptance. Initial history imports generate no reply and execute no tools.
 
-The aggregators capture these operations when a service advertises `acknowledges_operations=True`. They do not change shared context before provider acceptance. The conversation owner commits each accepted operation once. Records that arrive during a history edit remain in context.
+Prism can reject an update, so Pipecat waits for acknowledgment before changing local context. Aggregators preserve operation intent when the service advertises `acknowledges_operations=True`. Each accepted operation commits once, preserving records that arrive during the wait.
 
-Observe `LLMOperationResultFrame` or `on_operation_result`. Results carry the initiating frame's `request_id`, the operation kind, the service name, and one outcome:
+Observe `LLMOperationResultFrame` or `on_operation_result` for the initiating frame's `request_id`, operation kind, service name, and outcome:
 
 | Outcome | Meaning |
 | --- | --- |
-| `accepted` | The provider acknowledged the operation and the service committed its local state. |
-| `rejected` | No provider change was accepted. Accepted state remains available. |
-| `unknown` | Submission or acknowledgment failed without a known result. The conversation is unusable. |
-| `partial` | Some history mutations committed before failure. The conversation is unusable. |
+| `accepted` | Prism acknowledged the operation and Pipecat committed local state. |
+| `rejected` | No change was accepted. The conversation remains usable. |
+| `unknown` | The request's outcome is unknown. Recovery is required. |
+| `partial` | Some history mutations committed before failure. Recovery is required. |
 
-A result identifies an operation. It does not provide server-side idempotency. The service does not automatically retry input, settings, tool execution, or history mutations. An admission rejection before submission permits an explicit new request. Do not resubmit accepted input or input with an unknown outcome.
+See [Limits and recovery](#limits-and-recovery) before retrying a failed operation. Request IDs identify operations; they do not make repeated submissions safe.
 
-## Settings, tools, and history
+## Settings and tools
 
-Settings deltas retain omitted values. Instructions, tools, fillers, voice, interruption policy, and truncation share one SDK update and one acknowledgment. `LLMSetToolsFrame` uses that same path. Empty tools remove all advertised tools. Removing a tool also removes its filler. Explicit fillers must name tools in the resulting tool set.
+Omitted settings retain their values. Instructions, tools, fillers, voice, interruption policy, and history truncation share one SDK update and acknowledgment. `LLMSetToolsFrame` follows the same path. For a settings-only handoff, send instructions and tools in one delta to retain the conversation.
 
-Fillers use SDK `PrismFiller` values with type `none`, `text`, or `auto`. An automatic filler can include generation instructions. Active replies retain their starting policy and handlers when a later update removes or replaces a tool. Live tools use Pipecat's function machinery. The service records each final result before it requests continuation. If continuation has expired, it uses the SDK's recorded-result reply operation where available. It never runs the tool again for result delivery.
+Tool fillers accept SDK `PrismFiller` values `none`, `text`, and `auto`. Automatic fillers can include generation instructions. Fillers must name tools in the resulting tool set. Removing a tool removes its filler; an empty tool list removes all tools.
 
-`response_metadata` uses a separate SDK operation and a separate result with operation kind `response_metadata`. Acceptance of a combined settings update does not promise acceptance of its metadata update. `session_info` exposes the accepted settings revision and the actual provider request ID. `on_session_updated` reports accepted session information. `on_rime_event` exposes SDK events, including response and input IDs, speech end reason, metadata, and faults. `LLMFullResponseStartFrame.metadata["rime"]` carries the provider request ID, response ID, input item IDs, settings revision, response metadata, input frame ID, and RTVI client message ID. Fault exceptions retain code, scope, retryability, and correlation. Retryability does not imply that a conversation is usable. A response with an unknown or expired settings revision requires recovery. If a deployment omits revisions, a policy or handler change can make later response ownership ambiguous and require a fresh conversation.
+Each reply retains its starting interruption policy and tool handlers. Live tools execute through Pipecat. Final results are recorded before continuation; if continuation has expired, the service can request a reply about the recorded result.
 
-History supports user, assistant, and system text, plus completed function call/result pairs. Messages have a 4,000-character limit. Imported calls require ordered completed results. Unsupported roles, images, invalid encoding, incomplete calls, and invalid edits are rejected before the first history mutation. Text equality does not establish identity. A transform that retains existing message objects can delete records with their server IDs intact. A replacement with new dictionaries, a content change, or a reorder requires a rebuild. Rebuilds require no active replies or pending calls. A rebuild can partially apply and has no atomic rollback.
+Response labels use a separate SDK operation with `operation="response_metadata"` in its result. A settings update can succeed while its metadata update fails.
 
-`await llm.get_history()` reads completed server history. It does not replace local conversation records. Active records can be absent from the server snapshot. Microphone turns reserve their place before their final transcript arrives.
+## Diagnostics
 
-History truncation controls future model context capacity. Startup and runtime settings accept `"auto"`, `"disabled"`, and SDK `RetentionRatio`. The service omits truncation until supplied. Deployment support is required. This setting does not remove local records. Interrupted audio truncation is a separate playback operation.
+Use these interfaces to inspect accepted state and correlate replies:
+
+| Interface | Information |
+| --- | --- |
+| `session_info` | Accepted settings revision and the provider request ID actually used. |
+| `on_session_updated` | Accepted SDK session information. |
+| `on_rime_event` | SDK events, including response/input IDs, speech end reason, metadata, and faults. |
+| `LLMFullResponseStartFrame.metadata["rime"]` | Provider request ID, response ID, input item IDs, settings revision, response metadata, input frame ID, and RTVI client message ID. |
+
+Fault exceptions retain code, scope, retryability, and correlation. Retryability describes the request; it does not establish that the conversation can continue.
+
+## History and truncation
+
+Supported history contains user, assistant, and system text, plus completed function call/result pairs. Messages have a 4,000-character limit. Imported results must follow their calls. Invalid edits are rejected before the first mutation.
+
+A transform that retains existing message objects can delete records while preserving server IDs. New dictionaries, changed content, or reordered records require a rebuild, even when text is identical. Rebuilds require no active replies or pending calls and can partially apply without atomic rollback.
+
+Reading `await llm.get_history()` returns completed server history without replacing Pipecat's record. Active records can be absent from the snapshot. Microphone turns reserve their position before the final transcript arrives.
+
+Context truncation controls future model history capacity. Startup and runtime settings accept `"auto"`, `"disabled"`, and SDK `RetentionRatio`. The setting is omitted until supplied and requires deployment support. It does not remove local records. Interrupted audio truncation is a separate playback operation.
 
 ## Playback and interruption
 
-Each output has a globally unique `context_id`. `AudioOutputStartFrame` registers it and `AudioOutputEndFrame` closes it. `AudioOutputStopFrame` stops interruptible audio for one output. These lifecycle markers survive queue interruption. Audio identities survive output resampling, chunking, filters, and mixing. Speech counts exclude padding and mixer-only background audio. Outputs with disabled audio still receive a terminal report.
+Each output has a globally unique `context_id`. `AudioOutputStartFrame` registers it, `AudioOutputEndFrame` closes it, and `AudioOutputStopFrame` stops its interruptible audio. Lifecycle markers survive interruption, and identity is preserved through resampling, chunking, filters, and mixing. Speech counts exclude padding and background audio.
 
-`AudioPlaybackReportFrame` travels upstream with one terminal outcome per output and destination. The Rime owner maps it to the original SDK references, including reports that arrive after a service switch. Prism supports one authoritative destination. Concurrent destinations are rejected. Duplicate reports do not generate duplicate receipts. A response's finished receipt waits for all of its output reports, including an empty response.
+Reports travel upstream as `AudioPlaybackReportFrame`, once per output and destination, including disabled output. They reach the original Rime owner after a service switch. Prism permits one authoritative destination. Duplicate reports are ignored, and finished receipts wait for every output, including empty responses.
 
 | Transport path | Timing guarantee |
 | --- | --- |
-| `LocalAudioTransportParams(audio_out_playback_clock=True)` | Uses PortAudio callback DAC times and the PortAudio stream clock. Counts valid speech samples whose device time has passed. Invalid callback timing or underflow produces unknown timing. This does not establish physical audibility. |
-| Other `BaseOutputTransport` paths, including eval and WebRTC | A successful write establishes byte acceptance. The report uses unknown timing, `played_ms=None`, after any accepted audio. It does not claim listener playback. |
-| Disabled or fully discarded output | Known zero playback. |
-| Test measured-output adapter | Deterministic completion of accepted valid samples, with padding excluded. |
+| `LocalAudioTransportParams(audio_out_playback_clock=True)` | Measures speech using PortAudio callback DAC times and the stream clock. Underflow or invalid timing produces unknown timing. |
+| Other `BaseOutputTransport` paths, including eval and WebRTC | Reports byte acceptance with `played_ms=None` after audio is written. Listener playback is unknown. |
+| Disabled or fully discarded output | Reports known zero playback. |
 
-The SDK/server can estimate playback when timing is unknown. The service does not invent a zero interruption position for partly played output. A measured caller interruption reports per-output audio truncation. Application stops cancel generation and report finished playback. Uninterruptible audio remains in the output queue and is included in the terminal report.
+When timing is unknown, the SDK/server can estimate playback. A measured caller interruption reports per-output audio truncation. Application stops cancel generation and report finished playback. Uninterruptible audio stays queued and counts in the terminal report.
 
-`SpeechHint` applies an immediate temporary multiplier at the output transport. Defaults are gain `0.25` and expiry `0.6` seconds. Repeated hints extend expiry. Confirmed speech, shutdown, errors, and expiry remove only this multiplier. Application volume and gain remain independent. Samples already submitted to a device or remote buffer can retain their prior gain.
+Speech hints lower output gain without cancelling the reply. The `SpeechHint` defaults are gain `0.25` and expiry `0.6` seconds. Repeated hints extend expiry; confirmed speech, shutdown, errors, and expiry remove only the temporary multiplier. Application volume and gain stay independent. Audio already submitted to a device or remote buffer can retain its earlier gain.
 
 ## Limits and recovery
 
-Input queues, requests, transcripts, tool calls, response references, and unresolved output state have explicit limits. Overflow marks the conversation unusable. Responses are retained within the SDK's 128-response window. Unresolved receipts are never silently evicted. End and cancel use one bounded cleanup deadline. A pause in microphone capture does not close the conversation.
-
-For a settings-only handoff, send instructions and tools in one settings delta. This retains the same conversation. For restart or failover, create a fresh service with a copy of accepted settings and supported completed context. Pending calls cannot resume in a fresh conversation. History import does not replay user input or execute imported tools. Unknown outcomes require an explicit application recovery decision. Old playback reports remain with their original service owner.
-
 Prism does not support disabling server turn detection, manual audio commit, video, image history, forced or disabled tool selection, per-reply tool overrides, or intermediate tool results. Use a separate TTS service for arbitrary application-directed speech.
+
+Queues and retained state have explicit limits. Overflow makes the conversation unusable. The SDK retains 128 responses; unresolved receipts are never silently evicted. End and cancel share a bounded cleanup deadline. Pausing microphone capture leaves the conversation open.
+
+A request can be accepted even if its acknowledgment is lost. Do not resend it automatically. The service does not automatically retry input, settings, tool execution, or history mutations.
+
+Rejected admission before submission permits an explicit new request. Unknown outcomes and partially applied history edits require an application recovery decision.
+
+For restart or failover, create a fresh service with accepted settings and supported completed context. Pending tool calls cannot resume in a fresh conversation. Old playback reports stay with their original owner.
+
+Missing or expired settings revisions can also require recovery. Without revisions, a policy or handler change can make later response ownership ambiguous.
 
 ## Example and validation
 
-Run `examples/realtime/realtime-rime.py` with the development runner:
+Run the [example](../../examples/realtime/realtime-rime.py) with the development runner. It includes invoice lookup and a billing handoff that updates instructions and tools together. Initial system history requests the greeting. The typed scenario needs only `RIME_API_KEY`:
 
 ```sh
 uv run --extra rime-realtime --extra runner examples/realtime/realtime-rime.py --port 7860
 uv run pipecat eval run evals/release/scenarios/scripted/rime_prism.yaml --bot-url ws://localhost:7860/ws -v
 ```
 
-The example has invoice lookup and a billing handoff. The handoff updates instructions and tools together. Initial system history requests the opening greeting. The typed scenario covers conversation memory, tool execution, and an observable settings change. It requires only the Rime key.
-
-The audio scenarios use Kokoro for caller speech, Moonshine to transcribe returned audio, and a Typesafe judge. Install their optional dependencies and set `TYPESAFE_API_KEY` for these checks. This key belongs to the eval judge. Rime does not require it. The judge's optional Ollama explainer is disabled in this scenario file.
+Audio scenarios use Kokoro for caller speech, Moonshine to transcribe replies, and a Typesafe judge. Install those optional dependencies and set `TYPESAFE_API_KEY` for the judge. The scenario disables the optional Ollama explainer.
 
 ```sh
 PYTHONPATH=. uv run pipecat eval run evals/release/scenarios/scripted/rime_prism_audio.yaml \
   --bot-url ws://localhost:7860/ws --audio --record-dir /tmp/rime-recordings -v
 ```
 
-The audio scenarios cover conversation memory, interruption followed by another turn, invoice lookup, and billing handoff. Recordings and independent transcription establish returned speech. Physical speaker playback requires a separate device check. See the [live validation report](rime-realtime-validation.md) for results and limits.
+These scenarios cover memory, interruption followed by another turn, tools, and handoff. See the [validation report](rime-realtime-validation.md) for observed behavior and playback measurement limits.
