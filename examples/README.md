@@ -81,6 +81,10 @@ Speech-to-text examples with various STT providers.
 
 Image description and vision capabilities with different multimodal LLMs.
 
+### [`image-generation/`](./image-generation/)
+
+Generating an image from a text prompt with different image generation services (fal, Google, OpenAI).
+
 ### [`realtime/`](./realtime/)
 
 Realtime and multimodal live APIs (OpenAI Realtime, Gemini Live, AWS Nova Sonic, Ultravox, Grok).

@@ -4,9 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Language conversion utilities for Azure services."""
+"""Shared utilities for Azure services."""
+
+from collections.abc import Awaitable, Callable
 
 from pipecat.transcriptions.language import Language, resolve_language
+
+AzureTokenProvider = Callable[[], Awaitable[str]]
+"""Async callable returning a Microsoft Entra ID bearer token.
+
+Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
+``https://ai.azure.com/.default`` scope.
+"""
 
 
 def language_to_azure_language(language: Language) -> str:

@@ -12,10 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.frames.frames import (
-    LLMTextFrame,
-)
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
@@ -44,6 +41,7 @@ class SambaNovaLLMService(OpenAILLMService):
 
     Settings = SambaNovaLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -236,14 +234,14 @@ class SambaNovaLLMService(OpenAILLMService):
                             # Keep iterating through the response to collect all the argument fragments
                             arguments += tool_call.function.arguments
                     elif chunk.choices[0].delta.content:
-                        await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                        await self._push_llm_text(chunk.choices[0].delta.content)
 
                     # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                     # we need to get LLMTextFrame for the transcript
                     elif (audio := getattr(chunk.choices[0].delta, "audio", None)) and audio.get(
                         "transcript"
                     ):
-                        await self.push_frame(LLMTextFrame(audio["transcript"]))
+                        await self._push_llm_text(audio["transcript"])
         finally:
             # Report even if the response is interrupted or cancelled mid-stream.
             if token_usage:

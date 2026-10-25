@@ -139,9 +139,11 @@ class MoonshineSTTService(SegmentedSTTService):
     model works, including the streaming-capable ones. Audio is expected as 16-bit
     mono PCM at 16 kHz.
 
-    Models are language-specific, so a language change reloads the model. The
-    non-English models are released under the non-commercial Moonshine Community
-    License (https://www.moonshine.ai/license).
+    Models are language-specific, so a language change reloads the model. They are
+    MIT-licensed in every language and size, except the legacy non-streaming models
+    for languages other than English (``TINY`` and ``BASE``), which are under the
+    non-commercial Moonshine Community License (https://www.moonshine.ai/license);
+    Moonshine's ``LICENSE`` enumerates them.
     """
 
     Settings = MoonshineSTTSettings

@@ -21,6 +21,9 @@ from openai.types.responses import (
     ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputRefusal,
+    ResponseOutputText,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseTextDeltaEvent,
@@ -63,7 +66,7 @@ def _make_service(**kwargs):
     # streaming completion handler here.
     adapter = MagicMock()
     adapter.get_messages_for_logging.return_value = []
-    adapter.get_llm_invocation_params.return_value = {}
+    adapter.get_llm_invocation_params = AsyncMock(return_value={})
     service.get_llm_adapter = MagicMock(return_value=adapter)
     service._build_response_params = MagicMock(return_value={})
 
@@ -103,19 +106,21 @@ async def _run(service, *events):
     await service._process_context(MagicMock(spec=LLMContext))
 
 
-def _failed_event(error):
+def _failed_event(error, usage=None):
     """Build a ResponseFailedEvent whose response carries the given error object."""
     response = MagicMock()
     response.error = error
+    response.usage = usage
     event = MagicMock(spec=ResponseFailedEvent)
     event.response = response
     return event
 
 
-def _incomplete_event(incomplete_details):
+def _incomplete_event(incomplete_details, usage=None):
     """Build a ResponseIncompleteEvent carrying the given incomplete_details."""
     response = MagicMock()
     response.incomplete_details = incomplete_details
+    response.usage = usage
     event = MagicMock(spec=ResponseIncompleteEvent)
     event.response = response
     return event
@@ -357,6 +362,48 @@ class TestHttpStreamErrorEvents:
         assert "max_output_tokens" in service.push_error.call_args.kwargs["error_msg"]
 
     @pytest.mark.asyncio
+    async def test_response_incomplete_reports_token_usage(self):
+        """A response cut short is billed for the tokens it used."""
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        details = MagicMock()
+        details.reason = "max_output_tokens"
+        usage = ResponseUsage.construct(
+            input_tokens=12,
+            output_tokens=50,
+            total_tokens=62,
+            input_tokens_details=None,
+            output_tokens_details=None,
+        )
+        await _run(service, _incomplete_event(details, usage))
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 50
+        assert tokens.total_tokens == 62
+
+    @pytest.mark.asyncio
+    async def test_response_failed_reports_token_usage(self):
+        service = _make_service()
+        service.push_error = AsyncMock()
+
+        error = MagicMock()
+        error.message = "server_error"
+        usage = ResponseUsage.construct(
+            input_tokens=12,
+            output_tokens=3,
+            total_tokens=15,
+            input_tokens_details=None,
+            output_tokens_details=None,
+        )
+        await _run(service, _failed_event(error, usage))
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 12
+        assert tokens.completion_tokens == 3
+
+    @pytest.mark.asyncio
     async def test_response_incomplete_without_details(self):
         service = _make_service()
         service.push_error = AsyncMock()
@@ -532,6 +579,98 @@ class TestHttpStreamErrorEvents:
         assert error_frames, "Expected an ErrorFrame after an in-stream response.failed event"
 
 
+class TestHttpEmptyResponse:
+    """A response that completes with no text and no function call is reported."""
+
+    @staticmethod
+    def _completed(output):
+        response = MagicMock()
+        response.id = "resp_1"
+        response.model = "gpt-5.4-mini"
+        response.usage = None
+        response.output = output
+        event = MagicMock(spec=ResponseCompletedEvent)
+        event.response = response
+        return event
+
+    @staticmethod
+    def _message(content):
+        return ResponseOutputMessage(
+            id="msg_1", type="message", role="assistant", status="completed", content=content
+        )
+
+    async def _run(self, *events):
+        service = _make_service()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            await _run(service, *events)
+        return service, mock_logger
+
+    @pytest.mark.asyncio
+    async def test_reasoning_only_response_pushes_error(self):
+        reasoning = ResponseReasoningItem(id="rs_1", type="reasoning", summary=[])
+        service, mock_logger = await self._run(self._completed([reasoning]))
+
+        service.push_error.assert_awaited_once()
+        assert "resp_1" in service.push_error.call_args.kwargs["error_msg"]
+        assert "['reasoning']" in mock_logger.warning.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_named_in_the_warning(self):
+        refusal = ResponseOutputRefusal(type="refusal", refusal="I can't help with that.")
+        service, mock_logger = await self._run(self._completed([self._message([refusal])]))
+
+        service.push_error.assert_awaited_once()
+        assert "['message[refusal]']" in mock_logger.warning.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_text_response_pushes_no_error(self):
+        text = ResponseOutputText(type="output_text", text="Hello", annotations=[])
+        service, mock_logger = await self._run(
+            _text_delta_event("Hello"), self._completed([self._message([text])])
+        )
+
+        service.push_error.assert_not_awaited()
+        mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_function_call_only_response_pushes_no_error(self):
+        call = ResponseFunctionToolCall(
+            id="fc_1", type="function_call", name="end_session", call_id="call_1", arguments="{}"
+        )
+        added = MagicMock(spec=ResponseOutputItemAddedEvent)
+        added.item = call
+        done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        done.item = call
+        service, _ = await self._run(added, done, self._completed([call]))
+
+        service.push_error.assert_not_awaited()
+        service.run_function_calls.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_response_reaches_pipeline_as_error_frame(self):
+        service = _make_service()
+        reasoning = ResponseReasoningItem(id="rs_1", type="reasoning", summary=[])
+        service._client.responses.create = AsyncMock(
+            return_value=_FakeAsyncStream([self._completed([reasoning])])
+        )
+
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[LLMContextFrame(context=LLMContext())],
+            expected_down_frames=[
+                LLMServiceMetadataFrame,
+                LLMFullResponseStartFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
+        assert len(error_frames) == 1
+        assert not error_frames[0].fatal
+
+
 # ---------------------------------------------------------------------------
 # retry_on_timeout
 # ---------------------------------------------------------------------------
@@ -614,3 +753,30 @@ class TestHttpRetryOnTimeout:
 
         assert await service._create_stream({}) is stream
         assert attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_response_params — default reasoning effort
+# ---------------------------------------------------------------------------
+
+
+class TestHttpReasoningParams:
+    def _params(self, model):
+        # Built without _make_service, which stubs out _build_response_params.
+        with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+            service = OpenAIResponsesHttpLLMService(
+                api_key="test-key",
+                settings=OpenAIResponsesHttpLLMService.Settings(model=model),
+            )
+        return service._build_response_params({"input": []})
+
+    def test_listed_models_get_their_effort(self):
+        """Models listed in the reasoning defaults get their lowest effort."""
+        assert self._params("gpt-5-mini")["reasoning"] == {"effort": "minimal"}
+        assert self._params("gpt-5.5")["reasoning"] == {"effort": "none"}
+        assert self._params("o3")["reasoning"] == {"effort": "low"}
+
+    def test_unlisted_models_run_at_openais_default(self):
+        """Every other model is left at the provider default."""
+        for model in ("gpt-6.2", "gpt-4.1"):
+            assert "reasoning" not in self._params(model), model

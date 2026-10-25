@@ -31,6 +31,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -67,6 +68,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -157,8 +162,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Every processor is set up, so listing them all gives the pipeline it
         # ran against, which is what the phase totals below are spread over.
         logger.info(f"  Setup (concurrent): {report.setup_phase_secs:.3f}s")
-        if report.warmup:
-            logger.info(f"    warming deferred imports: {report.warmup.duration_secs:.3f}s")
         for timing in report.processor_timings:
             logger.info(f"    {timing.processor_name}: {timing.setup_duration_secs:.3f}s")
 

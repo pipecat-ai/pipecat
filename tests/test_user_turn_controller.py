@@ -662,8 +662,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """
         resets = 0
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+        with self.assertWarns(DeprecationWarning):
 
             class LegacyStart(VADUserTurnStartStrategy):
                 async def reset(self):  # the deprecated hook
@@ -684,8 +683,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """A stop strategy's reset() is bridged on both turn boundaries (armed, then cleaned)."""
         resets = 0
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+        with self.assertWarns(DeprecationWarning):
 
             class LegacyStop(ExternalUserTurnCompletionStopStrategy):
                 async def reset(self):  # the deprecated hook
@@ -704,6 +702,22 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
             class LegacyStop(ExternalUserTurnCompletionStopStrategy):
                 async def reset(self):
                     pass
+
+    async def test_reset_warning_shows_under_default_filters_at_the_subclass(self):
+        """The reset() warning survives the default DeprecationWarning filter and names the subclass's file."""
+        for base in (BaseUserTurnStartStrategy, BaseUserTurnStopStrategy):
+            with self.subTest(base=base.__name__):
+                with warnings.catch_warnings(record=True) as caught:
+                    # Python's default filter for a module other than __main__.
+                    warnings.simplefilter("ignore", DeprecationWarning)
+
+                    class Legacy(base):
+                        async def reset(self):
+                            pass
+
+                self.assertEqual(len(caught), 1)
+                self.assertIs(caught[0].category, DeprecationWarning)
+                self.assertEqual(caught[0].filename, __file__)
 
     async def test_subclass_of_concrete_strategy_overriding_reset_warns_but_is_not_bridged(self):
         """Subclassing a concrete strategy and overriding reset() warns, but reset() won't run.

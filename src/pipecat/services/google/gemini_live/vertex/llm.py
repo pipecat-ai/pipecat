@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.services.google.gemini_live.llm import (
     GeminiLiveLLMService,
     GeminiMediaResolution,
@@ -138,7 +138,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="google/gemini-live-2.5-flash-native-audio",
+            model="google/gemini-3.8-live",
             voice="Charon",
             frequency_penalty=None,
             max_tokens=4096,

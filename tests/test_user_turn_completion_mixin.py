@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
@@ -173,6 +174,69 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         # The marker must now be cleared — ready for the next response
         self.assertIsNone(processor._turn_marker)
         self.assertEqual(processor._turn_text_buffer, "")
+
+    async def test_response_end_reports_the_raw_text_and_marker(self):
+        """When the response ends, the mixin reports what the LLM wrote and the marker it read."""
+        processor = MockProcessor()
+        # Mock timeout to avoid needing task manager
+        processor._start_incomplete_timeout = AsyncMock()
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text("Well, ")
+            await processor._push_turn_text(f"{USER_TURN_INCOMPLETE_SHORT_MARKER} go on")
+            await processor._push_turn_text(" please")
+            await processor.push_frame(LLMFullResponseEndFrame())
+
+        reports = [f for f in pushed_frames if isinstance(f, LLMMarkerResponseFrame)]
+        self.assertEqual(len(reports), 1)
+        report = reports[0]
+        # Everything the LLM produced, including what the mixin held back.
+        self.assertEqual(report.raw, f"Well, {USER_TURN_INCOMPLETE_SHORT_MARKER} go on please")
+        self.assertEqual((report.marker, report.kind), (USER_TURN_INCOMPLETE_SHORT_MARKER, "short"))
+        self.assertEqual(
+            report.markers,
+            [
+                USER_TURN_COMPLETE_MARKER,
+                USER_TURN_INCOMPLETE_SHORT_MARKER,
+                USER_TURN_INCOMPLETE_LONG_MARKER,
+            ],
+        )
+        # The report precedes the end-of-response frame.
+        self.assertLess(
+            pushed_frames.index(report),
+            next(i for i, f in enumerate(pushed_frames) if isinstance(f, LLMFullResponseEndFrame)),
+        )
+
+    async def test_a_response_without_a_marker_is_reported_as_such(self):
+        processor = MockProcessor()
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor._push_turn_text("Hello there")
+            await processor.push_frame(LLMFullResponseEndFrame())
+        (report,) = [f for f in pushed_frames if isinstance(f, LLMMarkerResponseFrame)]
+        self.assertEqual((report.raw, report.marker, report.kind), ("Hello there", None, None))
+
+    async def test_a_response_the_mixin_never_saw_is_not_reported(self):
+        processor = MockProcessor()
+        pushed_frames = []
+        with unittest.mock.patch.object(
+            FrameProcessor,
+            "push_frame",
+            AsyncMock(side_effect=lambda f, *args, **kwargs: pushed_frames.append(f)),
+        ):
+            await processor.push_frame(LLMFullResponseStartFrame())
+            await processor.push_frame(LLMFullResponseEndFrame())
+        self.assertEqual([f for f in pushed_frames if isinstance(f, LLMMarkerResponseFrame)], [])
 
     async def test_new_response_cancels_pending_incomplete_timeout(self):
         """A new LLM response starting must cancel a pending incomplete timeout.
@@ -711,9 +775,9 @@ class TestConfigurableMarkers(unittest.IsolatedAsyncioTestCase):
             ):
                 self.assertNotIn(default, prompt)
 
-        self.assertIn("Mark as COMPLETE (Y) when:", config.completion_instructions)
-        self.assertIn("`N`", config.completion_instructions)
-        self.assertIn("`W`", config.completion_instructions)
+        self.assertIn("Write Y, a space, then your full reply", config.completion_instructions)
+        self.assertIn("Respond with only N", config.completion_instructions)
+        self.assertIn("Respond with only W", config.completion_instructions)
         self.assertIn("respond with Y", config.short_prompt)
         self.assertIn("respond with Y", config.long_prompt)
 

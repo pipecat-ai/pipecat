@@ -12,18 +12,24 @@ from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
     EvalAssertionFailure,
+    EvalExpectationResult,
     EvalProgress,
     EvalScriptResult,
     EvalScriptTurnProgress,
     EvalScriptTurnResult,
     EvalTrace,
 )
-from pipecat.evals.script import EvalScriptScenario, EvalScriptTurn, EvalSendAfter
+from pipecat.evals.script import (
+    EvalExpectation,
+    EvalScriptScenario,
+    EvalScriptTurn,
+    EvalSendAfter,
+)
 
 SEND_AFTER_MAX_WAIT_S = 30.0
 # How long a turn waits for the bot to finish speaking before it is sent. A
@@ -141,8 +147,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
     async def _run_turn(self, turn: EvalScriptTurn, turn_idx: int) -> list[EvalAssertionFailure]:
         """Drive one turn: honor ``send_after``, send the input, match the expectations."""
-        # The turn's function calls match by name in any order; start each turn
-        # with an empty buffer so a prior turn's calls can't carry over.
+        # An expectation may look back to the start of its turn, never further.
         self._matcher.reset_turn()
 
         if turn.send_after is not None:
@@ -163,26 +168,43 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         return await self._match_expectations(turn, turn_idx)
 
     async def _await_bot_quiet(self) -> None:
-        """Hold the send while the bot is speaking, up to ``BOT_QUIET_MAX_WAIT_S``."""
-        if not self._stream.bot_speaking:
+        """Hold the send while the bot is speaking, and until its speech is transcribed, up to ``BOT_QUIET_MAX_WAIT_S``.
+
+        What the bot said before the send belongs to the turn before, so the
+        send waits for the last of it to be transcribed and closed into a turn:
+        a transcript can land seconds after its audio, and one landing after
+        the send would otherwise be taken for the reply.
+        """
+        if self._stream.bot_speaking:
+            self._trace.log("send: waiting for the bot to finish speaking")
+            if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
+                self._trace.log(
+                    f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending"
+                )
+                return
+        if self._stream.bot_transcribed:
             return
-        self._trace.log("send: waiting for the bot to finish speaking")
-        if not await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S):
-            self._trace.log(f"send: bot still speaking after {BOT_QUIET_MAX_WAIT_S:g}s, sending")
+        self._trace.log("send: waiting for the bot's speech to be transcribed")
+        if not await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S):
+            self._trace.log(
+                f"send: bot speech still being transcribed after {BOT_QUIET_MAX_WAIT_S:g}s "
+                f"({self._stream.bot_speech_outstanding}), sending"
+            )
 
     async def _await_previous_reply(self) -> None:
-        """Let a reply the bot is still speaking end before an observing turn starts.
+        """Let a reply the bot is still speaking, or that is still being transcribed, end before an observing turn starts.
 
         A turn that sends nothing waits for what the bot says next, so what
         the bot is still saying belongs to the turn before it, however late its
         transcription lands. The first turn keeps the bot's greeting.
         """
-        if not self._stream.bot_speaking:
+        if not self._stream.bot_speaking and self._stream.bot_transcribed:
             return
         self._trace.log("observe: waiting for the bot to finish the previous reply")
         await self._stream.wait_bot_quiet(BOT_QUIET_MAX_WAIT_S)
+        await self._stream.wait_bot_transcribed(BOT_QUIET_MAX_WAIT_S)
         self._stream.drop_pending_bot_output("the previous reply")
-        self._stream.turn_boundary()
+        self._stream.observing_boundary()
 
     async def _await_send_after(
         self, send_after: EvalSendAfter, turn_idx: int
@@ -191,22 +213,34 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         try:
             await self._wait_send_after(send_after)
         except TimeoutError as e:
-            # Only the event-anchored wait can time out; the pure-delay form
-            # just sleeps. So event is never None here, but fall back for typing.
-            event_name = send_after.event or "send_after"
-            failure = EvalAssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=-1,
-                event_name=event_name,
-                reason=f"send_after never fired: {e}",
-                kind="send_after_timeout",
-            )
-            self._trace.log(f"FAIL: {event_name}: {failure.reason}")
-            await self._progress(
-                EvalScriptTurnProgress(turn_idx, -1, event_name, "timeout", failure.reason)
-            )
-            return failure
+            reason = f"send_after never fired: {e}"
+            return await self._send_after_failure(send_after, turn_idx, reason)
+        except EvalBotEndedError:
+            reason = f"the bot ended the call before {send_after.event!r} fired"
+            return await self._send_after_failure(send_after, turn_idx, reason, "bot_ended")
         return None
+
+    async def _send_after_failure(
+        self,
+        send_after: EvalSendAfter,
+        turn_idx: int,
+        reason: str,
+        kind: str = "send_after_timeout",
+    ) -> EvalAssertionFailure:
+        """Record a turn whose ``send_after`` never fired, and return its failure."""
+        # Only the event-anchored wait can fail; the pure-delay form just
+        # sleeps. So event is never None here, but fall back for typing.
+        event_name = send_after.event or "send_after"
+        self._trace.log(f"FAIL: {event_name}: {reason}")
+        status = "timeout" if kind == "send_after_timeout" else "failed"
+        await self._progress(EvalScriptTurnProgress(turn_idx, -1, event_name, status, reason))
+        return EvalAssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=-1,
+            event_name=event_name,
+            reason=reason,
+            kind=kind,
+        )
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Wait until ``send_after.event`` has been seen and ``delay_ms`` more have passed.
@@ -215,6 +249,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
         Raises:
             TimeoutError: If the event never arrives.
+            EvalBotEndedError: If the bot ends the call before the event arrives.
         """
         target_delay_s = send_after.delay_ms / 1000.0
 
@@ -232,6 +267,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 wait_s = max(0.0, (seen_at + target_delay_s) - time.monotonic())
                 await asyncio.sleep(wait_s)
                 return
+
+            if self._stream.bot_has_ended:
+                raise EvalBotEndedError()
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
@@ -252,7 +290,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         if turn.image is not None:
             await self._client.send_image(turn.image)
         if turn.user is not None:
-            await self._say(turn.user, audio_file=turn.audio)
+            await self._say(turn.user, audio_file=turn.audio, parts=turn.parts)
         elif turn.dtmf is not None:
             await self._press(turn.dtmf)
 
@@ -262,9 +300,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         """Match the turn's expectations in order, all within one deadline anchored at the send.
 
         A stalled turn then fails within a single ``within_ms`` budget rather than
-        one budget per expectation.
+        one budget per expectation, and a turn whose bot ended the call fails at
+        once.
         """
         failures: list[EvalAssertionFailure] = []
+        resolved = self.turns[turn_idx].expectations
         anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or self._default_timeout_ms
@@ -274,23 +314,18 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 )
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
+                failures.append(await self._unmatched(turn_idx, exp_idx, expectation, reason))
+                break
+            except EvalBotEndedError:
+                reason = f"the bot ended the call before a matching {expectation.event!r} event"
                 failures.append(
-                    EvalAssertionFailure(
-                        turn_index=turn_idx,
-                        expectation_index=exp_idx,
-                        event_name=expectation.event,
-                        reason=reason,
-                        kind="timeout",
-                    )
-                )
-                self._trace.log(f"FAIL: {expectation.event}: {reason}")
-                await self._progress(
-                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
+                    await self._unmatched(turn_idx, exp_idx, expectation, reason, "bot_ended")
                 )
                 break
 
             if failure:
                 failures.append(failure)
+                resolved.append(EvalExpectationResult(exp_idx, expectation.event, passed=False))
                 self._trace.log(f"FAIL: {expectation.event}: {failure.reason}")
                 await self._progress(
                     EvalScriptTurnProgress(
@@ -298,13 +333,36 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     )
                 )
             else:
+                matched = self._matcher.last_match_text
+                resolved.append(
+                    EvalExpectationResult(exp_idx, expectation.event, passed=True, matched=matched)
+                )
                 await self._progress(
-                    EvalScriptTurnProgress(
-                        turn_idx,
-                        exp_idx,
-                        expectation.event,
-                        "matched",
-                        self._matcher.last_match_text,
-                    )
+                    EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, "matched", matched)
                 )
         return failures
+
+    async def _unmatched(
+        self,
+        turn_idx: int,
+        exp_idx: int,
+        expectation: EvalExpectation,
+        reason: str,
+        kind: str = "timeout",
+    ) -> EvalAssertionFailure:
+        """Record an expectation whose event never arrived, and return its failure."""
+        self.turns[turn_idx].expectations.append(
+            EvalExpectationResult(exp_idx, expectation.event, passed=False)
+        )
+        self._trace.log(f"FAIL: {expectation.event}: {reason}")
+        status = "timeout" if kind == "timeout" else "failed"
+        await self._progress(
+            EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, status, reason)
+        )
+        return EvalAssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=exp_idx,
+            event_name=expectation.event,
+            reason=reason,
+            kind=kind,
+        )

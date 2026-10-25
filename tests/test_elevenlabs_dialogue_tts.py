@@ -6,7 +6,6 @@
 
 """Tests for the ElevenLabs Text-to-Dialogue TTS service."""
 
-import asyncio
 import base64
 import json
 import unittest
@@ -50,7 +49,7 @@ async def _open_dialogue_context(service, ws, context_id="ctx-1"):
     """Put the service in the state run_tts leaves behind for an open context."""
     service._websocket = ws
     service._contexts[context_id] = _DialogueContext()
-    service._audio_contexts[context_id] = asyncio.Queue()
+    await service._audio_context_manager.create(context_id)
 
 
 @pytest.mark.asyncio
@@ -124,6 +123,61 @@ async def test_dialogue_close_context_is_idempotent():
     await service._close_context("ctx-1")
 
     assert len(ws.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_dialogue_context_init_is_idempotent():
+    """Re-registering a context the server already has closes the socket."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._send_context_init("ctx-1")
+    await service._send_context_init("ctx-1")
+
+    assert ws.sent == [{"context_id": "ctx-1", "voices": ["test-voice"]}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_quiet_context_is_not_registered_again():
+    """The reported 1008: run_tts reopens the audio context, the server's stays."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+    await service._send_text("First sentence.", "ctx-1")
+
+    # What the base class does when an audio context reaches its idle timeout.
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_completed("ctx-1")
+    ws.sent.clear()
+
+    async for _ in service.run_tts("The rest of the turn.", "ctx-1"):
+        pass
+
+    assert ws.sent == [
+        {
+            "context_id": "ctx-1",
+            "inputs": [
+                {"text": "The rest of the turn.", "voice_id": "test-voice", "new_turn": False}
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_new_connection_forgets_old_contexts():
+    """A context belongs to the connection that registered it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    fresh = _FakeWebSocket()
+    service._websocket = fresh
+    await service._on_websocket_connected()
+
+    assert "ctx-1" not in service._contexts
+    assert fresh.sent == [{"context_id": _KEEPALIVE_CONTEXT_ID, "voices": ["test-voice"]}]
 
 
 @pytest.mark.asyncio
@@ -209,6 +263,23 @@ async def test_dialogue_turn_end_closes_the_context():
     await service.on_turn_context_completed()
 
     assert ws.sent[-1] == {"context_id": "ctx-1", "close_context": True}
+
+
+@pytest.mark.asyncio
+async def test_dialogue_turn_end_closes_a_context_that_went_quiet():
+    """A context still generating outlives the audio context that waits on it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+
+    # What the base class does when an audio context reaches its idle timeout.
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_completed("ctx-1")
+
+    await service.on_turn_context_completed()
+
+    assert ws.sent == [{"context_id": "ctx-1", "close_context": True}]
 
 
 @pytest.mark.asyncio
@@ -352,7 +423,13 @@ def test_dialogue_token_aggregation_is_refused():
     assert service._is_streaming_tokens is False
 
 
-def test_dialogue_non_v3_model_warns_without_raising():
+def test_dialogue_defaults_to_eleven_v4_turbo():
+    service = _make_dialogue_service()
+
+    assert service._settings.model == "eleven_v4_turbo"
+
+
+def test_dialogue_non_dialogue_model_warns_without_raising():
     """The wrong-model warning names the service, so it needs a constructed one."""
     service = _make_dialogue_service(model="eleven_flash_v2_5")
 
@@ -382,7 +459,8 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
     # The next turn is under way with a fresh clock.
     service._cumulative_time = 0.0
     service._partial_word = ""
-    service._audio_contexts = {"ctx-2": None}
+    service._audio_context_manager.remove("ctx-1")
+    await service._audio_context_manager.create("ctx-2")
 
     # Late alignment from the interrupted context arrives.
     await service._handle_message(

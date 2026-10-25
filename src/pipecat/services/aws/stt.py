@@ -14,8 +14,8 @@ import json
 import random
 import string
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from loguru import logger
 from websockets import Subprotocol
@@ -43,14 +43,24 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.errors import ErrorCategory, extract_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 @dataclass
 class AWSTranscribeSTTSettings(STTSettings):
-    """Settings for AWSTranscribeSTTService."""
+    """Settings for AWSTranscribeSTTService.
 
-    pass
+    Parameters:
+        partial_results_stability: How stable interim results should be, trading
+            accuracy against latency: ``"low"`` is the most accurate, ``"high"``
+            the fastest. AWS binds this to a connection, so updating it at
+            runtime triggers a reconnect. See
+            https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
+    """
+
+    partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class AWSTranscribeSTTService(WebsocketSTTService):
@@ -117,6 +127,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model=None,
             language=Language.EN,
+            partial_results_stability="high",
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -143,20 +154,15 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         self._show_speaker_label = False
         self._enable_channel_identification = False
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
-        resolved = resolve_credentials(
+        # Explicit or environment keys. Without them, each connection is signed
+        # with keys from the default chain (see `_signing_credentials`).
+        self._credentials = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
             aws_session_token=aws_session_token,
             region=region,
         )
-
-        self._credentials = {
-            "aws_access_key_id": resolved.access_key,
-            "aws_secret_access_key": resolved.secret_key,
-            "aws_session_token": resolved.session_token,
-            "region": resolved.region,
-        }
+        self._aws_session = None
 
         self._receive_task = None
 
@@ -249,7 +255,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -272,6 +280,46 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 await self.push_error(error_msg=f"Error sending end-stream: {e}", exception=e)
 
         await self._disconnect_websocket()
+
+    async def _signing_credentials(self) -> dict[str, str | None]:
+        """Return the keys to sign the next connection's URL with.
+
+        Keys passed in or set in the environment are used as given. Otherwise
+        they come from the default AWS credential chain through an aiobotocore
+        session, which renews temporary credentials as they near expiry, so
+        every connection is signed with current keys.
+
+        Raises:
+            ValueError: If no keys are passed in, set in the environment, or
+                found by the default chain.
+        """
+        if self._credentials.access_key or self._credentials.secret_key:
+            return {
+                "access_key": self._credentials.access_key,
+                "secret_key": self._credentials.secret_key,
+                "session_token": self._credentials.session_token,
+            }
+
+        if self._aws_session is None:
+            try:
+                import aiobotocore.session
+            except ModuleNotFoundError as e:
+                raise ValueError(
+                    "No AWS credentials were given, and the default credential chain "
+                    'needs aiobotocore: `uv add "pipecat-ai[aws]"`.'
+                ) from e
+            self._aws_session = aiobotocore.session.get_session()
+            self._aws_session.set_config_variable("region", self._credentials.region)
+
+        credentials = await self._aws_session.get_credentials()
+        if credentials is None:
+            raise ValueError("No AWS credentials found in the parameters, environment or chain.")
+        frozen = await credentials.get_frozen_credentials()
+        return {
+            "access_key": frozen.access_key,
+            "secret_key": frozen.secret_key,
+            "session_token": frozen.token,
+        }
 
     async def _connect_websocket(self):
         """Establish the websocket connection to AWS Transcribe."""
@@ -311,12 +359,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             # Get presigned URL
             presigned_url = get_presigned_url(
-                region=self._credentials["region"],
-                credentials={
-                    "access_key": self._credentials["aws_access_key_id"],
-                    "secret_key": self._credentials["aws_secret_access_key"],
-                    "session_token": self._credentials["aws_session_token"],
-                },
+                region=self._credentials.region,
+                credentials=await self._signing_credentials(),
                 language_code=language_code,
                 media_encoding=self.get_service_encoding(
                     self._media_encoding
@@ -324,7 +368,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 sample_rate=connect_sample_rate,
                 number_of_channels=self._number_of_channels,
                 enable_partial_results_stabilization=True,
-                partial_results_stability="high",
+                partial_results_stability=assert_given(self._settings.partial_results_stability),
                 show_speaker_label=self._show_speaker_label,
                 enable_channel_identification=self._enable_channel_identification,
             )

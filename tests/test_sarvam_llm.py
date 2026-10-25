@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -18,6 +18,13 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.utils.types import NotGiven
+
+
+def _mock_adapter() -> MagicMock:
+    """Adapter mock with an async get_llm_invocation_params."""
+    adapter = MagicMock()
+    adapter.get_llm_invocation_params = AsyncMock()
+    return adapter
 
 
 class _FakeSarvamError(Exception):
@@ -51,8 +58,9 @@ def test_sarvam_llm_constructor_rejects_unsupported_model():
 @pytest.mark.parametrize(
     "model",
     [
+        "deepseekv4.1-flash",
         "gemma4",
-        "glm5.2",
+        "glm5.3",
         "sarvam-105b",
         "sarvam-105b-conversations",
     ],
@@ -76,8 +84,9 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
     "model, expected_base_url",
     [
         ("sarvam-105b", "https://api.sarvam.ai/v2"),
+        ("deepseekv4.1-flash", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
-        ("glm5.2", "https://api.sarvam.ai/v2"),
+        ("glm5.3", "https://api.sarvam.ai/v2"),
         ("sarvam-105b-conversations", "https://api.sarvam.ai/v1"),
     ],
 )
@@ -563,12 +572,12 @@ def test_sarvam_llm_conversations_supports_tool_calling():
     assert built_params["tools"][0]["function"]["name"] == "get_weather"
 
 
-def test_sarvam_llm_glm52_supports_reasoning_effort():
+def test_sarvam_llm_glm53_supports_reasoning_effort():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(
-                model="glm5.2",
+                model="glm5.3",
                 reasoning_effort="high",
             ),
         )
@@ -583,12 +592,12 @@ def test_sarvam_llm_glm52_supports_reasoning_effort():
 
 
 @pytest.mark.asyncio
-async def test_sarvam_llm_glm52_rejects_wiki_grounding():
+async def test_sarvam_llm_glm53_rejects_wiki_grounding():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
             settings=SarvamLLMService.Settings(
-                model="glm5.2",
+                model="glm5.3",
                 wiki_grounding=True,
             ),
         )
@@ -610,11 +619,11 @@ async def test_sarvam_llm_glm52_rejects_wiki_grounding():
 
 
 @pytest.mark.asyncio
-async def test_sarvam_llm_glm52_rejects_image_input():
+async def test_sarvam_llm_glm53_rejects_image_input():
     with patch.object(SarvamLLMService, "create_client"):
         service = SarvamLLMService(
             api_key="test-key",
-            settings=SarvamLLMService.Settings(model="glm5.2"),
+            settings=SarvamLLMService.Settings(model="glm5.3"),
         )
         service._client = AsyncMock()
 
@@ -691,7 +700,7 @@ async def test_sarvam_llm_vision_validation_skips_non_dict_messages():
     service.push_error = mock_push_error
 
     # Non-dict entries should be skipped by vision validation, not cause an error
-    mock_adapter = MagicMock()
+    mock_adapter = _mock_adapter()
     mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
         messages=[
             "not a dict",
@@ -729,7 +738,7 @@ async def test_sarvam_llm_run_inference_with_llm_context():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         test_messages = [
             {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "Hello, world!"},
@@ -795,7 +804,7 @@ async def test_sarvam_llm_run_inference_max_tokens_override():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -825,7 +834,7 @@ async def test_sarvam_llm_run_inference_forwards_system_instruction():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -857,7 +866,7 @@ async def test_sarvam_llm_timeout_errors_are_not_wrapped():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -880,7 +889,7 @@ async def test_sarvam_llm_run_inference_surfaces_raw_server_error():
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -910,7 +919,7 @@ async def test_sarvam_llm_get_chat_completions_propagates_response_error():
         )
 
         mock_context = MagicMock(spec=LLMContext)
-        mock_adapter = MagicMock()
+        mock_adapter = _mock_adapter()
         mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
             messages=[{"role": "user", "content": "Hello"}],
             tools=OPENAI_NOT_GIVEN,
@@ -936,7 +945,7 @@ async def test_sarvam_llm_process_frame_surfaces_raw_server_error():
 
         pushed_errors = []
 
-        async def mock_push_error(error_msg, exception=None):
+        async def mock_push_error(error_msg, exception=None, **kwargs):
             pushed_errors.append({"error_msg": error_msg, "exception": exception})
 
         service.push_error = mock_push_error

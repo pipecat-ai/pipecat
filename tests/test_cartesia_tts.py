@@ -4,19 +4,28 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
     TTSTextFrame,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import (
+    CartesiaHttpTTSService,
+    CartesiaTTSService,
+    language_to_cartesia_language,
+)
 from pipecat.services.settings import TTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.context.word_timestamp_tracker import WordTimestamp
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
@@ -24,6 +33,86 @@ def _service(language: str) -> CartesiaTTSService:
     service = CartesiaTTSService.__new__(CartesiaTTSService)
     service._settings = TTSSettings(language=language)
     return service
+
+
+@pytest.mark.parametrize(
+    "language, expected",
+    [
+        (Language.ES, "es"),
+        (Language.ES_MX, "es-MX"),
+        (Language.EN_GB, "en-GB"),
+        (Language.ES_AR, "es-AR"),
+        (Language.ZH_TW, "zh"),
+        (Language.ES_BO, "es"),
+        (Language.DE_CH, "de"),
+        (Language.NB, "no"),
+        (Language.NB_NO, "no-NO"),
+        (Language.FIL, "tl"),
+        (Language.FIL_PH, "tl-PH"),
+    ],
+)
+def test_language_to_cartesia_language_keeps_supported_locales(language, expected):
+    assert language_to_cartesia_language(language) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
+@pytest.mark.parametrize("model", ["sonic-3.6", "sonic-3"])
+@pytest.mark.parametrize(
+    "language, expected",
+    [(Language.ES_MX, "es-MX"), ("en-GB", "en-GB"), (Language.DE_CH, "de"), (None, None)],
+)
+@pytest.mark.parametrize("update", [False, True])
+async def test_requests_send_the_mapped_language(service_cls, model, language, expected, update):
+    service = service_cls(
+        api_key="test",
+        settings=service_cls.Settings(
+            model=model, voice="voice", language="en" if update else language
+        ),
+    )
+    if update:
+        await service._update_settings(service.Settings(language=language))
+    if service_cls is CartesiaTTSService:
+        payload = json.loads(service._build_msg(text="Hello", context_id="ctx"))
+    else:
+        response = MagicMock(status=200, read=AsyncMock(return_value=b"\x00\x00"))
+        service._session = MagicMock()
+        service._session.post.return_value.__aenter__.return_value = response
+        _ = [frame async for frame in service.run_tts("Hello", "ctx")]
+        payload = service._session.post.call_args.kwargs["json"]
+
+    assert payload.get("language") == expected
+    assert "locale" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "language, delta, expected, rotated",
+    [
+        ("en-US", {"language": "en-GB"}, "en-GB", True),
+        ("en-US", {"language": Language.ES_MX}, "es-MX", True),
+        ("en-US", {"language": Language.DE_CH}, "de", True),
+        ("en-US", {"language": "en-US"}, "en-US", False),
+    ],
+)
+async def test_locale_update_rotates_context(language, delta, expected, rotated):
+    service = CartesiaTTSService(
+        api_key="test",
+        settings=CartesiaTTSService.Settings(model="sonic-3.6", voice="voice", language=language),
+    )
+    service._turn_context_id = "old"
+    service.flush_audio = AsyncMock()
+    service.audio_context_available = lambda context_id: True
+
+    await service._update_settings(service.Settings(**delta))
+
+    assert (service._turn_context_id != "old") is rotated
+    if rotated:
+        service.flush_audio.assert_awaited_once_with(context_id="old")
+    else:
+        service.flush_audio.assert_not_awaited()
+    payload = json.loads(service._build_msg(text="Hello", context_id=service._turn_context_id))
+    assert payload["language"] == expected
 
 
 def _process_word_timestamps(
@@ -201,7 +290,7 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         service._aggregated_frame_sequencer = seq
         service._turn_context_id = old_ctx
         for token in ("Hi", " there"):
-            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            frame = AggregatedTextFrame(token, TextType.SENTENCE, raw_text=token)
             await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
         assert seq._slots == []  # nothing promoted — sentence has no boundary yet
 
@@ -260,3 +349,67 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         self.assertEqual(pushed, [])
         self.assertIsNone(service._flushed)
         self.assertEqual(service._turn_context_id, old_ctx)
+
+
+class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
+    """Cartesia reports a Japanese sentence's final mark as its own token. Each mark
+    must reach the conversation context exactly once, whether it arrives with the
+    character before it or opens the next timestamps message.
+    """
+
+    async def _queued_words(self, batches: list[list[str]]) -> list[WordTimestamp]:
+        service = _service("ja")
+        queued: list[WordTimestamp] = []
+
+        async def messages():
+            for words in batches:
+                yield json.dumps(
+                    {
+                        "type": "timestamps",
+                        "context_id": "ctx1",
+                        "word_timestamps": {"words": words, "start": [0.0] * len(words)},
+                    }
+                )
+
+        async def append(context_id, frame):
+            queued.append(frame)
+
+        service._websocket = messages()
+        service.audio_context_available = lambda context_id: True
+        service.append_to_audio_context = append
+        await service._process_messages()
+        return queued
+
+    async def test_marks_attach_to_the_preceding_character(self):
+        queued = await self._queued_words([["で", "す", "。"], ["歯", "科"]])
+        self.assertEqual([w.word for w in queued], ["で", "す。", "歯", "科"])
+        self.assertTrue(all(w.includes_inter_frame_spaces for w in queued))
+
+    async def test_context_matches_llm_text(self):
+        sentences = ["です。", "歯科ですか？"]
+        queued = await self._queued_words(
+            [["で", "す", "。"], ["歯", "科"], ["で", "す"], ["か"], ["？"]]
+        )
+
+        seq = AggregatedFrameSequencer()
+        for sentence in sentences:
+            frame = AggregatedTextFrame(sentence, TextType.SENTENCE, raw_text=sentence)
+            await seq.register_spoken(
+                frame, "ctx1", sentence, append_to_context=True, includes_inter_frame_spaces=True
+            )
+        frames = []
+        for i, w in enumerate(queued):
+            frames.extend(
+                seq.process_word(w.word, (i + 1) * 10, w.context_id, w.includes_inter_frame_spaces)
+            )
+
+        context_text = concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text or f.text, includes_inter_part_spaces=f.includes_inter_frame_spaces
+                )
+                for f in frames
+                if isinstance(f, TTSTextFrame) and f.append_to_context
+            ]
+        )
+        self.assertEqual(context_text, "".join(sentences))

@@ -220,6 +220,21 @@ def _env_prefix(unit: inventory.Unit, entry: dict | None) -> str:
     return unit.provider.upper().replace("-", "_")
 
 
+def _init_parameters(cls: type) -> dict[str, inspect.Parameter]:
+    """Constructor parameters, following ``**kwargs`` up to the base classes that take them."""
+    params: dict[str, inspect.Parameter] = {}
+    for klass in cls.__mro__:
+        if "__init__" not in vars(klass):
+            continue
+        signature = inspect.signature(klass.__init__).parameters
+        for name, param in signature.items():
+            if param.kind not in (param.VAR_KEYWORD, param.VAR_POSITIONAL):
+                params.setdefault(name, param)
+        if not any(p.kind is p.VAR_KEYWORD for p in signature.values()):
+            break
+    return params
+
+
 def build_kwargs(
     cls: type,
     unit: inventory.Unit,
@@ -230,7 +245,7 @@ def build_kwargs(
     kwarg_overrides: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
     """Constructor kwargs from the environment plus overrides; also the missing env names."""
-    params = inspect.signature(cls.__init__).parameters
+    params = _init_parameters(cls)
     prefix = _env_prefix(unit, entry)
     include = list((entry or {}).get("include_params") or [])
     if "api_key" in params and "api_key" not in include:

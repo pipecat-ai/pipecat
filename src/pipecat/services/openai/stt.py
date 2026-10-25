@@ -54,9 +54,14 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 @dataclass
 class OpenAISTTSettings(BaseWhisperSTTService.Settings):
-    """Settings for the OpenAI STT service."""
+    """Settings for the OpenAI STT service.
 
-    pass
+    Parameters:
+        keywords: Words or phrases that guide transcription of the input audio, such
+            as product names or acronyms. Supported by ``"gpt-transcribe"``.
+    """
+
+    keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -128,6 +133,7 @@ class OpenAISTTService(BaseWhisperSTTService):
             language=_language,
             prompt=None,
             temperature=None,
+            keywords=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -195,6 +201,9 @@ class OpenAISTTService(BaseWhisperSTTService):
         if self._settings.temperature is not None:
             kwargs["temperature"] = self._settings.temperature
 
+        if self._settings.keywords:
+            kwargs["keywords"] = self._settings.keywords
+
         return await self._client.audio.transcriptions.create(**kwargs)
 
 
@@ -208,10 +217,15 @@ class OpenAIRealtimeSTTSettings(STTSettings):
         noise_reduction: Noise reduction mode. ``"near_field"`` for close
             microphones, ``"far_field"`` for distant microphones, or ``None``
             to disable.
+        delay: How long the model waits before emitting transcription text, trading
+            latency for accuracy. Only supported by ``"gpt-realtime-whisper"``.
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     noise_reduction: Literal["near_field", "far_field"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -341,6 +355,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             language=Language.EN,
             prompt=None,
             noise_reduction=None,
+            delay=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -354,7 +369,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if noise_reduction is not None:
-            self._warn_init_param_moved_to_settings("noise_reduction", "noise_reduction")
+            self._warn_init_param_moved_to_settings(
+                "noise_reduction", "noise_reduction", deprecated_since="0.0.106"
+            )
             default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---
@@ -526,7 +543,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Connect to the transcription endpoint and start receiving."""
         await super()._connect()
         await self._connect_websocket()
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -612,6 +631,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if self._settings.prompt:
             transcription["prompt"] = self._settings.prompt
 
+        if self._settings.delay:
+            transcription["delay"] = self._settings.delay
+
         input_audio: dict = {
             "format": {
                 "type": "audio/pcm",
@@ -681,10 +703,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
-        # `_connect` only starts the receive task after `_websocket` is set,
-        # and reconnects re-establish it before the next iteration, so this
-        # invariant should always hold when this method runs.
-        assert self._websocket is not None
+        if not self._websocket:
+            raise Exception("Websocket not connected")
         async for message in self._websocket:
             try:
                 evt = json.loads(message)

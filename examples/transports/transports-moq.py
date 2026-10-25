@@ -29,12 +29,13 @@ Usage:
 """
 
 import os
+from typing import cast
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -51,7 +52,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.transports.moq.transport import MOQParams
+from pipecat.transports.moq.transport import MOQParams, MOQTransport
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -171,10 +172,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
         await worker.queue_frames([LLMRunFrame()])
 
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
+        # In client mode the transport redials the relay, so this is not
+        # the end of the call; on_client_disconnected is.
         logger.info("Disconnected from MOQ relay")
-        await runner.cancel()
 
     @transport.event_handler("on_error")
     async def on_error(transport, message, exception):
@@ -185,7 +192,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     try:
         await runner.run()
     finally:
-        await transport.disconnect()
+        await cast(MOQTransport, transport).disconnect()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -196,10 +196,14 @@ class WhisperSTTSettings(STTSettings):
         no_speech_prob: Probability threshold for filtering non-speech segments.
         hotwords: Words or phrases to bias the transcription towards, as a single
             space-separated string (e.g. product names or jargon).
+        initial_prompt: Text prepended to the decoder prompt as preceding context,
+            steering style, punctuation and spelling (e.g. a sample sentence in the
+            wording the transcript should use).
     """
 
     no_speech_prob: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     hotwords: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    initial_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -278,6 +282,7 @@ class WhisperSTTService(SegmentedSTTService):
             language=Language.EN,
             no_speech_prob=0.4,
             hotwords=None,
+            initial_prompt=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -424,12 +429,22 @@ class WhisperSTTService(SegmentedSTTService):
         # The stored language is a Whisper code rather than a Language, but
         # Language is a StrEnum so downstream handles either.
         language = cast("Language | None", assert_given(self._settings.language))
-        segments, _ = await asyncio.to_thread(
-            self._model.transcribe,
-            audio_float,
-            language=language,
-            hotwords=assert_given(self._settings.hotwords),
-        )
+        model = self._model
+        hotwords = assert_given(self._settings.hotwords)
+        initial_prompt = assert_given(self._settings.initial_prompt)
+
+        def transcribe():
+            # `transcribe` returns a lazy generator that decodes as it is consumed,
+            # so consume it here, in the worker thread, not on the event loop.
+            segments, _ = model.transcribe(
+                audio_float,
+                language=language,
+                hotwords=hotwords,
+                initial_prompt=initial_prompt,
+            )
+            return list(segments)
+
+        segments = await asyncio.to_thread(transcribe)
         text: str = ""
         no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
         for segment in segments:
@@ -541,6 +556,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
         # MLX Whisper loads the model on demand, so only the name is checked here.
         require_given(self._settings.model, "Whisper model")
+        # No model is held, so there are no supported languages to check
+        # against when the language changes.
+        self._model = None
 
     @override
     def _load(self):

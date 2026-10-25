@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     SystemFrame,
-    UninterruptibleFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -79,9 +78,10 @@ class SpeculationGate:
     While holding, everything is held in arrival order except system frames,
     which are out-of-band throughout Pipecat — and which carry the verdicts the
     gate is waiting for, so holding them would deadlock it. That includes
-    :class:`~pipecat.frames.frames.UninterruptibleFrame` ones, which are ordered
-    like any other frame; discarding a speculation keeps them and emits them on,
-    since they can belong to work started before it.
+    uninterruptible frames (:attr:`~pipecat.frames.frames.Frame.interruptible`
+    False), which are ordered like any other frame; discarding a speculation
+    keeps them and emits them on, since they can belong to work started before
+    it.
 
     This decides rather than processes frames: :meth:`process` is synchronous
     and returns the frames its caller should push, in order. A host can
@@ -201,7 +201,7 @@ class SpeculationGate:
             # speculation around them is discarded.
             self._buffer.put_nowait((frame, direction))
         elif self._state == SpeculationState.DROPPING:
-            if isinstance(frame, UninterruptibleFrame):
+            if not frame.interruptible:
                 # Not part of the response being dropped, and nothing is being
                 # held back, so emitting it keeps it in order.
                 emitted.append((frame, direction))

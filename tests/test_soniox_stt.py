@@ -21,7 +21,13 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
+from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.stt import (
+    END_TOKEN,
+    SonioxSTTService,
+    _language_from_tokens,
+    language_to_soniox_language,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -45,6 +51,27 @@ class _FakeWebsocket:
     async def _iter_messages(self):
         for message in self._messages:
             yield message
+
+
+@pytest.mark.asyncio
+async def test_connect_sends_api_key_on_the_handshake(monkeypatch):
+    captured = {}
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        captured.update(kwargs)
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = SonioxSTTService(api_key="test-key")
+    await service._connect_websocket()
+
+    assert captured["additional_headers"] == {"Authorization": "Bearer test-key"}
+    # The handshake is the only carrier; the config message no longer repeats the key.
+    assert "api_key" not in json.loads(websocket.send.await_args.args[0])
 
 
 @pytest.mark.asyncio
@@ -591,3 +618,113 @@ async def test_stop_completes_teardown_when_the_end_of_audio_send_fails():
     service._flush_stt_usage_metrics.assert_awaited_once()
     assert service._disconnecting is True
     assert websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_language_update_reconnects_with_that_language_as_the_hint(monkeypatch):
+    websocket = _FakeWebsocket([])
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+
+    await service._update_settings(STTSettings(language=Language.SV))
+    await service._connect_websocket()
+
+    config = json.loads(websocket.send.call_args.args[0])
+    assert config["language_hints"] == ["sv"]
+    service._request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_language_update_leaves_the_callers_delta_unchanged(monkeypatch):
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+    delta = STTSettings(language=Language.SV)
+
+    await service._update_settings(delta)
+
+    assert delta.language == Language.SV
+    assert not hasattr(delta, "language_hints")
+
+
+@pytest.mark.asyncio
+async def test_constructor_language_connects_with_that_language_as_the_hint(monkeypatch):
+    websocket = _FakeWebsocket([])
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language=Language.SV)
+    )
+
+    await service._connect_websocket()
+
+    config = json.loads(websocket.send.call_args.args[0])
+    assert config["language_hints"] == ["sv"]
+
+
+@pytest.mark.asyncio
+async def test_language_update_outside_the_language_enum_does_not_raise(monkeypatch):
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(language_hints=[Language.FI])
+    )
+    monkeypatch.setattr(service, "_request_reconnect", AsyncMock())
+
+    await service._update_settings(STTSettings(language="zh-Hant"))
+
+    assert service._settings.language_hints == [Language.FI]
+
+
+def test_language_hints_given_with_a_language_are_kept():
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(
+            language=Language.FI, language_hints=[Language.FI, Language.SV]
+        ),
+    )
+
+    assert service._settings.language_hints == [Language.FI, Language.SV]
+
+
+@pytest.mark.asyncio
+async def test_soniox_error_code_sets_category(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    events = []
+    service = _instrumented_service(monkeypatch, events)
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+
+    messages = [
+        json.dumps({"tokens": [], "error_code": 402, "error_message": "balance exhausted"}),
+        json.dumps({"tokens": [], "error_code": 401, "error_message": "invalid key"}),
+        json.dumps({"tokens": [], "error_message": "no code"}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
+
+
+@pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
+def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
+    assert language_to_soniox_language(language) == "no"

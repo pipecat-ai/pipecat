@@ -8,7 +8,7 @@
 
 In audio mode the harness synthesizes each user turn and streams it to the
 bot. :class:`CachingTTSService` wraps a real TTS service and caches its
-audio on disk, keyed by service, voice, model, language, and text, so a
+audio on disk, keyed by service, voice, model, language, speed, and text, so a
 scripted utterance is synthesized once and reused across runs and bots.
 
 Only local (Kokoro) and HTTP (Cartesia) services fit, since the wrapper
@@ -54,12 +54,15 @@ def tts_sample_rate(voice_cfg: dict) -> int:
 
 
 def tts_cache_key(voice_cfg: dict) -> str:
-    """A stable identity for a ``user_audio`` config: service, voice, model, and language, not the sample rate."""
+    """A stable identity for a ``user_audio`` config: service, voice, model, language, and speed, not the sample rate."""
     service = str(voice_cfg.get("service", "")).lower()
     voice = str(voice_cfg.get("voice", ""))
     model = str(voice_cfg.get("model", ""))
     language = str(voice_cfg.get("language") or "")
-    return "\x00".join((service, voice, model, language))
+    speed = voice_cfg.get("speed")
+    # An absent speed and the service's default rate render the same audio.
+    speed_key = "" if speed is None or float(speed) == 1.0 else str(float(speed))
+    return "\x00".join((service, voice, model, language, speed_key))
 
 
 def _resolve_cache_dir(override: str | Path | None) -> Path:
@@ -164,6 +167,21 @@ class CachingTTSService(TTSService):
         """Clean up the inner service, then this one."""
         await self._inner.cleanup()
         await super().cleanup()
+
+    async def synthesize(self, text: str) -> bytes:
+        """Return the audio for ``text``, from cache or by driving the inner service.
+
+        Args:
+            text: The utterance to synthesize.
+
+        Returns:
+            The utterance as 16-bit mono PCM, at this service's sample rate.
+        """
+        audio = bytearray()
+        async for frame in self.run_tts(text, self.create_context_id()):
+            if isinstance(frame, TTSAudioRawFrame):
+                audio.extend(frame.audio)
+        return bytes(audio)
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Emit the audio for ``text`` from cache, or by driving the inner service.

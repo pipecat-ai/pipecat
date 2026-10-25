@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -839,6 +839,80 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frames[-1], FunctionCallResultFrame)
         self.assertEqual(frames[-1].result, {"ok": True})
 
+    async def test_intermediate_result_does_not_disarm_the_deadline(self):
+        """An update isn't a result, so it can't buy the handler more time."""
+        service, frames = self._service()
+        side_effects = []
+        rolled_back = []
+
+        async def progress_then_hang(params: FunctionCallParams):
+            try:
+                await params.result_callback(
+                    "working", properties=FunctionCallResultProperties(is_final=False)
+                )
+                await asyncio.sleep(self.HANDLER_DURATION)
+                side_effects.append(params.tool_call_id)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "progress",
+            progress_then_hang,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "progress")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(side_effects, [])
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertFalse(frames[2].properties.is_final)
+        self.assertTrue(frames[-1].run_llm)
+
+    async def test_a_hanging_async_tool_times_out_without_any_update(self):
+        """Control for the test above, differing only in the missing update."""
+        service, frames = self._service()
+        rolled_back = []
+
+        async def hang(params: FunctionCallParams):
+            try:
+                await asyncio.sleep(self.HANDLER_DURATION)
+                await params.result_callback({"ok": True})
+            except asyncio.CancelledError:
+                rolled_back.append(params.tool_call_id)
+                raise
+
+        service.register_function(
+            "hang",
+            hang,
+            cancel_on_interruption=False,
+            timeout_secs=self.TIMEOUT,
+        )
+        await self._run_call(service, "hang")
+        await asyncio.sleep(self.SETTLE)
+
+        self.assertEqual(rolled_back, ["call_1"])
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallCancelFrame,
+            ],
+        )
+        self.assertTrue(frames[-1].run_llm)
+
 
 class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
     """A handler that raises settles its call instead of holding it open."""
@@ -1193,6 +1267,17 @@ class TestAsyncToolCancellationExposure(unittest.IsolatedAsyncioTestCase):
         self._sync(service)
         self.assertEqual(self._advertised(service), {cancel_tool_name("write_report")})
         self.assertIn(cancel_tool_name("write_report"), service._functions)
+
+    def test_built_in_tools_are_sent_alone_when_there_are_no_others(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        converted = service.get_llm_adapter().from_standard_tools(NOT_GIVEN)
+        self.assertEqual(
+            [t["function"]["name"] for t in converted], [cancel_tool_name("write_report")]
+        )
 
     def test_the_cancel_tool_does_not_ask_for_a_tool_call_id(self):
         # Requiring it would make every cancellation go looking for an id first,

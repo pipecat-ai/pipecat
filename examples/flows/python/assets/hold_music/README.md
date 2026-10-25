@@ -4,4 +4,4 @@ This project is a hold music player, based on the `wav_audio_send` example from 
 
 The hold music WAV file used in this example was sourced from [No Copyright Music](https://www.no-copyright-music.com/).
 
-To see this hold music player in action, check out the [warm transfer example](../warm_transfer.py).
+To see this hold music player in action, check out the [warm transfer example](../../warm_transfer.py).

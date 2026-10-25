@@ -25,6 +25,7 @@ from speechmatics.agent_stt import AudioEncoding, Model, Segment  # noqa: E402
 
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame  # noqa: E402
 from pipecat.services.speechmatics.stt import (  # noqa: E402
+    _DEFAULT_TURN_DETECTION_MODE,
     SpeechmaticsSTTService,
     TurnDetectionMode,
     _is_auth_rejection,
@@ -43,7 +44,10 @@ def _clear_env(monkeypatch):
 
 
 def _service(**kwargs) -> SpeechmaticsSTTService:
-    return SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    service = SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    # setup() resolves the sample rate; these tests never run it, so mirror what it does.
+    service._sample_rate = 16000
+    return service
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +207,11 @@ def test_missing_api_key_raises():
         SpeechmaticsSTTService(api_key=None, sample_rate=16000)
 
 
-def test_default_turn_detection_mode_is_vad():
-    """The service must default to detecting turns itself (VAD); this default drives
-    turn-frame emission and endpointing behavior downstream."""
-    assert _service()._settings.turn_detection_mode == TurnDetectionMode.VAD
+def test_default_turn_detection_mode():
+    """The default drives turn-frame emission and endpointing behavior downstream, so it
+    is pinned here rather than left to whatever the settings dataclass happens to hold."""
+    assert _service()._settings.turn_detection_mode == _DEFAULT_TURN_DETECTION_MODE
+    assert _DEFAULT_TURN_DETECTION_MODE == TurnDetectionMode.EXTERNAL
 
 
 def test_settings_take_precedence_over_deprecated_params():
@@ -247,6 +252,14 @@ def test_punctuation_overrides_reach_the_wire_config():
     assert _service()._config.punctuation_overrides is None
 
 
+def test_emit_sentences_reaches_the_wire_config_only_when_set():
+    """Unset means the service default (turn-level segments), so the key stays off the wire."""
+    assert "emit_sentences" not in _service()._config.to_dict()
+
+    service = _service(settings=SpeechmaticsSTTService.Settings(emit_sentences=True))
+    assert service._config.to_dict()["emit_sentences"] is True
+
+
 def test_no_diarization_leaves_config_empty():
     """With diarization off, neither the diarization flag nor a speaker config may be
     sent — otherwise the engine would attempt attribution it was not asked for."""
@@ -280,7 +293,10 @@ def test_service_closes_turns_false_for_external():
 def test_metadata_frame_routes_should_interrupt_to_external_strategies():
     """When the service closes turns it proposes the boundaries, and the strategies it
     recommends own the interruption, so `should_interrupt` must reach them."""
-    frame = _service(should_interrupt=False).service_metadata_frame()
+    frame = _service(
+        should_interrupt=False,
+        settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.VAD),
+    ).service_metadata_frame()
     assert isinstance(frame.user_turn_strategies, ExternalUserTurnStrategies)
     assert frame.user_turn_strategies.enable_interruptions is False
 
@@ -663,6 +679,41 @@ async def test_open_connection_auth_rejection_is_permanent(monkeypatch):
     service.push_error.assert_awaited_once()
     assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
     assert service.push_error.call_args.kwargs.get("fatal") is None
+
+
+@pytest.mark.asyncio
+async def test_open_connection_unsupported_sample_rate_is_permanent(monkeypatch):
+    """A pipeline rate the service does not accept fails every attempt the same way, so it
+    must stop the session with a permanent error before a client is built, not raise the
+    client's ValueError out of start()."""
+    service = _service()
+    service._sample_rate = 24000
+    service.push_error = AsyncMock()
+    client = Mock()
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is False
+    assert service._closed is True
+    client.assert_not_called()
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate", [8000, 16000])
+async def test_open_connection_supported_sample_rate_connects(monkeypatch, rate):
+    """Both rates the service accepts must reach the client's AudioFormat unchanged."""
+    service = _service()
+    service._sample_rate = rate
+    client = Mock(return_value=Mock(connect=AsyncMock()))
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+    service.create_task = Mock()
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is True
+    assert client.call_args.kwargs["audio_format"].sample_rate == rate
 
 
 @pytest.mark.asyncio

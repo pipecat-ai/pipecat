@@ -11,7 +11,6 @@ using segmented audio processing. The service uploads audio files and receives
 transcription results directly.
 """
 
-import asyncio
 import base64
 import io
 import json
@@ -55,8 +54,9 @@ def language_to_elevenlabs_language(language: Language) -> str:
 
     Returns:
         The corresponding service language code. If ``language`` is not in
-        the verified mapping, falls back to the full language code string and
-        logs a warning (via ``resolve_language(..., use_base_code=False)``).
+        the verified mapping, falls back to its base language's code (``en-US``
+        becomes ``eng``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "afr",  # Afrikaans
@@ -160,7 +160,7 @@ def language_to_elevenlabs_language(language: Language) -> str:
         Language.ZU: "zul",  # Zulu
     }
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class CommitStrategy(StrEnum):
@@ -614,9 +614,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._enable_logging = enable_logging
         self._include_language_detection = include_language_detection
 
-        self._connected_event = asyncio.Event()
-        self._connected_event.set()
-
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -624,6 +621,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             True, as ElevenLabs Realtime STT service supports metrics generation.
         """
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to ElevenLabs service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The ElevenLabs-specific language code, or None if not supported.
+        """
+        return language_to_elevenlabs_language(language)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed.
@@ -689,13 +697,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
-        # Wait for any in-flight _connect() to finish before checking state
-        await self._connected_event.wait()
-
-        # Reconnect if connection is closed
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            await self._connect()
-
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 # Encode audio as base64
@@ -716,18 +719,14 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
-        self._connected_event.clear()
-        try:
-            await self._connect_websocket()
+        await self._connect_websocket()
 
-            await super()._connect()
+        await super()._connect()
 
-            if self._websocket and not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-        finally:
-            self._connected_event.set()
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Close WebSocket connection and cleanup tasks."""

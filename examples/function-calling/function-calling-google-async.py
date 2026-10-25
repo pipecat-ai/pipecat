@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
@@ -25,15 +25,14 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
-    get_transport_client_id,
-    maybe_capture_participant_camera,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import BaseTransport, TransportParams, VideoInSourceParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -135,11 +134,25 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(on_request_only=True),
+        },
+    ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(on_request_only=True),
+        },
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(on_request_only=True),
+        },
     ),
 }
 
@@ -161,7 +174,7 @@ You are a helpful assistant who converses with a user and answers questions. Res
 
 Your response will be turned into speech so use only simple words and punctuation.
 
-You have access to three tools: get_current_weather, get_restaurant_recommendation, and get_image.
+You have access to five tools: get_current_weather, get_stock_price, get_restaurant_recommendation, write_report, and get_image.
 
 You can respond to questions about the weather using the get_current_weather tool.
 
@@ -237,9 +250,7 @@ indicate you should use the get_image tool are:
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
 
-        await maybe_capture_participant_camera(transport, client)
-
-        client_id = get_transport_client_id(transport, client)
+        client_id = transport.get_client_id(client)
 
         # Kick off the conversation.
         context.add_message(

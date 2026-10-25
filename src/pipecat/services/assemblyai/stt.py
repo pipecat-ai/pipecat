@@ -64,7 +64,8 @@ MAX_AGENT_CONTEXT_CHARS = 1500
 # Model-name prefixes shared by every Universal-3 Pro streaming variant, all of
 # which expose the full U3 Pro feature set: built-in turn detection, prompting,
 # continuous partials, interruption_delay, context carryover, and voice focus.
-# universal-3-6-pro is universal-3-5-pro upgraded — same model, same features.
+# universal-3-6-pro and universal-3-5-pro share that feature set; 3.6 covers 32
+# declared languages against 3.5's 19.
 U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
@@ -132,24 +133,38 @@ def language_to_assemblyai_language(language: Language) -> str:
         The AssemblyAI language code.
     """
     LANGUAGE_MAP = {
+        Language.AF: "af",
         Language.AR: "ar",
+        Language.CA: "ca",
         Language.DA: "da",
         Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
+        Language.ET: "et",
+        Language.FA: "fa",
         Language.FI: "fi",
         Language.FR: "fr",
+        Language.GL: "gl",
         Language.HE: "he",
         Language.HI: "hi",
         Language.IT: "it",
         Language.JA: "ja",
+        Language.KO: "ko",
+        Language.MR: "mr",
         Language.NL: "nl",
+        Language.NN: "nn",
         Language.NO: "no",
         Language.PT: "pt",
+        Language.RO: "ro",
+        Language.RU: "ru",
         Language.SV: "sv",
         Language.TR: "tr",
+        Language.UR: "ur",
         Language.VI: "vi",
+        Language.XH: "xh",
+        Language.YUE: "yue",
         Language.ZH: "zh",
+        Language.ZU: "zu",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
@@ -206,11 +221,13 @@ class AssemblyAISTTSettings(STTSettings):
             "en", "es", "fr"). On U3 Pro models, a tier-1 code
             ("en"/"es"/"fr"/"de"/"it"/"pt") steers transcription toward that
             language; other supported codes are "tr", "nl", "sv", "no", "da",
-            "fi", "hi", "vi", "ar", "he", "ja", "zh". This is one of the names
-            AssemblyAI accepts for its declared-language parameter, alongside
-            ``language_codes``, which covers the same languages as ``Language``
-            enums and is bound in preference to this one when both are set. Prefer
-            ``language_codes``. Defaults to None (not sent; no steering).
+            "fi", "hi", "vi", "ar", "he", "ja", "ur", "zh", "ru", "ko", "ca",
+            "gl", "ro", "et", "fa", "yue", "af", "mr", "zu", "xh", "nn". This
+            is one of the names AssemblyAI accepts for its declared-language
+            parameter, alongside ``language_codes``, which covers the same
+            languages as ``Language`` enums and is bound in preference to this
+            one when both are set. Prefer ``language_codes``. Defaults to None
+            (not sent; no steering).
         language_codes: Customer-declared audio languages. A single language (e.g.
             ``[Language.ES]``) pins transcription to that language; several (e.g.
             ``[Language.EN, Language.ES]``) steer toward that subset while keeping
@@ -240,9 +257,10 @@ class AssemblyAISTTSettings(STTSettings):
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
             U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
-            for a known opening line, or call
-            :meth:`AssemblyAISTTService.update_agent_context` to update it
-            mid-session. Defaults to None (not sent).
+            for a known opening line; the service sends each of the agent's replies
+            as context on its own. To replace it mid-session, push an
+            ``STTUpdateSettingsFrame`` with ``agent_context``. Defaults to None
+            (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable
@@ -382,7 +400,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             formatted_finals=True,
             word_finalization_max_wait_time=None,
@@ -447,31 +465,15 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
                 f"a U3 Pro model for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {default_settings.model}, "
-                f"or use model='universal-3-5-pro'."
+                f"or use model='universal-3-6-pro'."
             )
 
-        if (
-            not is_u3_pro
-            and default_settings.prompt is not None
-            and default_settings.keyterms_prompt is not None
-        ):
+        if not is_u3_pro and default_settings.prompt is not None:
             raise ValueError(
-                f"The prompt and keyterms_prompt parameters cannot be used in the same request "
-                f"with model {default_settings.model}; only U3 Pro models support combining them. "
-                "Please choose either one or the other based on your use case. When you use "
-                "keyterms_prompt, your boosted words are appended to the default prompt automatically. "
-                "Or to boost within prompt: <prompt> + Make sure to boost the words <keyterms> "
-                "in the audio. "
+                f"prompt is only supported by U3 Pro models and will be rejected by the server "
+                f"for model {default_settings.model}. Use keyterms_prompt instead, or switch to "
+                "a U3 Pro model to use prompt (optionally combined with keyterms_prompt). "
                 "For more info go to: https://www.assemblyai.com/docs/streaming/universal-3-pro"
-            )
-
-        if default_settings.prompt is not None:
-            logger.warning(
-                "Custom prompt detected. Prompting is a beta feature. We recommend testing "
-                "with no prompt first, as this will use our optimized default prompt for "
-                "voice agents. Bad prompts may lead to bad results. If you'd like to create "
-                "your own prompt, check out our prompting guide at: "
-                "https://www.assemblyai.com/docs/streaming/prompting"
             )
 
         # continuous_partials and interruption_delay are U3 Pro-only.
@@ -588,7 +590,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._termination_event = asyncio.Event()
-        self._received_termination = False
         self._connected = False
 
         self._receive_task = None
@@ -982,7 +983,9 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -997,7 +1000,6 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         try:
             self._termination_event.clear()
-            self._received_termination = False
 
             if self._websocket.state is State.OPEN:
                 # Send any remaining audio
@@ -1145,14 +1147,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
-        self._received_termination = True
         self._termination_event.set()
 
         logger.info(
             f"Session Terminated: Audio Duration={message.audio_duration_seconds}s, "
             f"Session Duration={message.session_duration_seconds}s"
         )
-        await self.push_frame(EndFrame())
 
     async def _handle_transcription(self, message: TurnMessage):
         """Handle transcription results with two turn detection modes.
@@ -1393,7 +1393,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             prompt=None,
             keyterms_prompt=None,

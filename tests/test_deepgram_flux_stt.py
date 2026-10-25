@@ -9,7 +9,11 @@ import dataclasses
 import unittest
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
+from pipecat.frames.frames import InterimTranscriptionFrame
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
@@ -17,6 +21,7 @@ from pipecat.services.deepgram.flux.stt_base import (
     FluxConnectionNotConfirmedError,
     FluxFatalError,
 )
+from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import (
     EagerUserTurnStrategies,
     ExternalUserTurnStrategies,
@@ -240,7 +245,7 @@ async def test_update_settings_reconnects_for_connection_only_field():
     """Fields Flux only reads from the connection URL are applied by reconnecting."""
     service = _make_fake_flux_service()
 
-    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+    await service._update_settings(DeepgramFluxSTTSettings(redact="numbers"))
 
     assert service.reconnect_requests == 1
     assert service.sent_messages == []
@@ -254,6 +259,17 @@ async def test_update_settings_configures_without_reconnecting():
     await service._update_settings(DeepgramFluxSTTSettings(eot_threshold=0.9))
 
     assert service.sent_messages == [{"type": "Configure", "thresholds": {"eot_threshold": 0.9}}]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_update_settings_configures_numerals():
+    """Numerals are toggled over the live connection rather than by reconnecting."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(numerals=True))
+
+    assert service.sent_messages == [{"type": "Configure", "numerals": True}]
     assert service.reconnect_requests == 0
 
 
@@ -417,6 +433,75 @@ def test_flux_keeps_a_configured_eager_threshold():
     )
 
     assert service._settings.eager_eot_threshold == 0.8
+
+
+@pytest.mark.asyncio
+async def test_update_pushes_interim_transcription():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    pushed = []
+
+    async def push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = push_frame
+
+    data = {"event": "Update", "transcript": "so I was thinking"}
+    await service._handle_turn_info(data)
+
+    assert len(pushed) == 1
+    frame = pushed[0]
+    assert isinstance(frame, InterimTranscriptionFrame)
+    assert frame.text == "so I was thinking"
+    assert frame.language == Language.EN
+    assert frame.result == data
+
+
+@pytest.mark.asyncio
+async def test_empty_update_pushes_nothing():
+    service = DeepgramFluxSTTService(api_key="test-key")
+    pushed = []
+
+    async def push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = push_frame
+
+    await service._handle_turn_info({"event": "Update", "transcript": ""})
+
+    assert pushed == []
+
+
+@pytest.mark.asyncio
+async def test_refused_handshake_reports_deepgram_reason():
+    """Deepgram's reason for refusing the handshake reaches the error and the event."""
+    service = DeepgramFluxSTTService(api_key="test-key")
+    service._websocket_url = "wss://example.invalid/v2/listen"
+    reason = "eager_eot_threshold cannot be greater than eot_threshold."
+    refusal = InvalidStatus(Response(400, "Bad Request", Headers({"dg-error": reason}), b""))
+
+    async def refuse(*args, **kwargs):
+        raise refusal
+
+    errors = []
+    connection_errors = []
+
+    async def record_error(error_msg, exception=None):
+        errors.append((error_msg, exception))
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    service._websocket_connect = refuse
+    service.push_error = record_error
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    expected = f"Deepgram refused the connection (HTTP 400): {reason}"
+    assert errors == [(expected, refusal)]
+    assert connection_errors == [expected]
 
 
 if __name__ == "__main__":

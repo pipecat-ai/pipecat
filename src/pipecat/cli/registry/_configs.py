@@ -76,6 +76,7 @@ SERVICE_CONFIGS = {
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
@@ -93,6 +94,7 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_ai_stt": 'ZoomAISTTService(api_key=os.getenv("ZOOM_AI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"
@@ -277,10 +279,10 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "perplexity_llm": (
-        "PerplexityLLMService(\n"
+        "PerplexityAgentHttpLLMService(\n"
         '        api_key=os.getenv("PERPLEXITY_API_KEY"),\n'
-        "        settings=PerplexityLLMService.Settings(\n"
-        '            model=os.getenv("PERPLEXITY_MODEL"),\n'
+        "        settings=PerplexityAgentHttpLLMService.Settings(\n"
+        '            model=os.getenv("PERPLEXITY_MODEL", "openai/gpt-5.6-luna"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -308,6 +310,15 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
         "        settings=SarvamLLMService.Settings(\n"
         '            model=os.getenv("SARVAM_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "smallest_llm": (
+        "SmallestLLMService(\n"
+        '        api_key=os.getenv("SMALLEST_API_KEY"),\n'
+        "        settings=SmallestLLMService.Settings(\n"
+        '            model=os.getenv("SMALLEST_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -359,7 +370,7 @@ SERVICE_CONFIGS = {
         "BlandTTSService(\n"
         '        api_key=os.getenv("BLAND_API_KEY"),\n'
         "        settings=BlandTTSService.Settings(\n"
-        '            voice=os.getenv("BLAND_VOICE_ID", "2f29fdbb-c55e-4add-9c7c-93437ebf379d"),\n'
+        '            voice=os.getenv("BLAND_VOICE_ID", "29158307-9893-4149-8a75-bc9ce313d64e"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -636,6 +647,22 @@ SERVICE_CONFIGS = {
         '    api_key=os.getenv("AZURE_REALTIME_API_KEY"),\n'
         '    base_url=os.getenv("AZURE_REALTIME_BASE_URL"),\n'
         "    settings=AzureRealtimeLLMService.Settings(\n"
+        "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "azure_voice_live": (
+        "session_properties = SessionProperties(\n"
+        '    voice=AzureStandardVoice(name="en-US-Ava:DragonHDLatestNeural"),\n'
+        '    turn_detection=TurnDetection(type="azure_semantic_vad"),\n'
+        '    input_audio_transcription=InputAudioTranscription(model="azure-speech"),\n'
+        ")\n"
+        "llm = AzureVoiceLiveLLMService(\n"
+        '    api_key=os.getenv("AZURE_VOICE_LIVE_API_KEY"),\n'
+        '    endpoint=os.getenv("AZURE_VOICE_LIVE_ENDPOINT"),\n'
+        "    settings=AzureVoiceLiveLLMService.Settings(\n"
+        '        model="gpt-4o-mini",\n'
         "        session_properties=session_properties,\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"

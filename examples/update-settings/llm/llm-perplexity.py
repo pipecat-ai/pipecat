@@ -24,9 +24,10 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.perplexity.llm import PerplexityLLMService
+from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -38,6 +39,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -64,7 +69,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = PerplexityLLMService(api_key=os.environ["PERPLEXITY_API_KEY"])
+    llm = PerplexityAgentHttpLLMService(api_key=os.environ["PERPLEXITY_API_KEY"])
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -109,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await asyncio.sleep(10)
         logger.info("Updating Perplexity LLM settings: temperature=0.1")
         await worker.queue_frame(
-            LLMUpdateSettingsFrame(delta=PerplexityLLMService.Settings(temperature=0.1))
+            LLMUpdateSettingsFrame(delta=PerplexityAgentHttpLLMService.Settings(temperature=0.1))
         )
 
     @transport.event_handler("on_client_disconnected")

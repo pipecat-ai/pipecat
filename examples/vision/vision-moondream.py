@@ -21,6 +21,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.moondream.vision import MoondreamService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -34,6 +35,9 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_out_enabled=True,
     ),
     "webrtc": lambda: TransportParams(

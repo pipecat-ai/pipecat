@@ -16,7 +16,6 @@ Provides:
   to the bus).
 """
 
-import warnings
 from typing import TYPE_CHECKING
 
 from pipecat.bus.bus import WorkerBus
@@ -32,6 +31,7 @@ from pipecat.frames.frames import (
     StopFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.utils.deprecation import warn_deprecated
 
 if TYPE_CHECKING:
     from pipecat.pipeline.worker import PipelineWorker
@@ -78,14 +78,11 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         """
         super().__init__(**kwargs)
         if target_task is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`BusBridgeProcessor(target_task=...)` is deprecated since 1.8.0, "
-                    "use `target_worker` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`BusBridgeProcessor(target_task=...)` is deprecated since 1.8.0 and will be "
+                "removed in 2.0.0. Use `target_worker` instead.",
+                stacklevel=2,
+            )
             if target_worker is None:
                 target_worker = target_task
         self._bus = bus

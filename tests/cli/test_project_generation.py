@@ -831,7 +831,7 @@ def test_eval_transport_opt_in(temp_output_dir):
 
 def test_eval_starter_scenarios(temp_output_dir):
     """``enable_eval`` scaffolds runnable starter scenarios plus the deps to run them."""
-    from pipecat.evals.scenario import EvalScriptScenario
+    from pipecat.evals.scenario import EvalScenarioFile
 
     def gen(name, *, enable_eval, mode="cascade", **kwargs):
         path = temp_output_dir / name
@@ -862,13 +862,14 @@ def test_eval_starter_scenarios(temp_output_dir):
     assert "kokoro" not in pyproject and "moonshine" not in pyproject
 
     # Cascade: both starters are generated and parse against the real scenario
-    # schema (EvalScriptScenario.load is the validator the harness itself uses).
+    # schema (EvalScenarioFile.load is the loader the harness itself uses).
     server = gen("starters-cascade", enable_eval=True, **cascade_services)
     text_path = server / "evals" / "starter_text.yaml"
     audio_path = server / "evals" / "starter_audio.yaml"
-    assert EvalScriptScenario.load(text_path).name == "starter_text"
-    audio = EvalScriptScenario.load(audio_path)
-    assert audio.name == "starter_audio"
+    (text,) = EvalScenarioFile.load(text_path)
+    assert text.name == "starter_text/starter_text"
+    (audio,) = EvalScenarioFile.load(audio_path)
+    assert audio.name == "starter_audio/starter_audio"
     assert audio.user_audio is not None  # audio starter drives real speech in
 
     # The project env carries what the harness needs via the `evals` extra: the
@@ -888,7 +889,8 @@ def test_eval_starter_scenarios(temp_output_dir):
         realtime_service="openai_realtime",
     )
     assert not (server / "evals" / "starter_text.yaml").exists()
-    assert EvalScriptScenario.load(server / "evals" / "starter_audio.yaml").name == "starter_audio"
+    (audio,) = EvalScenarioFile.load(server / "evals" / "starter_audio.yaml")
+    assert audio.name == "starter_audio/starter_audio"
 
 
 def _gen_bot(temp_output_dir, name, *, mode="cascade", **kwargs):
@@ -1205,6 +1207,49 @@ def test_websocket_transport_generation(temp_output_dir):
     assert "match runner_args" not in bot
 
     ast.parse(bot)
+
+
+def _gen_video_input_bot(temp_output_dir, name, transports):
+    config = ProjectConfig(
+        project_name=name,
+        bot_type="web",
+        transports=transports,
+        mode="cascade",
+        stt_service="deepgram_stt",
+        llm_service="openai_llm",
+        tts_service="cartesia_tts",
+        video_input=True,
+    )
+    ProjectGenerator(config).generate(output_dir=temp_output_dir)
+    return temp_output_dir / name
+
+
+def test_video_input_captures_sources(temp_output_dir):
+    """Video input on Daily and SmallWebRTC lists the camera in video_in_sources, so
+    the transport captures it when the client connects. The screen share is listed
+    commented out, for the developer to enable."""
+    path = _gen_video_input_bot(temp_output_dir, "video-in", ["daily", "smallwebrtc"])
+    assert_server_ruff_clean(path / "server")
+    assert_server_ruff_lint_clean(path / "server")
+    bot = (path / "server" / "bot.py").read_text()
+
+    assert "VideoInSourceParams" in bot.split("transport_params = {")[0]
+    assert bot.count("video_in_sources={") == 2
+    assert bot.count('"camera": VideoInSourceParams(framerate=1)') == 2
+    assert bot.count('# "screenVideo": VideoInSourceParams(framerate=1)') == 2
+    assert bot.count('"screenVideo"') == 2
+    ast.parse(bot)
+
+
+def test_video_input_without_video_transport(temp_output_dir):
+    """A websocket-only bot has no video sources to list, so it doesn't import
+    VideoInSourceParams."""
+    path = _gen_video_input_bot(temp_output_dir, "video-in-ws", ["websocket"])
+    assert_server_ruff_lint_clean(path / "server")
+    bot = (path / "server" / "bot.py").read_text()
+
+    assert "VideoInSourceParams" not in bot
+    assert "video_in_sources" not in bot
 
 
 def test_env_example_lists_selected_service_keys(temp_output_dir):

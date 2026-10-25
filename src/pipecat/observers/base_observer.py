@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import Frame
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import deprecated
 
 if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -58,6 +59,8 @@ class FramePushed:
         frame: The frame being transferred.
         direction: The direction of the transfer (e.g., downstream or upstream).
         timestamp: The time when the frame was pushed, based on the pipeline clock.
+        first_push: Whether this is the first time the frame is pushed. A frame
+            is pushed again by every processor that passes it along.
     """
 
     source: "FrameProcessor"
@@ -65,6 +68,7 @@ class FramePushed:
     frame: Frame
     direction: "FrameDirection"
     timestamp: int
+    first_push: bool = True
 
 
 @dataclass
@@ -87,14 +91,16 @@ class ProcessorSetUp:
     finished_at_ns: int
 
 
+@deprecated(
+    "`StartupWarmup` is deprecated since 1.12.0 and will be removed in 2.0.0. No replacement."
+)
 @dataclass
 class StartupWarmup:
     """Event data for the framework having warmed its deferred imports.
 
-    Warming runs alongside processor setup and the pipeline waits for it before
-    starting, so it accounts for startup time that belongs to no processor. The
-    times come from :func:`time.monotonic_ns`, since the pipeline clock only
-    starts once the pipeline does.
+    .. deprecated:: 1.12.0
+        No replacement. Nothing warms deferred imports at startup, so this
+        event is never emitted. Will be removed in 2.0.0.
 
     Parameters:
         started_at_ns: When warming began.
@@ -112,7 +118,29 @@ class BaseObserver(BaseObject):
     needing to inject processors into the pipeline structure. This enables
     non-intrusive monitoring capabilities such as frame logging, debugging,
     performance analysis, and analytics collection.
+
+    A frame is pushed again by every processor that passes it along, and by
+    default an observer observes every push. An observer that handles a frame
+    once, such as one that reports the moment a frame represents, is created
+    with ``observe_every_push=False`` and is told about a frame only when it
+    is first pushed.
     """
+
+    def __init__(self, *, observe_every_push: bool = True, **kwargs):
+        """Initialize the observer.
+
+        Args:
+            observe_every_push: Whether to observe every push of a frame,
+                rather than only its first. Defaults to True.
+            **kwargs: Additional arguments passed to the parent class.
+        """
+        super().__init__(**kwargs)
+        self._observe_every_push = observe_every_push
+
+    @property
+    def observe_every_push(self) -> bool:
+        """Whether the observer observes every push of a frame, not only the first."""
+        return self._observe_every_push
 
     async def on_process_frame(self, data: FrameProcessed):
         """Handle the event when a frame is being processed by a processor.
@@ -133,6 +161,11 @@ class BaseObserver(BaseObject):
         behavior (e.g., logging, monitoring, debugging) when a frame is
         transferred through the pipeline.
 
+        A frame is pushed again by every processor that passes it along, so
+        this is called once per hop, with ``data.first_push`` set on the first
+        one. An observer created with ``observe_every_push=False`` is only
+        called for that first push.
+
         Args:
             data: The event data containing details about the frame transfer.
         """
@@ -151,11 +184,16 @@ class BaseObserver(BaseObject):
         """
         pass
 
+    @deprecated(
+        "`BaseObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def on_startup_warmup(self, data: StartupWarmup):
         """Handle the event when the framework has warmed its deferred imports.
 
-        Warming overlaps the processors being set up, so what it costs a
-        pipeline is the part of it that outlasts them.
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
 
         Args:
             data: The event data containing details about the warming.

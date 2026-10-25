@@ -12,10 +12,13 @@ the main pipeline execution.
 """
 
 import asyncio
+import weakref
 from typing import Any
 
 from attr import dataclass
+from loguru import logger
 
+from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import (
     BaseObserver,
     FrameProcessed,
@@ -24,6 +27,7 @@ from pipecat.observers.base_observer import (
     StartupWarmup,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.deprecation import deprecated
 
 
 @dataclass
@@ -62,6 +66,9 @@ class WorkerObserver(BaseObserver):
     pipeline by creating a queue and a worker for each user observer. When a frame
     is received, it will be put in a queue for efficiency and later processed by
     each worker.
+
+    It also tells a frame's first push from the ones that follow, and only
+    passes the first one to observers that want a frame once.
     """
 
     def __init__(
@@ -79,8 +86,12 @@ class WorkerObserver(BaseObserver):
         super().__init__(**kwargs)
         self._observers = observers or []
         self._proxies: dict[BaseObserver, Proxy] | None = (
-            None  # Becomes a dict after start() is called
+            None  # Becomes a dict after setup() is called
         )
+        # Frames pushed so far, held weakly: an entry goes away with its
+        # frame, so this tracks the frames in flight, not every frame ever
+        # pushed.
+        self._frames_pushed: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
 
     def add_observer(self, observer: BaseObserver):
         """Add a new observer to the managed list.
@@ -91,9 +102,8 @@ class WorkerObserver(BaseObserver):
         # Add the observer to the list.
         self._observers.append(observer)
 
-        # If we already started, create a new proxy for the observer.
-        # Otherwise, it will be created in start().
-        if self._proxies:
+        # After setup(), create the proxy immediately; setup() handles earlier additions.
+        if self._proxies is not None:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
 
@@ -108,8 +118,13 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.task)
+            # Cancel the proxy worker right away. An observer removing itself
+            # runs on that worker, which can't be cancelled from inside, so
+            # the worker ends itself instead.
+            if proxy.task is not asyncio.current_task():
+                await self.cancel_task(proxy.task)
+            # Shutdown only cleans up the observers in _proxies.
+            await observer.cleanup()
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -131,7 +146,11 @@ class WorkerObserver(BaseObserver):
             await observer.setup(task_manager)
 
     async def cleanup(self):
-        """Cleanup all proxy observers."""
+        """Cleanup all proxy observers.
+
+        Tearing down is best effort: an observer that raises is logged and the
+        rest are still cleaned up.
+        """
         await super().cleanup()
 
         if not self._proxies:
@@ -141,7 +160,10 @@ class WorkerObserver(BaseObserver):
             await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
-            await observer.cleanup()
+            try:
+                await observer.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {observer}: {e}")
 
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
@@ -156,12 +178,24 @@ class WorkerObserver(BaseObserver):
         await self._send_to_proxy(data)
 
     async def on_push_frame(self, data: FramePushed):
-        """Queue frame data for all managed observers.
+        """Queue frame data for the managed observers.
+
+        A repeated push only reaches the observers that want every push.
 
         Args:
             data: The frame push event data to distribute to observers.
         """
-        await self._send_to_proxy(data)
+        if not self._proxies:
+            return
+
+        frame = data.frame
+        data.first_push = frame.id not in self._frames_pushed
+        if data.first_push:
+            self._frames_pushed[frame.id] = frame
+
+        for proxy in self._proxies.values():
+            if data.first_push or proxy.observer.observe_every_push:
+                await proxy.queue.put(data)
 
     async def on_processor_setup(self, data: ProcessorSetUp):
         """Queue processor setup timing for all managed observers.
@@ -171,8 +205,16 @@ class WorkerObserver(BaseObserver):
         """
         await self._send_to_proxy(data)
 
+    @deprecated(
+        "`WorkerObserver.on_startup_warmup` is deprecated since 1.12.0 and will be removed in "
+        "2.0.0. No replacement."
+    )
     async def on_startup_warmup(self, data: StartupWarmup):
         """Queue deferred-import warming timing for all managed observers.
+
+        .. deprecated:: 1.12.0
+            No replacement. Nothing warms deferred imports at startup, so this
+            is never called. Will be removed in 2.0.0.
 
         Args:
             data: The startup warmup event data to distribute to observers.
@@ -217,3 +259,8 @@ class WorkerObserver(BaseObserver):
                 await observer.on_startup_warmup(data)
 
             queue.task_done()
+
+            # Stop once the observer has removed itself (see remove_observer()).
+            proxy = self._proxies.get(observer) if self._proxies else None
+            if not proxy or proxy.queue is not queue:
+                break

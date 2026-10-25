@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -42,7 +41,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -495,14 +494,12 @@ class STTService(AIService):
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via STTUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use STTUpdateSettingsFrame(delta=STTSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`STTUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`STTUpdateSettingsFrame(delta=STTSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, STTMuteFrame):
@@ -751,7 +748,8 @@ class STTService(AIService):
         When keepalive is enabled, this task checks periodically if the connection
         has been idle (no audio sent) for longer than keepalive_timeout seconds.
         If so, it generates silent 16-bit mono PCM audio and passes it to
-        _send_keepalive() for service-specific formatting and sending.
+        _send_keepalive() for service-specific formatting and sending. A failed
+        send is logged and the loop keeps going.
         """
         # This task is only started when a keepalive timeout is configured.
         assert self._keepalive_timeout is not None
@@ -771,7 +769,6 @@ class STTService(AIService):
                 logger.trace(f"{self} sent keepalive silence")
             except Exception as e:
                 logger.warning(f"{self} keepalive error: {e}")
-                break
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the service is ready to send keepalive.
@@ -1079,18 +1076,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         await self._disconnect()
         await self._connect()
-
-    async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Reconnect and restart keepalive task.
-
-        The keepalive task breaks out of its loop on send errors, so it may
-        be dead after the websocket failure that triggered this reconnect.
-        """
-        result = await super()._reconnect_websocket(attempt_number)
-        if result:
-            await self._cancel_keepalive_task()
-            self._create_keepalive_task()
-        return result
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the websocket is open and ready for keepalive."""
