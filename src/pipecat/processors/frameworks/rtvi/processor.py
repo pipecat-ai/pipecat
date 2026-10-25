@@ -28,7 +28,9 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
+    LLMInputTextFrame,
     LLMMessagesAppendFrame,
+    LLMServiceMetadataFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
@@ -87,6 +89,7 @@ class RTVIProcessor(FrameProcessor):
         self._client_ready_id = ""
         # Default to 0.0.0 to indicate unknown version.
         self._client_version = [0, 0, 0]
+        self._accepts_input_text = False
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         # A task to process incoming transport messages.
@@ -236,6 +239,9 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, InputTransportMessageFrame):
             await self._handle_transport_message(frame)
         # All other system frames
+        elif isinstance(frame, LLMServiceMetadataFrame):
+            self._accepts_input_text = frame.accepts_input_text
+            await self.push_frame(frame, direction)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
@@ -493,10 +499,18 @@ class RTVIProcessor(FrameProcessor):
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
             await self.push_frame(output_frame)
-        text_frame = LLMMessagesAppendFrame(
-            messages=[{"role": "user", "content": data.content}],
-            run_llm=opts.run_immediately,
-        )
+        if self._accepts_input_text:
+            text_frame = LLMInputTextFrame(
+                text=data.content,
+                user_id=user_id,
+                audio_response=opts.audio_response,
+                client_message_id=message_id,
+            )
+        else:
+            text_frame = LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": data.content}],
+                run_llm=opts.run_immediately,
+            )
         await self.push_frame(text_frame)
         await self.push_frame(
             RTVISendTextFrame(msg_id=message_id, text=data.content, user_id=user_id)
