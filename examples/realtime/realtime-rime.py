@@ -62,14 +62,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = RimeRealtimeLLMService(
         endpoint=os.getenv("RIME_REALTIME_ENDPOINT"),
         settings=RimeRealtimeLLMService.Settings(
-            system_instruction="You are a voice support assistant. Greet the user. Keep answers short. Use tools for invoice status and billing transfers.",
+            system_instruction="You are a voice support assistant. Keep answers short. Use tools for invoice status and billing transfers.",
             tools=[lookup_invoice, transfer_to_billing],
             tool_fillers={
                 "lookup_invoice": PrismFiller(type="text", text="Checking your invoice.")
             },
         ),
     )
-    context = LLMContext()
+    context = LLMContext([{"role": "system", "content": "Greet the caller and offer help."}])
     user, assistant = LLMContextAggregatorPair(context)
     pipeline = Pipeline([transport.input(), user, llm, transport.output(), assistant])
     worker = PipelineWorker(

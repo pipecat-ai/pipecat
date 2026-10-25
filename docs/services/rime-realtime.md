@@ -1,6 +1,6 @@
 # Rime Prism realtime
 
-`RimeRealtimeLLMService` uses one Rime SDK conversation for microphone audio, live typed turns, transcripts, replies, and application tools. Install `pipecat-ai[rime-realtime]`. Set `RIME_API_KEY`, or pass a caller-owned `rimelabs_sdk.Rime` client with `client=`. The service closes clients that it creates. Existing Rime TTS services use the separate `rime` extra.
+`RimeRealtimeLLMService` uses one Rime SDK session for microphone audio, live typed turns, transcripts, replies, and application tools. It calls `Rime.realtime.connect`, consumes session events, and sends session operations directly. Pipecat owns the pipeline and tool execution. It does not use the SDK's conversation runners. Install `pipecat-ai[rime-realtime]`. Set `RIME_API_KEY`, or pass a caller-owned `rimelabs_sdk.Rime` client with `client=`. The service closes clients that it creates. Existing Rime TTS services use the separate `rime` extra.
 
 ```python
 from rimelabs_sdk.realtime import PrismFiller
@@ -93,8 +93,17 @@ Prism does not support disabling server turn detection, manual audio commit, vid
 Run `examples/realtime/realtime-rime.py` with the development runner:
 
 ```sh
-uv run --extra rime-realtime --extra runner examples/realtime/realtime-rime.py --transport eval --port 7860
+uv run --extra rime-realtime --extra runner examples/realtime/realtime-rime.py --port 7860
 uv run pipecat eval run evals/release/scenarios/scripted/rime_prism.yaml --bot-url ws://localhost:7860/ws -v
 ```
 
-The example has invoice lookup and a billing handoff. The handoff updates instructions and tools together. The eval scenario covers typed multi-turn context, tool execution, and an observable settings change. Voice and interruption also require audio-mode evals and a separate listener or recording when audible output must be established.
+The example has invoice lookup and a billing handoff. The handoff updates instructions and tools together. Initial system history requests the opening greeting. The typed scenario covers conversation memory, tool execution, and an observable settings change. It requires only the Rime key.
+
+The audio scenarios use Kokoro for caller speech, Moonshine to transcribe returned audio, and a Typesafe judge. Install their optional dependencies and set `TYPESAFE_API_KEY` for these checks. This key belongs to the eval judge. Rime does not require it. The judge's optional Ollama explainer is disabled in this scenario file.
+
+```sh
+PYTHONPATH=. uv run pipecat eval run evals/release/scenarios/scripted/rime_prism_audio.yaml \
+  --bot-url ws://localhost:7860/ws --audio --record-dir /tmp/rime-recordings -v
+```
+
+The audio scenarios cover conversation memory, interruption followed by another turn, invoice lookup, and billing handoff. Recordings and independent transcription establish returned speech. Physical speaker playback requires a separate device check. See the [live validation report](rime-realtime-validation.md) for results and limits.
