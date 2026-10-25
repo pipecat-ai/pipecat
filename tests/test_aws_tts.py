@@ -23,10 +23,14 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 CTX = "ctx-1"
@@ -233,6 +237,49 @@ async def test_word_marks_unescape_ssml_characters():
 
     words = [f.raw_text for f in down if isinstance(f, TTSTextFrame)]
     assert words == ["Call", "AT&", "T", "if", "x", "<", "5."]
+
+
+@pytest.mark.parametrize(
+    "language,text,marks,expected",
+    [
+        (
+            Language.JA,
+            "今日はいい天気ですね。",
+            [("今日", 0), ("は", 300), ("いい", 400), ("天気", 600), ("です", 900), ("ね", 1100)],
+            "今日はいい天気ですね。",
+        ),
+        (
+            Language.ZH,
+            "今天天气很好。",
+            [("今天", 0), ("天气", 400), ("很", 800), ("好", 1000)],
+            "今天天气很好。",
+        ),
+        (
+            Language.EN,
+            "Hello there.",
+            [("Hello", 0), ("there", 300)],
+            "Hello there.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_word_marks_keep_the_language_spacing_in_context(language, text, marks, expected):
+    """Words of a language written without spaces reach the context unspaced."""
+    service = _make_service(settings=AWSPollyTTSService.Settings(language=language))
+    service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.5), marks=_ndjson(marks)))
+    context = LLMContext()
+
+    await run_test(
+        Pipeline([service, LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(text),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=2.5),
+        ],
+    )
+
+    assert [m["content"] for m in context.get_messages()] == [expected]
 
 
 @pytest.mark.asyncio

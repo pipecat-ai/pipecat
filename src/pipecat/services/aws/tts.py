@@ -379,6 +379,11 @@ class AWSPollyTTSService(TTSService):
 
         return ssml
 
+    def _language_is_written_without_spaces(self) -> bool:
+        """Whether the synthesis language joins its words without spaces (Chinese, Japanese)."""
+        language = self._settings.language or ""
+        return language.split("-")[0].lower() in {"cmn", "yue", "ja"}
+
     async def _fetch_word_marks(self, polly, base_params: dict) -> list[tuple[str, float]]:
         """Fetch per-word SpeechMarks from Polly for the same utterance.
 
@@ -499,7 +504,13 @@ class AWSPollyTTSService(TTSService):
                             word_times = [
                                 (word, self._cumulative_time + start) for word, start in word_marks
                             ]
-                            await self.add_word_timestamps(word_times, context_id)
+                            await self.add_word_timestamps(
+                                word_times,
+                                context_id,
+                                includes_inter_frame_spaces=(
+                                    True if self._language_is_written_without_spaces() else None
+                                ),
+                            )
                         # Offset the next sentence by this utterance's audio duration.
                         self._cumulative_time += utterance_seconds
                 finally:
