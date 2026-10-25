@@ -10,6 +10,8 @@ import asyncio
 from dataclasses import replace
 from enum import Enum
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -330,6 +332,19 @@ class UserTurnController(BaseObject):
                 "on_user_turn_speculation_cancelled", self._on_user_turn_speculation_cancelled
             )
             s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
+
+        self._warn_if_no_stop_strategy_listens_to_the_user()
+
+    def _warn_if_no_stop_strategy_listens_to_the_user(self):
+        # The turn's inference runs once the stop strategies that listen to the
+        # user have decided, so with none of them only the stop timeout runs it.
+        stop_strategies = self._user_turn_stop_strategies
+        if stop_strategies and all(s.waits_for_inference for s in stop_strategies):
+            logger.warning(
+                f"{self}: every user turn stop strategy waits for the turn's inference, so "
+                "nothing runs it until the user turn stop timeout. Add a stop strategy that "
+                "detects the user stopping, such as SpeechTimeoutUserTurnStopStrategy."
+            )
 
     async def _cleanup_strategies(self):
         # Remove the handlers _setup_strategies added (symmetric), so re-applying

@@ -9,6 +9,8 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, MagicMock
 
+from loguru import logger
+
 from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -1293,6 +1295,23 @@ class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
 
         await on_inference.decide()
         self.assertEqual([s for s, _ in self.stops], [on_inference])
+
+    async def test_a_list_that_only_waits_for_the_inference_warns(self):
+        """With no stop strategy listening to the user, only the stop timeout runs the inference."""
+        messages = []
+        sink = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+        try:
+            await self._start([DecidingStopStrategy(on_inference=True)])
+            await self.controller.update_strategies(
+                UserTurnStrategies(
+                    stop=[DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)]
+                )
+            )
+        finally:
+            logger.remove(sink)
+
+        warned = [m for m in messages if "waits for the turn's inference" in m]
+        self.assertEqual(len(warned), 1)
 
     async def test_the_inference_runs_once_per_round_of_decisions(self):
         first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
