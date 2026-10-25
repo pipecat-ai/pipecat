@@ -22,6 +22,7 @@ from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -389,6 +390,30 @@ async def test_no_marks_pushes_sentence_once():
     assert [f.text for f in down if isinstance(f, TTSTextFrame)] == ["Hello world."]
 
 
+@pytest.mark.parametrize("engine", ["neural", "generative"])
+@pytest.mark.asyncio
+async def test_untimed_sentence_reaches_context_before_an_interruption(engine):
+    """A sentence played without marks stays in the context when the next one is interrupted."""
+    service = _make_service(settings=AWSPollyTTSService.Settings(engine=engine))
+    _use_polly(service, _FakePolly(pcm=_pcm(0.3), marks=b""))
+    context = LLMContext()
+
+    await run_test(
+        Pipeline([service, LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("One two. "),
+            SleepFrame(sleep=1.0),
+            LLMTextFrame("Three four. "),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            SleepFrame(sleep=2.5),
+        ],
+    )
+
+    assert [m["content"] for m in context.get_messages()] == ["One two."]
+
+
 @pytest.mark.asyncio
 async def test_word_timestamps_disabled_skips_marks_call():
     """With word timestamps off, run_tts never makes the json marks call."""
@@ -405,8 +430,8 @@ async def test_word_timestamps_disabled_skips_marks_call():
 
 
 @pytest.mark.asyncio
-async def test_generative_engine_skips_marks_call():
-    """The generative engine has no speech marks, so run_tts doesn't request them."""
+async def test_generative_engine_times_the_sentence_as_a_whole():
+    """The generative engine has no speech marks, so its sentence is timed as a whole."""
     service = _make_service(settings=AWSPollyTTSService.Settings(engine="generative"))
     _stub_for_run_tts(service)
     captured = _capture_word_timestamps(service)
@@ -415,7 +440,7 @@ async def test_generative_engine_skips_marks_call():
 
     await _drain(service, "Hello world")
 
-    assert captured == []
+    assert captured == [("Hello world", pytest.approx(0.0))]
     assert all(call.get("OutputFormat") != "json" for call in polly.calls)
 
 

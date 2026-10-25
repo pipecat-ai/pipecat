@@ -441,7 +441,7 @@ class AWSPollyTTSService(TTSService):
         arrive as newline-delimited JSON in the ``AudioStream`` body.
 
         If the request fails or the marks can't be parsed, it returns an empty
-        list so audio is unaffected and the sentence is pushed untimed.
+        list so audio is unaffected and the sentence is timed as a whole.
 
         Args:
             polly: An open aiobotocore Polly client.
@@ -516,7 +516,7 @@ class AWSPollyTTSService(TTSService):
                 elif not self._warned_generative_untimed:
                     logger.warning(
                         f"{self}: the generative engine has no speech marks, so its "
-                        "words are pushed without timestamps"
+                        "text is pushed a sentence at a time"
                     )
                     self._warned_generative_untimed = True
             try:
@@ -543,20 +543,21 @@ class AWSPollyTTSService(TTSService):
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
 
-                if marks_task is not None:
-                    word_marks = await marks_task
-                    marks_task = None
-                    # Without marks, the base class pushes the sentence untimed
-                    # when the audio context ends.
-                    if word_marks:
-                        word_times = [
-                            (word, self._cumulative_time + start) for word, start in word_marks
-                        ]
-                        await self.add_word_timestamps(
-                            word_times,
-                            context_id,
-                            includes_inter_frame_spaces=self._language_is_written_without_spaces(),
-                        )
+                if self._word_timestamps:
+                    word_marks = []
+                    if marks_task is not None:
+                        word_marks = await marks_task
+                        marks_task = None
+                    # Without marks, the sentence is timed as a whole at its start, so
+                    # it still reaches the context as soon as its audio plays.
+                    word_times = [
+                        (word, self._cumulative_time + start) for word, start in word_marks
+                    ] or [(text, self._cumulative_time)]
+                    await self.add_word_timestamps(
+                        word_times,
+                        context_id,
+                        includes_inter_frame_spaces=self._language_is_written_without_spaces(),
+                    )
                     self._cumulative_time += utterance_seconds
             finally:
                 # Cancel a marks call still in flight (audio call failed, or the
