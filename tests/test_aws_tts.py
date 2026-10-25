@@ -102,6 +102,8 @@ class _FakeSession:
 
 def _make_service(**kwargs) -> AWSPollyTTSService:
     # Explicit credentials short-circuit the botocore chain (no network).
+    # Word timestamps are on unless a test says otherwise.
+    kwargs.setdefault("word_timestamps", True)
     return AWSPollyTTSService(
         api_key="test-secret",
         aws_access_key_id="test-key",
@@ -157,20 +159,20 @@ async def _drain(service: AWSPollyTTSService, text: str):
 # --------------------------------------------------------------------------- #
 
 
-def test_word_timestamps_enabled_by_default():
-    """Word timestamps are on by default and activate the per-word path."""
-    service = _make_service()
+def test_word_timestamps_disabled_by_default():
+    """Word timestamps are off by default, so Polly gets one request per sentence."""
+    service = AWSPollyTTSService(api_key="test-secret", aws_access_key_id="test-key")
+    assert service._word_timestamps is False
+    assert service._push_text_frames is True
+
+
+def test_word_timestamps_enabled_uses_per_word_path():
+    """Enabling word timestamps activates the per-word path."""
+    service = _make_service(word_timestamps=True)
     assert service._word_timestamps is True
     # Word events produce the TTSTextFrames, so the base must not push whole text.
     assert service._push_text_frames is False
     assert service._cumulative_time == 0.0
-
-
-def test_word_timestamps_disabled_pushes_whole_text():
-    """Disabling word timestamps flips the service back to whole-text frames."""
-    service = _make_service(word_timestamps=False)
-    assert service._word_timestamps is False
-    assert service._push_text_frames is True
 
 
 # --------------------------------------------------------------------------- #

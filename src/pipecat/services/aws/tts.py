@@ -160,10 +160,9 @@ class AWSPollyTTSService(TTSService):
     multiple languages, voices, SSML features, and voice customization
     options including prosody controls.
 
-    When ``word_timestamps`` is enabled (the default), the service makes a
-    second Polly call requesting word SpeechMarks and emits one timestamped
-    ``TTSTextFrame`` per word, the same behaviour timestamp-capable services
-    such as ElevenLabs provide.
+    With ``word_timestamps`` enabled, the service makes a second Polly call
+    per sentence for word SpeechMarks and emits one timestamped
+    ``TTSTextFrame`` per word. The generative engine has no SpeechMarks.
     """
 
     Settings = AWSPollyTTSSettings
@@ -205,7 +204,7 @@ class AWSPollyTTSService(TTSService):
         region: str | None = None,
         voice_id: str | None = None,
         sample_rate: int | None = None,
-        word_timestamps: bool = True,
+        word_timestamps: bool = False,
         params: InputParams | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -228,11 +227,9 @@ class AWSPollyTTSService(TTSService):
 
             sample_rate: Audio sample rate. If None, uses service default.
             word_timestamps: Whether to emit per-word timestamped TTSTextFrames
-                using Polly SpeechMarks. Defaults to True. When True the service
-                makes a second (concurrent) Polly call to fetch word timing.
-                Set to False to skip that extra call (e.g. to reduce request
-                cost), in which case the base class emits a single whole-sentence
-                TTSTextFrame with no timing.
+                using Polly SpeechMarks. Each sentence then costs a second,
+                concurrent Polly request. Defaults to False, which pushes each
+                sentence as one TTSTextFrame with no timing.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
