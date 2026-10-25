@@ -487,18 +487,14 @@ class LiveKitTransportClient:
             digit: The DTMF digit to send (0-9, \*, #).
         """
         if not self._connected:
-            return
+            raise RuntimeError("Cannot send DTMF before connecting to LiveKit")
 
         if digit not in DTMF_CODE_MAP:
-            logger.warning(f"Invalid DTMF digit: {digit}")
-            return
+            raise ValueError("Invalid DTMF digit")
 
         code = DTMF_CODE_MAP[digit]
 
-        try:
-            await self.room.local_participant.publish_dtmf(code=code, digit=digit)
-        except Exception as e:
-            logger.error(f"Error sending DTMF tone {digit}: {e}")
+        await self.room.local_participant.publish_dtmf(code=code, digit=digit)
 
     async def publish_audio(self, audio_frame: rtc.AudioFrame) -> bool:
         """Publish an audio frame to the room.
@@ -1510,16 +1506,14 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use LiveKit's native publish_dtmf method for telephone events.
 
-        LiveKit's DTMF API sends a single tone per call, so when
-        ``frame.buttons`` contains multiple entries only the first one is
-        sent.
+        LiveKit's DTMF API sends a single tone per call. Publish every
+        button in order, stopping if the gateway rejects a tone.
 
         Args:
             frame: The DTMF frame to write.
         """
-        if not frame.buttons:
-            return
-        await self._client.send_dtmf(frame.buttons[0].value)
+        for button in frame.buttons:
+            await self._client.send_dtmf(button.value)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
