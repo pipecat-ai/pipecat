@@ -351,6 +351,22 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             logger.debug(f"Received final message for context {received_ctx_id}")
             self._contexts.pop(received_ctx_id, None)
             if self.audio_context_available(received_ctx_id):
+                # A word is reported once the character after it arrives, so the
+                # context's last word is still waiting, with nothing to follow it.
+                if self._partial_word:
+                    await self.add_word_timestamps(
+                        [(self._partial_word, self._partial_word_start_time)],
+                        received_ctx_id,
+                        includes_inter_frame_spaces=(
+                            True
+                            if _word_timestamps_include_inter_frame_spaces(
+                                assert_given(self._settings.language)
+                            )
+                            else None
+                        ),
+                    )
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
                 await self.append_to_audio_context(
                     received_ctx_id, TTSStoppedFrame(context_id=received_ctx_id)
                 )

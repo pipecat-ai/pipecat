@@ -298,6 +298,38 @@ async def test_dialogue_turn_final_does_not_end_the_audio_context():
 
 
 @pytest.mark.asyncio
+async def test_dialogue_context_end_reports_its_last_word():
+    """A word is reported when the character after it arrives; the last has none."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    await service._handle_message(
+        {
+            "context_id": "ctx-1",
+            "alignment": {
+                "chars": ["H", "i", " ", "t", "h", "e", "r", "e", "."],
+                "char_start_times_ms": [0, 120, 240, 293, 347, 400, 453, 507, 560],
+                "char_durations_ms": [120, 120, 53, 54, 53, 53, 54, 53, 60],
+            },
+        }
+    )
+    assert reported == ["Hi"]
+
+    await service._handle_message({"context_id": "ctx-1", "is_final": True})
+
+    assert reported == ["Hi", "there."]
+    assert service._partial_word == ""
+
+
+@pytest.mark.asyncio
 async def test_dialogue_interruption_closes_without_waiting_for_audio():
     """Before generation starts, an immediate close is what cancels the text."""
     service = _make_dialogue_service()
