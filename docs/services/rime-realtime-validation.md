@@ -1,86 +1,55 @@
 # Rime Prism live validation
 
-Validation date: October 24, 2026, America/Los_Angeles. Branch: `feat/rime-prism-realtime`.
-The environment used Python 3.13.14, Pipecat 1.14.1.dev2, and `rimelabs-sdk` 0.1.0a22.
-The checks used the SDK's public Prism endpoint and the credentials supplied for this validation.
-Credentials remained outside the repository.
+On October 24, 2026, the `feat/rime-prism-realtime` branch was checked against the public Prism endpoint with Python 3.13.14, Pipecat 1.14.1.dev2, and `rimelabs-sdk` 0.1.0a22.
 
-The integration uses `Rime.realtime.connect`, session events, and direct session operations.
-Pipecat runs the pipeline, context aggregators, and application tools. No SDK conversation runner
-was used. `RIME_API_KEY` authenticates the service. `TYPESAFE_API_KEY` authenticates the audio
-eval judge. The typed scenario does not need the Typesafe key.
+## Saved scenarios
 
-## Live checks
+All four saved scenarios passed in 84 seconds. The example server log had no service errors or shutdown warnings.
 
-The final run of the saved scenarios passed all four checks in 84 seconds. The repository
-example's final server log had no service errors or shutdown warnings.
-
-| Check | Evidence |
+| Scenario | Observed behavior |
 | --- | --- |
-| Typed conversation | The bot retained invoice number 123, called `lookup_invoice`, returned paid status, called `transfer_to_billing`, and then answered with the billing prefix. |
-| Voice conversation | Kokoro supplied caller audio. The bot remembered Alex and answered Berlin. Moonshine transcribed returned audio independently of Rime's text events. The Typesafe judge accepted the answers. |
-| Interruption | Caller audio interrupted a long story. The client received `bot_interrupted`, the bot answered Tokyo, and the next turn answered Paris. |
-| Voice tools and handoff | Audio input triggered invoice lookup and the billing transfer. The spoken replies included paid status and the changed billing prefix. |
-| Initial history | The server accepted two history messages without generating a reply. A typed query recovered KILO. |
-| Append without inference | A system-history append generated no reply. The next typed query recovered NOVA. |
-| Stable history identity | A transform deleted the first of two identical messages. The remaining message retained its server ID. |
-| History replacement | A full replacement contained two messages. The next typed query recovered ZULU. |
-| Runtime truncation | The server accepted `disabled`, `RetentionRatio(0.7)`, and `auto`, each through its correlated operation result. |
-| Settings and metadata | A combined update accepted instructions, tools, automatic filler, the current voice, interruption disabled, and truncation. A separate metadata update accepted `{"validation": "live"}`. The published session revision was 6. |
-| Tool after settings update | After invoice confirmation, `lookup` executed once for ABC123. The continuation returned paid status. Six replies received six terminal output reports, with no service errors. |
+| Typed conversation | Retained invoice 123, called `lookup_invoice`, returned paid status, and called `transfer_to_billing`. Later replies used the billing prefix. |
+| Voice conversation | Remembered Alex and answered Berlin. Kokoro supplied caller speech; Moonshine independently transcribed replies, which the Typesafe judge accepted. |
+| Interruption | Caller speech interrupted a long story. The client received `bot_interrupted`, and subsequent turns answered Tokyo and Paris. |
+| Voice tools and handoff | Speech input triggered invoice lookup and billing transfer. Replies included paid status and the changed billing prefix. |
 
-The control check used `RimeRealtimeLLMService` in a Pipecat `PipelineWorker` with normal context
-aggregators. Its output adapter accepted bytes immediately and reported unknown playback timing.
-It did not measure device playback. The model asked for invoice confirmation before calling the
-tool. The check answered that question before it expected paid status.
+## Additional controls
 
-## Changes required by validation
+Control checks used `RimeRealtimeLLMService` in a `PipelineWorker` with normal context aggregators. The output adapter accepted bytes and reported unknown playback timing. It did not measure device playback.
 
-Four regression cases exposed faults and passed after the fixes:
+| Control | Observed behavior |
+| --- | --- |
+| Initial history | Imported two messages without generating a reply; a later typed query recovered KILO. |
+| Append without inference | Added system history without a reply; the next query recovered NOVA. |
+| Stable history identity | Deleted the first of two identical messages while retaining the second message's server ID. |
+| History replacement | Replaced history with two messages; the next query recovered ZULU. |
+| Runtime truncation | Accepted `disabled`, `RetentionRatio(0.7)`, and `auto` through correlated operation results. |
+| Settings and metadata | Accepted combined instructions, tools, automatic filler, current voice, interruption disabled, and truncation. A separate metadata update accepted `{"validation": "live"}`. The published revision was 6. |
+| Tool after update | After invoice confirmation, `lookup` executed once for ABC123 and returned paid status. Six replies received six terminal output reports with no service errors. |
 
-- Terminal playback reports can pass through processors during cancellation.
-- Cancellation keeps the output transport open until the service collects terminal reports,
-  within the configured shutdown deadline. This includes a pending output with no audio.
-- Tool continuations retain the initiating typed turn's audio setting and request identifiers.
-- A metadata acknowledgment records its published settings revision before later replies use it.
+## Opening reply
 
-A separate direct SDK probe tested an opening reply with no history. The deployment returned
-`turn_failed` with empty text and no audio. An initial greeting history message or an explicit reply
-instruction succeeded. The example uses an initial system-history message to request its greeting.
-The service does not retry a failed opening reply automatically.
+An opening reply with no history returned `turn_failed`, empty text, and no audio in a direct SDK probe. Initial greeting history or an explicit reply instruction succeeded. The example uses initial system history to request its greeting; failed opening replies are not retried automatically.
 
 ## Playback evidence and limits
 
-Audio evals recorded returned speech and used Moonshine transcription for response assertions.
-The final audio run produced nonzero 16 kHz mono recordings of 16.855 seconds for memory,
-16.978 seconds for interruption, and 37.000 seconds for tools and handoff. These recordings contain
-the conversation audio. They are evidence of captured speech, not physical speaker playback.
+Recorded conversation audio was non-silent, 16 kHz mono, and independently transcribed by Moonshine. This establishes returned speech, not physical speaker playback.
 
-The eval transport reports successful byte acceptance with unknown playback timing after audio
-has been written. The service leaves `played_ms=None` and lets the SDK/server estimate playback.
-It reports known zero for suppressed or discarded audio. The final typed run produced no bot
-speaking events. Tool continuations also retained text-only output in the regression test.
+Eval output reports byte acceptance with `played_ms=None`; the SDK/server estimates playback. Suppressed or fully discarded output reports zero. Text-only output was also checked for tool continuations.
 
-The local PortAudio path has tests for callback DAC times, valid speech sample counts, padding,
-underflow, and invalid timing. Device enumeration found zero audio devices and zero output devices
-in this environment. A live PortAudio playback-clock check and physical audibility remain
-unverified. No live WebRTC listener playback measurement was performed.
+No audio devices were available for a live PortAudio check. Device-clock timing, valid speech counts, padding, underflow, and invalid timing have local tests. Physical audibility and live WebRTC listener timing remain unverified.
 
-Opening and runtime truncation have local protocol tests. Live runtime acceptance is recorded
-above. Voice changes to a different voice, timeout recovery against a failing public endpoint,
-and long-running retention-limit behavior were not tested live. Local protocol tests cover their
-accepted-operation and failure contracts where supported. These results do not establish support
-for unsupported provider operations.
+Live checks also exclude a change to a different voice, timeout recovery against a failing public endpoint, and long-running retention-limit behavior. Opening and runtime truncation have local protocol tests; runtime acceptance was checked live.
 
-## Repeatable checks and local evidence
+## Reproduce the scenarios
 
-Start the repository example with `RIME_API_KEY` in its environment:
+Start the example with `RIME_API_KEY` available:
 
 ```sh
 uv run --extra rime-realtime --extra runner examples/realtime/realtime-rime.py --port 7860
 ```
 
-Run the saved scenarios with the audio judge dependencies and key available:
+Audio checks require caller speech, transcription, and judge dependencies plus `TYPESAFE_API_KEY`. See the [usage guide](rime-realtime.md#example-and-validation) for setup, then run:
 
 ```sh
 PYTHONPATH=. uv run pipecat eval run \
@@ -90,21 +59,8 @@ PYTHONPATH=. uv run pipecat eval run \
   --timeout 35 --debug -v
 ```
 
-The regression selection covers Rime realtime and TTS, base output, frame processing and queues,
-context aggregation, settings, service switching, tools, RTVI, audio volume, user turns,
-OpenAI realtime audio, and deprecation markers. It passed 628 tests and 24 subtests. Ruff lint,
-Ruff format, Pyright, lock consistency, the CLI service registry check, and the changelog draft
-also passed.
+## Regression checks
 
-Local artifacts from this validation remain outside the repository:
+The recorded regression run passed 628 tests and 24 subtests across Rime realtime/TTS, shared pipeline and output behavior, tools, RTVI, user turns, and OpenAI realtime audio. Ruff lint and format, Pyright, lock consistency, the CLI service registry check, and the changelog draft also passed.
 
-- `/private/tmp/pipecat-rime-verified-eval.log`: final scenario results.
-- `/private/tmp/pipecat-rime-verified-bot.log`: final example server log.
-- `/private/tmp/pipecat-rime-live/verified/`: per-scenario eval and debug logs.
-- `/private/tmp/pipecat-rime-live/recordings-verified/`: final conversation recordings.
-- `/private/tmp/pipecat-rime-live/controls/results.json`: accepted history/settings operations
-  and the tool result from the control check.
-- `/private/tmp/pipecat-rime-verified-tests.log`: regression results.
-
-These temporary artifacts can be removed by the operating system. The saved scenarios and this
-report remain in the repository.
+Raw logs and recordings are not stored in the repository. The saved scenarios provide repeatable checks; the results above record this validation environment.
