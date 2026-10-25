@@ -24,7 +24,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
     FrameProcessorSetup,
 )
-from pipecat.turns.types import UserTurnSpeculation
+from pipecat.turns.types import UserTurnResumedParams, UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -45,9 +45,13 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_started: Emitted when a user turn starts.
     - on_user_turn_inference_triggered: Emitted when enough signal exists to
       start LLM inference. Fires together with `on_user_turn_stopped` for
-      most strategies; fires alone when a downstream strategy gates
-      finalization on the LLM's verdict.
+      most strategies; fires alone when the turn's end waits for a decision
+      on the inference, or for an eager end of turn to be confirmed.
     - on_user_turn_stopped: Emitted when a user turn is semantically final.
+    - on_user_turn_resumed: Emitted when the user starts speaking again in
+      an open turn, after they stopped or after the turn's inference was
+      triggered. Its `UserTurnResumedParams` say whether the turn interrupts
+      the bot and whether that inference was triggered.
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
@@ -64,6 +68,10 @@ class UserTurnProcessor(FrameProcessor):
 
         @processor.event_handler("on_user_turn_stopped")
         async def on_user_turn_stopped(processor, strategy: BaseUserTurnStopStrategy):
+            ...
+
+        @processor.event_handler("on_user_turn_resumed")
+        async def on_user_turn_resumed(processor, params: UserTurnResumedParams):
             ...
 
         @processor.event_handler("on_user_turn_stop_timeout")
@@ -103,6 +111,7 @@ class UserTurnProcessor(FrameProcessor):
 
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
+        self._register_event_handler("on_user_turn_resumed")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
         self._register_event_handler("on_user_turn_inference_triggered")
@@ -122,6 +131,9 @@ class UserTurnProcessor(FrameProcessor):
         )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stopped", self._on_user_turn_stopped
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_resumed", self._on_user_turn_resumed
         )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
@@ -248,6 +260,9 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._call_event_handler("on_user_turn_stopped", strategy)
+
+    async def _on_user_turn_resumed(self, controller, params: UserTurnResumedParams):
+        await self._call_event_handler("on_user_turn_resumed", params)
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")

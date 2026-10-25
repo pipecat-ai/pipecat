@@ -94,6 +94,12 @@ class UserTurnController(BaseObject):
       was triggered, since the new speech voids the answer it started.
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
+    - on_user_turn_speculation_cancelled: Emitted when a stop strategy
+      withdraws its speculative inference, such as an eager end of turn whose
+      prediction turned out wrong.
+    - on_reset_aggregation: Emitted when a start strategy wants the user's
+      aggregated text dropped, as the wake phrase strategy does for speech
+      before the wake phrase.
     - on_push_frame: Emitted when a strategy wants to push a frame.
     - on_broadcast_frame: Emitted when a strategy wants to broadcast a frame.
 
@@ -115,8 +121,20 @@ class UserTurnController(BaseObject):
         async def on_user_turn_stopped(controller, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams):
             ...
 
+        @controller.event_handler("on_user_turn_resumed")
+        async def on_user_turn_resumed(controller, params: UserTurnResumedParams):
+            ...
+
         @controller.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(controller):
+            ...
+
+        @controller.event_handler("on_user_turn_speculation_cancelled")
+        async def on_user_turn_speculation_cancelled(controller):
+            ...
+
+        @controller.event_handler("on_reset_aggregation")
+        async def on_reset_aggregation(controller, strategy: BaseUserTurnStartStrategy):
             ...
 
         @controller.event_handler("on_push_frame")
