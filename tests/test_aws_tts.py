@@ -207,8 +207,17 @@ async def test_fetch_word_marks_parses_ndjson():
 async def test_word_marks_unescape_ssml_characters():
     """Marks for escaped characters keep every word of the sentence timed."""
     service = _make_service()
+    # As Polly's neural engine returns them for this sentence.
     marks = _ndjson(
-        [("Call", 0), ("AT&amp;T", 200), ("if", 500), ("x", 600), ("&lt;", 700), ("5.", 800)]
+        [
+            ("Call", 0),
+            ("AT", 300),
+            ("&amp;T", 700),
+            ("if", 1000),
+            ("x", 1100),
+            ("&lt;", 1400),
+            ("5", 1800),
+        ]
     )
     service._aws_session = _FakeSession(_FakePolly(pcm=_pcm(1.0), marks=marks))
 
@@ -222,8 +231,8 @@ async def test_word_marks_unescape_ssml_characters():
         ],
     )
 
-    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
-    assert words == ["Call", "AT&T", "if", "x", "<", "5."]
+    words = [f.raw_text for f in down if isinstance(f, TTSTextFrame)]
+    assert words == ["Call", "AT&", "T", "if", "x", "<", "5."]
 
 
 @pytest.mark.asyncio
