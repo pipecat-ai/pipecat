@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -46,6 +46,92 @@ class SimliVideoSettings(ServiceSettings):
     pass
 
 
+class SimliCamera(BaseModel):
+    """The camera a Simli Trinity-2 session starts with.
+
+    Offsets on top of the avatar's own framing. A field left unset stays
+    neutral: 0, or 1 for ``zoom``. Simli still applies a value outside its
+    supported range. See https://docs.simli.com/api-reference/trinity-2/camera.
+
+    Parameters:
+        pos_x_off: Moves the avatar right, in half canvas widths. Supported
+            range -10 to 10.
+        pos_y_off: Moves the avatar down, in half canvas heights. Supported
+            range -10 to 10.
+        pos_z_off: Metres the camera backs away from the avatar (negative moves
+            in). Supported range -5 to 5.
+        rot_x_off: Degrees the camera tilts up (pitch). Supported range -180 to 180.
+        rot_y_off: Degrees the camera pans right (yaw). Supported range -180 to 180.
+        rot_z_off: Degrees the camera rolls clockwise. Supported range -180 to 180.
+        zoom: Multiplies the avatar's zoom; 1 is no change. Supported range
+            above 0, up to 4.
+        orbit_x_off: Degrees the camera orbits up over the avatar's head
+            (elevation). Supported range -80 to 80.
+        orbit_y_off: Degrees the camera orbits round to its right (azimuth).
+            Supported range -180 to 180.
+    """
+
+    pos_x_off: float | None = None
+    pos_y_off: float | None = None
+    pos_z_off: float | None = None
+    rot_x_off: float | None = None
+    rot_y_off: float | None = None
+    rot_z_off: float | None = None
+    zoom: float | None = None
+    orbit_x_off: float | None = None
+    orbit_y_off: float | None = None
+
+
+class SimliFraming(BaseModel):
+    """How a Simli Trinity-2 session frames its video.
+
+    The video's size, where the avatar sits in it, the camera, and an uploaded
+    background or foreground. Simli applies them when the session starts. Only
+    Trinity-2 faces use them; other faces keep their own frame size. A field
+    left unset keeps Simli's default. See
+    https://docs.simli.com/api-reference/trinity-2#framing-the-video.
+
+    Set the output transport's ``video_out_width`` and ``video_out_height`` to
+    the same size as ``streaming_width`` and ``streaming_height``.
+
+    Example::
+
+        # 16:9 video with the avatar a little left of center.
+        SimliVideoService.Framing(
+            streaming_width=1366,
+            streaming_height=768,
+            avatar_position_x=0.4,
+        )
+
+    Parameters:
+        streaming_width: Width of the video in pixels, at least 512. With
+            ``streaming_height`` it must make a 1:1, 16:9 or 9:16 frame, such
+            as 1366x768; Simli rejects other shapes. Simli's default is 768.
+        streaming_height: Height of the video in pixels, at least 512. See
+            ``streaming_width``. Simli's default is 768.
+        avatar_position_x: Where the avatar sits across the video, from 0
+            (left) to 1 (right). Simli's default is 0.5.
+        avatar_position_y: Where the avatar sits down the video, from 0 (top)
+            to 1 (bottom). Simli's default is 1.
+        camera: The camera the session starts with. Unset keeps the avatar's
+            own framing.
+        background_id: The id of a background uploaded to your Simli account
+            (``POST /assets/backgrounds``) to show behind the avatar. Unset
+            keeps the avatar's own.
+        foreground_id: The id of a foreground uploaded to your Simli account
+            (``POST /assets/foregrounds``) to lay over the avatar. Unset keeps
+            the avatar's own.
+    """
+
+    streaming_width: int | None = Field(default=None, ge=512)
+    streaming_height: int | None = Field(default=None, ge=512)
+    avatar_position_x: float | None = Field(default=None, ge=0.0, le=1.0)
+    avatar_position_y: float | None = Field(default=None, ge=0.0, le=1.0)
+    camera: SimliCamera | None = None
+    background_id: str | None = None
+    foreground_id: str | None = None
+
+
 class SimliVideoService(AIService):
     """Simli video service for real-time avatar generation.
 
@@ -55,6 +141,8 @@ class SimliVideoService(AIService):
     """
 
     Settings = SimliVideoSettings
+    Framing = SimliFraming
+    Camera = SimliCamera
     _settings: Settings
 
     @deprecated(
@@ -91,6 +179,7 @@ class SimliVideoService(AIService):
         max_session_length: int | None = None,
         max_idle_time: int | None = None,
         enable_logging: bool | None = None,
+        framing: SimliFraming | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -115,6 +204,10 @@ class SimliVideoService(AIService):
             max_idle_time: Maximum duration in seconds the avatar is not speaking
                 before the avatar disconnects.
             enable_logging: Whether to enable Simli logging.
+            framing: Trinity-2 framing for the session: the video's size, where
+                the avatar sits in it, the camera, and an uploaded background or
+                foreground. Unset keeps Simli's defaults (768x768, avatar at
+                the bottom center).
             settings: Service settings.
             **kwargs: Additional arguments passed to the parent AIService.
         """
@@ -148,6 +241,12 @@ class SimliVideoService(AIService):
             config_kwargs["maxIdleTime"] = max_idle_time
 
         config = SimliConfig(**config_kwargs)
+        if framing is not None:
+            # simli-ai 2.0.x's SimliConfig has no fields for these, but the SDK sends
+            # every attribute of the config as the session request. Later releases
+            # declare them as fields, which setting them also fills.
+            for key, value in framing.model_dump(exclude_none=True).items():
+                setattr(config, key, value)
 
         self._initialized = False
         # Add buffer time to session limits
