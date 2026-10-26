@@ -31,7 +31,6 @@ Requirements:
 - ANTHROPIC_API_KEY
 - DEEPGRAM_API_KEY
 - CARTESIA_API_KEY
-- TYPESAFE_API_KEY, for predictive delegation (commented out below)
 """
 
 import os
@@ -105,19 +104,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # cancellation is then sent to the client as an RTVI server message.
         # from pipecat.pipeline.llm_with_backend import BackendConnector
         # connector=BackendConnector(client_trace=True),
-        #
-        # To speed up responses that need backend involvement, add predictive
-        # delegation, which uses a classifier to determine whether it needs to
-        # wait for the frontend's inference or can go ahead and trigger an
-        # early backend delegation. The cost is money, not time: the
-        # classifier runs in parallel with the frontend, but on every turn,
-        # and an early delegation abandons a frontend request already under
-        # way.
-        # from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
-        # from pipecat.pipeline.llm_with_backend import PredictiveDelegation
-        # predictive_delegation=PredictiveDelegation(
-        #     JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])
-        # ),
     )
 
     # The frontend's tools are installed by the service; the real tools live
