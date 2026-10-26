@@ -481,6 +481,19 @@ class AssemblyAITTSService(WebsocketTTSService):
         await self._forget_context(context_id)
         await super().on_audio_context_interrupted(context_id)
 
+    async def on_audio_context_completed(self, context_id: str):
+        """Forget a context's bookkeeping once it has finished playing.
+
+        A context that goes quiet mid-turn ends on the base class's timeout and
+        is recreated when more audio arrives, with word times measured from its
+        new first audio, so its offset starts again from zero.
+
+        Args:
+            context_id: The ID of the audio context that finished playing.
+        """
+        await self._forget_context(context_id)
+        await super().on_audio_context_completed(context_id)
+
     # ------------------------------------------------------------------
     # Server messages
     # ------------------------------------------------------------------

@@ -514,6 +514,43 @@ async def test_session_renewed_mid_turn_keeps_word_times():
     ]
 
 
+@pytest.mark.asyncio
+async def test_context_recreated_after_quiet_timeout_restarts_word_times():
+    """Words after a context times out mid-turn are timed from the recreated context's audio."""
+    captured: dict = {"messages": []}
+    async with serve(_server(captured), "127.0.0.1", 0) as server:
+        service = _service(server, stop_frame_timeout_s=0.3)
+        word_times = []
+        add_word_timestamps = service.add_word_timestamps
+
+        async def record_word_times(times, context_id=None, **kwargs):
+            word_times.extend(times)
+            await add_word_timestamps(times, context_id, **kwargs)
+
+        service.add_word_timestamps = record_word_times
+        down_frames, _ = await run_test(
+            service,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(text="Hi there! "),
+                LLMTextFrame(text="Thanks "),
+                # The turn goes quiet for longer than stop_frame_timeout_s.
+                SleepFrame(sleep=0.8),
+                LLMTextFrame(text="for calling. "),
+                LLMTextFrame(text="Bye."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
+
+    assert sum(isinstance(f, TTSStartedFrame) for f in down_frames) == 2
+    assert [word for word, _ in word_times] == ["Hi", "there!", "Thanks", "for", "calling.", "Bye."]
+    # The recreated context's words start again from zero.
+    offsets_ms = [round(time * 1000) for _, time in word_times]
+    assert offsets_ms == [0, WORD_MS, 0, WORD_MS, 2 * WORD_MS, 2 * CHUNK_MS]
+
+
 def test_language_is_sent_when_set():
     service = AssemblyAITTSService(
         api_key="test-key",
