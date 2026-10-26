@@ -16,8 +16,7 @@ from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
     EndFrame,
-    LLMMessagesAppendFrame,
-    LLMOperationResultFrame,
+    LLMRunFrame,
     LLMServiceMetadataFrame,
     StartFrame,
 )
@@ -212,7 +211,7 @@ class Peer:
             await self.emit("response.audio.done", **common)
         return common
 
-    async def end(self, ref, status="completed"):
+    async def end(self, ref, status="completed", *, ready=True):
         await self.emit(
             "response.done",
             response={
@@ -221,6 +220,9 @@ class Peer:
                 "metadata": {"prism_drain_token": f"drain-{ref}"},
             },
         )
+        # The server admits another turn after its playback estimate expires.
+        if ready:
+            await self.emit("prism.typed_input.ready")
 
 
 class Capture(FrameProcessor):
@@ -236,31 +238,23 @@ class Capture(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class MeasuredOutput(BaseOutputTransport):
-    """A deterministic device that completes every accepted sample before returning."""
+class Output(BaseOutputTransport):
+    """Capture audio written through the unchanged output transport."""
 
-    def __init__(self, *, enabled=True, measured=True, channels=1):
+    def __init__(self, *, enabled=True, channels=1):
         super().__init__(
             TransportParams(
                 audio_out_enabled=enabled, audio_out_sample_rate=24000, audio_out_channels=channels
             )
         )
-        self.measured = measured
         self.writes = []
-        self.played = {}
 
     async def start(self, frame: StartFrame):
         await self.set_transport_ready(frame)
 
     async def write_audio_frame(self, frame):
         self.writes.append(frame)
-        if frame.context_id:
-            size = frame.metadata.get("speech_audio_bytes", len(frame.audio))
-            self.played[frame.context_id] = self.played.get(frame.context_id, 0) + size / 48
         return True
-
-    async def get_audio_playback_ms(self, context_id):
-        return self.played.get(context_id, 0.0) if self.measured else None
 
 
 async def until(predicate, timeout=3):
@@ -270,7 +264,7 @@ async def until(predicate, timeout=3):
 
 
 @asynccontextmanager
-async def conversation(*, context=None, measured=True, enabled=True, unversioned=False, **options):
+async def conversation(*, context=None, enabled=True, unversioned=False, **options):
     peer = Peer(unversioned=unversioned)
     context = context or LLMContext()
     upstream, downstream = [], []
@@ -281,7 +275,7 @@ async def conversation(*, context=None, measured=True, enabled=True, unversioned
                 client=client, endpoint=endpoint, shutdown_timeout=0.4, **options
             )
             pair = LLMContextAggregatorPair(context)
-            output = MeasuredOutput(enabled=enabled, measured=measured)
+            output = Output(enabled=enabled)
             pipeline = Pipeline(
                 [
                     Capture(upstream, FrameDirection.UPSTREAM),
@@ -306,13 +300,12 @@ async def conversation(*, context=None, measured=True, enabled=True, unversioned
                 running = tasks.create_task(runner.run())
                 await asyncio.wait_for(started.wait(), 3)
                 await until(lambda: any(isinstance(f, LLMServiceMetadataFrame) for f in upstream))
-                initial = LLMMessagesAppendFrame(messages=[])
-                await worker.queue_frame(initial)
+                await worker.queue_frame(LLMRunFrame())
+                initial = await peer.next()
+                response = await peer.start(initial)
+                await peer.end(response)
                 await until(
-                    lambda: any(
-                        isinstance(f, LLMOperationResultFrame) and f.request_id == initial.id
-                        for f in upstream
-                    )
+                    lambda: any(type(f).__name__ == "LLMFullResponseEndFrame" for f in downstream)
                 )
                 try:
                     yield peer, service, worker, context, output, upstream, downstream

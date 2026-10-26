@@ -11,8 +11,6 @@ audio input and output through the system's default audio devices.
 """
 
 import asyncio
-import threading
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from loguru import logger
@@ -22,7 +20,6 @@ from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.local._playback_clock import PlaybackClock
 
 try:
     import pyaudio
@@ -40,13 +37,10 @@ class LocalAudioTransportParams(TransportParams):
     Parameters:
         input_device_index: PyAudio device index for audio input. If None, uses default.
         output_device_index: PyAudio device index for audio output. If None, uses default.
-        audio_out_playback_clock: Use callback DAC timing for playback reports.
-            Measures samples rendered by PortAudio, not physical audibility.
     """
 
     input_device_index: int | None = None
     output_device_index: int | None = None
-    audio_out_playback_clock: bool = False
 
 
 class LocalAudioInputTransport(BaseInputTransport):
@@ -145,9 +139,6 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
         self._out_stream = None
         self._sample_rate = 0
-        self._callback_lock = threading.Lock()
-        self._callback_queue = deque()
-        self._playback_clock = PlaybackClock()
 
         # We only write audio frames from a single task, so only one thread
         # should be necessary.
@@ -167,15 +158,6 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             rate=self.sample_rate,
             output=True,
             output_device_index=self._params.output_device_index,
-            **(
-                {
-                    "stream_callback": self._audio_out_callback,
-                    "frames_per_buffer": self.audio_chunk_size
-                    // (2 * self._params.audio_out_channels),
-                }
-                if self._params.audio_out_playback_clock
-                else {}
-            ),
         )
 
     async def cleanup(self):
@@ -210,87 +192,12 @@ class LocalAudioOutputTransport(BaseOutputTransport):
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
-        if self._out_stream and self._params.audio_out_playback_clock:
-            completed = self.get_event_loop().create_future()
-            with self._callback_lock:
-                self._callback_queue.append([frame, 0, completed])
-            return await completed
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
                 self._executor, self._out_stream.write, frame.audio
             )
             return True
         return False
-
-    async def stop_audio_output(self, context_id: str | None, *, cancel: bool = False) -> None:
-        """Remove unscheduled callback samples while retaining uninterruptible audio."""
-        if not self._params.audio_out_playback_clock:
-            return
-        with self._callback_lock:
-            retained = deque()
-            for item in self._callback_queue:
-                frame, _, completed = item
-                if (context_id is None or frame.context_id == context_id) and (
-                    cancel or frame.interruptible
-                ):
-                    if not completed.done():
-                        completed.set_result(False)
-                else:
-                    retained.append(item)
-            self._callback_queue = retained
-
-    def _audio_out_callback(self, in_data, frame_count, time_info, status):
-        """Supply PCM and record valid speech samples at their callback DAC times."""
-        width = self._params.audio_out_channels * 2
-        required = frame_count * width
-        output = bytearray()
-        try:
-            with self._callback_lock:
-                while len(output) < required and self._callback_queue:
-                    frame, offset, completed = self._callback_queue[0]
-                    count = min(required - len(output), len(frame.audio) - offset)
-                    valid_bytes = frame.metadata.get("speech_audio_bytes", len(frame.audio))
-                    speech = min(count, max(0, valid_bytes - offset))
-                    if frame.context_id and speech:
-                        dac = time_info.get("output_buffer_dac_time", 0.0)
-                        self._playback_clock.schedule(
-                            frame.context_id,
-                            dac + len(output) / (width * self.sample_rate),
-                            speech / (width * self.sample_rate),
-                            valid=not status,
-                        )
-                    output.extend(frame.audio[offset : offset + count])
-                    self._callback_queue[0][1] += count
-                    if offset + count == len(frame.audio):
-                        self._callback_queue.popleft()
-                        self.get_event_loop().call_soon_threadsafe(
-                            self._complete_callback_write, completed
-                        )
-        except Exception:
-            return (bytes(required), pyaudio.paAbort)
-        output.extend(bytes(required - len(output)))
-        return (bytes(output), pyaudio.paContinue)
-
-    @staticmethod
-    def _complete_callback_write(completed):
-        if not completed.done():
-            completed.set_result(True)
-
-    async def get_audio_playback_ms(self, context_id: str) -> float | None:
-        """Measure rendered samples with PortAudio's stream clock and DAC schedule."""
-        if not self._params.audio_out_playback_clock or self._out_stream is None:
-            return None
-        with self._callback_lock:
-            end = self._playback_clock.end(context_id)
-        # The callback can run ahead of the DAC. Its final sample must pass the
-        # device clock before a completed report can name it as played.
-        async with asyncio.timeout(self._params.audio_out_write_timeout_secs):
-            while self._out_stream.get_time() < end:
-                await asyncio.sleep(0.005)
-        with self._callback_lock:
-            played = self._playback_clock.played_ms(context_id, self._out_stream.get_time())
-            self._playback_clock.forget(context_id)
-        return played
 
 
 class LocalAudioTransport(BaseTransport):

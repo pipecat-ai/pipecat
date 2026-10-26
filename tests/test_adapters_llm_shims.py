@@ -7,27 +7,22 @@
 """The deprecated ``pipecat.adapters`` paths still export what moved to ``pipecat.adapters.llm``."""
 
 import importlib
-import json
+import pkgutil
 import sys
 import unittest
 import warnings
-from pathlib import Path
+
+import pipecat.adapters.llm
 
 NEW_PREFIX = "pipecat.adapters.llm."
 OLD_PREFIX = "pipecat.adapters."
 
 
 def _moved_modules() -> list[str]:
-    """Return recorded module moves into the LLM adapter namespace."""
-    registry_path = Path(__file__).parents[1] / "scripts/deprecations/deprecations.json"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
     return sorted(
-        entry["replacement"]
-        for entry in registry["deprecations"]
-        if entry["kind"] == "module"
-        and entry["relation"] == "move"
-        and entry["subject"].startswith(OLD_PREFIX)
-        and entry["replacement"].startswith(NEW_PREFIX)
+        info.name
+        for info in pkgutil.walk_packages(pipecat.adapters.llm.__path__, NEW_PREFIX)
+        if not info.ispkg
     )
 
 
