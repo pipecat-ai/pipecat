@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaExpressionAdapter,
+)
+from pipecat.expressive.expression import DeliveryScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -19,6 +23,8 @@ from pipecat.frames.frames import (
 from pipecat.services.cartesia.tts import (
     CartesiaHttpTTSService,
     CartesiaTTSService,
+    GenerationConfig,
+    _generation_config,
     language_to_cartesia_language,
 )
 from pipecat.services.settings import TTSSettings
@@ -243,6 +249,67 @@ def test_cartesia_tag_only_token_is_dropped():
         )
         == []
     )
+
+
+def test_cartesia_laughter_token_is_kept():
+    """It marks when the laughter sound is performed."""
+    assert _process_word_timestamps(
+        words=["ancient.", "[laughter]", "Let"],
+        starts=[0.0, 0.5, 1.0],
+        language="en",
+    ) == [("ancient.", 0.0), ("[laughter]", 0.5), ("Let", 1.0)]
+
+
+class TestCartesiaExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = CartesiaExpressionAdapter().capabilities()
+        delivery = [term.name for term in capabilities.delivery]
+        assert "excited" in delivery
+        assert "neutral" not in delivery
+        assert [term.name for term in capabilities.sounds] == ["laughter"]
+        assert capabilities.delivery_scope == DeliveryScope.SENTENCE
+        assert not capabilities.emphasis
+
+    def test_emotion_formatted_where_it_changes(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == '<emotion value="excited"/> Hi.'
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad"], ["excited"]) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", [], None) == "Hi."
+
+    def test_return_to_baseline_formats_neutral(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", [], ["sad"]) == '<emotion value="neutral"/> Hi.'
+
+    def test_of_several_delivery_names_the_first_is_formatted(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", ["sad", "tired"], ["sad", "calm"]) == "Hi."
+
+    def test_slow_and_fast_set_the_speed_not_the_emotion(self):
+        adapter = CartesiaExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["slow", "sad"], None) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", ["sad", "slow"], ["sad"]) == "Hi."
+        assert adapter.request_settings(["sad", "slow"]) == {"speed": 0.7}
+        assert adapter.request_settings(["fast"]) == {"speed": 1.3}
+        assert adapter.request_settings(["sad"]) == {}
+
+    def test_sounds_and_pauses(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_sound("laughter") == " [laughter] "
+        assert adapter.format_pause(600) == ' <break time="600ms"/> '
+
+
+def test_a_request_in_a_speed_delivery_states_its_speed():
+    assert _generation_config(None, {"speed": 0.7}) == {"speed": 0.7}
+    assert _generation_config(GenerationConfig(volume=1.2), {"speed": 1.3}) == {
+        "volume": 1.2,
+        "speed": 1.3,
+    }
+    # Without a speed delivery, the configured speed is kept.
+    assert _generation_config(GenerationConfig(speed=0.9), {}) == {"speed": 0.9}
+    assert _generation_config(None, {}) is None
 
 
 def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():

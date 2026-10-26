@@ -13,6 +13,8 @@ import unittest
 import pytest
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.expressive.formatter import ExpressionFormatter
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
     ElevenLabsDialogueTTSService,
@@ -20,6 +22,9 @@ from pipecat.services.elevenlabs.dialogue.tts import (
     _normalize_ttd_alignment,
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
+from pipecat.services.elevenlabs.tts_base import (
+    _join_audio_tags,
+)
 from pipecat.services.tts_service import TextAggregationMode
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
@@ -480,3 +485,106 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _alignment(text: str, start_ms: int = 0) -> dict:
+    """Alignment for text, one character every 10ms."""
+    return {
+        "chars": list(text),
+        "charStartTimesMs": [start_ms + 10 * i for i in range(len(text))],
+        "charDurationsMs": [10] * len(text),
+    }
+
+
+def test_audio_tags_are_joined_into_words_of_their_own():
+    joined, in_tag = _join_audio_tags(
+        _alignment("four, [short pause] two"), _WS_ALIGNMENT_KEYS, False
+    )
+
+    assert "".join(joined["chars"]) == "four, [shortpause] two"
+    assert not in_tag
+    word_times, partial, _ = calculate_word_times(joined, 0.0)
+    assert [word for word, _ in word_times] == ["four,", "[shortpause]"]
+    assert partial == "two"
+
+
+def test_audio_tag_split_across_chunks_is_joined():
+    first, in_tag = _join_audio_tags(_alignment("[clear th"), _WS_ALIGNMENT_KEYS, False)
+    second, in_tag = _join_audio_tags(_alignment("roat] It's"), _WS_ALIGNMENT_KEYS, in_tag)
+
+    assert "".join(first["chars"]) == "[clearth"
+    assert "".join(second["chars"]) == "roat] It's"
+    assert not in_tag
+
+
+@pytest.mark.asyncio
+async def test_dialogue_word_timestamps_report_audio_tags_as_words():
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    for chunk in ("[exci", "ted] Good news [clear th", "roat] it's ", "back."):
+        alignment = _alignment(chunk)
+        await service._handle_message(
+            {
+                "context_id": "ctx-1",
+                "alignment": {
+                    "chars": alignment["chars"],
+                    "char_start_times_ms": alignment["charStartTimesMs"],
+                    "char_durations_ms": alignment["charDurationsMs"],
+                },
+            }
+        )
+
+    assert reported == ["[excited]", "Good", "news", "[clearthroat]", "it's"]
+    assert service._cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
+
+
+class TestAudioTagExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert capabilities.free_text_delivery
+        assert capabilities.free_text_sounds
+        assert capabilities.emphasis
+        assert capabilities.pause_range_ms == (100, 3000)
+
+    def test_delivery_names_are_single_words(self):
+        # A delivery tag separates its names by spaces.
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
+
+    def test_tags_formatted_where_delivery_changes(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
+
+    def test_slow_and_fast_are_written_as_pace_tags(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm] [slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], ["calm"]) == "[quickly] Hi."
+
+    def test_return_to_baseline_formats_nothing(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis_is_capitalized(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("back up", ["emphasis"], None) == "BACK UP"
+        assert adapter.format_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
+
+    def test_sounds(self):
+        assert ElevenLabsAudioTagExpressionAdapter().format_sound("laughs") == " [laughs] "
+
+    def test_pauses_are_short_or_long(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_pause(500) == " [short pause] "
+        assert adapter.format_pause(1500) == " [long pause] "
