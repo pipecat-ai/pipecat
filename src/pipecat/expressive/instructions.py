@@ -41,6 +41,46 @@ def expression_instructions(
         return None
     policy = policy or ExpressionPolicy()
 
+    tags = _tags(capabilities, policy)
+    if not tags:
+        return None
+
+    parts = ["You can direct how your words are spoken with tags:\n" + "\n".join(tags)]
+    if policy.guidance:
+        parts.append("\n".join(policy.guidance))
+    return "\n\n".join(parts)
+
+
+def expression_policy_warning(
+    capabilities: ExpressionCapabilities | None, policy: ExpressionPolicy | None
+) -> str | None:
+    """Tell what an expression policy asks for that a TTS service can't perform.
+
+    Args:
+        capabilities: What the TTS service can perform, or None for nothing.
+        policy: Which tags to offer, and guidance on when to use them.
+
+    Returns:
+        The warning, or None when there's no policy or the service can
+        perform every tag it offers.
+    """
+    if policy is None:
+        return None
+    if capabilities is None or not _tags(capabilities, policy):
+        return (
+            "the TTS service performs none of the expression policy's tags, so the "
+            "policy and its guidance aren't taught"
+        )
+    if left_out := _left_out(capabilities, policy):
+        return (
+            f"the TTS service can't perform {', '.join(left_out)} from the expression "
+            "policy, so they aren't offered"
+        )
+    return None
+
+
+def _tags(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:
+    """The instruction's lines for the tags offered, one per kind of tag."""
     tags = []
     delivery = [
         term
@@ -78,13 +118,7 @@ def expression_instructions(
         tags.append("- ^^word^^ stresses a word.")
     if capabilities.pause_range_ms:
         tags.append("- [[pause 500]] pauses for about that many milliseconds.")
-    if not tags:
-        return None
-
-    parts = ["You can direct how your words are spoken with tags:\n" + "\n".join(tags)]
-    if policy.guidance:
-        parts.append("\n".join(policy.guidance))
-    return "\n\n".join(parts)
+    return tags
 
 
 def _left_out(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:

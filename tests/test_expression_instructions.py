@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from pipecat.expressive.expression import SPEED_DELIVERY, ExpressionCapabilities, ExpressionTerm
-from pipecat.expressive.instructions import expression_instructions
+from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
 FIXED = ExpressionCapabilities(
@@ -158,3 +158,36 @@ def test_a_policy_list_given_as_a_bare_string_is_rejected(field):
     # A bare string would otherwise be offered letter by letter.
     with pytest.raises(ValidationError):
         ExpressionPolicy(**{field: "calm"})
+
+
+def test_no_warning_without_a_policy_or_when_every_tag_is_performable():
+    assert expression_policy_warning(FIXED, None) is None
+    assert expression_policy_warning(None, None) is None
+    assert expression_policy_warning(FIXED, ExpressionPolicy(delivery=["calm"])) is None
+    # A free-text service performs any delivery or sound it's given.
+    assert expression_policy_warning(FREE_TEXT, ExpressionPolicy(delivery=["relieved"])) is None
+
+
+def test_a_warning_names_the_policy_tags_the_service_cant_perform():
+    policy = ExpressionPolicy(delivery=["neutral", "calm", "relieved"], sounds=["sighs"])
+
+    warning = expression_policy_warning(FIXED, policy)
+
+    # Every service returns to its baseline, so neutral is never left out.
+    assert warning == (
+        "the TTS service can't perform <<relieved>>, [[sighs]] from the expression "
+        "policy, so they aren't offered"
+    )
+
+
+def test_a_warning_says_when_the_service_performs_none_of_the_policy():
+    capabilities = ExpressionCapabilities(delivery=[ExpressionTerm("calm")])
+    expected = (
+        "the TTS service performs none of the expression policy's tags, so the "
+        "policy and its guidance aren't taught"
+    )
+
+    assert expression_policy_warning(capabilities, ExpressionPolicy(delivery=["relieved"])) == (
+        expected
+    )
+    assert expression_policy_warning(None, ExpressionPolicy()) == expected

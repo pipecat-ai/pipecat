@@ -31,7 +31,7 @@ from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.expressive.expression import ExpressionCapabilities
-from pipecat.expressive.instructions import _left_out, expression_instructions
+from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
@@ -824,20 +824,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Each warning is given once, until what is left out changes, so a switch
         to a service with the same gap doesn't repeat it.
         """
-        policy = self._expression_policy
-        if not policy:
-            return
-        warning = None
-        if expression_instructions(self._tts_expression, policy) is None:
-            warning = (
-                "the TTS service performs none of the expression policy's tags, so the "
-                "policy and its guidance aren't taught"
-            )
-        elif self._tts_expression and (tags := _left_out(self._tts_expression, policy)):
-            warning = (
-                f"the TTS service can't perform {', '.join(tags)} from the expression "
-                "policy, so they aren't offered"
-            )
+        warning = expression_policy_warning(self._tts_expression, self._expression_policy)
         if warning and warning != self._policy_warning:
             logger.warning(f"{self}: {warning}")
         self._policy_warning = warning
