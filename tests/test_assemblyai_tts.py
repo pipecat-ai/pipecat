@@ -110,6 +110,7 @@ def _server(
                         await ws.send(json.dumps(frame))
                         # Cancelled audio still holds its place on the timeline.
                         session_ms += CHUNK_MS
+                        flush_id += 1
                         buffer = ""
                         continue
                     await ws.send(json.dumps(frame))
