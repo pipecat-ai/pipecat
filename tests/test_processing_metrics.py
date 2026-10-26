@@ -24,9 +24,20 @@ class TestProcessingMetrics(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.data[0].value, 3.5)
 
     async def test_an_interval_that_ends_before_it_started_is_not_reported(self):
-        """Mirrors stop_ttfb_metrics: a stale end_time (or a clock that stepped
-        backwards) must not surface as a negative duration."""
+        """Mirrors stop_ttfb_metrics: a stale end_time must not surface as a
+        negative duration."""
         await self.metrics.start_processing_metrics(start_time=1000.0)
         frame = await self.metrics.stop_processing_metrics(end_time=500.0)
 
         self.assertIsNone(frame)
+
+    async def test_a_rejected_interval_does_not_block_the_next_one(self):
+        """The rejected measurement resets, so the next interval reports."""
+        await self.metrics.start_processing_metrics(start_time=1000.0)
+        self.assertIsNone(await self.metrics.stop_processing_metrics(end_time=500.0))
+
+        await self.metrics.start_processing_metrics(start_time=2000.0)
+        frame = await self.metrics.stop_processing_metrics(end_time=2002.0)
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.data[0].value, 2.0)

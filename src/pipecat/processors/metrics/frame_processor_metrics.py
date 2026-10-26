@@ -305,9 +305,7 @@ class FrameProcessorMetrics(BaseObject):
         end_time = end_time or time.time()
 
         if end_time < self._start_processing_time:
-            # Same as stop_ttfb_metrics: the interval being measured predates the
-            # request it is measured from (a stale end_time, or a clock step
-            # backwards mid-measurement). There is no interval to report.
+            # Same bound as stop_ttfb_metrics: no interval to report.
             logger.warning(
                 f"{self._processor_name()} processing time not reported: end predates the "
                 f"start of the measurement by {self._start_processing_time - end_time:.3f}s"
