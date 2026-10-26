@@ -327,7 +327,7 @@ SERVICE_CONFIGS = {
         "AssemblyAITTSService(\n"
         '        api_key=os.getenv("ASSEMBLYAI_API_KEY"),\n'
         "        settings=AssemblyAITTSService.Settings(\n"
-        '            voice=os.getenv("ASSEMBLYAI_VOICE_ID", "110c952f-38ba-54b6-b3b4-b49e96c30eaa"),\n'
+        '            voice=os.getenv("ASSEMBLYAI_VOICE_ID", "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"),\n'
         "        ),\n"
         "    )\n"
     ),

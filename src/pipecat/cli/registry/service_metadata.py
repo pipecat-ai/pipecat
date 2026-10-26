@@ -748,7 +748,7 @@ class ServiceRegistry:
             env_prefix="ASSEMBLYAI",
             include_params=["api_key"],
             settings_params=["voice"],
-            param_defaults={"voice": "110c952f-38ba-54b6-b3b4-b49e96c30eaa"},
+            param_defaults={"voice": "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"},
         ),
         ServiceDefinition(
             value="asyncai_tts",

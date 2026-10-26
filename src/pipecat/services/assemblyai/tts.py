@@ -35,8 +35,8 @@ from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import is_given
 
-# Sara, a voice from AssemblyAI's public voice library.
-DEFAULT_VOICE_ID = "110c952f-38ba-54b6-b3b4-b49e96c30eaa"
+# Audrey, a voice from AssemblyAI's public voice library.
+DEFAULT_VOICE_ID = "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"
 
 # Longest text one Generate message accepts, when Begin doesn't report a limit.
 MAX_GENERATE_CHARS = 2000
@@ -94,7 +94,7 @@ class AssemblyAITTSSettings(TTSSettings):
 
     ``voice`` is the API's ``voice_id``: any voice by its ID, an AssemblyAI
     voice by its library slug, such as ``aai-jane``, or a cloned voice by the
-    slug the AssemblyAI dashboard shows. It defaults to Sara
+    slug the AssemblyAI dashboard shows. It defaults to Audrey
     (``DEFAULT_VOICE_ID``); ``None`` leaves the voice to the server.
     ``language`` is the language the session speaks, and ``model`` names the
     model, such as ``assemblyai-tts-1``. Unset, the session speaks the voice's
@@ -138,7 +138,7 @@ class AssemblyAITTSService(WebsocketTTSService):
 
     Example::
 
-        # Speaks in Sara, the default voice.
+        # Speaks in Audrey, the default voice.
         tts = AssemblyAITTSService(api_key=os.getenv("ASSEMBLYAI_API_KEY"))
 
         # Another voice, by its ID: Keegan.
