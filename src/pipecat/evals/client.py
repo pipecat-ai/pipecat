@@ -27,6 +27,8 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 from pydantic import BaseModel, Field
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import InvalidHandshake
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -112,6 +114,14 @@ _BOT_FRAMES = (
 )
 
 
+def _close_description(websocket: ClientConnection) -> str:
+    """How the bot closed the connection, with its close code and reason when it sent them."""
+    if websocket.close_code is None:
+        return "the bot closed the connection before bot-ready"
+    reason = f" {websocket.close_reason}" if websocket.close_reason else ""
+    return f"the bot closed the connection before bot-ready ({websocket.close_code}{reason})"
+
+
 @dataclass
 class _BotSegmentTranscriptionFrame(TranscriptionFrame):
     """A transcription of one segment of the bot's speech, with when that audio began.
@@ -179,17 +189,19 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
 
 
 class _BotSpeechGate(FrameProcessor):
-    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only audio from after it gets through.
+    """Between the bot-speech STT and the turn aggregator: after an interrupting send, only the bot's reply gets through.
 
     The aggregator's VAD reports the bot's speech segments upstream, past this
     gate, to the STT; the gate notes when each began and, as each ends, hands
     the start to the STT's tagging (see :func:`_tag_bot_segments`) and tells
     the stream a segment awaits transcription. An ordinary send waits for the
     bot's speech to be transcribed first, so nothing of it is in flight. A send
-    that talks over the bot cannot wait: a tagged transcript whose segment began
-    before that send is the bot finishing what it was saying, however late it
-    lands, and is dropped here so it cannot pass for the reply or be folded
-    into it.
+    that talks over the bot cannot wait, and the bot goes on speaking until it
+    notices the user: a tagged transcript whose segment began before the bot
+    started speaking again is the bot finishing what it was saying, however
+    late it lands, and is dropped here so it cannot pass for the reply or be
+    folded into it. A turn that sends nothing drops the same way what the bot
+    says before it starts speaking again.
 
     Both need a segmented STT, which transcribes one segment at a time. With
     any other STT the gate keeps no account of segments and drops nothing, and
@@ -225,11 +237,9 @@ class _BotSpeechGate(FrameProcessor):
             self._segment_started_at = None
             self._stream.bot_segment_ended()
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            interrupted_at = self._stream.interrupting_send_at
-            if interrupted_at is not None and frame.segment_started_at < interrupted_at:
-                self._trace.log(
-                    f"discard: bot speech from before the interrupting send {frame.text!r}"
-                )
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
                 return
         await self.push_frame(frame, direction)
 
@@ -325,9 +335,13 @@ class _PersonaTurnRelay(FrameProcessor):
 
     In text mode a whole reply goes to the bot as one ``send-text``; in audio
     mode the user TTS has already spoken it and this only logs the text. A
-    reply with words in it is one ``persona_turn`` event; a reply that only
-    calls ``end_call``, or that the bot's speech cut off before a word went
-    out, is not a turn.
+    reply with words in it is one ``persona_turn`` event, up to where the
+    bot's speech cut it off if it did; a reply that only calls ``end_call``,
+    or that the bot's speech cut off before a word went out, is not a turn.
+
+    The persona's ``end_call`` event follows the turn of the reply that made
+    the call: in audio mode the reply is still being spoken when the persona
+    calls it.
     """
 
     def __init__(
@@ -348,13 +362,34 @@ class _PersonaTurnRelay(FrameProcessor):
         # What the persona said in the current response: the one text turn, or
         # the sentences the user TTS spoke.
         self._spoken: list[str] = []
+        # Whether a response is on its way to the bot, and the end_call event
+        # held until it has gone out.
+        self._replying = False
+        self._end_call: dict | None = None
+
+    async def end_call(self, event: dict) -> None:
+        """Append the persona's ``end_call`` event once the response in progress has gone out.
+
+        Args:
+            event: The ``end_call`` event.
+        """
+        if self._replying:
+            self._end_call = event
+        else:
+            await self._stream.append(event)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         self._stream.touch()
-        if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
+        if isinstance(frame, LLMFullResponseStartFrame):
             self._text = []
             self._spoken = []
+            self._replying = True
+        elif isinstance(frame, InterruptionFrame):
+            # The bot heard what the user TTS spoke before the cut; a text-mode
+            # reply is sent only once it is complete.
+            self._text = []
+            await self._end_reply()
         elif isinstance(frame, LLMTextFrame) and frame.skip_tts:
             self._text.append(frame.text)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -366,15 +401,21 @@ class _PersonaTurnRelay(FrameProcessor):
                     OutputTransportMessageUrgentFrame(message=self._text_turn_message(text))
                 )
                 self._spoken.append(text)
-            if self._spoken:
-                await self._stream.append(
-                    {"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)}
-                )
-            self._spoken = []
+            await self._end_reply()
         elif isinstance(frame, TTSTextFrame):
             self._trace.log(f"send: {frame.text!r} (persona, audio)")
             self._spoken.append(frame.text)
         await self.push_frame(frame, direction)
+
+    async def _end_reply(self) -> None:
+        """Append what went out of the reply as a turn, then the end_call event held for it."""
+        if self._spoken:
+            await self._stream.append({"type": PERSONA_TURN_EVENT, "text": " ".join(self._spoken)})
+        self._spoken = []
+        self._replying = False
+        if self._end_call is not None:
+            await self._stream.append(self._end_call)
+            self._end_call = None
 
 
 class EvalClientParams(BaseModel):
@@ -412,6 +453,23 @@ class EvalClientParams(BaseModel):
     marker_events: bool = False
     context: list[dict] = Field(default_factory=list)
     trigger_disconnect: bool = False
+
+
+class EvalBotUnavailableError(Exception):
+    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
+
+    def __init__(self, kind: str, reason: str):
+        """Initialize the error.
+
+        Args:
+            kind: The failure kind the run records: ``connect_failed`` when the
+                bot refused the connection, ``closed_before_ready`` when it
+                closed the connection before ``bot-ready``.
+            reason: What happened, with the close code and reason when there
+                was one.
+        """
+        super().__init__(reason)
+        self.kind = kind
 
 
 class EvalClient:
@@ -486,13 +544,17 @@ class EvalClient:
         self._stopping = False
         # Where the user's turns enter the pipeline (built with the processors).
         self._sink: _BotFrameSink | None = None
+        # What sends the persona's replies to the bot (built with the processors).
+        self._relay: _PersonaTurnRelay | None = None
         self._run_task: asyncio.Task | None = None
         # Records the conversation audio (bot + user) when record_path is set and
         # the scenario is audio mode; fed raw audio by the transport, written on stop().
         self._recorder: EvalClientRecorder | None = None
-        # Set by the transport's on_bot_ready handler once the bot completes the
-        # RTVI handshake; handshake() waits on it.
-        self._bot_ready_event = asyncio.Event()
+        # Set once the handshake is over: by the bot's bot-ready, or by the bot
+        # refusing or closing the connection first, which leaves _refusal set.
+        # handshake() waits on it.
+        self._handshake_over = asyncio.Event()
+        self._refusal: EvalBotUnavailableError | None = None
         self._next_id = 0
 
     @property
@@ -549,7 +611,16 @@ class EvalClient:
 
         @self._worker.event_handler("on_pipeline_error")
         async def _on_pipeline_error(_worker, frame):
+            # The transport connects as it starts, so a refused connection (an
+            # HTTP 403 for a spent token, nothing listening) surfaces here.
+            if isinstance(frame.exception, (InvalidHandshake, OSError)):
+                self._refuse("connect_failed", str(frame.exception))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
+
+        # Before the pipeline runs, so the persona is configured before it can
+        # hear the bot, which may greet as soon as the input transport starts.
+        if self._persona is not None:
+            await self._configure_persona(self._persona.instruction)
 
         runner = WorkerRunner()
         await runner.add_workers(self._worker)
@@ -562,15 +633,19 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
+            EvalBotUnavailableError: If the bot refuses the connection or closes
+                it before sending ``bot-ready``.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
-        # the bot answers; our handler sets _bot_ready_event.
+        # the bot answers; our handler sets _handshake_over.
         timeout_s = self._session_params.bot_ready_timeout_s
         try:
-            await asyncio.wait_for(self._bot_ready_event.wait(), timeout=timeout_s)
+            await asyncio.wait_for(self._handshake_over.wait(), timeout=timeout_s)
         except TimeoutError:
             raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
+        if self._refusal is not None:
+            raise self._refusal
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -677,6 +752,32 @@ class EvalClient:
         await self._drop_bot_speech_if_talking_over()
         await self._sink.inject(TTSSpeakFrame(text))
 
+    async def say_with_pauses(self, parts: list[str | int]) -> None:
+        """Speak the user's text with real silence between its parts.
+
+        Each text is synthesized by the user TTS (cached), and the turn goes out
+        like a recording: one stretch of audio, paced to the bot and recorded.
+
+        Args:
+            parts: Text to speak, or the milliseconds of silence between texts.
+        """
+        assert self._sink is not None  # pipeline built before any send
+        assert self._user_tts is not None  # pauses need a voice to speak them
+        await self._drop_bot_speech_if_talking_over()
+        sample_rate = self._user_tts.sample_rate
+        pcm = bytearray()
+        for part in parts:
+            if isinstance(part, str):
+                pcm.extend(await self._user_tts.synthesize(part))
+            else:
+                pcm.extend(b"\x00\x00" * (sample_rate * part // 1000))
+        for frame in (
+            TTSStartedFrame(),
+            TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
+            TTSStoppedFrame(),
+        ):
+            await self._sink.inject(frame)
+
     async def play(self, path: str) -> None:
         """Play a recording to the bot as the user's turn, instead of synthesizing one.
 
@@ -711,25 +812,33 @@ class EvalClient:
         self._trace.log("discard: bot speech held in its open turn before the interrupting send")
         await self._bot_turns.reset()
 
-    async def configure_persona(self, instruction: str) -> None:
-        """Give the persona LLM its instruction, and say whether its replies are spoken.
+    async def hang_up(self) -> None:
+        """End the persona's part of the conversation: it answers nothing more."""
+        assert self._persona is not None
+        self._persona.hang_up()
 
-        In text mode a reply goes to the bot as text; in audio mode the user TTS
-        speaks it.
+    async def report_end_call(self, event: dict) -> None:
+        """Append the persona's ``end_call`` event once the reply that made the call has gone out.
 
         Args:
-            instruction: The persona's system instruction.
+            event: The ``end_call`` event.
         """
-        assert self._sink is not None  # pipeline built before any send
+        assert self._relay is not None  # pipeline built before the persona replies
+        await self._relay.end_call(event)
+
+    async def _configure_persona(self, instruction: str) -> None:
+        """Give the persona LLM its instruction, and say whether its replies are spoken or sent as text."""
+        assert self._sink is not None  # pipeline built before the persona is configured
         await self._sink.inject(
             LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=instruction))
         )
         await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
 
-    async def hang_up(self) -> None:
-        """End the persona's part of the conversation: it answers nothing more."""
-        assert self._persona is not None
-        self._persona.hang_up()
+    def _refuse(self, kind: str, reason: str) -> None:
+        """End the handshake with a refusal, unless it is already over."""
+        if not self._handshake_over.is_set():
+            self._refusal = EvalBotUnavailableError(kind, reason)
+            self._handshake_over.set()
 
     def _connection_flags(self) -> EvalConnectionFlags:
         """What this connection asks of the bot.
@@ -796,14 +905,19 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
-            self._bot_ready_event.set()
+            self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
-        async def _on_disconnected(_transport, _websocket):
+        async def _on_disconnected(_transport, websocket):
             # The bot ended the call by closing the connection; our own teardown
             # closes it too, and that is not the bot's doing.
-            if not self._stopping:
-                await self._stream.append({"type": BOT_ENDED_EVENT})
+            if self._stopping:
+                return
+            # Before bot-ready a close is a refusal, such as Pipecat Cloud's
+            # bot-starter turning away a session over the agent's limit.
+            self._refuse("closed_before_ready", _close_description(websocket))
+            self._stream.bot_ended()
+            await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
 
@@ -834,11 +948,11 @@ class EvalClient:
         if persona is None:
             outbound: list = [*speech, transport.output()]
         else:
-            relay = _PersonaTurnRelay(self._text_turn_message, self._trace, self._stream)
+            self._relay = _PersonaTurnRelay(self._text_turn_message, self._trace, self._stream)
             outbound = [
                 persona.llm,
                 *speech,
-                relay,
+                self._relay,
                 transport.output(),
                 LLMAssistantAggregator(context),
             ]

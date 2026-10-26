@@ -13,8 +13,9 @@ WorkerRunner, so the whole path runs: the tools installed on the frontend,
 outputs appended to the frontend's conversation.
 """
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
+    StartFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
     RELAY_NOTE,
@@ -47,6 +49,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
 from tests.test_backend_llm_worker import _ScriptedLLM, get_weather
@@ -174,6 +177,18 @@ def test_a_realtime_frontend_words_the_request():
     connector = _bound(realtime=True)
     assert isinstance(connector.request_strategy, ExplicitBackendRequestStrategy)
     assert connector.tool.required == ["request"]
+
+
+def test_a_realtime_frontend_refuses_the_transcript_strategy():
+    connector = BackendConnector(request_strategy=TranscriptBackendRequestStrategy())
+    with pytest.raises(ValueError, match="TranscriptBackendRequestStrategy"):
+        _bound(connector, realtime=True)
+
+
+def test_a_realtime_frontend_takes_a_given_explicit_strategy():
+    strategy = ExplicitBackendRequestStrategy()
+    connector = _bound(BackendConnector(request_strategy=strategy), realtime=True)
+    assert connector.request_strategy is strategy
 
 
 def test_the_tool_description_frames_a_handoff():
@@ -578,3 +593,33 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
         (ExternalFunctionCallInProgressFrame, "get_weather"),
         (ExternalFunctionCallResultFrame, "get_weather"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_local_backend_is_added_before_the_frontend_starts():
+    """The frontend can delegate as soon as it gets the StartFrame, so the
+    backend worker is added before the frontend starts."""
+    events = []
+
+    class _StartRecordingFrontend(_DelegatingFrontend):
+        async def process_frame(self, frame: Frame, direction: FrameDirection):
+            if isinstance(frame, StartFrame):
+                events.append("frontend_started")
+            await super().process_frame(frame, direction)
+
+    add_workers = BaseWorker.add_workers
+
+    async def slow_add_workers(worker, *workers, **kwargs):
+        await asyncio.sleep(0.2)
+        await add_workers(worker, *workers, **kwargs)
+        events.append("backend_added")
+
+    backend = BackendLLMWorker(
+        name="backend", llm=_ScriptedLLM([[("text", "Done.")]]), context=LLMContext()
+    )
+    service = LLMWithBackend(frontend=_StartRecordingFrontend(), backend=backend)
+
+    with patch.object(BaseWorker, "add_workers", slow_add_workers):
+        await run_test(service, frames_to_send=[SleepFrame(sleep=0.5)])
+
+    assert events[:2] == ["backend_added", "frontend_started"]

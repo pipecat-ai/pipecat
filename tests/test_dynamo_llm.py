@@ -15,11 +15,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import pytest_asyncio
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
     HeartbeatFrame,
@@ -35,6 +34,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
+    UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -457,7 +458,7 @@ async def test_invalid_final_context_releases_prefill(make_service):
 
 @pytest.mark.asyncio
 async def test_response_usage_is_reported_through_pipecat_metrics(make_service):
-    """Realtime token usage reaches standard metrics, not just demo callbacks."""
+    """Realtime token usage reaches standard Pipecat metrics."""
     service, _, _ = make_service()
     await service._process_context(LLMContext([{"role": "user", "content": "Hello."}]))
 
@@ -800,7 +801,7 @@ async def test_generation_forwards_frames_before_response_finishes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "action", ["interruption", "eager_cancel", "settings", "cancel", "cleanup"]
+    "action", ["interruption", "response_cancel", "settings", "cancel", "cleanup"]
 )
 async def test_managed_generation_cancellation_discards_pending_responses(
     managed_service, fake_transport, blocked_response, action
@@ -823,7 +824,7 @@ async def test_managed_generation_cancellation_discards_pending_responses(
     await service.process_frame(
         LLMContextFrame(
             LLMContext([{"role": "user", "content": "Active request"}]),
-            speculation=action == "eager_cancel",
+            speculation=action == "response_cancel",
         ),
         FrameDirection.DOWNSTREAM,
     )
@@ -841,7 +842,7 @@ async def test_managed_generation_cancellation_discards_pending_responses(
         else:
             frame = {
                 "interruption": InterruptionFrame(),
-                "eager_cancel": EagerEndOfTurnCancelFrame(),
+                "response_cancel": UserTurnResponseCancelFrame(),
                 "settings": LLMUpdateSettingsFrame(
                     delta=DynamoRealtimeLLMService.Settings(model="updated-model")
                 ),
@@ -873,6 +874,68 @@ async def test_managed_generation_cancellation_discards_pending_responses(
         if action == "settings":
             update = next(event for event in sockets[1].sent if event["type"] == "session.update")
             assert update["session"]["model"] == "updated-model"
+
+
+@pytest.mark.asyncio
+async def test_response_cancel_discards_speculation_before_generation(
+    managed_service, fake_transport
+):
+    """A withdrawn turn cannot start inference from an already queued context."""
+    service = managed_service
+    sockets, sessions = fake_transport
+    await service.process_frame(
+        LLMContextFrame(
+            LLMContext([{"role": "user", "content": "Unfinished request"}]),
+            speculation=True,
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    generation = service._generation_task
+
+    await service.process_frame(UserTurnResponseCancelFrame(), FrameDirection.DOWNSTREAM)
+
+    assert generation.done()
+    assert service._generation_task is None
+    assert not service._generation_queue
+    assert not sockets and not sessions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speculation", [False, True])
+async def test_response_cancel_preserves_confirmed_generation(
+    managed_service, fake_transport, blocked_response, speculation
+):
+    """Turn-response cancellation leaves answers to a completed user turn running."""
+    service = managed_service
+    sockets, sessions = fake_transport
+    waiting, release = blocked_response
+    pushed = []
+
+    @service.event_handler("on_after_push_frame")
+    async def on_push(service, frame):
+        pushed.append(frame)
+
+    await service.process_frame(
+        LLMContextFrame(
+            LLMContext([{"role": "user", "content": "Complete request"}]),
+            speculation=speculation,
+        ),
+        FrameDirection.DOWNSTREAM,
+    )
+    await asyncio.wait_for(waiting.wait(), 1)
+    generation = service._generation_task
+    if speculation:
+        await service.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    await service.process_frame(UserTurnResponseCancelFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service._generation_task is generation
+    assert not generation.done()
+    assert not sockets[0].closed
+    release.set()
+    await asyncio.wait_for(generation, 1)
+    assert [frame.text for frame in pushed if isinstance(frame, LLMTextFrame)] == ["Hello", "."]
+    assert sockets[0].closed and sessions[0].closed
 
 
 @pytest.mark.asyncio

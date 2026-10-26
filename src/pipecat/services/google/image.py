@@ -18,7 +18,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from PIL import Image
@@ -49,6 +49,9 @@ class GoogleImageGenSettings(ImageGenSettings):
         number_of_images: Number of images to generate per prompt.
         aspect_ratio: Aspect ratio of generated images, such as ``"1:1"`` or
             ``"16:9"``. ``None`` leaves the model's own default in place.
+        image_size: Resolution of generated images, one of ``"1K"``, ``"2K"``
+            or ``"4K"``. ``None`` leaves the model's own default in place.
+            Supported sizes vary by model.
         negative_prompt: Text describing what not to include in generated images.
 
             .. deprecated:: 1.13.0
@@ -58,6 +61,9 @@ class GoogleImageGenSettings(ImageGenSettings):
 
     number_of_images: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     aspect_ratio: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    image_size: Literal["1K", "2K", "4K"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
     negative_prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -123,6 +129,7 @@ class GoogleImageGenService(ImageGenService):
             model="gemini-3.1-flash-image",
             number_of_images=1,
             aspect_ratio="1:1",
+            image_size=None,
             negative_prompt=None,
         )
 
@@ -151,7 +158,7 @@ class GoogleImageGenService(ImageGenService):
         # Add client header
         http_options = update_google_client_http_options(http_options)
 
-        self._client = genai.Client(api_key=api_key, http_options=http_options)
+        self._client: genai.Client | None = genai.Client(api_key=api_key, http_options=http_options)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -183,10 +190,12 @@ class GoogleImageGenService(ImageGenService):
             config = types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
                 image_config=types.ImageConfig(
-                    aspect_ratio=assert_given(self._settings.aspect_ratio)
+                    aspect_ratio=assert_given(self._settings.aspect_ratio),
+                    image_size=assert_given(self._settings.image_size),
                 ),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             )
+            assert self._client is not None
             for _ in range(assert_given(self._settings.number_of_images)):
                 response = await self._client.aio.models.generate_content(
                     model=model, contents=prompt, config=config
@@ -209,6 +218,22 @@ class GoogleImageGenService(ImageGenService):
 
         except Exception as e:
             yield ErrorFrame(f"Image generation error: {str(e)}")
+
+    async def cleanup(self):
+        """Close the GenAI client at teardown."""
+        await super().cleanup()
+        await self._close_client()
+
+    async def _close_client(self):
+        if not self._client:
+            return
+        try:
+            await self._client.aio.aclose()
+        except Exception:
+            # Do nothing - we're shutting down anyway
+            pass
+        finally:
+            self._client = None
 
 
 def _get_image_bytes(response: types.GenerateContentResponse) -> bytes | None:

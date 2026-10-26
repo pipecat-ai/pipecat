@@ -10,7 +10,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
@@ -39,7 +39,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
@@ -265,6 +265,24 @@ class SonioxSTTSettings(STTSettings):
     client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
+    """Replace ``language_hints`` with ``delta.language``, the field Soniox reads on connect.
+
+    Hints given in the same delta win. A string outside :class:`Language` stays in
+    ``language`` for the base class to handle.
+    """
+    if not is_given(delta.language) or delta.language is None:
+        return
+    if is_given(getattr(delta, "language_hints", NOT_GIVEN)):
+        return
+    try:
+        language = Language(delta.language)
+    except ValueError:
+        return
+    delta.language_hints = [language]
+    delta.language = NOT_GIVEN
+
+
 class SonioxSTTService(WebsocketSTTService):
     """Speech-to-Text service using Soniox's WebSocket API.
 
@@ -375,6 +393,8 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
+            settings = replace(settings)
+            _move_language_to_hints(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -456,12 +476,16 @@ class SonioxSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
+        A ``language`` replaces ``language_hints``, the field Soniox reads on connect.
+
         Args:
             delta: A settings delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        delta = replace(delta)
+        _move_language_to_hints(delta)
         changed = await super()._update_settings(delta)
 
         if changed:
@@ -565,7 +589,9 @@ class SonioxSTTService(WebsocketSTTService):
 
         await super()._connect()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):

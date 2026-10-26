@@ -154,9 +154,9 @@ ELEVENLABS_V3_LANGUAGES: frozenset[str] = frozenset(
     }
 )
 
-#: Languages Eleven v4 Turbo accepts as a ``language_code``. A superset of
+#: Languages the Eleven v4 models accept as a ``language_code``. A superset of
 #: :data:`ELEVENLABS_V3_LANGUAGES`. This is the set the API accepts, which
-#: differs from the list ElevenLabs publishes for the model.
+#: differs from the list ElevenLabs publishes for the models.
 ELEVENLABS_V4_LANGUAGES: frozenset[str] = ELEVENLABS_V3_LANGUAGES | frozenset(
     {
         "ast",
@@ -185,6 +185,7 @@ ELEVENLABS_MODEL_LANGUAGES: dict[str, frozenset[str]] = {
     "eleven_turbo_v2_5": ELEVENLABS_V2_5_LANGUAGES,
     "eleven_v3": ELEVENLABS_V3_LANGUAGES,
     "eleven_v3_conversational": ELEVENLABS_V3_LANGUAGES,
+    "eleven_v4": ELEVENLABS_V4_LANGUAGES,
     "eleven_v4_turbo": ELEVENLABS_V4_LANGUAGES,
 }
 
@@ -404,6 +405,47 @@ def _select_alignment(
     return msg.get(alignment_key) or msg.get(normalized_key)
 
 
+def _join_audio_tags(
+    alignment: Mapping[str, Any], keys: tuple[str, str, str], in_tag: bool
+) -> tuple[dict[str, Any], bool]:
+    """Join each bracketed audio tag, such as ``[short pause]``, into one word of the alignment.
+
+    Eleven v3 and v4 return the tags they perform as characters in the
+    alignment. Without the spaces inside it, a tag reaches the word timestamps
+    as a word of its own, which completes the sound or pause it performs. A
+    tag can span alignment chunks, so whether one is still open is carried
+    from chunk to chunk.
+
+    Args:
+        alignment: Alignment dict from the API.
+        keys: Tuple of (chars_key, start_times_key, durations_or_end_times_key)
+            naming the three parallel arrays.
+        in_tag: Whether a tag was still open at the end of the previous chunk.
+
+    Returns:
+        The alignment without the spaces inside tags, and whether a tag is
+        still open at its end.
+    """
+    chars_key, starts_key, tail_key = keys
+    chars = alignment.get(chars_key) or []
+    starts = alignment.get(starts_key) or []
+    tails = alignment.get(tail_key) or []
+    kept = []
+    for i, char in enumerate(chars):
+        if char == "[":
+            in_tag = True
+        elif char == "]":
+            in_tag = False
+        elif char == " " and in_tag:
+            continue
+        kept.append(i)
+    joined = dict(alignment)
+    joined[chars_key] = [chars[i] for i in kept]
+    joined[starts_key] = [starts[i] for i in kept]
+    joined[tail_key] = [tails[i] for i in kept] if tails else []
+    return joined, in_tag
+
+
 def _strip_utterance_leading_spaces(
     alignment: Mapping[str, Any], keys: tuple[str, str, str], should_strip: bool
 ) -> Mapping[str, Any]:
@@ -564,7 +606,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         self._partial_word_start_time = 0.0
 
         self._receive_task = None
-        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -681,8 +722,8 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=10)
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -691,9 +732,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -777,17 +816,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         """Reset alignment state after all audio for the context has played."""
         self._reset_alignment_state(context_id)
         await super().on_audio_context_completed(context_id)
-
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                await self._send_keepalive()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

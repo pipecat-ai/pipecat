@@ -89,8 +89,7 @@ class MockPausingTTSService(TTSService):
     """WebSocket-style service that pauses frame processing and never speaks.
 
     The provider reports the context finished with no audio at all, so the
-    transport never sends the BotStartedSpeakingFrame/BotStoppedSpeakingFrame
-    pair that would lift the pause.
+    transport never sends BotStartedSpeakingFrame or BotStoppedSpeakingFrame.
     """
 
     def __init__(self, **kwargs):

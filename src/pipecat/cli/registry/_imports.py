@@ -82,11 +82,13 @@ IMPORTS = {
     "openai_stt": ["from pipecat.services.openai.stt import OpenAISTTService"],
     "openai_realtime_stt": ["from pipecat.services.openai.stt import OpenAIRealtimeSTTService"],
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
+    "smallest_stt": ["from pipecat.services.smallest.stt import SmallestSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],
     "moonshine_stt": ["from pipecat.services.moonshine.stt import MoonshineSTTService"],
     "whisper_stt": ["from pipecat.services.whisper.stt import WhisperSTTService"],
     "xai_stt": ["from pipecat.services.xai.stt import XAISTTService"],
+    "zoom_ai_stt": ["from pipecat.services.zoom_ai.stt import ZoomAISTTService"],
     # LLM Services
     "anthropic_llm": ["from pipecat.services.anthropic.llm import AnthropicLLMService"],
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],
@@ -110,10 +112,11 @@ IMPORTS = {
         "from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService"
     ],
     "openrouter_llm": ["from pipecat.services.openrouter.llm import OpenRouterLLMService"],
-    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityLLMService"],
+    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService"],
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
+    "smallest_llm": ["from pipecat.services.smallest.llm import SmallestLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],
     # TTS Services
     "asyncai_tts": ["from pipecat.services.asyncai.tts import AsyncAITTSService"],

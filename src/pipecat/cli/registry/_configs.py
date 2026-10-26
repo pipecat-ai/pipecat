@@ -76,6 +76,7 @@ SERVICE_CONFIGS = {
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
@@ -93,6 +94,7 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_ai_stt": 'ZoomAISTTService(api_key=os.getenv("ZOOM_AI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"
@@ -277,10 +279,10 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "perplexity_llm": (
-        "PerplexityLLMService(\n"
+        "PerplexityAgentHttpLLMService(\n"
         '        api_key=os.getenv("PERPLEXITY_API_KEY"),\n'
-        "        settings=PerplexityLLMService.Settings(\n"
-        '            model=os.getenv("PERPLEXITY_MODEL"),\n'
+        "        settings=PerplexityAgentHttpLLMService.Settings(\n"
+        '            model=os.getenv("PERPLEXITY_MODEL", "openai/gpt-5.6-luna"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -308,6 +310,15 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
         "        settings=SarvamLLMService.Settings(\n"
         '            model=os.getenv("SARVAM_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "smallest_llm": (
+        "SmallestLLMService(\n"
+        '        api_key=os.getenv("SMALLEST_API_KEY"),\n'
+        "        settings=SmallestLLMService.Settings(\n"
+        '            model=os.getenv("SMALLEST_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"

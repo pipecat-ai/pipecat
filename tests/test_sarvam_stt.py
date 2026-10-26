@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
-from dataclasses import fields
+from dataclasses import dataclass, field, fields
+from http import HTTPStatus
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -21,6 +23,7 @@ pytest.importorskip("sarvamai")
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     ErrorFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
@@ -31,6 +34,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import STTUsageMetricsData
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
@@ -42,7 +46,7 @@ from pipecat.services.sarvam.stt import (
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -70,6 +74,9 @@ class _FakeWebsocket:
     async def _iter_messages(self):
         for message in self._messages:
             yield message
+
+
+_SESSION_BEGIN = json.dumps({"event": "session.begin", "request_id": "test-request"})
 
 
 class _CapturingLogger:
@@ -1066,10 +1073,10 @@ async def test_session_end_mid_utterance_completes_the_turn(monkeypatch):
 async def test_socket_drop_mid_utterance_completes_the_turn(monkeypatch):
     """A dropped socket must still close the turn.
 
-    Reconnection is disabled, so the boundary can never arrive on its own and
+    With reconnection off, the boundary can never arrive on its own and
     external turn aggregation would wait on it forever.
     """
-    service = SarvamRealtimeSTTService(api_key="test-key")
+    service = SarvamRealtimeSTTService(api_key="test-key", reconnect_on_error=False)
     broadcasted = []
     monkeypatch.setattr(service, "push_frame", _noop)
     monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
@@ -1077,7 +1084,9 @@ async def test_socket_drop_mid_utterance_completes_the_turn(monkeypatch):
     monkeypatch.setattr(service, "push_error", _noop)
     # The socket dies after speech starts, with no matching `vad.speech_end`.
     monkeypatch.setattr(
-        service, "_websocket", _FakeWebsocket([json.dumps({"event": "vad.speech_start"})])
+        service,
+        "_websocket",
+        _FakeWebsocket([_SESSION_BEGIN, json.dumps({"event": "vad.speech_start"})]),
     )
 
     await service._receive_task_handler(AsyncMock())
@@ -1171,9 +1180,12 @@ def test_service_metadata_leaves_turn_strategies_unset_in_manual_mode():
     assert frame.user_turn_strategies is None
 
 
-def test_reconnect_on_error_cannot_be_overridden():
-    with pytest.raises(TypeError, match="reconnect_on_error"):
-        SarvamRealtimeSTTService(api_key="test-key", reconnect_on_error=True)
+@pytest.mark.parametrize(
+    ("kwargs", "expected"), [({}, True), ({"reconnect_on_error": False}, False)]
+)
+def test_reconnect_on_error_defaults_on_and_can_be_turned_off(kwargs, expected):
+    service = SarvamRealtimeSTTService(api_key="test-key", **kwargs)
+    assert service._reconnect_on_error is expected
 
 
 @pytest.mark.asyncio
@@ -1185,7 +1197,7 @@ def test_reconnect_on_error_cannot_be_overridden():
     ],
 )
 async def test_receive_errors_are_reported_without_reconnect(monkeypatch, receive_error):
-    service = SarvamRealtimeSTTService(api_key="test-key")
+    service = SarvamRealtimeSTTService(api_key="test-key", reconnect_on_error=False)
     report_error = AsyncMock()
     try_reconnect = AsyncMock(return_value=False)
     monkeypatch.setattr(service, "_receive_messages", AsyncMock(side_effect=receive_error))
@@ -1195,7 +1207,7 @@ async def test_receive_errors_are_reported_without_reconnect(monkeypatch, receiv
 
     try_reconnect.assert_not_awaited()
     report_error.assert_awaited_once()
-    # No reconnection path, so a dropped socket ends transcription for the
+    # With reconnection off, a dropped socket ends transcription for the
     # session and a switcher has to stop handing this service audio.
     assert service.is_usable is False
 
@@ -1215,7 +1227,7 @@ async def test_intentional_disconnect_leaves_the_service_usable(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
-    service = SarvamRealtimeSTTService(api_key="test-key")
+    service = SarvamRealtimeSTTService(api_key="test-key", reconnect_on_error=False)
     report_error = AsyncMock()
     try_reconnect = AsyncMock(return_value=False)
     pushed_errors = []
@@ -1228,6 +1240,7 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
         "_websocket",
         _FakeWebsocket(
             [
+                _SESSION_BEGIN,
                 json.dumps(
                     {
                         "event": "error",
@@ -1235,7 +1248,7 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
                         "message": "Invalid subscription key",
                         "is_fatal": True,
                     }
-                )
+                ),
             ]
         ),
     )
@@ -1247,6 +1260,365 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
     assert pushed_errors[0][2] is False
     try_reconnect.assert_not_awaited()
     report_error.assert_awaited_once()
+
+
+async def _run_against_local_sarvam(*, close_first):
+    """Stream 1 s of audio to a local stand-in for the realtime endpoint.
+
+    Each connection answers 500 ms of audio with one final transcript. The
+    first connection is then closed with ``close_first`` (a close code and
+    reason).
+    """
+    handshakes = 0
+
+    def process_request(connection, request):
+        nonlocal handshakes
+        handshakes += 1
+
+    async def handle_connection(websocket):
+        connection, chunks = handshakes, 0
+        await websocket.send(_SESSION_BEGIN)
+        async for message in websocket:
+            if json.loads(message)["event"] != "audio_input":
+                continue
+            chunks += 1
+            if chunks == 10:
+                text = f"hello from connection {connection}"
+                await websocket.send(json.dumps({"event": "transcript.final", "text": text}))
+                if connection == 1:
+                    await websocket.close(*close_first)
+                    return
+
+    async with serve(handle_connection, "127.0.0.1", 0, process_request=process_request) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SarvamRealtimeSTTService(
+            api_key="test-key", base_url=f"ws://127.0.0.1:{port}/ws", sample_rate=8000
+        )
+        frames = []
+        for _ in range(50):
+            frames += [
+                InputAudioRawFrame(audio=b"\0\0" * 160, sample_rate=8000, num_channels=1),
+                SleepFrame(sleep=0.02),
+            ]
+        down, _ = await run_test(
+            service,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_in_sample_rate=8000),
+        )
+
+    transcripts = [frame.text for frame in down if isinstance(frame, TranscriptionFrame)]
+    return service, handshakes, transcripts
+
+
+@pytest.mark.asyncio
+async def test_dropped_connection_is_reopened():
+    """Sarvam documents 1011 as an internal error to retry with backoff."""
+    service, handshakes, transcripts = await _run_against_local_sarvam(
+        close_first=(1011, "internal server error")
+    )
+
+    assert handshakes == 2
+    assert transcripts == ["hello from connection 1", "hello from connection 2"]
+    assert service.is_usable is True
+
+
+@dataclass
+class _FakeSarvamRealtime:
+    """A local stand-in for the realtime endpoint, counting audio per connection."""
+
+    # Open an utterance on the first connection just before dropping it.
+    drop_mid_utterance: bool = False
+    # Send the utterance's final before dropping, so nothing is left pending.
+    final_before_drop: bool = False
+    # Continue speaking on the second connection: a new utterance.
+    resume_utterance: bool = False
+    drop_first_after: int | None = None
+    # Reject every handshake after this many.
+    reject_after: int | None = None
+    # Open an utterance on the first connection after this many audio chunks;
+    # it is never finalized.
+    open_utterance_after: int | None = None
+    # How many connections, from the first, never get session.begin; None for all.
+    unconfirmed: int | None = 0
+    # Close every connection as Sarvam does for a rejected parameter.
+    reject_settings: bool = False
+    handshakes: int = 0
+    audio_per_connection: list[int] = field(default_factory=list)
+
+    async def process_request(self, connection, request):
+        self.handshakes += 1
+        if self.reject_after is not None and self.handshakes > self.reject_after:
+            return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, "unavailable\n")
+        return None
+
+    async def handle(self, websocket):
+        index = len(self.audio_per_connection)
+        self.audio_per_connection.append(0)
+        if self.reject_settings:
+            await websocket.close(4000, "Invalid model")
+            return
+        if self.unconfirmed is not None and index >= self.unconfirmed:
+            await websocket.send(_SESSION_BEGIN)
+        async for message in websocket:
+            if json.loads(message)["event"] != "audio_input":
+                continue
+            self.audio_per_connection[index] += 1
+            count = self.audio_per_connection[index]
+            if index == 0 and count == self.open_utterance_after:
+                await self._send(websocket, "vad.speech_start")
+                await self._send(websocket, "transcript.partial", "hello there")
+            if index == 1 and self.resume_utterance and count == 3:
+                await self._send(websocket, "vad.speech_start")
+                await self._send(websocket, "vad.speech_end")
+                await self._send(websocket, "transcript.final", "how are you")
+            if index == 0 and count == self.drop_first_after:
+                if self.drop_mid_utterance:
+                    await self._send(websocket, "vad.speech_start")
+                    await self._send(websocket, "transcript.partial", "hello")
+                    await self._send(websocket, "transcript.partial", "hello there")
+                    if self.final_before_drop:
+                        await self._send(websocket, "vad.speech_end")
+                        await self._send(websocket, "transcript.final", "hello there")
+                    await asyncio.sleep(0.05)
+                websocket.transport.abort()
+                return
+
+    @staticmethod
+    async def _send(websocket, event: str, text: str | None = None):
+        message = {"event": event}
+        if text is not None:
+            message["text"] = text
+        await websocket.send(json.dumps(message))
+
+
+async def _run_fake_sarvam(server: _FakeSarvamRealtime, seconds: float, configure=None):
+    async with serve(server.handle, "127.0.0.1", 0, process_request=server.process_request) as s:
+        port = s.sockets[0].getsockname()[1]
+        service = SarvamRealtimeSTTService(
+            api_key="test-key", base_url=f"ws://127.0.0.1:{port}/ws", sample_rate=8000
+        )
+        if configure:
+            configure(service)
+        frames = []
+        for _ in range(int(seconds / 0.02)):
+            frames += [
+                InputAudioRawFrame(audio=b"\0\0" * 160, sample_rate=8000, num_channels=1),
+                SleepFrame(sleep=0.02),
+            ]
+        down, up = await run_test(
+            service,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(audio_in_sample_rate=8000, enable_usage_metrics=True),
+        )
+        # Give a connection still being served time to record what it received.
+        await asyncio.sleep(0.1)
+    return service, down, up
+
+
+def _transcripts(down) -> list[tuple[str, bool]]:
+    return [(f.text, f.finalized) for f in down if isinstance(f, TranscriptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_an_utterance_cut_short_by_a_drop_ends_with_its_partial_transcript():
+    server = _FakeSarvamRealtime(drop_first_after=10, drop_mid_utterance=True)
+
+    _, down, _ = await _run_fake_sarvam(server, seconds=1.0)
+
+    assert _transcripts(down) == [("hello there", False)]
+    stops = [i for i, f in enumerate(down) if isinstance(f, ProposedUserStoppedSpeakingFrame)]
+    transcript = next(i for i, f in enumerate(down) if isinstance(f, TranscriptionFrame))
+    assert len(stops) == 1
+    # The same order as a normal utterance: the boundary, then its transcript.
+    assert stops[0] < transcript
+    # Usage is reported ahead of the transcript, for the STT span it closes.
+    assert any(
+        isinstance(f, MetricsFrame) and any(isinstance(d, STTUsageMetricsData) for d in f.data)
+        for f in down[:transcript]
+    )
+    assert len(server.audio_per_connection) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_finalized_utterance_is_not_repeated_after_a_drop():
+    server = _FakeSarvamRealtime(
+        drop_first_after=10, drop_mid_utterance=True, final_before_drop=True
+    )
+
+    _, down, _ = await _run_fake_sarvam(server, seconds=1.0)
+
+    assert _transcripts(down) == [("hello there", True)]
+
+
+@pytest.mark.asyncio
+async def test_speech_continuing_after_a_drop_becomes_a_new_utterance():
+    server = _FakeSarvamRealtime(
+        drop_first_after=10, drop_mid_utterance=True, resume_utterance=True
+    )
+
+    _, down, _ = await _run_fake_sarvam(server, seconds=1.0)
+
+    assert _transcripts(down) == [("hello there", False), ("how are you", True)]
+    assert sum(isinstance(f, ProposedUserStoppedSpeakingFrame) for f in down) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_utterance_ends_when_reconnecting_gives_up():
+    def fast_backoff(service):
+        service._reconnect_backoff_min_wait = 0.01
+        service._reconnect_backoff_max_wait = 0.01
+
+    server = _FakeSarvamRealtime(drop_first_after=10, drop_mid_utterance=True, reject_after=1)
+
+    service, down, _ = await _run_fake_sarvam(server, seconds=1.0, configure=fast_backoff)
+
+    assert _transcripts(down) == [("hello there", False)]
+    assert sum(isinstance(f, ProposedUserStoppedSpeakingFrame) for f in down) == 1
+    assert not service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_stopping_mid_utterance_pushes_no_partial_transcript():
+    server = _FakeSarvamRealtime(open_utterance_after=5)
+
+    _, down, _ = await _run_fake_sarvam(server, seconds=0.4)
+
+    assert _transcripts(down) == []
+
+
+@pytest.mark.asyncio
+async def test_an_unconfirmed_connection_is_retried(monkeypatch):
+    monkeypatch.setattr(SarvamRealtimeSTTService, "_CONNECTION_TIMEOUT", 0.1)
+    server = _FakeSarvamRealtime(unconfirmed=1)
+
+    service, _, _ = await _run_fake_sarvam(server, seconds=0.5)
+
+    assert server.handshakes == 2
+    assert server.audio_per_connection[1] > 0
+    assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_connections_that_never_confirm_are_given_up_after_three(monkeypatch):
+    monkeypatch.setattr(SarvamRealtimeSTTService, "_CONNECTION_TIMEOUT", 0.1)
+    server = _FakeSarvamRealtime(unconfirmed=None)
+
+    def stable_before_timeout(service):
+        # As in production, the wait for session.begin outlasts the time after
+        # which a connection counts as stable rather than a quick failure.
+        service._quick_failure_tracker.min_stable_duration = 0.05
+
+    service, _, _ = await _run_fake_sarvam(server, seconds=1.0, configure=stable_before_timeout)
+
+    assert server.handshakes == 3
+    assert not service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_rejected_settings_are_not_retried():
+    server = _FakeSarvamRealtime(reject_settings=True)
+
+    service, _, up = await _run_fake_sarvam(server, seconds=0.5)
+
+    assert server.handshakes == 1
+    assert not service.is_usable
+    errors = [f for f in up if isinstance(f, ErrorFrame)]
+    assert errors[0].category == ErrorCategory.INVALID_REQUEST
+    assert "Invalid model" in errors[0].error
+
+
+@pytest.mark.asyncio
+async def test_connected_fires_once_the_session_begins():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    events = []
+
+    async def record_event(name, *_args):
+        events.append((name, service._request_id))
+
+    service._call_event_handler = record_event
+    service._websocket = _FakeWebsocket([_SESSION_BEGIN])
+
+    await service._receive_messages()
+
+    assert events == [("on_connected", "test-request")]
+
+
+@pytest.mark.asyncio
+async def test_a_connection_closed_before_the_session_begins_is_not_connected():
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    events = []
+
+    async def record_event(name, *_args):
+        events.append(name)
+
+    service._call_event_handler = record_event
+    service._websocket = _FakeWebsocket([])
+
+    await service._receive_messages()
+
+    assert events == []
+    assert not service._connection_established_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_undecodable_messages_are_skipped(monkeypatch):
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    pushed = []
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+    monkeypatch.setattr(service, "_call_event_handler", _noop)
+    partial = json.dumps({"event": "transcript.partial", "text": "hello"})
+    service._websocket = _FakeWebsocket([_SESSION_BEGIN, b"\x00\x01", "not json", partial])
+
+    await service._receive_messages()
+
+    assert [f.text for f in pushed if isinstance(f, InterimTranscriptionFrame)] == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_reconnect_restarts_the_audio_position(monkeypatch):
+    """A new session's speech-end position counts from its own start."""
+    service = SarvamRealtimeSTTService(api_key="test-key")
+    monkeypatch.setattr(service, "push_frame", _noop)
+    monkeypatch.setattr(service, "broadcast_frame", _noop)
+    monkeypatch.setattr(WebsocketSTTService, "_reconnect_websocket", AsyncMock(return_value=True))
+    service._sample_rate = 16000
+    service._audio_position_bytes = _seconds_to_bytes(3.0)
+
+    await service._reconnect_websocket(1)
+    service._audio_position_bytes += _seconds_to_bytes(0.5)
+    await service._handle_message({"event": "vad.speech_start"})
+    await service._handle_message({"event": "vad.speech_end"})
+
+    assert service._speech_end_audio_position_s == 0.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("boundaries", "resent"),
+    [
+        ([VADUserStartedSpeakingFrame], True),
+        ([VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame], False),
+    ],
+)
+async def test_reconnect_reopens_an_open_manual_turn(monkeypatch, boundaries, resent):
+    """Sarvam ignores a `speech_end` whose `speech_start` went to the old session."""
+    service = SarvamRealtimeSTTService(api_key="test-key", endpointing="manual")
+    monkeypatch.setattr(service, "push_frame", _noop)
+    service._websocket = _FakeWebsocket()
+    for boundary in boundaries:
+        await service.process_frame(boundary(), FrameDirection.DOWNSTREAM)
+
+    new_websocket = _FakeWebsocket()
+
+    async def reconnect(self, attempt_number):
+        self._websocket = new_websocket
+        return True
+
+    monkeypatch.setattr(WebsocketSTTService, "_reconnect_websocket", reconnect)
+    await service._reconnect_websocket(1)
+
+    expected = [json.dumps({"event": "speech_start"})] if resent else []
+    assert new_websocket.sent == expected
 
 
 @pytest.mark.asyncio

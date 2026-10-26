@@ -276,6 +276,13 @@ class FalSTTService(SegmentedSTTService):
         """
         return True
 
+    async def cleanup(self):
+        """Close the HTTP session at teardown, unless the caller provided it."""
+        await super().cleanup()
+        if self._owns_session and self._session:
+            await self._session.close()
+            self._session = None
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Fal's service-specific language code.
 

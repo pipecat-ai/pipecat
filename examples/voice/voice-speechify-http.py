@@ -68,10 +68,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             aiohttp_session=session,
             settings=SpeechifyHttpTTSService.Settings(
                 voice=os.getenv("SPEECHIFY_VOICE_ID", "geffen_32"),
-                # simba-3.2 is English only. Use simba-3.0 for other languages; the
-                # legacy simba-english and simba-multilingual models cannot produce
-                # the speech marks this service relies on.
-                model="simba-3.2",
+                # simba-3.5 speaks 48 languages with every voice. The legacy
+                # simba-english and simba-multilingual models cannot produce the
+                # speech marks this service relies on.
+                model="simba-3.5",
             ),
         )
 

@@ -6,7 +6,6 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
-import json
 import time
 from collections.abc import Awaitable, Callable
 
@@ -17,6 +16,7 @@ from pipecat.evals.client import (
     PERSONA_TURN_EVENT,
     EvalClient,
 )
+from pipecat.evals.conversation import EvalConversation
 from pipecat.evals.events import EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
@@ -26,16 +26,17 @@ from pipecat.evals.results import (
     EvalSimulationMetricScore,
     EvalSimulationProgress,
     EvalSimulationResult,
-    EvalSimulationTurnVerdict,
     EvalTrace,
 )
 from pipecat.evals.script import EvalFunctionCall
 from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
+from pipecat.evals.simulation_judge import EvalSimulationJudge
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.deprecation import deprecated
 
-# The event the driver appends when the persona calls end_call.
+# The event that reports the persona's end_call, once the reply that made the
+# call has gone out to the bot.
 END_CALL_EVENT = "end_call"
 # How long the run waits, after the persona hangs up on its own last line, for
 # the bot's reply to it. A flow makes its final tool calls in that turn, and a
@@ -81,8 +82,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
         Args:
             simulation: The simulation being run.
-            persona: The simulated caller: its instruction, its LLM in the
-                pipeline, and its context.
+            persona: The simulated caller: its LLM in the pipeline, and its
+                context.
             client: The connection to the bot.
             stream: The bot's output as events.
             judge: The judge for the goal and the quality criteria.
@@ -99,22 +100,18 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._end_call: dict | None = None
         self._succeeded = False
         self._reason = ""
+        self._goal_confidence: float | None = None
+        self._goal_probabilities: dict[str, float] = {}
         self._metrics: list[EvalSimulationMetricScore] = []
-        # The conversation as the events tell it, built as they arrive (see
-        # :meth:`timeline`): the lines so far, the bot's words since the last
-        # persona turn, the tool calls made so far, and how far into the stream's
-        # events the build has read.
+        # The conversation as the events tell it, built as they arrive, and how
+        # far into the stream's events the build has read.
         self._bot_said = "response" if simulation.bot_audio else "llm_response"
-        self._lines: list[dict] = []
-        self._pending: list[str] = []
-        self._evidence: list[str] = []
+        self._conversation = EvalConversation()
         self._observed = 0
-        self._criteria = {m.name: m.criterion for m in simulation.metrics if m.criterion}
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
         self._persona.on_end_call(self._on_end_call)
-        await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription
         # of what it said, in text mode its LLM text.
@@ -153,10 +150,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 break
             self._observe_new_events()
             if event["type"] == END_CALL_EVENT:
-                # The persona says nothing more from here. The bot still gets
-                # its turn if the persona hung up on its own last line.
-                await self._client.hang_up()
-                if self._pending or not self._lines or self._lines[-1]["role"] != "user":
+                # The bot still gets its turn if the persona hung up on its own
+                # last line.
+                if not self._conversation.user_spoke_last:
                     self._ended_by = "end_call"
                 else:
                     self._trace.log("persona: hung up; waiting for the bot's closing turn")
@@ -169,7 +165,9 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 await self._report("user", event.get("text", ""))
-                if self._turns >= simulation.max_turns:
+                # A persona that hung up on this turn has its end_call event
+                # next, which leaves the bot its closing turn.
+                if self._turns >= simulation.max_turns and self._end_call is None:
                     self._ended_by = "max_turns"
             elif event["type"] == self._bot_said and event.get("text"):
                 await self._report("bot", event["text"])
@@ -182,7 +180,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
-        self._close_bot_turn()
+        self._conversation.end_bot_turn()
         await self._report("ended", self._ended_by)
         if failures:
             return failures
@@ -203,15 +201,19 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             simulation_name=self._simulation.name,
             succeeded=self._succeeded and error is None,
             reason=error or self._reason,
+            confidence=self._goal_confidence,
+            probabilities=self._goal_probabilities,
             error=error,
             metrics=self._metrics,
             messages=self.conversation(),
+            conversation=self._conversation.messages,
             turns=self._turns,
             ended_by=self._ended_by or "error",
             end_call=self._end_call,
             duration_ms=duration_ms,
             events_seen=events_seen,
             debug_log=debug_log,
+            success=self._simulation.success,
         )
 
     def timeline(self) -> list[dict]:
@@ -219,9 +221,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
         A bot turn is everything the bot said between two persona turns, however
         turn detection or a function call split it; a turn in which the bot said
-        nothing is not a turn. Built as the events arrive.
+        nothing is not a turn.
         """
-        return list(self._lines)
+        lines: list[dict] = []
+        evidence: list[str] = []
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                evidence.extend(EvalSimulationJudge.call_lines(message))
+            else:
+                lines.append(
+                    {
+                        "role": message["role"],
+                        "content": message["content"],
+                        "evidence": evidence[:],
+                    }
+                )
+        return lines
 
     @deprecated(
         "`EvalSimulationDriver.transcript` is deprecated since 1.11.0 and will be removed in "
@@ -235,25 +250,29 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             Will be removed in 2.0.0.
         """
         entries: list[dict] = []
-        placed = 0
-        for line in self._lines:
-            for call in line["evidence"][placed:]:
-                entries.append({"role": "tool", "content": call})
-            placed = len(line["evidence"])
-            entries.append({"role": line["role"], "content": line["content"]})
-        for call in self._evidence[placed:]:
-            entries.append({"role": "tool", "content": call})
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                entries.extend(
+                    {"role": "tool", "content": c} for c in EvalSimulationJudge.call_lines(message)
+                )
+            else:
+                entries.append({"role": message["role"], "content": message["content"]})
         return entries
 
     def conversation(self) -> list[dict]:
         """The conversation with the persona as ``user`` and the bot as ``assistant``, without the tool calls."""
-        return [{"role": line["role"], "content": line["content"]} for line in self.timeline()]
+        return [
+            {"role": message["role"], "content": message["content"]}
+            for message in self._conversation.messages
+            if message["role"] != "tool_call"
+        ]
 
     def tool_calls(self) -> list[str]:
         """The bot's function calls in order, one line each; a cancelled call is listed as cancelled."""
         lines = []
-        for event in self._stream.events_seen:
-            lines.extend(self._evidence_line(event))
+        for message in self._conversation.messages:
+            if message["role"] == "tool_call":
+                lines.extend(EvalSimulationJudge.call_lines(message))
         return lines
 
     async def _report(self, status: str, text: str) -> None:
@@ -282,56 +301,29 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await params.result_callback(
             {"status": "call ended"}, properties=FunctionCallResultProperties(run_llm=False)
         )
-        await self._stream.append(
+        # The persona answers nothing more. The run hears of the call once the
+        # reply that made it has gone out, so that reply's turn comes first.
+        await self._client.hang_up()
+        await self._client.report_end_call(
             {"type": END_CALL_EVENT, "text": self._end_call["reason"], **self._end_call}
         )
 
     def _observe_new_events(self) -> None:
-        """Read the stream's events not yet read into the timeline."""
+        """Read the stream's events not yet read into the conversation."""
         events = self._stream.events_seen
         while self._observed < len(events):
             event = events[self._observed]
             self._observed += 1
             kind = event["type"]
+            name = event.get("name") or "?"
             if kind == self._bot_said and event.get("text"):
-                self._pending.append(event["text"])
+                self._conversation.add_assistant_message(event["text"])
             elif kind == PERSONA_TURN_EVENT:
-                self._close_bot_turn()
-                text = (event.get("text") or "").strip()
-                if text:
-                    self._add_line("user", text)
-            elif kind in ("function_call", "function_call_stopped"):
-                for call in self._evidence_line(event):
-                    self._evidence.append(call)
-                    if self._judge is not None:
-                        self._judge.add_tool_call(call)
-
-    def _close_bot_turn(self) -> None:
-        """End the bot's turn: what it said since the persona last spoke becomes a line."""
-        text = " ".join(self._pending).strip()
-        self._pending.clear()
-        if text:
-            self._add_line("assistant", text)
-
-    def _add_line(self, role: str, content: str) -> None:
-        """Append a line to the timeline, and to the conversation the judge sees."""
-        self._lines.append({"role": role, "content": content, "evidence": list(self._evidence)})
-        if self._judge is None:
-            return
-        if role == "user":
-            self._judge.add_user_message(content)
-        else:
-            self._judge.add_assistant_message(content)
-
-    def _evidence_line(self, event: dict) -> list[str]:
-        """The evidence line a function-call event contributes, if any."""
-        name = event.get("name") or "?"
-        if event["type"] == "function_call":
-            arguments = event.get("args") or {}
-            return [f"{name}({json.dumps(arguments) if arguments else ''})"]
-        if event["type"] == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
-            return [f"{name} was cancelled"]
-        return []
+                self._conversation.add_user_message(event.get("text") or "")
+            elif kind == "function_call":
+                self._conversation.add_tool_call(name, event.get("args") or {})
+            elif kind == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
+                self._conversation.cancel_tool_call(name)
 
     async def _judge_conversation(self) -> list[EvalAssertionFailure]:
         """Score the measured metrics, then ask the judge once about the goal and every judged criterion.
@@ -348,31 +340,18 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             self._metrics.extend(measured.values())
             self._reason = "no judge configured"
             return []
-        evidence = self.tool_calls()
-        if evidence:
-            self._trace.log(f"judge: the bot's tool calls: {'; '.join(evidence)}")
-        judged = await self._judge.evaluate_run(self._criteria, self._simulation.success)
-        for metric in self._simulation.metrics:
-            if metric.name in measured:
-                self._metrics.append(measured[metric.name])
-                continue
-            verdicts = [
-                EvalSimulationTurnVerdict(
-                    turn=index,
-                    passed=verdict.verdict == "yes",
-                    reason=verdict.reason,
-                    verdict=verdict.verdict,
-                )
-                for index, verdict in enumerate(judged.turns.get(metric.name, []), 1)
-            ]
-            for verdict in verdicts:
-                self._trace.log(
-                    f"judge: turn {verdict.turn} {metric.name} {verdict.verdict}: {verdict.reason}"
-                )
-            self._metrics.append(self._score(metric, verdicts))
-        self._succeeded = judged.goal.verdict == "yes"
-        self._reason = judged.goal.reason
-        if judged.goal.verdict == "none":
+        judgement = await EvalSimulationJudge(
+            self._simulation, judge=self._judge, trace=self._trace
+        ).judge(self._conversation.messages)
+        judged = {metric.name: metric for metric in judgement.metrics}
+        self._metrics.extend(
+            measured.get(metric.name) or judged[metric.name] for metric in self._simulation.metrics
+        )
+        self._succeeded = judgement.goal.verdict == "yes"
+        self._reason = judgement.goal.reason
+        self._goal_confidence = judgement.goal.confidence
+        self._goal_probabilities = judgement.goal.probabilities
+        if judgement.goal.verdict == "none":
             self._trace.log(f"judge: no verdict on the goal: {self._reason}")
             return [
                 EvalAssertionFailure(
@@ -387,44 +366,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             f"judge: goal {'achieved' if self._succeeded else 'not achieved'}: {self._reason}"
         )
         return []
-
-    def _score(
-        self, metric: EvalSimulationMetric, verdicts: list[EvalSimulationTurnVerdict]
-    ) -> EvalSimulationMetricScore:
-        """A metric's score over its turn verdicts: the share of turns that passed.
-
-        A metric that fell short only on turns the judge left unanswered is
-        judge trouble, and its failure kind says so.
-        """
-        failure_kind = None
-        if not verdicts:
-            score, reason, passed = None, "no bot turn to judge", True
-        else:
-            score = sum(1 for v in verdicts if v.passed) / len(verdicts)
-            failed = [v for v in verdicts if not v.passed]
-            reason = (
-                f"all {len(verdicts)} turn(s)"
-                if not failed
-                else "; ".join(f"turn {v.turn}: {v.reason}" for v in failed)
-            )
-            passed = metric.min_score is None or score >= metric.min_score
-            if not passed:
-                failure_kind = (
-                    "judge_no" if any(v.verdict == "no" for v in failed) else "judge_no_verdict"
-                )
-        self._trace.log(
-            f"judge: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
-            f"{'' if passed else f' (below {metric.min_score:.2f})'}: {reason}"
-        )
-        return EvalSimulationMetricScore(
-            name=metric.name,
-            score=score,
-            passed=passed,
-            reason=reason,
-            min_score=metric.min_score,
-            verdicts=verdicts,
-            failure_kind=failure_kind,
-        )
 
     def _measure(self, metric: EvalSimulationMetric) -> EvalSimulationMetricScore:
         """A measured metric's outcome: its value against its range, or the bot's calls against the list."""
@@ -472,7 +413,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             longest = max(
                 (
                     len(line["content"].split())
-                    for line in self.timeline()
+                    for line in self.conversation()
                     if line["role"] == "assistant"
                 ),
                 default=None,
@@ -526,15 +467,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
     def _calls_made(self) -> list[EvalFunctionCall]:
         """The bot's function calls in order, less the ones it cancelled."""
-        made: list[EvalFunctionCall] = []
-        for event in self._stream.events_seen:
-            if event["type"] == "function_call":
-                made.append(EvalFunctionCall(name=event.get("name"), args=event.get("args") or {}))
-            elif event["type"] == "function_call_stopped" and (event.get("args") or {}).get(
-                "cancelled"
-            ):
-                for index in range(len(made) - 1, -1, -1):
-                    if made[index].name == event.get("name"):
-                        del made[index]
-                        break
-        return made
+        return [
+            EvalFunctionCall(name=message["name"], args=message["arguments"])
+            for message in self._conversation.messages
+            if message["role"] == "tool_call" and not message["cancelled"]
+        ]

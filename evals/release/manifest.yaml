@@ -132,6 +132,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-rime-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-rime-v1.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-sarvam.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-sarvam-vad-http.py
@@ -155,6 +157,8 @@ suite:
   - bot: voice/voice-xai.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-xai-http.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-zoom-ai.py
     scenarios: [scripted/capital_question]
 
   #
@@ -240,15 +244,15 @@ suite:
       - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-openrouter.py
     scenarios: [scripted/weather_function_call]
-  # Perplexity's completions API doesn't support tool calling, so this bot
-  # answers from web-grounded search instead of invoking a function.
   - bot: function-calling/function-calling-perplexity.py
-    scenarios: [scripted/weather_no_function_call]
+    scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-qwen.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sambanova.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sarvam.py
+    scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-smallest.py
     scenarios: [scripted/weather_function_call]
 
   #
@@ -401,6 +405,23 @@ suite:
   #
   - bot: features/features-voicemail-detection.py
     scenarios: [scripted/voicemail_detection]
+
+  #
+  # Expressive conversation: the LLM writes expression tags, and the TTS
+  # performs them rather than speaking them. The Tone bot reads how each user
+  # turn was meant; Tone reads a flat transcript as neutral, which holds back
+  # the tags expressive_conversation asks for, so it runs perception alone.
+  #
+  - bot: expressive-conversation/expressive-conversation-cartesia.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-elevenlabs.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-fish.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-minimax.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-tone.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services

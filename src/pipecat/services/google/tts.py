@@ -25,6 +25,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
+from xml.sax.saxutils import escape
 
 from loguru import logger
 from pydantic import BaseModel
@@ -809,7 +810,7 @@ class GoogleHttpTTSService(TTSService):
         if self._settings.google_style:
             ssml += f"<google:style name='{self._settings.google_style}'>"
 
-        ssml += text
+        ssml += escape(text)
 
         # Close tags
         if self._settings.google_style:

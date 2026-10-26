@@ -16,7 +16,7 @@ tool apart takes the ``tool_call_id`` the conversation already carries, on the
 message that reported each call running.
 """
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 
 ASYNC_TOOL_CANCELLATION_INSTRUCTIONS = """ASYNC TOOL CANCELLATION:
 Some of your tools keep running in the background after you have replied, and some of \

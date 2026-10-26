@@ -15,10 +15,9 @@ from urllib.parse import urlsplit, urlunsplit
 import aiohttp
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
@@ -30,6 +29,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -365,7 +365,7 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
     async def _generation_loop(self) -> None:
         while self._generation_queue:
             frame, direction = self._generation_queue.popleft()
-            # Initialize the speculation gate only when this response starts.
+            # Queued contexts must not overwrite the active response's speculation state.
             await super().process_frame(frame, direction)
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
@@ -413,12 +413,12 @@ class DynamoRealtimeLLMService(LLMService[OpenAILLMAdapter]):
             await self._close()
             self._prefill_failed = False
 
-    async def _handle_eager_end_of_turn_cancel(self, frame: EagerEndOfTurnCancelFrame) -> None:
+    async def _handle_user_turn_response_cancel(self, frame: UserTurnResponseCancelFrame) -> None:
         if self._speculation_gate.is_speculating or any(
             frame.speculation for frame, _ in self._generation_queue
         ):
             await self._cancel_generation()
-        await super()._handle_eager_end_of_turn_cancel(frame)
+        await super()._handle_user_turn_response_cancel(frame)
 
     async def start(self, frame: StartFrame):
         """Enable speculative input when the pipeline starts."""

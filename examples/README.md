@@ -32,8 +32,8 @@ text LLM, and streaming TTS endpoints. STT interim deltas are sent to the LLM
 while the user speaks. The final Pipecat context remains authoritative, including
 transcript corrections; response generation begins only when the user turn ends.
 
-Use Dynamo **1.6.0-rc.0** as the compatibility baseline, including both the
-frontend and vLLM runtime. This example requires its **experimental text-input
+Use Dynamo [**1.6.0**](https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.0)
+for both the frontend and vLLM runtime. This example requires its **experimental text-input
 Realtime API**, not just an OpenAI-compatible chat-completions endpoint. The LLM backend
 must support `input_text.append`, `input_text.clear`, and `input_text.commit`,
 alongside `conversation.item.create`, `response.create`, and streamed
@@ -43,11 +43,12 @@ worker with `--realtime --enable-prefix-caching`; an ordinary text-generation
 worker does not register this capability. These input events are Dynamo
 extensions, not part of the OpenAI standard, and remain experimental.
 
-Release-candidate images are
-`nvcr.io/nvstaging/ai-dynamo/dynamo-frontend:1.6.0-rc.0` and
-`nvcr.io/nvstaging/ai-dynamo/vllm-runtime:1.6.0-rc.0` (NGC staging access required).
-Speech adapters should use the example source and frontend base image from the
-same release. ASR/TTS NIMs retain their own model-specific image versions.
+The release images are `nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.6.0` and
+`nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.6.0`.
+Build the speech adapters from the
+[matching release's example](https://github.com/ai-dynamo/dynamo/tree/v1.6.0/examples/nemotron_speech_cascaded_pipeline)
+using the same frontend base image. ASR/TTS NIMs retain their own model-specific
+image versions and access requirements.
 
 The STT endpoint must support transcription sessions with 24 kHz PCM input,
 client-side audio-buffer commits, and append-only transcription deltas. The TTS
@@ -162,6 +163,10 @@ Changing service settings at runtime, organized by service type:
 ### [`turn-management/`](./turn-management/)
 
 Turn detection, interruption handling, and user input management.
+
+### [`expressive-conversation/`](./expressive-conversation/)
+
+Expressive conversation (alpha): the LLM writes expression tags into its replies, such as emotions and laughter, and the TTS performs them.
 
 ### [`thinking/`](./thinking/)
 

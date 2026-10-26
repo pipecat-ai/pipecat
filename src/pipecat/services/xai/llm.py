@@ -16,7 +16,7 @@ from typing import Any, Literal
 from loguru import logger
 from openai.types import CompletionUsage
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
@@ -51,6 +51,7 @@ class GrokLLMService(OpenAILLMService):
 
     Settings = GrokLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
