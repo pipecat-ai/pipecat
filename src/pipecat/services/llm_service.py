@@ -90,7 +90,6 @@ from pipecat.utils.log_config import _get_llm_context_log_mode, _LLMContextLogMo
 from pipecat.utils.types import assert_given
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.llm_with_backend import _PredictiveDelegationRace
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.workers.runner import WorkerRunner
 
@@ -103,6 +102,45 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 # `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
 # frontend, or the LLM inside the backend worker.
 LLMWithBackendRole = Literal["frontend", "backend"]
+
+
+class _OutputGate(Protocol):
+    """Decides whether the service's output goes out: each frame it pushes, and its function calls.
+
+    It lets output through or drops it; it never changes it. It sees each
+    frame the service processes, to keep track of what the service is doing.
+    Used by predictive delegation (see "Predictive delegation" in
+    `pipecat.pipeline.llm_with_backend`) to drop what a frontend's inference
+    outputs once its turn is delegated early.
+    """
+
+    async def process_frame(self, service: LLMService[Any], frame: Frame) -> None:
+        """Called with each frame the service processes.
+
+        Args:
+            service: The service.
+            frame: The frame it is processing.
+        """
+        ...
+
+    def allow_push(self, frame: Frame) -> bool:
+        """Whether the service may push a frame.
+
+        Args:
+            frame: The frame the service is about to push.
+
+        Returns:
+            Whether the service may push it.
+        """
+        ...
+
+    def allow_function_calls(self) -> bool:
+        """Whether the service may run its inference's function calls.
+
+        Returns:
+            Whether the service may run them.
+        """
+        ...
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -405,11 +443,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
-        # Set only on the frontend of an `LLMWithBackend` with predictive
-        # delegation, which can delegate a user's turn early in place of this
-        # service's inference. See "Predictive delegation" in
-        # `pipecat.pipeline.llm_with_backend`.
-        self._llm_with_backend_predictive_delegation: _PredictiveDelegationRace | None = None
+        # Can drop what this service pushes or the function calls it runs.
+        # See `_OutputGate`.
+        self._output_gate: _OutputGate | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -948,8 +984,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         await super().process_frame(frame, direction)
 
-        if self._llm_with_backend_predictive_delegation is not None:
-            await self._llm_with_backend_predictive_delegation.process_frame(self, frame)
+        if self._output_gate is not None:
+            await self._output_gate.process_frame(self, frame)
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
@@ -1004,8 +1040,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
-        race = self._llm_with_backend_predictive_delegation
-        if race is not None and not race.before_push(frame):
+        if self._output_gate is not None and not self._output_gate.allow_push(frame):
             return
 
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
@@ -1014,9 +1049,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         await self._track_pushed_frame(frame)
 
-        # The gate decides synchronously, so its verdict can't be torn by
-        # another task pushing at the same time. Everything it hands back is
-        # pushed past it — routing that back through here would re-gate it.
+        # The speculation gate decides synchronously, so its verdict can't be
+        # torn by another task pushing at the same time. Everything it hands
+        # back is pushed past it — routing that back through here would
+        # re-gate it.
         emitted = self._speculation_gate.process(frame, direction)
         for gated_frame, gated_direction in emitted:
             await super().push_frame(gated_frame, gated_direction)
@@ -1813,8 +1849,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if len(function_calls) == 0:
             return
 
-        race = self._llm_with_backend_predictive_delegation
-        if race is not None and not race.before_function_calls():
+        if self._output_gate is not None and not self._output_gate.allow_function_calls():
             return
 
         if self._speculation_gate.is_speculating:
