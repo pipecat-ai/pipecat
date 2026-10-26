@@ -228,3 +228,19 @@ async def test_perception_is_not_taught_without_expressive_conversation():
     )
 
     assert llm._settings.system_instruction == "APP"
+
+
+@pytest.mark.asyncio
+async def test_every_llm_in_a_switcher_is_taught_the_perception():
+    first, second = _llm("first"), _llm("second")
+
+    # Sent down as a perception producer before the switcher would, while the first is active.
+    await run_test(
+        LLMSwitcher(llms=[first, second]),
+        frames_to_send=[PerceptionMetadataFrame(service_name="tone", perception=TONE)],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    taught = f"APP\n\n{expression_instructions(None, perception=TONE)}"
+    assert first._settings.system_instruction == taught
+    assert second._settings.system_instruction == taught
