@@ -19,6 +19,12 @@ class ProcessFrameResult(Enum):
     Parameters:
         CONTINUE: Continue to the next strategy in the loop.
         STOP: Stop evaluating further strategies for this frame.
+
+    .. deprecated:: 1.15.0
+        Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead.
+        Every strategy sees every frame, and a list whose strategies all have
+        to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``.
+        Will be removed in 2.0.0.
     """
 
     CONTINUE = "continue"
@@ -38,3 +44,18 @@ class UserTurnSpeculation:
     """
 
     text: str
+
+
+@dataclass
+class UserTurnResumedParams:
+    """Parameters emitted when the user speaks again in an open turn.
+
+    Parameters:
+        enable_interruptions: Whether the turn interrupts the bot, as decided
+            when it started.
+        inference_triggered: Whether the turn's inference was already
+            triggered. The new speech voids the answer it started.
+    """
+
+    enable_interruptions: bool
+    inference_triggered: bool

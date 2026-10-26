@@ -647,7 +647,7 @@ class EagerTranscriptionFrame(TextFrame):
 
     Some STT services emit a provisional end of turn ahead of the real one, so a
     response can be generated during the gap. The prediction may be withdrawn
-    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    (:class:`UserTurnResponseCancelFrame`) and the committed transcript may differ
     from this one, so nothing produced from it may reach the user or the context
     until it is confirmed. See
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
@@ -1430,17 +1430,34 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EagerEndOfTurnCancelFrame(SystemFrame):
-    """Frame withdrawing an eager end of turn.
+class UserTurnResponseCancelFrame(SystemFrame):
+    """Frame cancelling the speculative response for the current user turn.
 
-    Emitted when a service reports the user resumed speaking after an eager end
-    of turn, or when the committed transcript doesn't match the eager one. The
-    LLM service stops generating, and its
-    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
-    was holding — which is everything the response produced, so nothing further
-    down the pipeline has anything to undo.
+    Emitted when an eager end of turn is withdrawn (the user resumed speaking,
+    or the committed transcript doesn't match the eager one). The LLM service
+    stops generating, and its
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards
+    what it was holding — which is everything the response produced, so nothing
+    further down the pipeline has anything to undo. A response the gate has
+    already released is left alone; stopping it is what
+    :class:`InterruptionFrame` does.
 
     A system frame so it overtakes the speculative output it cancels.
+    """
+
+    pass
+
+
+@deprecated(
+    "`EagerEndOfTurnCancelFrame` is deprecated since 1.15.0 and will be removed in 2.0.0. "
+    "Use `UserTurnResponseCancelFrame` instead."
+)
+@dataclass
+class EagerEndOfTurnCancelFrame(UserTurnResponseCancelFrame):
+    """Deprecated alias for :class:`UserTurnResponseCancelFrame`.
+
+    .. deprecated:: 1.15.0
+        Use :class:`UserTurnResponseCancelFrame` instead. Will be removed in 2.0.0.
     """
 
     pass
@@ -1494,6 +1511,30 @@ class UserTurnInferenceCompletedFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class UserTurnCompletionFrame(SystemFrame):
+    """The LLM's judgment of whether the user's turn is complete.
+
+    Pushed upstream by an LLM service that uses turn-completion markers, once
+    per inference and as soon as the judgment is known: when the response's
+    marker is read, when the response calls a tool before writing a marker
+    (``"complete"``), or when the response ends without one (``None``). The
+    marker itself reaches the context as an :class:`LLMMarkerFrame`.
+
+    Parameters:
+        kind: ``"complete"``, ``"short"`` (the user will continue shortly) or
+            ``"long"`` (the user needs more time), or ``None`` when the
+            response carried no marker.
+        marker: The marker read, or ``None`` for a tool call or no marker.
+        context_frame_id: The id of the :class:`LLMContextFrame` that started
+            the inference, or ``None`` when it isn't known.
+    """
+
+    kind: str | None
+    marker: str | None = None
+    context_frame_id: int | None = None
 
 
 @dataclass
