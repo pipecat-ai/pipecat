@@ -12,12 +12,10 @@ output processing, including frame buffering, mixing, timing, and media streamin
 
 import asyncio
 import itertools
-import math
 import time
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -28,12 +26,6 @@ from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence, scale_audio
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
-    AudioOutputEndFrame,
-    AudioOutputGainFrame,
-    AudioOutputStartFrame,
-    AudioOutputStopFrame,
-    AudioPlaybackOutcome,
-    AudioPlaybackReportFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -41,7 +33,6 @@ from pipecat.frames.frames import (
     EndFrame,
     FilterControlFrame,
     Frame,
-    InterruptionCause,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -70,15 +61,6 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0.35
 # Only used as a fallback
 BOT_VAD_STOP_FALLBACK_SECS = 3
-
-
-@dataclass
-class _PlaybackState:
-    written: bool = False
-    attempted: bool = False
-    interruptible: bool = False
-    outcome: AudioPlaybackOutcome = "completed"
-    cause: InterruptionCause | None = None
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -120,23 +102,6 @@ class BaseOutputTransport(FrameProcessor):
                 "removed in 2.0.0. Use provider-specific settings instead.",
                 stacklevel=2,
             )
-
-    async def stop_audio_output(self, context_id: str | None, *, cancel: bool = False) -> None:
-        """Stop device-buffered audio when the transport supports it.
-
-        Args:
-            context_id: Output to stop, or None for every output.
-            cancel: Also stop uninterruptible audio during transport teardown.
-        """
-        pass
-
-    async def get_audio_playback_ms(self, context_id: str) -> float | None:
-        """Return measured played speech duration, or None without a playback clock.
-
-        A completed write alone does not provide a playback measurement. A
-        transport with device or client timing can override this hook.
-        """
-        return None
 
     @property
     def sample_rate(self) -> int:
@@ -418,20 +383,6 @@ class BaseOutputTransport(FrameProcessor):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
-        elif isinstance(frame, AudioOutputStopFrame):
-            for sender in self._media_senders.values():
-                await sender.handle_output_stop(frame)
-        elif isinstance(frame, AudioOutputGainFrame):
-            if (
-                not math.isfinite(frame.gain)
-                or not 0 <= frame.gain <= 1
-                or not math.isfinite(frame.timeout)
-                or frame.timeout < 0
-            ):
-                await self.push_error("Invalid temporary output gain")
-                return
-            for sender in self._media_senders.values():
-                sender.set_temporary_gain(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         elif direction == FrameDirection.UPSTREAM:
@@ -445,22 +396,12 @@ class BaseOutputTransport(FrameProcessor):
             logger.warning(
                 f"{self} destination [{frame.transport_destination}] not registered for frame {frame}"
             )
-            if isinstance(frame, (AudioOutputStartFrame, AudioOutputEndFrame)):
-                report = AudioPlaybackReportFrame(frame.context_id, "discarded", 0.0, "error")
-                report.transport_destination = frame.transport_destination
-                if isinstance(frame, AudioOutputEndFrame):
-                    await self.push_frame(report, FrameDirection.UPSTREAM)
             return
 
         sender = self._media_senders[frame.transport_destination]
 
         if isinstance(frame, InterruptionFrame):
-            for sender in self._media_senders.values():
-                await sender.handle_interruptions(frame)
-        elif isinstance(frame, AudioOutputStartFrame):
-            await sender.handle_output_start(frame)
-        elif isinstance(frame, AudioOutputEndFrame):
-            await sender.handle_output_end(frame)
+            await sender.handle_interruptions(frame)
         elif isinstance(frame, OutputAudioRawFrame):
             await sender.handle_audio_frame(frame)
         elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
@@ -544,11 +485,6 @@ class BaseOutputTransport(FrameProcessor):
             # updated in order with the audio.
             self._volume = params.audio_out_volume
             self._volume_gain = 1.0
-            self._hint_gain = 1.0
-            self._hint_deadline = 0.0
-            self._audio_context_id: str | None = None
-            self._playback: dict[str, _PlaybackState] = {}
-            self._reported_outputs: OrderedDict[str, None] = OrderedDict()
 
             # These are the images that we should send at our desired framerate.
             self._video_images = None
@@ -658,17 +594,11 @@ class BaseOutputTransport(FrameProcessor):
 
         async def cleanup(self):
             """Release media sender resources at teardown."""
-            self._hint_gain = 1.0
             try:
                 # Since we are cancelling everything it doesn't matter what task we cancel first.
                 await self._cancel_audio_task()
                 await self._cancel_clock_task()
                 await self._cancel_video_task()
-                await self._transport.stop_audio_output(None, cancel=True)
-                for context_id in list(self._playback):
-                    state = self._playback[context_id]
-                    state.outcome, state.cause = "interrupted", "shutdown"
-                    await self._report_output(context_id)
 
                 # Stop audio mixer so it doesn't keep generating frames after cancellation.
                 if self._mixer:
@@ -676,11 +606,11 @@ class BaseOutputTransport(FrameProcessor):
             finally:
                 self._executor.shutdown(wait=False)
 
-        async def handle_interruptions(self, frame: InterruptionFrame):
+        async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
-                frame: Interruption with its stop cause.
+                _: The start interruption frame (unused).
             """
             # Keep the audio task running but drain all interruptible frames, so
             # the frame being written and the pending uninterruptible ones are
@@ -688,10 +618,6 @@ class BaseOutputTransport(FrameProcessor):
             # mixer-only output during the restart, causing an audible gap in
             # the background audio (made worse by telephony serializers that
             # clear the playout buffer on interruptions).
-            self._hint_gain = 1.0
-            for state in self._playback.values():
-                if state.interruptible:
-                    state.outcome, state.cause = "interrupted", frame.cause
             self._audio_queue.reset()
             # The same goes for the audio still waiting to fill a chunk.
             self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
@@ -712,82 +638,7 @@ class BaseOutputTransport(FrameProcessor):
             # speaking while there's uninterruptible audio still to play (after
             # the reset, everything left in the queue is uninterruptible).
             if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
-                await self._resampler.reset()
                 await self._bot_stopped_speaking()
-
-        def set_temporary_gain(self, frame: AudioOutputGainFrame):
-            """Apply a prompt gain override independently of queued application gain."""
-            self._hint_gain = frame.gain if frame.timeout else 1.0
-            self._hint_deadline = time.monotonic() + frame.timeout
-
-        async def handle_output_start(self, frame: AudioOutputStartFrame):
-            """Register an output even when its audio is disabled or discarded."""
-            if frame.context_id in self._reported_outputs:
-                return
-            if len(self._playback) >= 4096:
-                await self._transport.push_error(
-                    "Unresolved audio output limit exceeded", force_treat_as_permanent=True
-                )
-                return
-            self._playback.setdefault(frame.context_id, _PlaybackState())
-            await self._audio_queue.put(frame)
-
-        async def handle_output_stop(self, frame: AudioOutputStopFrame):
-            """Discard only interruptible samples owned by a stopped output."""
-            if frame.context_id in self._reported_outputs:
-                return
-            if len(self._playback) >= 4096 and frame.context_id not in self._playback:
-                await self._transport.push_error(
-                    "Unresolved audio output limit exceeded", force_treat_as_permanent=True
-                )
-                return
-            state = self._playback.setdefault(frame.context_id, _PlaybackState())
-            state.outcome, state.cause = "interrupted", frame.cause
-            await self._transport.stop_audio_output(frame.context_id)
-            self._hint_gain = 1.0
-            self._audio_queue.discard_interruptible(
-                lambda queued: getattr(queued, "context_id", None) == frame.context_id
-            )
-            if self._audio_context_id == frame.context_id:
-                self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
-                if not self._audio_runs:
-                    await self._resampler.reset()
-            # The terminal marker follows the in-flight write and any retained
-            # uninterruptible samples, so their timing stays in the report.
-
-        async def handle_output_end(self, frame: AudioOutputEndFrame):
-            """Place the terminal marker after its buffered speech and padding."""
-            if frame.context_id in self._reported_outputs:
-                return
-            self._playback.setdefault(frame.context_id, _PlaybackState())
-            if self._audio_context_id == frame.context_id:
-                await self._enqueue_flushed_audio_buffer()
-                self._audio_context_id = None
-            await self._audio_queue.put(frame)
-
-        async def _report_output(self, context_id: str):
-            state = self._playback.pop(context_id, None)
-            if state is None or context_id in self._reported_outputs:
-                return
-            self._reported_outputs[context_id] = None
-            if len(self._reported_outputs) > 4096:
-                self._reported_outputs.popitem(last=False)
-            try:
-                measured = await self._transport.get_audio_playback_ms(context_id)
-            except Exception as error:
-                measured = None
-                state.outcome, state.cause = "failed", "error"
-                await self._transport.push_error("Audio playback timing failed", exception=error)
-            if measured is None and not state.written and not state.attempted:
-                measured = 0.0
-            if measured is not None and measured > 0:
-                state.written = True
-            outcome = state.outcome
-            if not state.written and outcome == "completed":
-                outcome = "discarded"
-            report = AudioPlaybackReportFrame(context_id, outcome, measured, state.cause)
-            report.transport_destination = self._destination
-            await self._transport.push_frame(report, FrameDirection.UPSTREAM)
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
@@ -795,26 +646,8 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The output audio frame to handle.
             """
-            if frame.context_id in self._reported_outputs:
-                return
-            if frame.context_id in self._playback:
-                state = self._playback[frame.context_id]
-                state.interruptible |= frame.interruptible
-                if frame.num_channels != self._params.audio_out_channels or (
-                    frame.num_channels != 1 and frame.sample_rate != self._sample_rate
-                ):
-                    state.outcome, state.cause = "failed", "error"
-                    await self._transport.push_error(
-                        "Tracked audio requires matching output channels and mono resampling"
-                    )
-                    return
-                if state.outcome != "completed" and frame.interruptible:
-                    return
             if not self._params.audio_out_enabled:
                 return
-            if frame.context_id != self._audio_context_id:
-                await self._enqueue_flushed_audio_buffer()
-                self._audio_context_id = frame.context_id
 
             # We might need to resample if incoming audio doesn't match the
             # transport sample rate.
@@ -828,8 +661,6 @@ class BaseOutputTransport(FrameProcessor):
             while self._buffered_audio_bytes >= self._audio_chunk_size:
                 audio, uninterruptible = self._take_audio_chunk()
                 chunk = cls(audio, sample_rate=self._sample_rate, num_channels=frame.num_channels)
-                chunk.context_id = self._audio_context_id
-                chunk.metadata["speech_audio_bytes"] = len(audio)
                 chunk.transport_destination = self._destination
                 chunk.interruptible = not uninterruptible
                 await self._audio_queue.put(chunk)
@@ -962,9 +793,7 @@ class BaseOutputTransport(FrameProcessor):
             if self._audio_runs:
                 audio, uninterruptible = self._take_audio_chunk()
                 padding = bytes(self._audio_chunk_size - len(audio))
-                await self._enqueue_audio_chunk(
-                    audio + padding, uninterruptible, valid_bytes=len(audio)
-                )
+                await self._enqueue_audio_chunk(audio + padding, uninterruptible)
 
         @property
         def _buffered_audio_bytes(self) -> int:
@@ -998,30 +827,31 @@ class BaseOutputTransport(FrameProcessor):
         def _clear_audio_buffer(self):
             self._audio_runs.clear()
 
-        async def _enqueue_audio_chunk(
-            self, audio: bytes, uninterruptible: bool, *, valid_bytes: int | None = None
-        ):
+        async def _enqueue_audio_chunk(self, audio: bytes, uninterruptible: bool):
             """Queue one full chunk of output-rate audio for playback."""
             frame = self._audio_buffer_cls(
                 audio,
                 sample_rate=self._sample_rate,
                 num_channels=self._params.audio_out_channels,
             )
-            frame.context_id = self._audio_context_id
-            frame.metadata["speech_audio_bytes"] = (
-                len(audio) if valid_bytes is None else valid_bytes
-            )
             frame.transport_destination = self._destination
             frame.interruptible = not uninterruptible
             await self._audio_queue.put(frame)
 
         async def _bot_stopped_speaking(self):
-            """Announce playback stopping without changing buffered input."""
+            """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
 
             self._bot_speaking = False
             self._tts_audio_received = False
+
+            # Any remaining leftover here (e.g. from an interruption) is
+            # discarded rather than flushed, since it's no longer wanted. The
+            # same goes for the audio still inside the resampler, which would
+            # otherwise be prepended to whatever the bot says next.
+            self._clear_audio_buffer()
+            await self._resampler.reset()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -1075,9 +905,7 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The frame to handle.
             """
-            if isinstance(frame, AudioOutputEndFrame):
-                await self._report_output(frame.context_id)
-            elif isinstance(frame, OutputAudioRawFrame):
+            if isinstance(frame, OutputAudioRawFrame):
                 await self._handle_bot_speech(frame)
             elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)
@@ -1109,24 +937,11 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The queued frame. Only audio frames are filtered.
             """
             if self._filter and isinstance(frame, OutputAudioRawFrame):
-                try:
-                    filtered = await self._filter.filter(frame.audio)
-                    if frame.context_id in self._playback and len(filtered) != len(frame.audio):
-                        raise ValueError("Tracked audio filters must preserve sample count")
-                    frame.audio = filtered
-                except Exception as error:
-                    if frame.context_id not in self._playback:
-                        raise
-                    state = self._playback[frame.context_id]
-                    state.outcome, state.cause = "failed", "error"
-                    frame.metadata["audio_output_failed"] = True
-                    await self._transport.push_error("Audio output filter failed", exception=error)
+                frame.audio = await self._filter.filter(frame.audio)
 
         def _apply_volume(self, frame: Frame):
             """Scale an audio frame taken from the audio queue by the volume and its gain."""
-            if time.monotonic() >= self._hint_deadline:
-                self._hint_gain = 1.0
-            volume = self._volume * self._volume_gain * self._hint_gain
+            volume = self._volume * self._volume_gain
             if volume != 1.0 and isinstance(frame, OutputAudioRawFrame):
                 frame.audio = scale_audio(frame.audio, volume)
 
@@ -1224,23 +1039,10 @@ class BaseOutputTransport(FrameProcessor):
                 # Try to send audio to the transport.
                 try:
                     if isinstance(frame, OutputAudioRawFrame):
-                        state = self._playback.get(frame.context_id) if frame.context_id else None
-                        if frame.metadata.get("audio_output_failed"):
-                            push_downstream = False
-                        else:
-                            if state:
-                                state.attempted = True
-                            push_downstream = await self._internal_write_audio_frame(frame)
+                        push_downstream = await self._internal_write_audio_frame(frame)
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False
-
-                if isinstance(frame, OutputAudioRawFrame) and frame.context_id:
-                    state = self._playback.get(frame.context_id)
-                    if state:
-                        state.written |= push_downstream
-                        if not push_downstream and state.outcome == "completed":
-                            state.outcome, state.cause = "failed", "error"
 
                 # If we were able to send to the transport, push the frame
                 # downstream in case anyone else needs it.

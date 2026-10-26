@@ -18,8 +18,6 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
-    AudioOutputEndFrame,
-    AudioOutputStartFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -380,68 +378,6 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
     padded with silence to a full chunk and queued for playback (see
     ``handle_tts_stopped``), instead of being silently discarded.
     """
-
-    async def test_previous_tts_stop_preserves_next_output_partial_chunk(self):
-        transport = await _make_transport(audio_out_sample_rate=24000)
-        write_started = asyncio.Event()
-        release_write = asyncio.Event()
-        first_stopped = asyncio.Event()
-        second_ended = asyncio.Event()
-
-        async def write(frame):
-            if not write_started.is_set():
-                write_started.set()
-                await release_write.wait()
-            return True
-
-        async def pushed(frame, *args):
-            if isinstance(frame, TTSStoppedFrame) and frame.context_id == "first":
-                first_stopped.set()
-            elif isinstance(frame, AudioOutputEndFrame) and frame.context_id == "second":
-                second_ended.set()
-
-        transport.write_audio_frame.side_effect = write
-        transport.push_frame.side_effect = pushed
-        second_audio = b"\x03\x04" * 120
-        try:
-            await transport.process_frame(AudioOutputStartFrame("first"), FrameDirection.DOWNSTREAM)
-            await transport.process_frame(
-                TTSAudioRawFrame(b"\x01\x02" * 960, 24000, 1, context_id="first"),
-                FrameDirection.DOWNSTREAM,
-            )
-            await asyncio.wait_for(write_started.wait(), timeout=1)
-            await transport.process_frame(
-                TTSStoppedFrame(context_id="first"), FrameDirection.DOWNSTREAM
-            )
-            await transport.process_frame(AudioOutputEndFrame("first"), FrameDirection.DOWNSTREAM)
-            await transport.process_frame(
-                AudioOutputStartFrame("second"), FrameDirection.DOWNSTREAM
-            )
-            await transport.process_frame(
-                TTSAudioRawFrame(second_audio, 24000, 1, context_id="second"),
-                FrameDirection.DOWNSTREAM,
-            )
-
-            release_write.set()
-            await asyncio.wait_for(first_stopped.wait(), timeout=1)
-            await transport.process_frame(
-                TTSStoppedFrame(context_id="second"), FrameDirection.DOWNSTREAM
-            )
-            await transport.process_frame(AudioOutputEndFrame("second"), FrameDirection.DOWNSTREAM)
-            await asyncio.wait_for(second_ended.wait(), timeout=1)
-
-            written = [
-                call.args[0]
-                for call in transport.write_audio_frame.call_args_list
-                if call.args[0].context_id == "second"
-            ]
-            played_audio = b"".join(
-                frame.audio[: frame.metadata["speech_audio_bytes"]] for frame in written
-            )
-            self.assertEqual(played_audio, second_audio)
-        finally:
-            release_write.set()
-            await transport.cancel(CancelFrame())
 
     async def test_tts_stopped_frame_flushes_partial_chunk_padded_with_silence(self):
         transport = await _make_transport(mixer=None)

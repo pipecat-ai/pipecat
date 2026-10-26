@@ -51,10 +51,6 @@ from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
-InterruptionCause = Literal["user", "application", "shutdown", "error"]
-AudioPlaybackOutcome = Literal["completed", "interrupted", "discarded", "failed"]
-LLMOperationOutcome = Literal["accepted", "rejected", "unknown", "partial"]
-
 if TYPE_CHECKING:
     from pipecat.adapters.llm.schemas.direct_function import DirectFunction
     from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
@@ -255,8 +251,6 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
     transport supports multiple audio destinations (e.g. multiple audio tracks)
     the destination name can be specified in transport_destination.
     """
-
-    context_id: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         super().__post_init__()
@@ -883,119 +877,6 @@ class LLMRunFrame(DataFrame):
 
 
 @dataclass
-class LLMInputTextFrame(DataFrame):
-    """One live typed user turn and its requested reply.
-
-    Parameters:
-        text: User text.
-        user_id: Optional user identity.
-        audio_response: Whether the reply should include audio.
-        client_message_id: Optional client correlation identity.
-    """
-
-    text: str
-    user_id: str | None = None
-    audio_response: bool = True
-    client_message_id: str | None = None
-
-
-@dataclass
-class LLMOperationResultFrame(SystemFrame):
-    """Provider acceptance of a frame-ordered operation.
-
-    Parameters:
-        request_id: Identity of the initiating frame.
-        operation: Operation kind.
-        outcome: Provider acceptance state. Unknown and partial require recovery.
-        detail: Optional failure description.
-        service_name: Service that owns the operation.
-    """
-
-    request_id: int
-    operation: str
-    outcome: LLMOperationOutcome
-    detail: str | None = None
-    service_name: str = ""
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class AudioOutputStartFrame(ControlFrame):
-    """Register audio ownership before its first sample, including empty output.
-
-    Parameters:
-        context_id: Globally unique output identity, retained by playback reports.
-    """
-
-    context_id: str
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class AudioOutputEndFrame(ControlFrame):
-    """Close an output after its final audio sample.
-
-    Parameters:
-        context_id: Identity from :class:`AudioOutputStartFrame`.
-    """
-
-    context_id: str
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class AudioOutputStopFrame(SystemFrame):
-    """Stop interruptible audio for one output without stopping other turns.
-
-    Parameters:
-        context_id: Identity from :class:`AudioOutputStartFrame`.
-        cause: Reason for stopping this output.
-    """
-
-    context_id: str
-    cause: InterruptionCause = "application"
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class ServiceSwitcherDeactivatedFrame(SystemFrame):
-    """Tell an output-owning service to stop generation after a service switch."""
-
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class AudioPlaybackReportFrame(SystemFrame):
-    """Terminal playback result for one output and transport destination.
-
-    Parameters:
-        context_id: Globally unique output identity.
-        outcome: Playback outcome.
-        played_ms: Measured speech duration, or None when timing is unknown.
-        cause: Stop cause, when applicable.
-    """
-
-    context_id: str
-    outcome: AudioPlaybackOutcome
-    played_ms: float | None = None
-    cause: InterruptionCause | None = None
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
-class AudioOutputGainFrame(SystemFrame):
-    """Temporary output gain, applied immediately without changing application gain.
-
-    Parameters:
-        gain: Multiplier between zero and one.
-        timeout: Expiry in seconds. Zero removes the override.
-    """
-
-    gain: float = 1.0
-    timeout: float = 0.0
-
-
-@dataclass
 class LLMMessagesAppendFrame(DataFrame):
     """Frame containing LLM messages to append to current context.
 
@@ -1537,7 +1418,7 @@ class InterruptionFrame(SystemFrame):
     by any processor.
     """
 
-    cause: InterruptionCause = "application"
+    pass
 
 
 @dataclass
@@ -1719,7 +1600,7 @@ class ProposedUserStartedSpeakingFrame(SystemFrame):
     frame; see :class:`ProposedUserStoppedSpeakingFrame`.
     """
 
-    enable_interruptions: bool | None = None
+    pass
 
 
 @dataclass
@@ -2272,14 +2153,9 @@ class LLMServiceMetadataFrame(ServiceMetadataFrame):
     Parameters:
         is_realtime_service: Whether the broadcasting service is a realtime
             (speech-to-speech) LLM service.
-        acknowledges_operations: Preserve mutation intent until the service accepts
-            and commits each context operation.
-        accepts_input_text: Use explicit live typed turns for this service.
     """
 
     is_realtime_service: bool = False
-    acknowledges_operations: bool = False
-    accepts_input_text: bool = False
 
 
 @dataclass

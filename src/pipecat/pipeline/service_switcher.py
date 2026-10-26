@@ -13,12 +13,10 @@ from typing import Any, Generic, TypeVar
 from loguru import logger
 
 from pipecat.frames.frames import (
-    AudioPlaybackReportFrame,
     ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
     ServiceMetadataFrame,
-    ServiceSwitcherDeactivatedFrame,
     ServiceSwitcherFrame,
     ServiceSwitcherRequestMetadataFrame,
     ServiceUpdateSettingsFrame,
@@ -141,10 +139,7 @@ class ServiceSwitcherStrategy(BaseObject):
             logger.warning(f"Not switching to {service.name}: it can no longer do its job")
             return None
 
-        previous = self._active_service
         self._active_service = service
-        if previous is not service and hasattr(previous, "owns_audio_output"):
-            await previous.queue_frame(ServiceSwitcherDeactivatedFrame())
         await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
         await self._call_event_handler("on_service_switched", service)
         return service
@@ -378,10 +373,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     def _make_pipeline_definition(
         service: FrameProcessor, strategy: ServiceSwitcherStrategy
     ) -> Any:
-        async def filter(frame: Frame) -> bool:
-            if isinstance(frame, AudioPlaybackReportFrame):
-                owns = getattr(service, "owns_audio_output", None)
-                return bool(owns and owns(frame.context_id))
+        async def filter(_: Frame) -> bool:
             return service == strategy.active_service
 
         # Layout: Filter → Service → Filter

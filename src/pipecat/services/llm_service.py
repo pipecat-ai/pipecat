@@ -237,8 +237,6 @@ class FunctionCallRunnerItem:
         group_id: Shared identifier for all function calls from the same LLM
             response batch. Used to trigger the LLM exactly once when the last
             call in the group completes.
-        pin_handler: Keep the captured handler through execution when the provider
-            binds a call to an accepted tool revision.
         settled: Whether the call has already reached a terminal state — a
             final result, a timeout, or a cancellation. Results reported after
             that are rejected, since the rest of the pipeline has stopped
@@ -253,7 +251,6 @@ class FunctionCallRunnerItem:
     run_llm: bool | None = None
     group_id: str | None = None
     settled: bool = False
-    pin_handler: bool = False
 
 
 # `default=BaseLLMAdapter` (PEP 696) so that unparameterized subclasses
@@ -318,8 +315,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     FUNCTION_CALL_ERROR_MESSAGE_TEMPLATE = (
         "The function `{function_name}` failed and returned no result."
     )
-
-    _reject_intermediate_results: bool = False
 
     supports_response_schema: bool = False
     """Whether the provider can enforce a response schema in ``run_inference()``.
@@ -1918,9 +1913,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # been unregistered between queuing and execution, in which case we
         # fall back to the missing-function handler so the call still terminates
         # with a normal tool result.
-        if runner_item.pin_handler:
-            item = runner_item.registry_item
-        elif runner_item.function_name in self._functions.keys():
+        if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
         elif None in self._functions.keys():
             item = self._functions[None]
@@ -1966,9 +1959,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             nonlocal timeout_task
 
             is_final = properties.is_final if properties else True
-            if not is_final and self._reject_intermediate_results:
-                await self.push_error(f"{self.name} requires final function call results")
-                return
             if not is_final and item.cancel_on_interruption:
                 logger.warning(
                     f"{self} result_callback called with is_final=False on sync function call"
