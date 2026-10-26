@@ -50,6 +50,7 @@ from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
+    from pipecat.expressive.policy import ExpressionPolicy
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
     from pipecat.workers.runner import WorkerRunner
@@ -84,6 +85,9 @@ class FrameProcessorSetup:
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.expression_policy`.
         pipeline_worker: The :class:`~pipecat.pipeline.worker.PipelineWorker` running this pipeline. Stored
             on each processor as ``self.pipeline_worker`` so processors can
             reach task-scoped state (e.g. ``self.pipeline_worker.app_resources``).
@@ -110,6 +114,7 @@ class FrameProcessorSetup:
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
+    expression_policy: ExpressionPolicy | None = None
     observer: BaseObserver | None = None
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None

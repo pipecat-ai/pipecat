@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -69,18 +70,38 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=FishAudioTTSService.Settings(voice="933563129e564b19a115bedd57b7406a"),
     )
 
-    # Teach the LLM the expression tags the TTS can perform. Fish Audio's tags
-    # are free text, so the prompt gives examples and lets the LLM describe
-    # others.
-    system_instruction = """You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief.
+    # With expressive conversation on, the LLM is taught the expression tags the TTS
+    # performs. Fish Audio's tags are free text, so the policy offers examples for
+    # this conversation, leaving out sound effects such as [[crowd laughing]].
+    system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
 
-You can control how your words are spoken with tags:
-- <<delivery>> at the start of a sentence speaks it, and the sentences after it, with that delivery, until the next delivery tag. <<neutral>> returns to your normal voice. A delivery is one word. For example: <<happy>>, <<excited>>, <<delighted>>, <<curious>>, <<calm>>, <<empathetic>>, <<sympathetic>>, <<hopeful>>, <<nervous>>, <<sad>>, <<disappointed>>, <<frustrated>>, <<sarcastic>>, <<whispering>>. Others work too.
-- [[sound]] makes a sound at that point, such as [[laughing]], [[chuckling]], [[sighing]], [[gasping]] or [[clear throat]].
-- ^^word^^ stresses a word.
-- [[pause 500]] pauses for about that many milliseconds.
-
-Let your voice match the conversation: be excited for the user's good news, sympathetic with their bad news, and laugh when they say something funny. Most sentences need no tag."""
+    expression_policy = ExpressionPolicy(
+        guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS],
+        delivery=[
+            "slow",
+            "happy",
+            "excited",
+            "delighted",
+            "curious",
+            "calm",
+            "empathetic",
+            "sympathetic",
+            "hopeful",
+            "nervous",
+            "sad",
+            "disappointed",
+            "frustrated",
+            "sarcastic",
+            "whispering",
+        ],
+        sounds=[
+            "laughing",
+            "chuckling",
+            "sighing",
+            "gasping",
+            "clear throat",
+        ],
+    )
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -110,8 +131,10 @@ Let your voice match the conversation: be excited for the user's good news, symp
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
-            # The TTS reads the expression tags in the LLM's responses.
+            # The LLM writes expression tags into its responses, and the TTS
+            # performs them.
             enable_expressive_conversation=True,
+            expression_policy=expression_policy,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,

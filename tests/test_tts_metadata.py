@@ -12,8 +12,9 @@ import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
-from pipecat.frames.frames import Frame, TTSMetadataFrame
+from pipecat.frames.frames import Frame, TTSMetadataFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.worker import PipelineParams
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 
@@ -88,3 +89,36 @@ async def test_nothing_is_broadcast_without_expressive_conversation():
     down, up = await run_test(SilentTTSService(CAPABILITIES), frames_to_send=[])
 
     assert not [f for f in down + up if isinstance(f, TTSMetadataFrame)]
+
+
+class ModelTTSService(SilentTTSService):
+    """A TTS service that performs expression only on its "expressive" model."""
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        if self._settings.model == "expressive":
+            return self._declaring_adapter
+        return DeclaringAdapter(None)
+
+
+@pytest.mark.asyncio
+async def test_a_model_change_that_changes_the_expression_is_broadcast():
+    down, up = await run_test(
+        ModelTTSService(CAPABILITIES),
+        frames_to_send=[TTSUpdateSettingsFrame(delta=TTSSettings(model="expressive"))],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    metadata = [f for f in up if isinstance(f, TTSMetadataFrame)]
+    assert [f.expression for f in metadata] == [None, CAPABILITIES]
+    assert [f.expression for f in down if isinstance(f, TTSMetadataFrame)] == [None, CAPABILITIES]
+
+
+@pytest.mark.asyncio
+async def test_a_change_that_keeps_the_expression_is_not_broadcast():
+    _, up = await run_test(
+        ModelTTSService(CAPABILITIES),
+        frames_to_send=[TTSUpdateSettingsFrame(delta=TTSSettings(model="plain"))],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert len([f for f in up if isinstance(f, TTSMetadataFrame)]) == 1
