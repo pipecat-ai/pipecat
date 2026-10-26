@@ -17,9 +17,7 @@ llm = RimeRealtimeLLMService(
     settings=RimeRealtimeLLMService.Settings(
         system_instruction="Answer briefly. Use lookup_invoice for invoice status.",
         tools=[lookup_invoice],
-        tool_fillers={
-            "lookup_invoice": PrismFiller(type="text", text="Checking your invoice.")
-        },
+        tool_fillers={"lookup_invoice": PrismFiller(type="text", text="Checking your invoice.")},
     ),
 )
 ```
