@@ -192,7 +192,6 @@ class AssemblyAITTSService(WebsocketTTSService):
         self._api_key = api_key
         self._url = url
         self._receive_task: asyncio.Task | None = None
-        self._keepalive_task: asyncio.Task | None = None
 
         # Session state reported by Begin. A session ID means Begin arrived.
         self._session_id: str | None = None
@@ -290,16 +289,13 @@ class AssemblyAITTSService(WebsocketTTSService):
         await super()._connect()
         self._reconnect_delay = 0.0
         await self._open_session()
-        if not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        self._create_keepalive_task(KEEPALIVE_INTERVAL_S)
 
     async def _disconnect(self):
         """Disconnect from AssemblyAI and stop the receive and keepalive tasks."""
         await super()._disconnect()
         await self.stop_all_metrics()
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
         await self._close_session()
 
     async def _open_session(self):
@@ -404,15 +400,9 @@ class AssemblyAITTSService(WebsocketTTSService):
     async def _send(self, message: dict):
         await self._get_websocket().send(json.dumps(message))
 
-    async def _keepalive_task_handler(self):
-        """Keep an idle session open; the receive loop handles a lost one."""
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL_S)
-            if self._websocket and self._websocket.state is State.OPEN:
-                try:
-                    await self._send({"type": "KeepAlive"})
-                except Exception as e:
-                    logger.debug(f"{self}: error sending KeepAlive: {e}")
+    async def _send_keepalive(self):
+        """Send KeepAlive so an idle session stays open."""
+        await self._send({"type": "KeepAlive"})
 
     # ------------------------------------------------------------------
     # Audio contexts
