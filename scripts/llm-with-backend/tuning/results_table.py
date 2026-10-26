@@ -9,7 +9,7 @@
 Each row is a scenario and each column a bot, with how many of the runs
 passed::
 
-    uv run python evals/llm-with-backend/tuning/results_table.py test-runs/<run>/results.jsonl
+    uv run python scripts/llm-with-backend/tuning/results_table.py test-runs/<run>/results.jsonl
 """
 
 import argparse

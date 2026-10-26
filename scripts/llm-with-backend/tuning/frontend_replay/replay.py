@@ -15,10 +15,10 @@ instruction and tool description as they are in the code, runs the model on
 the context several times, and reports the turns where the model's decision
 differs from the expected one.
 
-One of the tuning checks: see ``evals/llm-with-backend/tuning/README.md``.
+One of the tuning checks: see ``scripts/llm-with-backend/tuning/README.md``.
 Needs the frontend's key in ``.env``::
 
-    uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend openai --samples 5
+    uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend openai --samples 5
 """
 
 import argparse

@@ -7,7 +7,7 @@ The latest results of the [tuning checks](README.md), from the last change to `L
 Predictive delegation's classifier on the recorded turns in `classifier_replay/`, with `jev-1.13.0` (2026-10-14):
 
 ```bash
-uv run python evals/llm-with-backend/tuning/classifier_replay/replay.py
+uv run python scripts/llm-with-backend/tuning/classifier_replay/replay.py
 ```
 
 ```
@@ -33,7 +33,7 @@ probability of a "yes" per utterance: median (min-max)
 The three frontend models on the recorded turns in `frontend_replay/`, five runs per turn (2026-10-14). A wrong decision is a turn the model should have delegated and answered itself, or the reverse; the turns from the eval scenarios include every stop and correction they make.
 
 ```bash
-uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
+uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
 ```
 
 | frontend                        | wrong decisions, 75 turns × 5 | where                                                                                                                                         |
@@ -50,7 +50,7 @@ The twelve text scenarios on the three bots with a text frontend, five runs each
 
 ```bash
 uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
-uv run python evals/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
+uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```
 
 | scenario                      | anthropic-frontend | google-frontend | openai-responses-frontend |

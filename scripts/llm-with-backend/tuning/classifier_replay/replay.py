@@ -14,10 +14,10 @@ example's frontend instruction and the pairing instruction as they are in the
 code, asks ``JevClassifier``, and reports the turns it gets wrong at the
 threshold for delegating early.
 
-One of the tuning checks: see ``evals/llm-with-backend/tuning/README.md``.
+One of the tuning checks: see ``scripts/llm-with-backend/tuning/README.md``.
 Needs ``TYPESAFE_API_KEY``::
 
-    uv run python evals/llm-with-backend/tuning/classifier_replay/replay.py --out after.json
+    uv run python scripts/llm-with-backend/tuning/classifier_replay/replay.py --out after.json
 """
 
 import argparse

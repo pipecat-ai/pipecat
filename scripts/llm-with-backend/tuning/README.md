@@ -14,16 +14,16 @@ They use the bots in [`examples/multi-worker/llm-with-backend/`](../../../exampl
 1. **Frontend replay** (`frontend_replay/`, minutes). 75 recorded user turns, each labelled with whether it should be delegated. Runs one text frontend's model on each and lists the turns it gets wrong: a stop answered with no `delegate` call, or small talk delegated. Run it for each of the three.
 
    ```bash
-   uv run python evals/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
+   uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
    ```
 
 2. **Classifier replay** (`classifier_replay/`, about a minute, needs `TYPESAFE_API_KEY`). 107 recorded user turns, each labelled with whether it needs the backend. Asks the classifier about each, as a running bot would, and reports false "yes" answers (delegated early, not needed) and missed ones. The classifier reads the frontend's prompts, so run it for a prompt change too.
 
    ```bash
-   uv run python evals/llm-with-backend/tuning/classifier_replay/replay.py
+   uv run python scripts/llm-with-backend/tuning/classifier_replay/replay.py
    ```
 
-3. **Text evals** (about an hour): the [suite](../README.md)'s scenarios on the three text frontends, five runs each.
+3. **Text evals** (about an hour): the [suite](../../../evals/llm-with-backend/README.md)'s scenarios on the three text frontends, five runs each.
 
    ```bash
    uv run python -m pipecat.evals suite evals/llm-with-backend/manifest.yaml -s text --repeat 5
@@ -42,5 +42,5 @@ The replays check only whether a turn is delegated; the evals judge everything t
 Update [`RESULTS.md`](RESULTS.md) in the same commit as the change, so `git log -p RESULTS.md` ties every number to its change and shows the numbers before. `results_table.py` turns a suite run into the table it uses:
 
 ```bash
-uv run python evals/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
+uv run python scripts/llm-with-backend/tuning/results_table.py <runs-dir>/<run>/results.jsonl
 ```

@@ -37,4 +37,4 @@ The judge sees each reply as the harness attributes it to a turn, so a result th
 
 ## Tuning
 
-[`tuning/`](tuning/README.md) holds the checks to run before and after changing `LLMWithBackend`'s prompts or predictive delegation's classifier, and a log of their results.
+[`scripts/llm-with-backend/tuning/`](../../scripts/llm-with-backend/tuning/README.md) holds the checks to run before and after changing `LLMWithBackend`'s prompts or predictive delegation's classifier, and a log of their results.
