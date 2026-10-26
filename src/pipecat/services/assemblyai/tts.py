@@ -320,13 +320,8 @@ class AssemblyAITTSService(WebsocketTTSService):
         await self._open_session()
 
     async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Reconnect, first waiting as long as the last Error asked.
-
-        The lost session's contexts are closed before the wait, so a turn cut
-        off by the error ends rather than holding the pipeline.
-        """
+        """Reconnect, first waiting as long as the last Error asked."""
         if self._reconnect_delay:
-            await self._close_connection_contexts()
             delay, self._reconnect_delay = self._reconnect_delay, 0.0
             logger.debug(f"{self}: waiting {delay} s before reconnecting, as the server asked")
             await asyncio.sleep(delay)
