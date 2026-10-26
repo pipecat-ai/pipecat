@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     OutputImageRawFrame,
+    SpeechOutputAudioRawFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
@@ -138,6 +139,12 @@ class SimliVideoService(AIService):
     Provides real-time avatar video generation by processing audio frames
     and producing synchronized video output using the Simli API. Handles
     audio resampling, video frame processing, and connection management.
+
+    The avatar speaks the bot's voice: ``TTSAudioRawFrame`` from a TTS service,
+    or ``SpeechOutputAudioRawFrame`` from a speech-to-speech service that
+    streams its voice in real time, such as ``OpenAILiveLLMService``. The
+    service sends that audio to Simli and pushes the avatar's video and its
+    voice, in sync, in place of it.
     """
 
     Settings = SimliVideoSettings
@@ -268,6 +275,9 @@ class SimliVideoService(AIService):
         self._is_trinity_avatar = is_trinity_avatar
         self._previously_interrupted = is_trinity_avatar
         self._audio_buffer = bytearray()
+        # Whether the bot's voice last came as a speech stream
+        # (SpeechOutputAudioRawFrame) rather than as TTS audio.
+        self._speech_stream = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service.
@@ -328,8 +338,14 @@ class SimliVideoService(AIService):
                 audio_array = resampled_frame.to_ndarray()
                 # Only push frame is there is audio (e.g. not silence)
                 if audio_array.any():
+                    # The avatar's voice goes on as the same kind of audio as the
+                    # bot's came in. For a speech stream the output transport tells
+                    # speech from silence itself, as it would without Simli.
+                    frame_type = (
+                        SpeechOutputAudioRawFrame if self._speech_stream else TTSAudioRawFrame
+                    )
                     await self.push_frame(
-                        TTSAudioRawFrame(
+                        frame_type(
                             audio=audio_array.tobytes(),
                             sample_rate=self._pipecat_resampler.rate,
                             num_channels=1,
@@ -358,8 +374,13 @@ class SimliVideoService(AIService):
             direction: The direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, TTSAudioRawFrame):
-            # Send audio frame to Simli
+        if isinstance(frame, (TTSAudioRawFrame, SpeechOutputAudioRawFrame)):
+            # Send the bot's voice to Simli, which sends back the avatar's in sync
+            # with its video, so the frame doesn't go on. TTS services send
+            # TTSAudioRawFrame; speech-to-speech services that stream their voice
+            # in real time, such as OpenAILiveLLMService, send
+            # SpeechOutputAudioRawFrame.
+            self._speech_stream = isinstance(frame, SpeechOutputAudioRawFrame)
             try:
                 old_frame = AudioFrame.from_ndarray(
                     np.frombuffer(frame.audio, dtype=np.int16)[None, :],
@@ -376,6 +397,14 @@ class SimliVideoService(AIService):
                 resampled_frames = self._simli_resampler.resample(old_frame)
                 for resampled_frame in resampled_frames:
                     audioBytes = resampled_frame.to_ndarray().astype(np.int16).tobytes()
+                    if self._previously_interrupted and self._speech_stream:
+                        # A speech stream comes at the pace it plays at, so holding
+                        # it back to fill the buffer below would only delay the
+                        # avatar. Send what's buffered and go on.
+                        if self._audio_buffer:
+                            await self._simli_client.sendImmediate(bytes(self._audio_buffer))
+                            self._audio_buffer = bytearray()
+                        self._previously_interrupted = False
                     if self._previously_interrupted:
                         self._audio_buffer.extend(audioBytes)
                         if len(self._audio_buffer) >= 128000:

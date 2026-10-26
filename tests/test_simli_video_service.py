@@ -21,6 +21,18 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
+from pipecat.frames.frames import (
+    InterruptionFrame,
+    OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
+    TTSAudioRawFrame,
+    TTSStoppedFrame,
+)
+from pipecat.tests.utils import SleepFrame, run_test
+
+SPEECH = np.full(160, 1000, dtype=np.int16).tobytes()
+SILENCE = bytes(320)
+
 
 class _FakeAudioFrame:
     def __init__(self, array: np.ndarray, layout: str):
@@ -162,6 +174,10 @@ def _framing(module):
     )
 
 
+def _audio_frames(frames, frame_type):
+    return [f for f in frames if type(f) is frame_type]
+
+
 #
 # Framing
 #
@@ -232,3 +248,91 @@ def test_no_framing_leaves_session_request_unchanged(simli_video):
 def test_framing_rejects_out_of_range_values(simli_video, fields):
     with pytest.raises(ValidationError):
         simli_video.SimliVideoService.Framing(**fields)
+
+
+#
+# Audio
+#
+
+
+@pytest.mark.asyncio
+async def test_speech_output_audio_animates_avatar(simli_video):
+    """A speech stream (e.g. OpenAILiveLLMService) reaches Simli, and the avatar's
+    voice goes on as a speech stream."""
+    service = simli_video.SimliVideoService(api_key="key", face_id="face")
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SpeechOutputAudioRawFrame(audio=SILENCE, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_client.sent == [SPEECH, SILENCE]
+    voice = _audio_frames(down, SpeechOutputAudioRawFrame)
+    assert [f.audio for f in voice] == [SPEECH]
+    assert voice[0].sample_rate == 24000
+    # Only the avatar's voice goes on: the bot's isn't also pushed.
+    assert len([f for f in down if isinstance(f, OutputAudioRawFrame)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_tts_audio_animates_avatar(simli_video):
+    """TTS audio goes to Simli once, and the avatar's voice comes back as TTS audio
+    with silence left out, as before."""
+    service = simli_video.SimliVideoService(api_key="key", face_id="face")
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            TTSAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            TTSAudioRawFrame(audio=SILENCE, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_client.sent == [SPEECH, SILENCE]
+    assert [f.audio for f in _audio_frames(down, TTSAudioRawFrame)] == [SPEECH]
+    assert not _audio_frames(down, SpeechOutputAudioRawFrame)
+
+
+@pytest.mark.asyncio
+async def test_trinity_buffers_tts_audio_until_tts_stops(simli_video):
+    service = simli_video.SimliVideoService(api_key="key", face_id="face", is_trinity_avatar=True)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            TTSAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            TTSAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            TTSStoppedFrame(),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_client.sent == []
+    assert service._simli_client.sent_immediately == [SPEECH + SPEECH]
+
+
+@pytest.mark.asyncio
+async def test_trinity_sends_speech_stream_as_it_comes(simli_video):
+    """A speech stream plays in real time, so it isn't held back to fill
+    the Trinity buffer, and an interruption still clears Simli's buffer."""
+    service = simli_video.SimliVideoService(api_key="key", face_id="face", is_trinity_avatar=True)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_client.sent == [SPEECH, SPEECH]
+    assert service._simli_client.sent_immediately == []
+    assert service._simli_client.buffer_clears == 1
