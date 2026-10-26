@@ -28,7 +28,6 @@ from loguru import logger
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
-    AudioPlaybackReportFrame,
     CancelFrame,
     ErrorFrame,
     Frame,
@@ -36,7 +35,6 @@ from pipecat.frames.frames import (
     FrameProcessorPauseUrgentFrame,
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
-    InterruptionCause,
     InterruptionFrame,
     StartFrame,
     SystemFrame,
@@ -738,9 +736,8 @@ class FrameProcessor(BaseObject):
             direction: The direction of frame flow.
             callback: Optional callback to call after processing.
         """
-        # Output teardown can still produce a terminal receipt needed by its
-        # conversation owner before that owner's cleanup completes.
-        if self._cancelling and not isinstance(frame, AudioPlaybackReportFrame):
+        # If we are cancelling we don't want to process any other frame.
+        if self._cancelling:
             return
 
         if self._enable_direct_mode:
@@ -1048,16 +1045,12 @@ class FrameProcessor(BaseObject):
 
         await self._call_event_handler("on_after_push_frame", frame)
 
-    async def broadcast_interruption(self, *, cause: InterruptionCause = "application"):
-        """Broadcast an `InterruptionFrame` both upstream and downstream.
-
-        Args:
-            cause: Reason for stopping interruptible output.
-        """
+    async def broadcast_interruption(self):
+        """Broadcast an `InterruptionFrame` both upstream and downstream."""
         logger.debug(f"{self}: broadcasting interruption")
         self.__reset_process_task()
         await self.stop_all_metrics()
-        await self.broadcast_frame(InterruptionFrame, cause=cause)
+        await self.broadcast_frame(InterruptionFrame)
 
     @deprecated(
         "`FrameProcessor.push_interruption_task_frame_and_wait` is deprecated since 0.0.104 "

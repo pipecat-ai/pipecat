@@ -70,8 +70,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 member LLMs.
         """
         for llm in self.llms:
-            if not llm.service_metadata_frame().acknowledges_operations:
-                llm._sync_registered_tool_handlers(tools)
+            llm._sync_registered_tool_handlers(tools)
 
     @property
     def llms(self) -> list[LLMService]:

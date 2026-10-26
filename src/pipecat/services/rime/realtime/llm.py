@@ -4,16 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Rime Prism speech-to-speech conversations through the direct SDK session API."""
+"""Rime Prism conversations through Pipecat's standard realtime frame interface."""
 
 import asyncio
 import copy
 import json
 import math
+import time
 from collections import OrderedDict
 from collections.abc import Coroutine
 from dataclasses import dataclass, field, fields, replace
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 from loguru import logger
@@ -25,45 +27,29 @@ except ModuleNotFoundError as error:
     logger.error('Install Rime realtime support with `uv pip install "pipecat-ai[rime-realtime]"`.')
     raise Exception(f"Missing module: {error}") from error
 
-from pipecat.adapters.llm.services.rime_realtime_adapter import RimeRealtimeLLMAdapter
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    AudioOutputEndFrame,
-    AudioOutputGainFrame,
-    AudioOutputStartFrame,
-    AudioOutputStopFrame,
-    AudioPlaybackReportFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InputImageRawFrame,
     InterimTranscriptionFrame,
-    InterruptionCause,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMInputTextFrame,
-    LLMMessagesAppendFrame,
-    LLMMessagesTransformFrame,
-    LLMMessagesUpdateFrame,
-    LLMOperationOutcome,
-    LLMOperationResultFrame,
     LLMRunFrame,
     LLMServiceMetadataFrame,
-    LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
-    ServiceSwitcherDeactivatedFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -71,16 +57,12 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.processors.aggregators._llm_operation import (
-    _LLMContextBindFrame,
-    _LLMContextOperationFrame,
-)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import FunctionCallRunnerItem, LLMService
-from pipecat.services.rime.realtime._history import History, PartialHistoryError
-from pipecat.services.rime.realtime._playback import Output, Playback, Response
+from pipecat.services.rime.realtime._adapter import RimeRealtimeLLMAdapter
+from pipecat.services.rime.realtime._history import History
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.text.base_text_aggregator import TextType
@@ -90,12 +72,13 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 @dataclass
 class RimeRealtimeSettings(LLMSettings):
-    """Acknowledged Prism settings, also used for sparse frame deltas.
+    """Prism configuration and sparse settings deltas.
 
     Parameters:
         tools: Advertised tools. An empty list removes all tools.
         voice: Prism voice.
-        interrupt_on_speech: Interruption policy for subsequent replies.
+        interrupt_on_speech: Server interruption setting. Local turn strategies
+            control Pipecat interruptions independently.
         tool_fillers: SDK fillers keyed by the resulting tool names.
         truncation: Future model history capacity policy.
         response_metadata: Labels applied through a separate SDK operation.
@@ -109,21 +92,58 @@ class RimeRealtimeSettings(LLMSettings):
     response_metadata: dict[str, str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
-    """One Prism conversation with frame-ordered input and accepted mutations.
+@dataclass
+class _Output:
+    ref: r.OutputRef
+    context_id: str = field(default_factory=lambda: uuid4().hex)
+    text: str = ""
+    audio_ms: float = 0
+    started_at: float | None = None
+    closed: bool = False
+    recorded: bool = False
 
-    Use a separate instance for each concurrent conversation. An injected client
-    remains caller-owned. There is no automatic replay or reconnect. Use a fresh
-    service with completed context for explicit recovery.
+
+@dataclass
+class _Response:
+    ref: r.ResponseRef
+    outputs: dict[str, _Output] = field(default_factory=dict)
+    calls: set[str] = field(default_factory=set)
+    input_ids: tuple[str, ...] = ()
+    ended: bool = False
+    stopped: bool = False
+    audio_response: bool = True
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+    continued: bool = False
+
+
+@dataclass
+class _Operation:
+    messages: list | None = None
+    tools: Any = NOT_GIVEN
+    tool_choice: Any = NOT_GIVEN
+    delta: LLMSettings | None = None
+    run_llm: bool = False
+    audio_response: bool = True
+
+
+class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
+    """One Prism conversation using the standard context aggregators and transports.
+
+    Text input is imported into history before requesting a reply. Aggregators
+    own the local conversation record; rejected provider edits do not roll it
+    back. Playback positions are estimates and completion receipts are not sent.
+    Speech hints do not change output volume.
+
+    Use one instance per conversation. An injected client remains caller-owned.
+    There is no automatic reconnect or replay. Start a fresh instance with known
+    valid, completed history after an unknown or partially applied operation.
 
     Events:
-        on_session_updated: Accepted SDK session information.
-        on_operation_result: One result frame per operation and SDK operation kind.
-        on_rime_event: SDK events with provider correlation and diagnostic fields.
+        on_session_updated: Acknowledged SDK session information.
+        on_rime_event: SDK events, including provider diagnostics.
     """
 
     Settings = RimeRealtimeSettings
-    _reject_intermediate_results = True
     _settings: RimeRealtimeSettings
 
     def __init__(
@@ -135,39 +155,31 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         turn_detection: r.TurnDetection | None = None,
         timeouts: r.RealtimeTimeouts | None = None,
         request_id: str | None = None,
-        speech_hint_gain: float = 0.25,
-        speech_hint_timeout: float = 0.6,
         max_pending_operations: int = 256,
         max_input_audio_bytes: int = 1920000,
-        max_output_audio_bytes: int = 16000000,
         shutdown_timeout: float = 5.0,
         **kwargs,
     ):
-        """Configure connection ownership, limits, and opening turn detection.
+        """Configure the SDK connection and bounded background work.
 
         Args:
             client: Optional caller-owned SDK client.
             endpoint: Optional SDK-validated Prism WebSocket endpoint.
             settings: Initial settings and advertised tools.
-            turn_detection: Opening-only SDK turn timing settings.
+            turn_detection: Opening-only SDK server turn timing settings.
             timeouts: SDK connection, readiness, and acknowledgment limits.
             request_id: Requested provider correlation ID.
-            speech_hint_gain: Temporary output multiplier on a speech hint.
-            speech_hint_timeout: Hint expiry in seconds.
-            max_pending_operations: Bound for each pending operation queue.
+            max_pending_operations: Bound for pending operations and requests.
             max_input_audio_bytes: Bound for buffered microphone PCM.
-            max_output_audio_bytes: Bound for emitted PCM awaiting playback reports.
-            shutdown_timeout: Maximum time for graceful output and request drain.
+            shutdown_timeout: Maximum time to drain requests during shutdown.
             **kwargs: Arguments for LLMService.
         """
-        if not math.isfinite(speech_hint_gain) or not 0 <= speech_hint_gain <= 1:
-            raise ValueError("speech_hint_gain must be between zero and one")
-        if not math.isfinite(speech_hint_timeout) or not 0 < speech_hint_timeout <= 60:
-            raise ValueError("speech_hint_timeout must be above zero and at most 60 seconds")
         if max_pending_operations < 1 or max_input_audio_bytes < 192000:
             raise ValueError("Prism queue limits must be positive and hold one SDK audio chunk")
         if not math.isfinite(shutdown_timeout) or shutdown_timeout <= 0:
             raise ValueError("shutdown_timeout must be finite and positive")
+        if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
+            raise ValueError("Prism requires SDK server turn detection")
         defaults: dict[str, Any] = {f.name: None for f in fields(LLMSettings) if f.name != "extra"}
         defaults.update(
             model="prism", filter_incomplete_user_turns=False, use_provider_thinking_default=False
@@ -189,48 +201,39 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._owns_client = client is None
         self._endpoint = endpoint
         self._turn_detection = turn_detection
-        if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
-            raise ValueError("Prism requires SDK server turn detection")
         self._timeouts = timeouts or r.RealtimeTimeouts()
         self._request_id = request_id
-        self._hint_gain = speech_hint_gain
-        self._hint_timeout = speech_hint_timeout
         self._shutdown_timeout = shutdown_timeout
         self._pending_limit = max_pending_operations
         self._audio_limit = max_input_audio_bytes
-        if max_output_audio_bytes < 192000:
-            raise ValueError("max_output_audio_bytes must hold at least 192000 bytes")
-        self._output_audio_limit = max_output_audio_bytes
-        self._pending_output_audio_bytes = 0
-        self._converted_input_rate: int | None = None
         self._pending_audio_bytes = 0
-        self._controls: asyncio.Queue = asyncio.Queue(max_pending_operations)
-        self._audio: asyncio.Queue = asyncio.Queue(max_pending_operations)
-        self._receipts: asyncio.Queue = asyncio.Queue(max_pending_operations)
+        self._converted_input_rate: int | None = None
+        self._input_resampler = create_stream_resampler(clear_after_secs=None)
+        self._controls: asyncio.Queue[_Operation] = asyncio.Queue(max_pending_operations)
+        self._audio: asyncio.Queue[InputAudioRawFrame] = asyncio.Queue(max_pending_operations)
         self._ready = asyncio.Event()
-        self._closed = asyncio.Event()
         self._closing = False
         self._failure: Exception | None = None
         self._session: r.RealtimeSession | None = None
         self._connection = None
-        self._connection_task = None
-        self._shutdown_task = None
+        self._connection_task: asyncio.Task | None = None
         self._tasks: list[asyncio.Task] = []
         self._requests: set[asyncio.Task] = set()
         self._context: LLMContext | None = None
         self._history: History | None = None
-        self._playback = Playback()
-        self._unversioned_policy_ambiguous = False
-        self._policies: OrderedDict[int | None, tuple[bool, dict]] = OrderedDict()
+        self._responses: OrderedDict[str, _Response] = OrderedDict()
         self._calls: dict[str, tuple[r.ToolCall, bool]] = {}
         self._transcripts: dict[str, str] = {}
-        self._input_resampler = create_stream_resampler(clear_after_secs=None)
-        self._input_lock = asyncio.Lock()
-        self._typed: dict[str, LLMInputTextFrame] = {}
-        self._typed_bound: dict[str, asyncio.Event] = {}
-        self._operation_results: set[tuple[int, str]] = set()
-        for event in ("on_session_updated", "on_operation_result", "on_rime_event"):
+        self._reply_lock = asyncio.Lock()
+        self._reply_audio_response = True
+        self._reply_started = asyncio.Event()
+        self._latest_audio_output: _Output | None = None
+        for event in ("on_session_updated", "on_rime_event"):
             self._register_event_handler(event)
+
+    @classmethod
+    def _resolve_adapter_class(cls):
+        return RimeRealtimeLLMAdapter
 
     @property
     def _sdk(self) -> r.RealtimeSession:
@@ -245,51 +248,35 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         return self._history
 
     @property
-    def _conversation(self) -> LLMContext:
-        if self._context is None:
-            raise RuntimeError("Prism context is not bound")
-        return self._context
-
-    @classmethod
-    def _resolve_adapter_class(cls):
-        return RimeRealtimeLLMAdapter
-
-    def can_generate_metrics(self) -> bool:
-        """Report provider turn-to-first-output timing through normal metrics frames."""
-        return True
+    def session_info(self) -> r.SessionInfo | None:
+        """Acknowledged session information, including the provider request ID."""
+        return self._sdk.info if self._session else None
 
     @property
     def accepts_intermediate_function_call_results(self) -> bool:
         """Prism accepts final tool results only."""
         return False
 
-    @property
-    def session_info(self) -> r.SessionInfo | None:
-        """Accepted session information, including the actual provider request ID."""
-        return self._sdk.info if self._session else None
-
-    async def get_history(self) -> tuple[r.HistoryItem, ...]:
-        """Read completed server history without changing the Pipecat record."""
-        if self._connection_task is None:
-            raise RuntimeError("Prism conversation is not open")
-        await self._ready.wait()
-        if not self._session or not self.is_usable or self._closing:
-            raise RuntimeError("Prism conversation is not usable")
-        return await self._sdk.get_history()
+    def can_generate_metrics(self) -> bool:
+        """Emit standard turn-to-first-output metrics."""
+        return True
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
-        """Advertise acknowledged mutations, explicit text, and external turns."""
+        """Use the existing realtime aggregation and external turn strategies."""
         return LLMServiceMetadataFrame(
             service_name=self.name,
             is_realtime_service=True,
-            acknowledges_operations=True,
-            accepts_input_text=True,
             user_turn_strategies=ExternalUserTurnStrategies(),
         )
 
-    def owns_audio_output(self, context_id: str) -> bool:
-        """Whether a playback report belongs to this conversation."""
-        return context_id in self._playback.outputs
+    async def get_history(self) -> tuple[r.HistoryItem, ...]:
+        """Read completed server history without changing local context."""
+        if self._connection_task is None:
+            raise RuntimeError("Prism conversation is not open")
+        await self._ready.wait()
+        if not self.is_usable or self._closing:
+            raise RuntimeError("Prism conversation is not usable")
+        return await self._sdk.get_history()
 
     def _service_tools(self):
         return self._settings.tools
@@ -320,20 +307,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         if not isinstance(settings.interrupt_on_speech, bool):
             raise ValueError("interrupt_on_speech must be a boolean")
 
-    async def start(self, frame: StartFrame) -> None:
-        """Start independent control, audio, and receipt consumers."""
-        await super().start(frame)
-        for coroutine in (self._control_loop(), self._audio_loop(), self._receipt_loop()):
-            self._tasks.append(self.create_task(coroutine))
-
-    def _bind_context(self, context: LLMContext | None = None) -> None:
-        if self._context is None:
-            self._context = context or LLMContext()
-        elif context is not None and context is not self._context:
-            raise ValueError("A Prism conversation requires one shared LLMContext")
-        if self._connection_task is None:
-            self._connection_task = self.create_task(self._open())
-
     def _sdk_tools(self, settings: Settings) -> list[r.ToolDefinition]:
         tools = self._adapter.tools(settings.tools)
         fillers = settings.tool_fillers
@@ -343,35 +316,24 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             raise ValueError("Prism fillers must be SDK PrismFiller values")
         return [replace(tool, prism_filler=fillers.get(tool.name)) for tool in tools]
 
-    def _record_policy(self) -> None:
-        info = self._sdk.info
-        advertised = {tool.name for tool in self._sdk_tools(self._settings)}
-        handlers = {
-            name: handler
-            for name, handler in self._functions.items()
-            if name is None or name in advertised
-        }
-        policy = (info.interrupt_on_speech, handlers)
-        if info.settings_revision is None:
-            previous = self._policies.get(None)
-            if previous is not None and previous != policy:
-                self._unversioned_policy_ambiguous = True
-            if self._unversioned_policy_ambiguous:
-                self._policies.pop(None, None)
-                return
-        self._policies[info.settings_revision] = policy
-        while len(self._policies) > 128:
-            self._policies.popitem(last=False)
+    async def start(self, frame: StartFrame) -> None:
+        """Start independent control and audio consumers."""
+        await super().start(frame)
+        for coroutine in (self._control_loop(), self._audio_loop()):
+            self._tasks.append(self.create_task(coroutine))
+
+    def _bind_context(self, context: LLMContext) -> None:
+        if self._context is not None and context is not self._context:
+            raise ValueError("A Prism conversation requires one shared LLMContext")
+        self._context = context
+        if self._connection_task is None:
+            self._connection_task = self.create_task(self._open())
 
     async def _open(self) -> None:
         try:
             if self._client is None:
                 self._client = Rime()
-            if is_given(self._conversation.tools):
-                self._settings.tools = self._conversation.tools
             self._sync_registered_tool_handlers(self._settings.tools)
-            # Validate all initial history before opening or submitting mutations.
-            await self._adapter.get_llm_invocation_params(self._conversation)
             self._connection = self._client.realtime.connect(
                 endpoint=self._endpoint,
                 instructions=assert_given(self._settings.system_instruction),
@@ -386,200 +348,104 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             )
             self._session = await self._connection.__aenter__()
             self._history = History(self._session)
-            self._record_policy()
             self._tasks.append(self.create_task(self._event_loop()))
-            await self._ledger.edit(self._conversation.get_messages(), append=True)
             await self._call_event_handler("on_session_updated", self._sdk.info)
-            self._ready.set()
         except Exception as error:
             await self._fail(error)
+        finally:
             self._ready.set()
-            await self._close_resources()
 
-    async def _enqueue(self, queue: asyncio.Queue, item: Any) -> None:
+    async def _enqueue(self, operation: _Operation) -> None:
         if self._closing or not self.is_usable:
-            request = item.request if isinstance(item, _LLMContextOperationFrame) else item
-            if isinstance(request, Frame):
-                await self._result(request, "input", "rejected", "Prism conversation is not usable")
             return
         try:
-            queue.put_nowait(item)
+            self._controls.put_nowait(operation)
         except asyncio.QueueFull:
             await self._fail(RuntimeError("Prism pending operation limit exceeded"))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        """Capture frame intent without waiting for network operations."""
+        """Queue network work without holding up audio and control frames."""
         try:
-            await self._process_frame(frame, direction)
+            if isinstance(frame, (LLMContextFrame, LLMUpdateSettingsFrame)):
+                await AIService.process_frame(self, frame, direction)
+            else:
+                await super().process_frame(frame, direction)
+            if isinstance(frame, LLMContextFrame):
+                self._bind_context(frame.context)
+                await self._enqueue(
+                    _Operation(
+                        messages=copy.deepcopy(frame.context.get_messages()),
+                        tools=frame.context.tools,
+                        tool_choice=frame.context.tool_choice,
+                        run_llm=True,
+                        audio_response=not self._skip_tts,
+                    )
+                )
+            elif isinstance(frame, LLMRunFrame):
+                self._bind_context(self._context if self._context is not None else LLMContext())
+                await self._enqueue(_Operation(run_llm=True, audio_response=not self._skip_tts))
+            elif isinstance(frame, LLMUpdateSettingsFrame):
+                if frame.service is not None and frame.service is not self:
+                    await self.push_frame(frame, direction)
+                else:
+                    await self._enqueue(
+                        _Operation(
+                            delta=copy.deepcopy(
+                                frame.delta or self.Settings.from_mapping(frame.settings)
+                            ),
+                        )
+                    )
+            elif isinstance(frame, LLMSetToolsFrame):
+                await self._enqueue(_Operation(delta=self.Settings(tools=frame.tools)))
+                await self.push_frame(frame, direction)
+            elif isinstance(frame, InputAudioRawFrame):
+                if not self._closing and self.is_usable:
+                    self._pending_audio_bytes += len(frame.audio)
+                    if self._pending_audio_bytes > self._audio_limit or self._audio.full():
+                        self._pending_audio_bytes -= len(frame.audio)
+                        await self._fail(RuntimeError("Prism microphone buffer limit exceeded"))
+                    else:
+                        self._audio.put_nowait(frame)
+                await self.push_frame(frame, direction)
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._latest_audio_output = None
+                await self.push_frame(frame, direction)
+            elif isinstance(frame, InterruptionFrame):
+                self._spawn_request(self._interrupt())
+                await self.push_frame(frame, direction)
+            elif isinstance(frame, InputImageRawFrame):
+                await self.push_error("Prism does not support images or video")
+            else:
+                await self.push_frame(frame, direction)
         except Exception as error:
-            request = frame.request if isinstance(frame, _LLMContextOperationFrame) else frame
-            await self._operation_error(request, "input", error)
-
-    async def _process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        if isinstance(frame, (LLMContextFrame, LLMUpdateSettingsFrame)):
-            await AIService.process_frame(self, frame, direction)
-        else:
-            await super().process_frame(frame, direction)
-        if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            # Keep output alive until the shutdown task has collected its receipts.
-            pass
-        elif isinstance(frame, AudioPlaybackReportFrame):
-            if frame.context_id in self._playback.outputs:
-                if self._closed.is_set():
-                    self._playback.accept_report(frame)
-                    return
-                try:
-                    self._receipts.put_nowait(frame)
-                except asyncio.QueueFull:
-                    await self._fail(RuntimeError("Prism receipt queue limit exceeded"))
-            else:
-                await self.push_frame(frame, direction)
-        elif isinstance(frame, ServiceSwitcherDeactivatedFrame):
-            await self._stop_responses("application")
-        elif isinstance(frame, InterruptionFrame):
-            await self._stop_responses(frame.cause)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, _LLMContextBindFrame):
-            self._bind_context(frame.context)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            if frame.service is not None and frame.service is not self:
-                await self.push_frame(frame, direction)
-                return
-            proposal = copy.copy(frame)
-            proposal.delta = copy.deepcopy(
-                frame.delta or self.Settings.from_mapping(frame.settings)
-            )
-            await self._enqueue(self._controls, proposal)
-        elif isinstance(frame, _LLMContextOperationFrame):
-            self._bind_context(frame.context)
-            await self._enqueue(self._controls, frame)
-        elif isinstance(frame, LLMContextFrame):
-            self._bind_context(frame.context)
-            await self._enqueue(
-                self._controls, _LLMContextOperationFrame.capture(frame, self._conversation)
-            )
-        elif isinstance(frame, InputAudioRawFrame):
-            if self._closing or not self.is_usable:
-                return
-            self._pending_audio_bytes += len(frame.audio)
-            if self._pending_audio_bytes > self._audio_limit:
-                await self._fail(RuntimeError("Prism microphone buffer limit exceeded"))
-            else:
-                await self._enqueue(self._audio, frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(
-            frame,
-            (
-                LLMRunFrame,
-                LLMInputTextFrame,
-                LLMMessagesAppendFrame,
-                LLMMessagesUpdateFrame,
-                LLMMessagesTransformFrame,
-                LLMSetToolsFrame,
-                LLMSetToolChoiceFrame,
-            ),
-        ):
-            self._bind_context()
-            await self._enqueue(
-                self._controls, _LLMContextOperationFrame.capture(frame, self._conversation)
-            )
-        elif isinstance(frame, InputImageRawFrame):
-            await self._result(frame, "input", "rejected", "Prism does not support images or video")
-        else:
-            await self.push_frame(frame, direction)
-
-    @staticmethod
-    def _operation_kind(request: Frame) -> str:
-        if isinstance(request, (LLMUpdateSettingsFrame, LLMSetToolsFrame)):
-            return "settings"
-        if isinstance(request, LLMSetToolChoiceFrame):
-            return "tool_choice"
-        if isinstance(request, LLMInputTextFrame):
-            return "input"
-        if isinstance(request, (LLMRunFrame, LLMContextFrame)):
-            return "reply"
-        return "history"
+            await self._operation_error(error)
 
     async def _control_loop(self) -> None:
         while True:
             operation = await self._controls.get()
-            request = (
-                operation.request if isinstance(operation, _LLMContextOperationFrame) else operation
-            )
-            kind = self._operation_kind(request)
             try:
                 await self._ready.wait()
-                if not self.is_usable or self._closing:
-                    await self._result(
-                        request, kind, "rejected", "Prism conversation is not usable"
-                    )
+                if self._closing or not self.is_usable:
                     continue
-                if isinstance(operation, _LLMContextOperationFrame) and operation.validation_error:
-                    raise ValueError(operation.validation_error)
-                if isinstance(request, LLMUpdateSettingsFrame):
-                    assert request.delta is not None
-                    await self._settings_operation(request, request.delta)
-                elif isinstance(request, LLMSetToolsFrame):
-                    await self._settings_operation(
-                        request,
-                        self.Settings(tools=request.tools if is_given(request.tools) else []),
-                    )
-                elif isinstance(request, LLMSetToolChoiceFrame):
-                    if request.tool_choice != "auto":
-                        raise ValueError("Prism only supports automatic tool selection")
-                    await self._result(request, "tool_choice", "accepted")
-                elif isinstance(request, (LLMRunFrame, LLMContextFrame)):
-                    assert isinstance(operation, _LLMContextOperationFrame)
-                    assert operation.messages is not None
-                    if not self._ledger.matches(
-                        operation.messages, operation.base, operation.captured_at
-                    ):
-                        kind = "history"
-                        self._ledger.restore(self._conversation)
-                        base = self._ledger.edit_base(operation.base, operation.captured_at)
-                        await self._ledger.edit(operation.messages, append=False, base=base)
-                        operation.commit_messages(operation.messages, append=False, base=base)
-                        await self._result(request, "history", "accepted")
-                    self._spawn_request(self._reply(request), request, kind="reply")
-                elif isinstance(request, LLMInputTextFrame):
-                    self._spawn_request(self._typed_input(request), request)
-                elif isinstance(
-                    request,
-                    (LLMMessagesAppendFrame, LLMMessagesUpdateFrame, LLMMessagesTransformFrame),
-                ):
-                    assert isinstance(operation, _LLMContextOperationFrame)
-                    assert operation.messages is not None
-                    append = isinstance(request, LLMMessagesAppendFrame)
-                    base = (
-                        operation.base
-                        if append
-                        else self._ledger.edit_base(operation.base, operation.captured_at)
-                    )
-                    await self._ledger.edit(
-                        operation.messages,
-                        append=append,
-                        base=base,
-                        retained=operation.retained,
-                    )
-                    operation.commit_messages(operation.messages, append=append, base=base)
-                    await self._result(request, "history", "accepted")
-                    if request.run_llm:
-                        self._spawn_request(self._reply(request), request, kind="reply")
-            except asyncio.CancelledError:
-                await self._result(
-                    request, kind, "unknown", "Shutdown ended acknowledgment tracking"
-                )
-                raise
+                if is_given(operation.tool_choice) and operation.tool_choice != "auto":
+                    raise ValueError("Prism only supports automatic tool selection")
+                if operation.messages is not None:
+                    await self._ledger.sync(operation.messages)
+                if is_given(operation.tools) and operation.tools != self._settings.tools:
+                    await self._settings_operation(self.Settings(tools=operation.tools))
+                if operation.delta is not None:
+                    await self._settings_operation(operation.delta)
+                if operation.run_llm:
+                    self._spawn_request(self._reply(operation.audio_response))
             except Exception as error:
-                await self._operation_error(request, kind, error)
+                await self._operation_error(error)
             finally:
                 self._controls.task_done()
 
-    def _spawn_request(
-        self, coroutine: Coroutine[Any, Any, None], request: Frame, *, kind: str = "input"
-    ) -> None:
+    def _spawn_request(self, coroutine: Coroutine[Any, Any, None]) -> None:
+        if self._closing or not self.is_usable:
+            coroutine.close()
+            return
         if len(self._requests) >= self._pending_limit:
             coroutine.close()
             self._tasks.append(
@@ -590,63 +456,35 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         async def run():
             try:
                 await coroutine
-            except asyncio.CancelledError:
-                await self._result(request, "input", "unknown", "Shutdown ended request tracking")
-                raise
             except Exception as error:
-                await self._operation_error(request, kind, error)
+                await self._operation_error(error)
 
         task = self.create_task(run())
         self._requests.add(task)
         task.add_done_callback(self._requests.discard)
 
-    async def _typed_input(self, frame: LLMInputTextFrame) -> None:
-        # Admission does not hold the configuration/history mutation queue.
-        async with self._input_lock:
+    async def _reply(self, audio_response: bool, *, tool_call: r.ToolCallRef | None = None) -> None:
+        async with self._reply_lock:
+            self._reply_audio_response = audio_response
+            self._reply_started.clear()
             await self.start_ttfb_metrics()
-            ref = await self._sdk.send_text(frame.text)
-            self._typed[ref.response_id] = frame
-            response = self._playback.responses.get(ref.response_id)
-            if response:
-                self._commit_typed(response, frame)
-                self._typed.pop(ref.response_id, None)
-            self._typed_bound.setdefault(ref.response_id, asyncio.Event()).set()
-            await self._result(frame, "input", "accepted")
+            await self._sdk.request_reply(tool_call=tool_call)
+            await self._reply_started.wait()
 
-    def _commit_typed(self, response: Response, frame: LLMInputTextFrame) -> None:
-        if frame.metadata.get("rime_input_committed"):
-            return
-        if len(response.input_ids) != 1:
-            raise RuntimeError("Prism typed input does not have one unambiguous input identity")
-        frame.metadata["rime_input_committed"] = True
-        for item_id in response.input_ids:
-            self._ledger.transcript(item_id, frame.text, self._context)
-        response.audio_response = frame.audio_response
-        response.explicit_audio_response = True
-        response.input_request_id = frame.id
-        response.client_message_id = frame.client_message_id
-
-    async def _reply(self, request: Frame) -> None:
-        await self._sdk.request_reply()
-        await self._result(request, "reply", "accepted")
-
-    async def _settings_operation(self, request: Frame, delta: LLMSettings) -> None:
+    async def _settings_operation(self, delta: LLMSettings) -> None:
         proposal = copy.deepcopy(self._settings)
         proposal.apply_update(self.Settings.from_mapping(delta.given_fields()))
         supplied = delta.given_fields()
-        if "tools" in supplied:
-            if not is_given(proposal.tools):
-                proposal.tools = []
+        if "tools" in supplied and "tool_fillers" not in supplied:
             names = {tool.name for tool in self._adapter.tools(proposal.tools)}
-            if "tool_fillers" not in supplied:
-                proposal.tool_fillers = {
-                    name: filler
-                    for name, filler in assert_given(proposal.tool_fillers).items()
-                    if name in names
-                }
+            proposal.tool_fillers = {
+                name: filler
+                for name, filler in assert_given(proposal.tool_fillers).items()
+                if name in names
+            }
         self._validate_settings(proposal)
         tools = self._sdk_tools(proposal)
-        sdk = {}
+        update = {}
         for field_name, sdk_name in (
             ("system_instruction", "instructions"),
             ("voice", "voice"),
@@ -657,39 +495,23 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 value = getattr(proposal, field_name)
                 if value is None:
                     raise ValueError(f"Prism cannot reset {field_name} to None")
-                sdk[sdk_name] = value
+                update[sdk_name] = value
         if "tools" in supplied or "tool_fillers" in supplied:
-            sdk["tools"] = tools
-        if sdk:
-            await self._sdk.update(**sdk)
+            update["tools"] = tools
+        if update:
+            await self._sdk.update(**update)
             metadata = self._settings.response_metadata
             self._settings = proposal
             self._settings.response_metadata = metadata
-            self._conversation.set_tools(proposal.tools or [])
             self._base_system_instruction = assert_given(proposal.system_instruction)
             self._sync_registered_tool_handlers(proposal.tools)
-            self._record_policy()
+            if self._context is not None and "tools" in supplied:
+                self._context.set_tools(proposal.tools or [])
             await self._call_event_handler("on_session_updated", self._sdk.info)
-            await self._result(request, "settings", "accepted")
         if "response_metadata" in supplied:
-            try:
-                await self._sdk.set_response_metadata(supplied["response_metadata"] or {})
-                self._settings.response_metadata = copy.deepcopy(supplied["response_metadata"])
-                self._record_policy()
-                await self._result(request, "response_metadata", "accepted")
-                await self._call_event_handler("on_session_updated", self._sdk.info)
-            except asyncio.CancelledError:
-                await self._result(
-                    request,
-                    "response_metadata",
-                    "unknown",
-                    "Shutdown ended acknowledgment tracking",
-                )
-                raise
-            except Exception as error:
-                await self._operation_error(request, "response_metadata", error)
-        if not sdk and "response_metadata" not in supplied:
-            await self._result(request, "settings", "accepted")
+            await self._sdk.set_response_metadata(supplied["response_metadata"] or {})
+            self._settings.response_metadata = copy.deepcopy(supplied["response_metadata"])
+            await self._call_event_handler("on_session_updated", self._sdk.info)
 
     async def _audio_loop(self) -> None:
         while True:
@@ -731,7 +553,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     await self._sdk.send_audio(
                         r.AudioChunk(
                             data=audio[offset : offset + size],
-                            format=r.PCMFormat(sample_rate=sample_rate, channels=channels),
+                            format=r.PCMFormat(
+                                sample_rate=sample_rate, channels=1 if channels == 1 else 2
+                            ),
                         )
                     )
             except Exception as error:
@@ -740,62 +564,29 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 self._pending_audio_bytes -= len(frame.audio)
                 self._audio.task_done()
 
-    async def _receipt_loop(self) -> None:
-        while True:
-            frame = await self._receipts.get()
-            try:
-                accepted = self._playback.accept_report(frame)
-                if accepted:
-                    response, output = accepted
-                    self._pending_output_audio_bytes -= output.audio_bytes
-                    if (
-                        frame.cause == "user"
-                        and frame.outcome != "completed"
-                        and frame.played_ms is not None
-                    ):
-                        await self._sdk.report_playback(
-                            r.PlaybackInterrupted(
-                                output=output.ref, audio_end_ms=int(frame.played_ms)
-                            )
-                        )
-                    await self._finish_playback(response)
-            except Exception as error:
-                await self._fail(error)
-            finally:
-                self._receipts.task_done()
-
-    async def _finish_playback(self, response: Response) -> None:
-        report = self._playback.finished_report(response)
-        if report:
-            await self._sdk.report_playback(report)
-            response.finished = True
-
     async def _event_loop(self) -> None:
         try:
             async for event in self._sdk.events:
+                if self._closing or self._failure:
+                    break
                 await self._event(event)
-            if not self._closing:
+            if not self._closing and self._failure is None:
                 raise ConnectionError("Prism event stream ended")
         except Exception as error:
-            await self._fail(error)
+            if not self._closing:
+                await self._fail(error)
 
     async def _event(self, event: r.SessionEvent) -> None:
         payload = event.payload
         await self._call_event_handler("on_rime_event", event)
-        if isinstance(payload, r.SpeechHint):
-            if self._speech_policy():
-                await self.push_frame(AudioOutputGainFrame(self._hint_gain, self._hint_timeout))
-        elif isinstance(payload, r.SpeechStarted):
-            self._ledger.reserve_input(payload.item_id, self._context)
-            await self.push_frame(AudioOutputGainFrame())
-            await self.broadcast_frame(
-                ProposedUserStartedSpeakingFrame, enable_interruptions=self._speech_policy()
-            )
+        if isinstance(payload, r.SpeechStarted):
+            self._ledger.reserve_input(payload.item_id)
+            await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         elif isinstance(payload, r.SpeechStopped):
             await self.start_ttfb_metrics()
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         elif isinstance(payload, r.InputCommitted):
-            self._ledger.reserve_input(payload.item_id, self._context)
+            self._ledger.reserve_input(payload.item_id)
         elif isinstance(payload, (r.TranscriptDelta, r.TranscriptFinal)):
             final = isinstance(payload, r.TranscriptFinal)
             text = (
@@ -807,44 +598,40 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 raise RuntimeError("Prism transcript retention limit exceeded")
             if final:
                 self._transcripts.pop(payload.item_id, None)
-                self._ledger.transcript(payload.item_id, text, self._context)
+                self._ledger.transcript(payload.item_id, text)
             else:
                 self._transcripts[payload.item_id] = text
             cls = TranscriptionFrame if final else InterimTranscriptionFrame
-            frame = cls(text=text, user_id="", timestamp=time_now_iso8601())
-            frame.metadata["provider_managed_context"] = True
-            await self.broadcast_frame_instance(frame)
+            await self.broadcast_frame_instance(
+                cls(text=text, user_id="", timestamp=time_now_iso8601())
+            )
         elif isinstance(payload, r.TranscriptFailed):
             self._transcripts.pop(payload.item_id, None)
             await self.push_error(str(payload.error), exception=r.RimeRealtimeError(payload.error))
         elif isinstance(payload, r.ResponseStarted):
-            policy = self._policies.get(payload.settings_revision)
-            if policy is None:
-                raise RuntimeError("Prism response settings revision is unknown or expired")
-            response = self._playback.start(payload, *policy)
+            if len(self._responses) >= 128:
+                key, oldest = next(iter(self._responses.items()))
+                if not oldest.ended or oldest.calls:
+                    raise RuntimeError("Prism response retention limit has active replies or tools")
+                self._responses.pop(key)
+                for call_id in tuple(self._calls):
+                    if self._calls[call_id][0].call.response_id == key:
+                        self._calls.pop(call_id)
+            response = _Response(payload.response, input_ids=payload.input_item_ids)
+            if payload.cause == "proactive":
+                response.audio_response = self._reply_audio_response
+                self._reply_started.set()
             if payload.parent:
-                parent = self._playback.responses.get(payload.parent.response_id)
-                if parent is None:
-                    raise RuntimeError("Prism continuation parent is unknown or expired")
-                response.audio_response = parent.audio_response
-                response.explicit_audio_response = parent.explicit_audio_response
-                response.input_request_id = parent.input_request_id
-                response.client_message_id = parent.client_message_id
+                parent = self._responses.get(payload.parent.response_id)
+                response.stopped = parent is not None and parent.stopped
+                if parent is not None:
+                    response.audio_response = parent.audio_response
+            self._responses[payload.response.response_id] = response
             self._ledger.response_epoch += 1
             self._ledger.active_responses.add(payload.response.response_id)
             self._ledger.active_inputs.update(response.input_ids)
             for item_id in response.input_ids:
-                self._ledger.reserve_input(item_id, self._context)
-            typed = self._typed.pop(payload.response.response_id, None)
-            # The event can precede delivery of send_text's returned reference.
-            # The request task binds the input to that returned reference.
-            if typed:
-                self._commit_typed(response, typed)
-            elif payload.cause == "text":
-                bound = self._typed_bound.setdefault(payload.response.response_id, asyncio.Event())
-                async with asyncio.timeout(self._timeouts.request_s):
-                    await bound.wait()
-            self._typed_bound.pop(payload.response.response_id, None)
+                self._ledger.reserve_input(item_id)
             started = LLMFullResponseStartFrame()
             started.metadata["rime"] = {
                 "provider_request_id": self._sdk.info.request_id,
@@ -852,35 +639,26 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 "input_item_ids": response.input_ids,
                 "settings_revision": payload.settings_revision,
                 "response_metadata": dict(payload.metadata),
-                "input_request_id": response.input_request_id,
-                "client_message_id": response.client_message_id,
             }
             await self.push_frame(started)
-            if payload.parent:
-                parent = self._playback.responses.get(payload.parent.response_id)
-                if parent is None:
-                    raise RuntimeError("Prism continuation parent is unknown or expired")
-                if parent.stopped:
-                    await self._stop_response(response, parent.cause or "application")
-        elif isinstance(payload, r.ResponseAbandoned):
-            await self._stop_response(
-                self._playback.responses[payload.response.response_id], "application"
-            )
-        elif isinstance(payload, r.MessageStarted):
-            output = self._playback.message(payload.output)
-            response = self._playback.responses[payload.output.response.response_id]
-            await self.push_frame(AudioOutputStartFrame(output.context_id))
-            await self.push_frame(TTSStartedFrame(context_id=output.context_id))
             if response.stopped:
-                await self._end_output(output)
+                self._spawn_request(self._sdk.cancel(response.ref))
+        elif isinstance(payload, r.ResponseAbandoned):
+            response = self._responses[payload.response.response_id]
+            response.stopped = True
+            await self.broadcast_interruption()
+        elif isinstance(payload, r.MessageStarted):
+            response = self._responses[payload.output.response.response_id]
+            if len(response.outputs) >= 128:
+                raise RuntimeError("Prism output retention limit exceeded")
+            output = _Output(payload.output)
+            response.outputs[payload.output.item_id] = output
+            if not response.stopped:
+                await self.push_frame(TTSStartedFrame(context_id=output.context_id))
         elif isinstance(payload, (r.TextDelta, r.TextDone, r.AudioDelta, r.AudioDone)):
-            response = self._playback.responses[payload.output.response.response_id]
+            response = self._responses[payload.output.response.response_id]
             output = response.outputs[payload.output.item_id]
-            if (
-                output.discarded
-                or response.stopped
-                or (output.closed and isinstance(payload, r.AudioDelta))
-            ):
+            if response.stopped or output.closed:
                 return
             if isinstance(payload, r.TextDelta):
                 await self.stop_ttfb_metrics()
@@ -892,21 +670,23 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 await self.push_frame(text)
             elif isinstance(payload, r.TextDone):
                 output.text = payload.text
-                text = TTSTextFrame(payload.text, text_type=TextType.SENTENCE)
-                text.append_to_context = False
-                await self.push_frame(text)
+                if output.text and not output.recorded:
+                    self._ledger.add_live(
+                        {"role": "assistant", "content": output.text}, [output.ref.item_id]
+                    )
+                    output.recorded = True
+                await self.push_frame(TTSTextFrame(payload.text, text_type=TextType.SENTENCE))
             elif isinstance(payload, r.AudioDelta):
-                if response.audio_response and (
-                    response.explicit_audio_response or not self._skip_tts
-                ):
+                if response.audio_response:
                     audio = payload.audio
-                    if (
-                        self._pending_output_audio_bytes + len(audio.data)
-                        > self._output_audio_limit
-                    ):
-                        raise RuntimeError("Prism output PCM retention limit exceeded")
-                    output.audio_bytes += len(audio.data)
-                    self._pending_output_audio_bytes += len(audio.data)
+                    self._latest_audio_output = output
+                    output.audio_ms += (
+                        len(audio.data)
+                        * 1000
+                        / (audio.format.sample_rate * audio.format.channels * 2)
+                    )
+                    if output.started_at is None:
+                        output.started_at = time.monotonic()
                     frame = TTSAudioRawFrame(
                         audio.data,
                         audio.format.sample_rate,
@@ -919,13 +699,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             else:
                 await self._end_output(output)
         elif isinstance(payload, r.ToolCall):
-            if len(self._calls) >= 1024:
-                raise RuntimeError("Prism tool retention limit exceeded")
             if payload.call.call_id in self._calls:
                 return
-            response = self._playback.responses[payload.call.response_id]
+            if len(self._calls) >= 1024:
+                raise RuntimeError("Prism tool retention limit exceeded")
+            response = self._responses[payload.call.response_id]
             if response.stopped:
-                raise RuntimeError("Prism emitted a tool call for a stopped reply")
+                return
             self._calls[payload.call.call_id] = payload, False
             response.calls.add(payload.call.call_id)
             self._ledger.pending_calls.add(payload.call.call_id)
@@ -938,13 +718,12 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                             "type": "function",
                             "function": {
                                 "name": payload.name,
-                                "arguments": json.dumps(payload.arguments),
+                                "arguments": json.dumps(payload.arguments, ensure_ascii=False),
                             },
                         }
                     ],
                 },
                 [payload.item_id],
-                self._context,
             )
             await self.run_function_calls(
                 [
@@ -957,20 +736,18 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 ]
             )
         elif isinstance(payload, r.ResponseEnded):
-            response = self._playback.responses[payload.response.response_id]
+            response = self._responses[payload.response.response_id]
             response.ended = True
+            response.done.set()
             self._ledger.active_responses.discard(payload.response.response_id)
             self._ledger.active_inputs.difference_update(response.input_ids)
             for output in response.outputs.values():
                 await self._end_output(output)
-                if output.text:
+                if output.text and not output.recorded:
                     self._ledger.add_live(
-                        {"role": "assistant", "content": output.text},
-                        [output.ref.item_id],
-                        self._context,
+                        {"role": "assistant", "content": output.text}, [output.ref.item_id]
                     )
             await self.push_frame(LLMFullResponseEndFrame())
-            self._spawn_request(self._finish_playback(response), LLMRunFrame(), kind="playback")
         elif isinstance(payload, r.FaultEvent) and payload.error.request_id is None:
             error = r.RimeRealtimeError(payload.error)
             if payload.error.scope == "session":
@@ -978,92 +755,79 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             else:
                 await self.push_error(str(error), exception=error)
 
-    def _speech_policy(self) -> bool:
-        for response in reversed(self._playback.responses.values()):
-            if not response.finished and not response.stopped:
-                return response.interrupt_on_speech
-        return assert_given(self._settings.interrupt_on_speech)
-
-    async def _end_output(self, output: Output) -> None:
+    async def _end_output(self, output: _Output) -> None:
         if not output.closed:
             output.closed = True
             await self.push_frame(TTSStoppedFrame(context_id=output.context_id))
-            await self.push_frame(AudioOutputEndFrame(output.context_id))
 
-    async def _stop_response(self, response: Response, cause: InterruptionCause) -> None:
-        if response.stopped:
+    async def _interrupt(self) -> None:
+        if self._session is None:
             return
-        response.stopped = True
-        response.cause = cause
-        for output in response.outputs.values():
-            output.discarded = True
-            await self.push_frame(AudioOutputStopFrame(output.context_id, cause))
-            await self._end_output(output)
-        if not response.ended:
-            self._spawn_request(self._sdk.cancel(response.ref), LLMRunFrame(), kind="stop")
-
-    async def _stop_responses(self, cause: InterruptionCause) -> None:
-        await self.push_frame(AudioOutputGainFrame())
-        for response in self._playback.responses.values():
-            if not response.finished:
-                await self._stop_response(response, cause)
+        output, self._latest_audio_output = self._latest_audio_output, None
+        for response in tuple(self._responses.values()):
+            if response.stopped or (
+                response.ended
+                and not response.calls
+                and (output is None or output.ref.response.response_id != response.ref.response_id)
+            ):
+                continue
+            response.stopped = True
+            if not response.ended:
+                await self._sdk.cancel(response.ref)
+            for current in response.outputs.values():
+                await self._end_output(current)
+        # Standard transports do not return output identities or device clocks.
+        # Report one elapsed-time estimate for the latest emitted audio only.
+        if output is not None and output.started_at is not None:
+            elapsed = (time.monotonic() - output.started_at) * 1000
+            await self._sdk.report_playback(
+                r.PlaybackInterrupted(
+                    output=output.ref,
+                    audio_end_ms=int(min(elapsed, output.audio_ms)),
+                )
+            )
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem) -> None:
-        call, _ = self._calls[runner_item.tool_call_id]
-        response = self._playback.responses[call.call.response_id]
-        runner_item.registry_item = response.handlers.get(
-            runner_item.function_name,
-            response.handlers.get(None)
-            or self._build_missing_function_call_registry_item(runner_item.function_name),
-        )
-        runner_item.pin_handler = True
         runner_item.run_llm = False
         await super()._run_function_call(runner_item)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Keep live context writes and tool-result delivery under the conversation owner."""
-        if isinstance(
-            frame,
-            (
-                FunctionCallResultFrame,
-                FunctionCallInProgressFrame,
-                FunctionCallsStartedFrame,
-                FunctionCallCancelFrame,
-            ),
+        """Submit final tool results once while normal aggregators record them."""
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame))
+            and frame.tool_call_id in self._calls
         ):
-            frame.metadata["provider_managed_context"] = True
-        if isinstance(frame, FunctionCallCancelFrame) and frame.tool_call_id in self._calls:
-            call, submitted = self._calls[frame.tool_call_id]
-            if not submitted:
-                self._calls[frame.tool_call_id] = call, True
-                self._spawn_request(
-                    self._tool_result(call, {"error": "cancelled"}), frame, kind="tool_result"
-                )
-        if isinstance(frame, FunctionCallResultFrame) and frame.tool_call_id in self._calls:
-            call, submitted = self._calls[frame.tool_call_id]
-            if frame.properties and not frame.properties.is_final:
+            if (
+                isinstance(frame, FunctionCallResultFrame)
+                and frame.properties
+                and not frame.properties.is_final
+            ):
                 await self.push_error("Prism does not support intermediate tool results")
                 return
+            call, submitted = self._calls[frame.tool_call_id]
             if not submitted:
                 self._calls[frame.tool_call_id] = call, True
-                self._spawn_request(
-                    self._tool_result(call, frame.result), frame, kind="tool_result"
+                result = (
+                    (json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED")
+                    if isinstance(frame, FunctionCallResultFrame)
+                    else "CANCELLED"
                 )
+                self._spawn_request(self._tool_result(call, result))
             frame.run_llm = False
         await super().push_frame(frame, direction)
 
-    async def _tool_result(self, call: r.ToolCall, result: Any) -> None:
-        output = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    async def _tool_result(self, call: r.ToolCall, output: str) -> None:
         await self._sdk.submit_tool_result(call.call, output)
         self._ledger.pending_calls.discard(call.call.call_id)
         self._ledger.add_live(
-            {"role": "tool", "tool_call_id": call.call.call_id, "content": output},
-            [],
-            self._context,
+            {"role": "tool", "tool_call_id": call.call.call_id, "content": output}, []
         )
-        response = self._playback.responses[call.call.response_id]
+        response = self._responses[call.call.response_id]
         response.calls.discard(call.call.call_id)
-        if not response.calls and not response.stopped:
+        await response.done.wait()
+        if not response.calls and not response.stopped and not response.continued:
+            response.continued = True
             try:
                 await self._sdk.continue_reply(response.ref)
             except (RimeInputError, r.RimeRealtimeError) as error:
@@ -1072,162 +836,65 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     or error.fault.code != "tool_continuation_unavailable"
                 ):
                     raise
-                await self._sdk.request_reply(tool_call=call.call)
+                await self._reply(response.audio_response, tool_call=call.call)
 
-    async def _result(
-        self, request: Frame, kind: str, outcome: LLMOperationOutcome, detail: str | None = None
-    ) -> None:
-        key = request.id, kind
-        if key in self._operation_results:
-            return
-        if len(self._operation_results) >= 65536:
-            await self._fail(RuntimeError("Prism operation result retention limit exceeded"))
-            return
-        self._operation_results.add(key)
-        frame = LLMOperationResultFrame(request.id, kind, outcome, detail, self.name)
-        await self.broadcast_frame_instance(frame)
-        await self._call_event_handler("on_operation_result", frame)
-
-    async def _operation_error(self, request: Frame, kind: str, error: Exception) -> None:
-        outcome: LLMOperationOutcome
-        if isinstance(error, PartialHistoryError):
-            outcome = "partial"
-        elif isinstance(error, (ValueError, TypeError, RimeInputError, r.RealtimeAdmissionTimeout)):
-            outcome = "rejected"
-        elif isinstance(error, r.RimeRealtimeError) and error.fault.scope == "event":
-            fault = error.fault
-            known_rejection = kind in {
-                "history",
-                "settings",
-                "response_metadata",
-                "tool_choice",
-            } or (
-                fault.response_id is None
-                and fault.item_id is None
-                and fault.code not in {"typed_turn_superseded", "response_superseded"}
-            )
-            outcome = "rejected" if known_rejection else "unknown"
-        else:
-            outcome = "unknown"
-        await self._result(request, kind, outcome, str(error))
-        if outcome in ("unknown", "partial"):
-            await self._fail(error)
-        else:
+    async def _operation_error(self, error: Exception) -> None:
+        if isinstance(error, (ValueError, TypeError, RimeInputError, r.RealtimeAdmissionTimeout)):
             await self.push_error(str(error), exception=error)
+        elif isinstance(error, r.RimeRealtimeError) and error.fault.scope == "event":
+            await self.push_error(str(error), exception=error)
+        else:
+            await self._fail(error)
 
     async def _fail(self, error: Exception) -> None:
         if self._failure is not None:
             return
         self._failure = error
-        if self._session is not None:
-            await self._stop_responses("error")
-        await self.push_frame(AudioOutputGainFrame())
+        await self.broadcast_interruption()
         await self.push_error(str(error), exception=error, force_treat_as_permanent=True)
 
     async def stop(self, frame: EndFrame) -> None:
-        """Drain accepted work with one bounded shutdown deadline."""
-        self._begin_shutdown(frame)
-
-    async def cancel(self, frame: CancelFrame) -> None:
-        """Start cancellation once; repeated cancellation keeps the original deadline."""
-        self._begin_shutdown(frame)
-
-    def _begin_shutdown(self, frame: EndFrame | CancelFrame) -> None:
-        if self._shutdown_task is None:
-            self._shutdown_task = self.create_task(self._shutdown(frame))
-
-    async def _shutdown(self, frame: EndFrame | CancelFrame) -> None:
+        """Drain queued requests, then close the SDK with a bounded deadline."""
         try:
             async with asyncio.timeout(self._shutdown_timeout):
-                if isinstance(frame, EndFrame):
+                if self._connection_task is not None:
                     await self._controls.join()
                     await self._audio.join()
                     if self._session and self.is_usable:
                         tail = await self._input_resampler.flush()
                         if tail:
                             await self._sdk.send_audio(r.AudioChunk(data=tail))
-                    if self._requests:
-                        await asyncio.wait(self._requests)
-                    while any(
-                        not response.finished for response in self._playback.responses.values()
+                    while self._requests or any(
+                        not response.ended for response in self._responses.values()
                     ):
-                        await asyncio.sleep(0.01)
-                self._closing = True
-                if self._session:
-                    await self._stop_responses("shutdown")
-                    await self._controls.join()
-                    if self._requests:
-                        await asyncio.wait(self._requests)
-                    while any(
-                        not response.finished for response in self._playback.responses.values()
-                    ):
-                        await asyncio.sleep(0.01)
-                    await self._receipts.join()
+                        await asyncio.sleep(0.005)
         except TimeoutError:
             logger.warning(f"{self}: Prism shutdown drain deadline expired")
         finally:
             self._closing = True
-            unresolved = [
-                response for response in self._playback.responses.values() if not response.finished
-            ]
-            if unresolved and self._session:
-                await self._stop_responses("shutdown")
-                await self.push_error(
-                    "Prism shutdown could not confirm all playback reports; timing remains unknown"
-                )
-                for response in unresolved:
-                    for output in response.outputs.values():
-                        if output.report is None:
-                            self._playback.accept_report(
-                                AudioPlaybackReportFrame(
-                                    output.context_id, "failed", None, "shutdown"
-                                )
-                            )
             await self._close_resources()
-            if isinstance(frame, EndFrame):
-                await super().stop(frame)
-                await self.push_frame(frame)
-            else:
-                await super().cancel(frame)
-                await self.push_frame(frame)
-            self._closed.set()
+            await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame) -> None:
+        """Cancel owned work without waiting for playback completion."""
+        self._closing = True
+        await self._close_resources()
+        await super().cancel(frame)
 
     async def _close_resources(self) -> None:
         current = asyncio.current_task()
         for task in [*self._requests, *self._tasks, self._connection_task]:
             if task is not None and task is not current and not task.done():
                 await self.cancel_task(task)
-        while not self._controls.empty():
-            operation = self._controls.get_nowait()
-            request = (
-                operation.request if isinstance(operation, _LLMContextOperationFrame) else operation
-            )
-            kind = self._operation_kind(request)
-            await self._result(request, kind, "rejected", "Conversation closed before submission")
-            self._controls.task_done()
-        while not self._audio.empty():
-            audio = self._audio.get_nowait()
-            self._pending_audio_bytes -= len(audio.audio)
-            self._audio.task_done()
-        while not self._receipts.empty():
-            report = self._receipts.get_nowait()
-            try:
-                self._playback.accept_report(report)
-            except ValueError as error:
-                await self.push_error(str(error), exception=error)
-            finally:
-                self._receipts.task_done()
         if self._connection is not None:
             connection, self._connection = self._connection, None
             await connection.__aexit__(None, None, None)
         if self._owns_client and self._client is not None:
-            await self._client.close()
+            client, self._client = self._client, None
+            await client.close()
 
     async def cleanup(self):
-        """Close all owned resources, including failed or unused startup."""
-        if self._shutdown_task is not None and not self._shutdown_task.done():
-            await self._shutdown_task
-        else:
-            self._closing = True
-            await self._close_resources()
+        """Close resources after startup failure or worker cleanup."""
+        self._closing = True
+        await self._close_resources()
         await super().cleanup()

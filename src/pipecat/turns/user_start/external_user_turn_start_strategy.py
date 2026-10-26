@@ -65,11 +65,7 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
             logger.debug(f"{self}: resolving a proposed user turn start")
-            await self.report_user_turn_started(
-                enable_interruptions=(
-                    self._enable_interruptions and frame.enable_interruptions is not False
-                )
-            )
+            await self.report_user_turn_started()
         elif isinstance(frame, UserStartedSpeakingFrame):
             # Already announced elsewhere — adopt the decision without repeating it.
             logger.debug(f"{self}: adopting a user turn start decided elsewhere")
