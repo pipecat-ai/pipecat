@@ -4,11 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
 import json
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from loguru import logger
 from websockets.protocol import State
 
 from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamTTSService
@@ -214,3 +216,58 @@ async def test_switching_the_http_service_to_v4_flash_takes_its_capabilities():
     assert payload["speaker"] == "shubh_en_narration_gentle"
     assert payload["pitch"] == 0.3
     assert "temperature" not in payload
+
+
+def _audio_msg(request_id: str) -> str:
+    audio = base64.b64encode(b"\x00\x00").decode()
+    return json.dumps({"type": "audio", "data": {"audio": audio, "request_id": request_id}})
+
+
+async def _receive(service: SarvamTTSService, messages):
+    """Run `_receive_messages` over one scripted connection."""
+
+    async def scripted_websocket():
+        for message in messages:
+            yield message
+
+    service.append_to_audio_context = AsyncMock()
+    service.stop_ttfb_metrics = AsyncMock()
+    service.get_active_audio_context_id = lambda: "ctx"
+    service._get_websocket = scripted_websocket
+
+    await service._receive_messages()
+
+
+@pytest.fixture
+def request_id_logs():
+    logs = []
+    sink_id = logger.add(
+        lambda m: logs.append(m.record["message"]),
+        level="TRACE",
+        filter=lambda r: "request_id=" in r["message"],
+    )
+    yield logs
+    logger.remove(sink_id)
+
+
+@pytest.mark.asyncio
+async def test_request_id_is_logged_once_per_connection(request_id_logs):
+    """Every audio chunk carries the request ID, but one line per connection is enough."""
+    service = _service()
+
+    await _receive(service, [_audio_msg("req-a")] * 3)
+
+    assert len(request_id_logs) == 1
+    assert "request_id=req-a" in request_id_logs[0]
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_logs_its_own_request_id(request_id_logs):
+    service = _service()
+
+    await _receive(service, [_audio_msg("req-a")] * 2)
+    await _receive(service, [_audio_msg("req-b")] * 2)
+
+    assert len(request_id_logs) == 2
+    assert "request_id=req-a" in request_id_logs[0]
+    assert "request_id=req-b" in request_id_logs[1]
