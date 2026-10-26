@@ -32,9 +32,14 @@ class TestProcessingMetrics(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(frame)
 
     async def test_a_rejected_interval_does_not_block_the_next_one(self):
-        """The rejected measurement resets, so the next interval reports."""
+        """The rejected measurement resets, so a second stop before any new
+        start reports nothing, and the next interval reports."""
         await self.metrics.start_processing_metrics(start_time=1000.0)
         self.assertIsNone(await self.metrics.stop_processing_metrics(end_time=500.0))
+
+        # Must already be ended: another stop without restart must not surface
+        # the stale start_time as a positive interval.
+        self.assertIsNone(await self.metrics.stop_processing_metrics(end_time=1001.0))
 
         await self.metrics.start_processing_metrics(start_time=2000.0)
         frame = await self.metrics.stop_processing_metrics(end_time=2002.0)
