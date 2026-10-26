@@ -13,11 +13,9 @@ which synthesizes text into streamed PCM audio with per-word timings.
 import asyncio
 import base64
 import json
-import ssl
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from functools import cache
 from typing import Any
 from urllib.parse import urlencode
 
@@ -79,12 +77,6 @@ def language_to_assemblyai_tts_language(language: Language) -> str:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
-
-
-@cache
-def _ssl_context() -> ssl.SSLContext:
-    """One TLS context for every session, since building one loads the CA bundle."""
-    return ssl.create_default_context()
 
 
 @dataclass
@@ -339,8 +331,7 @@ class AssemblyAITTSService(WebsocketTTSService):
                 "Authorization": self._api_key,
                 "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version()})",
             }
-            tls = {"ssl": _ssl_context()} if url.startswith("wss:") else {}
-            self._websocket = await self._websocket_connect(url, additional_headers=headers, **tls)
+            self._websocket = await self._websocket_connect(url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Error connecting to AssemblyAI TTS: {e}", exception=e)
