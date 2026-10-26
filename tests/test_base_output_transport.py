@@ -379,6 +379,56 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
     ``handle_tts_stopped``), instead of being silently discarded.
     """
 
+    async def test_previous_tts_stop_preserves_next_output_partial_chunk(self):
+        transport = await _make_transport(mixer=None)
+        write_started, release_write = asyncio.Event(), asyncio.Event()
+        first_stopped, second_stopped = asyncio.Event(), asyncio.Event()
+
+        async def write(frame):
+            write_started.set()
+            await release_write.wait()
+            return True
+
+        async def pushed(frame, *args, **kwargs):
+            if isinstance(frame, TTSStoppedFrame):
+                if frame.context_id == "first":
+                    first_stopped.set()
+                elif frame.context_id == "second":
+                    second_stopped.set()
+
+        transport.write_audio_frame.side_effect = write
+        transport.push_frame.side_effect = pushed
+        sender = transport._media_senders[None]
+        full_audio = b"\x01\x02" * (sender.audio_chunk_size // 2)
+        partial_audio = b"\x03\x04" * (sender.audio_chunk_size // 8)
+        try:
+            await transport.process_frame(
+                TTSAudioRawFrame(full_audio, sender.sample_rate, 1), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.wait_for(write_started.wait(), 1)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="first"), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                TTSAudioRawFrame(partial_audio, sender.sample_rate, 1), FrameDirection.DOWNSTREAM
+            )
+            release_write.set()
+            await asyncio.wait_for(first_stopped.wait(), 1)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="second"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.wait_for(second_stopped.wait(), 1)
+            written = b"".join(
+                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            )
+            expected = (
+                full_audio + partial_audio + bytes(sender.audio_chunk_size - len(partial_audio))
+            )
+            self.assertEqual(written, expected)
+        finally:
+            release_write.set()
+            await transport.cancel(CancelFrame())
+
     async def test_tts_stopped_frame_flushes_partial_chunk_padded_with_silence(self):
         transport = await _make_transport(mixer=None)
         try:
