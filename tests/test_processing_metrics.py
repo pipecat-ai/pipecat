@@ -5,6 +5,7 @@
 #
 
 import unittest
+from unittest import mock
 
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
@@ -46,3 +47,42 @@ class TestProcessingMetrics(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(frame)
         self.assertEqual(frame.data[0].value, 2.0)
+
+    async def test_a_normal_text_aggregation_interval_is_reported(self):
+        with mock.patch(
+            "pipecat.processors.metrics.frame_processor_metrics.time.time",
+            side_effect=[1000.0, 1000.4],
+        ):
+            await self.metrics.start_text_aggregation_metrics()
+            frame = await self.metrics.stop_text_aggregation_metrics()
+
+        self.assertIsNotNone(frame)
+        self.assertAlmostEqual(frame.data[0].value, 0.4)
+
+    async def test_a_negative_text_aggregation_interval_is_not_reported(self):
+        with mock.patch(
+            "pipecat.processors.metrics.frame_processor_metrics.time.time",
+            side_effect=[1000.0, 999.5],
+        ):
+            await self.metrics.start_text_aggregation_metrics()
+            frame = await self.metrics.stop_text_aggregation_metrics()
+
+        self.assertIsNone(frame)
+
+    async def test_a_rejected_text_aggregation_resets(self):
+        with mock.patch(
+            "pipecat.processors.metrics.frame_processor_metrics.time.time",
+            side_effect=[1000.0, 999.0, 2000.0, 2002.0],
+        ):
+            await self.metrics.start_text_aggregation_metrics()
+            self.assertIsNone(await self.metrics.stop_text_aggregation_metrics())
+
+            # Must already be ended: another stop without restart must not
+            # surface the stale start as a positive interval.
+            self.assertIsNone(await self.metrics.stop_text_aggregation_metrics())
+
+            await self.metrics.start_text_aggregation_metrics()
+            frame = await self.metrics.stop_text_aggregation_metrics()
+
+        self.assertIsNotNone(frame)
+        self.assertAlmostEqual(frame.data[0].value, 2.0)
