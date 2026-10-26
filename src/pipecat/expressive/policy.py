@@ -13,14 +13,18 @@ offered and says when to use them.
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 
-class ExpressionGuidance:
+class ExpressionGuidance(StrEnum):
     """Guidance presets for :class:`ExpressionPolicy`.
 
     Each preset is a short paragraph on one aspect of delivery, written to
-    combine with other presets and with the developer's own lines.
+    combine with other presets and with the developer's own lines. A preset
+    is a string, so it joins with them as written, but stays a member of this
+    enum in a policy, apart from a line of the developer's with the same text.
 
     Parameters:
         MATCH_STYLE: Answer in the user's mood and energy, but stay calm with
@@ -57,6 +61,6 @@ class ExpressionPolicy(BaseModel):
             declares, narrowed the same way as ``delivery``.
     """
 
-    guidance: list[str] = Field(default_factory=list)
+    guidance: list[ExpressionGuidance | str] = Field(default_factory=list)
     delivery: list[str] | None = None
     sounds: list[str] | None = None

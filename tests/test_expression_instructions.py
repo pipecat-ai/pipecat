@@ -153,6 +153,17 @@ def test_a_free_text_service_is_taught_none_of_a_kind_the_policy_names_none_of()
     )
 
 
+def test_a_policy_keeps_presets_apart_from_lines_with_the_same_text():
+    policy = ExpressionPolicy(
+        guidance=[ExpressionGuidance.MATCH_STYLE, str(ExpressionGuidance.MATCH_STYLE)]
+    )
+
+    preset, line = policy.guidance
+    assert isinstance(preset, ExpressionGuidance)
+    assert not isinstance(line, ExpressionGuidance)
+    assert preset == line
+
+
 @pytest.mark.parametrize("field", ["guidance", "delivery", "sounds"])
 def test_a_policy_list_given_as_a_bare_string_is_rejected(field):
     # A bare string would otherwise be offered letter by letter.
