@@ -478,6 +478,42 @@ async def test_expiring_session_is_renewed_between_requests():
     assert words == ["First", "reply.", "Second", "reply."]
 
 
+@pytest.mark.asyncio
+async def test_session_renewed_mid_turn_keeps_word_times():
+    """A turn that spans a renewal keeps its word times measured from its first audio."""
+    captured: dict = {"messages": []}
+    tokens = ["Hi ", "there! ", "Thanks ", "for ", "calling. ", "Bye."]
+    async with serve(_server(captured, expires_in=1.0), "127.0.0.1", 0) as server:
+        down_frames, _ = await run_test(
+            _service(server),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                *[LLMTextFrame(text=token) for token in tokens[:3]],
+                # The first sentence is spoken and the session nears expires_at.
+                SleepFrame(sleep=0.8),
+                *[LLMTextFrame(text=token) for token in tokens[3:]],
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
+
+    assert captured["connections"] == 2
+    word_frames = [f for f in down_frames if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == [token.strip() for token in tokens]
+    # Each sentence's words follow the audio of the sentences before it.
+    start = word_frames[0].pts
+    offsets_ms = [(f.pts - start) // 1_000_000 for f in word_frames]
+    assert offsets_ms == [
+        0,
+        WORD_MS,
+        2 * CHUNK_MS,
+        2 * CHUNK_MS + WORD_MS,
+        2 * CHUNK_MS + 2 * WORD_MS,
+        4 * CHUNK_MS,
+    ]
+
+
 def test_language_is_sent_when_set():
     service = AssemblyAITTSService(
         api_key="test-key",
