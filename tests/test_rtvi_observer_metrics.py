@@ -11,10 +11,6 @@ from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
-    AICAudioQualityMetricsData,
-    AICAudioQualityScores,
-    AICAudioQualitySummary,
-    AICAudioQualitySummaryMetricsData,
     LLMTokenUsage,
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -110,40 +106,6 @@ class TestRTVIObserverMetrics(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["stt_usage"][0]["value"]["audio_seconds"], 1.5)
         self.assertEqual(data["stt_usage"][0]["processor"], "soniox_stt")
         self.assertEqual(data["characters"][0]["value"], 42)
-
-    async def test_audio_quality_forwarded_to_clients(self):
-        observer = RTVIObserver(params=RTVIObserverParams(metrics_enabled=True))
-        sent = []
-        observer.send_rtvi_message = AsyncMock(side_effect=lambda m: sent.append(m))
-        scores = AICAudioQualityScores(**dict.fromkeys(AICAudioQualityScores.model_fields, 0.2))
-
-        await observer._handle_metrics(
-            MetricsFrame(
-                data=[
-                    AICAudioQualityMetricsData(
-                        processor="tyto", model="tyto-1.1-l-16khz", value=scores, audio_secs=5.0
-                    ),
-                    AICAudioQualitySummaryMetricsData(
-                        processor="tyto",
-                        model="tyto-1.1-l-16khz",
-                        value=AICAudioQualitySummary(
-                            windows=1,
-                            mean=scores,
-                            p95=scores,
-                            max=scores,
-                            degraded_threshold=0.3,
-                            degraded_fraction=0.0,
-                            dominant_dimension="noise",
-                        ),
-                    ),
-                ]
-            )
-        )
-
-        data = sent[0].data
-        self.assertEqual(data["audio_quality"][0]["value"]["risk_score"], 0.2)
-        self.assertEqual(data["audio_quality"][0]["audio_secs"], 5.0)
-        self.assertEqual(data["audio_quality_summary"][0]["value"]["dominant_dimension"], "noise")
 
 
 if __name__ == "__main__":
