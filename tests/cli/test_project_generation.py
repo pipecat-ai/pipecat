@@ -119,6 +119,15 @@ def assert_server_ruff_lint_clean(server_path):
 
 # Test configurations for different transport types
 TEST_CONFIGS = [
+    {
+        "name": "rime-stt",
+        "bot_type": "web",
+        "transports": ["smallwebrtc"],
+        "mode": "cascade",
+        "stt_service": "rime_stt",
+        "llm_service": "openai_llm",
+        "tts_service": "rime_tts",
+    },
     # WebRTC Transports - Cascade
     {
         "name": "daily-cascade",

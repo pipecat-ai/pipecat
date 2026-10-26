@@ -10,6 +10,7 @@ import asyncio
 import time
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -792,6 +793,19 @@ class STTService(AIService):
         raise NotImplementedError("Subclasses must override _send_keepalive")
 
 
+@dataclass
+class STTSegment:
+    """Audio and speaker identity retained until a segment is transcribed.
+
+    Parameters:
+        audio: WAV or PCM bytes, according to the service's segment format.
+        user_id: Speaker associated with the captured audio.
+    """
+
+    audio: bytes
+    user_id: str
+
+
 class SegmentedSTTService(STTService):
     """STT service that processes speech in segments using VAD events.
 
@@ -847,7 +861,7 @@ class SegmentedSTTService(STTService):
         self._user_speaking = False
         # Segments awaiting transcription, drained in order by _segment_task;
         # None tells the task to finish.
-        self._segment_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._segment_queue: asyncio.Queue[STTSegment | None] = asyncio.Queue()
         self._segment_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -950,17 +964,39 @@ class SegmentedSTTService(STTService):
             # WAV container would make them misread the 44-byte header as audio.
             audio = pcm
 
-        await self._segment_queue.put(audio)
+        await self._segment_queue.put(self._create_segment(audio))
+
+    def _create_segment(self, audio: bytes) -> STTSegment:
+        """Capture metadata before a segment enters the transcription queue.
+
+        Subclasses may return a specialized segment carrying request settings
+        or timing information that must survive subsequent audio frames.
+
+        Args:
+            audio: The complete segment in the service's requested format.
+
+        Returns:
+            The audio and metadata to retain for transcription.
+        """
+        return STTSegment(audio=audio, user_id=self._user_id)
+
+    async def _process_segment(self, segment: STTSegment):
+        """Transcribe one queued segment.
+
+        Args:
+            segment: Captured audio and metadata for this request.
+        """
+        await self.process_generator(self.run_stt(segment.audio))
 
     async def _segment_task_handler(self):
         """Transcribe queued segments one at a time, in order, until told to finish."""
         running = True
         while running:
-            audio = await self._segment_queue.get()
-            running = audio is not None
-            if audio:
+            segment = await self._segment_queue.get()
+            running = segment is not None
+            if segment is not None:
                 try:
-                    await self.process_generator(self.run_stt(audio))
+                    await self._process_segment(segment)
                 except Exception as e:
                     await self.push_error(f"{self}: transcription failed: {e}", exception=e)
 
