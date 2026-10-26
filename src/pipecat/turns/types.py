@@ -9,6 +9,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from pipecat.expressive.perception import PerceptionSignal
+
 
 class ProcessFrameResult(Enum):
     """Result of processing a frame in a user turn strategy.
@@ -41,9 +43,12 @@ class UserTurnSpeculation:
 
     Parameters:
         text: The user turn text the inference was run against.
+        perception: How the user said it, as read at the eager end of turn,
+            or None. Part of expressive conversation (alpha).
     """
 
     text: str
+    perception: list[PerceptionSignal] | None = None
 
 
 @dataclass

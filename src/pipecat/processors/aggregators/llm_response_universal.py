@@ -24,6 +24,7 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.expressive.formatter import strip_expression_tags
+from pipecat.expressive.perception import PerceptionSignal, format_perception
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AssistantImageRawFrame,
@@ -316,12 +317,16 @@ class UserTurnStoppedMessage:
             instead.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
+        perception: The turn's final reading of how the user spoke, with
+            expressive conversation on and a perception producer in the
+            pipeline, or None. Part of expressive conversation (alpha).
 
     """
 
     content: str | None
     timestamp: str
     user_id: str | None = None
+    perception: list[PerceptionSignal] | None = None
 
 
 @dataclass
@@ -798,6 +803,13 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
+        # With expressive conversation on, the latest final reading of how the
+        # user spoke: for the user message, written at its head, and for the
+        # turn, reported when it stops. A turn can write several messages.
+        self._expressive = False
+        self._perception: list[PerceptionSignal] | None = None
+        self._turn_perception: list[PerceptionSignal] | None = None
+
         # Whether the current user turn interrupted the bot.
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
@@ -858,6 +870,7 @@ class LLMUserAggregator(LLMContextAggregator):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._expressive = setup.enable_expressive_conversation
         if self._vad_controller:
             await self._vad_controller.setup(setup)
 
@@ -907,6 +920,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
+            self._handle_perception(frame.perception)
             await self._handle_transcription(frame)
         elif isinstance(
             frame,
@@ -972,6 +986,11 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_idle_controller.process_frame(frame)
 
+    async def reset(self):
+        """Reset the aggregation state, with the turn's reading of how the user spoke."""
+        await super().reset()
+        self._perception = None
+
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         return await self._push_aggregation()
@@ -992,12 +1011,15 @@ class LLMUserAggregator(LLMContextAggregator):
             return ""
 
         aggregation = self.aggregation_string()
+        perception = self._perception
+        content = f"{format_perception(perception)} {aggregation}" if perception else aggregation
         await self.reset()
-        self._context.add_message(
-            cast(LLMContextMessage, {"role": self.role, "content": aggregation})
-        )
+        self._context.add_message(cast(LLMContextMessage, {"role": self.role, "content": content}))
         await self.broadcast_frame(
-            LLMContextUserTurnFrame, text=aggregation, timestamp=self._user_turn_start_timestamp
+            LLMContextUserTurnFrame,
+            text=aggregation,
+            timestamp=self._user_turn_start_timestamp,
+            perception=perception,
         )
         if run_llm:
             frame = await self.push_context_frame()
@@ -1361,6 +1383,12 @@ class LLMUserAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame()
 
+    def _handle_perception(self, signals: list[PerceptionSignal] | None):
+        if not self._expressive or not signals:
+            return
+        self._perception = signals
+        self._turn_perception = signals
+
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
 
@@ -1517,7 +1545,7 @@ class LLMUserAggregator(LLMContextAggregator):
         """Run an inference for a turn that hasn't ended yet.
 
         The turn is still open, so the context must not record it. The inference
-        runs against a provisional copy carrying the speculated turn text:
+        runs against a provisional copy carrying the speculated turn and its reading:
         nothing here mutates the real context, and ``_aggregation`` keeps
         accumulating for whenever the turn does end. The response is held
         downstream until the turn is confirmed, and discarded if it isn't.
@@ -1526,10 +1554,16 @@ class LLMUserAggregator(LLMContextAggregator):
             speculation: The speculation to run, from the stop strategy that
                 started it.
         """
+        perception = speculation.perception if self._expressive else None
+        content = (
+            f"{format_perception(perception)} {speculation.text}"
+            if perception
+            else speculation.text
+        )
         provisional = LLMContext(
             messages=[
                 *self._context.messages,
-                cast(LLMContextMessage, {"role": self.role, "content": speculation.text}),
+                cast(LLMContextMessage, {"role": self.role, "content": content}),
             ],
             tools=self._context.tools,
             tool_choice=self._context.tool_choice,
@@ -1574,6 +1608,7 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: Resetting aggregation (strategy: {strategy})")
         await self.reset()
+        self._turn_perception = None
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
@@ -1610,9 +1645,12 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             content = full_aggregation or segment
 
+        perception = self._turn_perception
+        self._turn_perception = None
+
         if not on_session_end or content:
             message = UserTurnStoppedMessage(
-                content=content, timestamp=self._user_turn_start_timestamp
+                content=content, timestamp=self._user_turn_start_timestamp, perception=perception
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""

@@ -25,6 +25,8 @@ class ExpressionGuidance(StrEnum):
     combine with other presets and with the developer's own lines. A preset
     is a string, so it joins with them as written, but stays a member of this
     enum in a policy, apart from a line of the developer's with the same text.
+    An LLM taught no tags, such as one whose replies a tagger marks up, is
+    given the developer's lines without the presets.
 
     Parameters:
         MATCH_STYLE: Answer in the user's mood and energy, but stay calm with
