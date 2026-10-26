@@ -247,3 +247,13 @@ def test_a_warning_says_when_the_service_performs_none_of_the_policy():
         expected
     )
     assert expression_policy_warning(None, ExpressionPolicy()) == expected
+
+
+def test_a_developer_line_with_a_presets_text_is_kept_for_perception_without_tags():
+    line = str(ExpressionGuidance.MATCH_STYLE)
+
+    instructions = expression_instructions(
+        None, ExpressionPolicy(guidance=[line]), perception=PERCEPTION
+    )
+
+    assert instructions.endswith(f"\n\n{line}")

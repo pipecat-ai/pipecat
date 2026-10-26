@@ -31,9 +31,6 @@ from pipecat.expressive.perception import (
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
-# The presets are about tags, so an LLM taught none isn't given them.
-_PRESETS = {value for name, value in vars(ExpressionGuidance).items() if name.isupper()}
-
 
 def expression_instructions(
     capabilities: ExpressionCapabilities | None,
@@ -59,7 +56,10 @@ def expression_instructions(
     parts = [part for part in (_perception_section(perception), tags) if part]
     if not parts:
         return None
-    guidance = [line for line in policy.guidance if tags or line not in _PRESETS]
+    # The presets are about tags, so an LLM taught none isn't given them.
+    guidance = [
+        line for line in policy.guidance if tags or not isinstance(line, ExpressionGuidance)
+    ]
     if guidance:
         parts.append("\n".join(guidance))
     return "\n\n".join(parts)
