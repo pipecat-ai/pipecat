@@ -51,10 +51,14 @@ class TestProcessingMetrics(unittest.IsolatedAsyncioTestCase):
     async def test_a_normal_text_aggregation_interval_is_reported(self):
         with mock.patch(
             "pipecat.processors.metrics.frame_processor_metrics.time.time",
-            side_effect=[1000.0, 1000.4],
+            side_effect=[1000.0, 1000.4, 1001.0],
         ):
             await self.metrics.start_text_aggregation_metrics()
             frame = await self.metrics.stop_text_aggregation_metrics()
+
+            # A second stop without restart reports nothing: the normal path
+            # also resets after emitting.
+            self.assertIsNone(await self.metrics.stop_text_aggregation_metrics())
 
         self.assertIsNotNone(frame)
         self.assertAlmostEqual(frame.data[0].value, 0.4)
