@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from pipecat.frames.frames import (
     InterruptionFrame,
     OutputAudioRawFrame,
+    OutputImageRawFrame,
     SpeechOutputAudioRawFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
@@ -130,7 +131,34 @@ class _SimliConfigWithFraming:
         return {key: value for key, value in asdict(self).items() if value is not None}
 
 
-def _load_simli_video(monkeypatch, config_class=_SimliConfig20):
+class _FakeVideoFrame:
+    width, height, pts = 2, 2, 0
+
+    def to_rgb(self):
+        return self
+
+    def to_image(self):
+        return self
+
+    def tobytes(self):
+        return bytes(12)
+
+
+class _IdleStreamingSimliClient(_FakeSimliClient):
+    """Like Simli with handleSilence: idle video and silence from the moment it connects."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for _ in range(3):
+            self._echo.put_nowait(SILENCE)
+
+    async def getVideoStreamIterator(self, targetFormat: str = "rgb24"):
+        for _ in range(3):
+            yield _FakeVideoFrame()
+        await asyncio.Event().wait()
+
+
+def _load_simli_video(monkeypatch, config_class=_SimliConfig20, client_class=_FakeSimliClient):
     av = types.ModuleType("av")
     av_audio = types.ModuleType("av.audio")
     av_audio_frame = types.ModuleType("av.audio.frame")
@@ -138,7 +166,7 @@ def _load_simli_video(monkeypatch, config_class=_SimliConfig20):
     av_audio_resampler = types.ModuleType("av.audio.resampler")
     av_audio_resampler.AudioResampler = _FakeAudioResampler
     simli = types.ModuleType("simli")
-    simli.SimliClient = _FakeSimliClient
+    simli.SimliClient = client_class
     simli.SimliConfig = config_class
 
     monkeypatch.setitem(sys.modules, "av", av)
@@ -336,3 +364,37 @@ async def test_trinity_sends_speech_stream_as_it_comes(simli_video):
     assert service._simli_client.sent == [SPEECH, SPEECH]
     assert service._simli_client.sent_immediately == []
     assert service._simli_client.buffer_clears == 1
+
+
+#
+# Before the bot speaks
+#
+
+
+@pytest.fixture
+def simli_video_idle_stream(monkeypatch):
+    module = _load_simli_video(monkeypatch, client_class=_IdleStreamingSimliClient)
+    yield module
+    sys.modules.pop("pipecat.services.simli.video", None)
+
+
+@pytest.mark.asyncio
+async def test_idle_video_streams_before_the_bot_speaks(simli_video_idle_stream):
+    """The avatar shows as soon as Simli is connected, not from the bot's first audio."""
+    service = simli_video_idle_stream.SimliVideoService(api_key="key", face_id="face")
+
+    down, _ = await run_test(service, frames_to_send=[SleepFrame(sleep=0.1)])
+
+    assert len([f for f in down if isinstance(f, OutputImageRawFrame)]) == 3
+
+
+@pytest.mark.asyncio
+async def test_idle_audio_is_read_but_not_pushed(simli_video_idle_stream):
+    """Simli's idle silence is read as it comes, so none of it waits to be read
+    when the bot first speaks, and none of it goes on."""
+    service = simli_video_idle_stream.SimliVideoService(api_key="key", face_id="face")
+
+    down, _ = await run_test(service, frames_to_send=[SleepFrame(sleep=0.1)])
+
+    assert service._simli_client._echo.empty()
+    assert not [f for f in down if isinstance(f, OutputAudioRawFrame)]

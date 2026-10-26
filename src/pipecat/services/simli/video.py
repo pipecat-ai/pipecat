@@ -266,8 +266,9 @@ class SimliVideoService(AIService):
             enableSFU=True,
         )
 
+        # Resamples the avatar's voice to the bot's voice's format. Built from the
+        # bot's first audio; until then Simli only sends idle silence.
         self._pipecat_resampler: AudioResampler | None = None
-        self._pipecat_resampler_event = asyncio.Event()
         self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
         self._audio_task: asyncio.Task | None = None
@@ -326,13 +327,16 @@ class SimliVideoService(AIService):
             await self.push_error(error_msg=f"Unable to start connection: {e}", exception=e)
 
     async def _consume_and_process_audio(self):
-        """Consume audio frames from Simli and push them downstream."""
-        await self._pipecat_resampler_event.wait()
-        # The _pipecat_resampler_event waits for _pipecat_resampler to be built
-        assert self._pipecat_resampler is not None
+        """Consume audio frames from Simli and push them downstream.
 
+        Runs from the moment the connection is up, like the video consumer, so
+        Simli's idle audio doesn't pile up unread before the bot first speaks.
+        """
         audio_iterator = self._simli_client.getAudioStreamIterator()
         async for audio_frame in audio_iterator:
+            if self._pipecat_resampler is None:
+                # The bot hasn't spoken yet, so this is idle silence.
+                continue
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
             for resampled_frame in resampled_frames:
                 audio_array = resampled_frame.to_ndarray()
@@ -354,7 +358,6 @@ class SimliVideoService(AIService):
 
     async def _consume_and_process_video(self):
         """Consume video frames from Simli and convert them to output frames."""
-        await self._pipecat_resampler_event.wait()
         video_iterator = self._simli_client.getVideoStreamIterator(targetFormat="rgb24")
         async for video_frame in video_iterator:
             # Process the video frame
@@ -392,7 +395,6 @@ class SimliVideoService(AIService):
                     self._pipecat_resampler = AudioResampler(
                         "s16", old_frame.layout, old_frame.sample_rate
                     )
-                    self._pipecat_resampler_event.set()
 
                 resampled_frames = self._simli_resampler.resample(old_frame)
                 for resampled_frame in resampled_frames:
