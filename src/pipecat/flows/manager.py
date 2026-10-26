@@ -58,6 +58,7 @@ from pipecat.flows.types import (
     FunctionHandler,
     LegacyFunctionHandler,
     NodeConfig,
+    RoleMessage,
     ZeroArgFunctionHandler,
     get_or_generate_node_name,
 )
@@ -653,7 +654,13 @@ class FlowManager:
 
         rendered = dict(node_config)
         if role_message := node_config.get("role_message"):
-            rendered["role_message"] = render(role_message)
+            if isinstance(role_message, str):
+                rendered["role_message"] = render(role_message)
+            else:
+                rendered["role_message"] = {
+                    **role_message,
+                    "content": render(role_message["content"]),
+                }
         rendered["task_messages"] = [
             {**message, "content": render(message["content"])}
             if isinstance(message.get("content"), str)
@@ -804,7 +811,7 @@ class FlowManager:
 
     async def _update_llm_context(
         self,
-        role_message: str | None,
+        role_message: str | RoleMessage | None,
         role_messages: list[dict] | None,
         task_messages: list[dict],
         functions: ToolsSchema | NotGiven,
@@ -813,14 +820,17 @@ class FlowManager:
         """Update LLM context with new messages and functions.
 
         If ``role_message`` is provided, it is sent as an
-        ``LLMUpdateSettingsFrame`` (system instruction on the LLM itself).
+        ``LLMUpdateSettingsFrame`` (system instruction on the LLM itself). A
+        :class:`~pipecat.flows.RoleMessage` can also mark that frame to reach
+        the inactive LLMs of an ``LLMSwitcher``.
 
         If ``role_messages`` (deprecated) is provided, the messages are
         prepended to the conversation context alongside ``task_messages``.
 
         Args:
-            role_message: Optional role/personality string sent as the LLM
-                system instruction via ``LLMUpdateSettingsFrame``.
+            role_message: Optional role/personality, as a string or a
+                ``RoleMessage``, sent as the LLM system instruction via
+                ``LLMUpdateSettingsFrame``.
             role_messages: Deprecated list-of-dicts prepended to context
                 messages for backward compatibility.
             task_messages: Task messages to add to context.
@@ -835,8 +845,13 @@ class FlowManager:
 
             # New path: role_message as LLM system instruction (persists until changed)
             if role_message:
+                if isinstance(role_message, str):
+                    role_message = RoleMessage(content=role_message)
                 frames.append(
-                    LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=role_message))
+                    LLMUpdateSettingsFrame(
+                        delta=LLMSettings(system_instruction=role_message["content"]),
+                        reach_inactive_services=role_message.get("reach_inactive_services", False),
+                    )
                 )
 
             messages = []
