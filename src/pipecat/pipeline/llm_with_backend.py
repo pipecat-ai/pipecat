@@ -105,7 +105,8 @@ BACKEND_PREFIXES = (
 # no unit test catches: gpt-4.1 stops delegating a "never mind", or the
 # classifier starts delegating questions about how the work is going. Before
 # and after changing any of these, run the checks in
-# scripts/llm-with-backend/tuning/README.md, and record their results there.
+# scripts/llm-with-backend/tuning/README.md, and record their results in
+# RESULTS.md beside it.
 # ---------------------------------------------------------------------------
 
 #: Carried on each spoken backend message, so the frontend relays it on whatever
