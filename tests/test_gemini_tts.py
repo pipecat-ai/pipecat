@@ -414,10 +414,16 @@ async def test_genai_38_strips_wav_header(mock_genai_client_class):
     assert audio == payload + b"\x03\x04" * 2400
 
 
-@requires_speech_metadata
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gemini-3.1-flash-tts-preview",
+        pytest.param("gemini-3.8-flash-tts", marks=requires_speech_metadata),
+    ],
+)
 @pytest.mark.asyncio
 @patch("google.genai.Client")
-async def test_genai_38_headerless_stream_resampled_to_pipeline_rate(mock_genai_client_class):
+async def test_genai_headerless_stream_resampled_to_pipeline_rate(mock_genai_client_class, model):
     """A headerless 24 kHz stream is resampled to an 8 kHz pipeline, not played 3x slow."""
     mock_client = MagicMock()
     mock_genai_client_class.return_value = mock_client
@@ -435,7 +441,7 @@ async def test_genai_38_headerless_stream_resampled_to_pipeline_rate(mock_genai_
 
     tts = GeminiTTSService(
         api_key="test-api-key",
-        settings=GeminiTTSService.Settings(model="gemini-3.8-flash-tts", voice="Puck"),
+        settings=GeminiTTSService.Settings(model=model, voice="Puck"),
     )
 
     frames_received = await run_test(
