@@ -497,12 +497,21 @@ def test_language_enum_maps_to_language_name():
     assert service._settings.language == "german"
 
 
-def test_voice_and_language_are_left_to_the_server_by_default():
+def test_default_voice_is_sent_and_language_is_left_to_the_server():
     service = AssemblyAITTSService(api_key="test-key")
     service._sample_rate = 24000
     query = parse_qs(urlparse(service._build_websocket_url()).query)
-    assert "voice_id" not in query
+    assert query["voice_id"] == [assemblyai_tts.DEFAULT_VOICE_ID]
     assert "language" not in query
+
+
+def test_voice_none_leaves_the_voice_to_the_server():
+    service = AssemblyAITTSService(
+        api_key="test-key", settings=AssemblyAITTSService.Settings(voice=None)
+    )
+    service._sample_rate = 24000
+    query = parse_qs(urlparse(service._build_websocket_url()).query)
+    assert "voice_id" not in query
 
 
 def test_cloned_voice_and_model_are_sent():

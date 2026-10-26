@@ -35,6 +35,9 @@ from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import is_given
 
+# Sara, a voice from AssemblyAI's public voice library.
+DEFAULT_VOICE_ID = "110c952f-38ba-54b6-b3b4-b49e96c30eaa"
+
 # Longest text one Generate message accepts, when Begin doesn't report a limit.
 MAX_GENERATE_CHARS = 2000
 
@@ -91,10 +94,11 @@ class AssemblyAITTSSettings(TTSSettings):
 
     ``voice`` is the API's ``voice_id``: any voice by its ID, an AssemblyAI
     voice by its library slug, such as ``aai-jane``, or a cloned voice by the
-    slug the AssemblyAI dashboard shows. ``language`` is the language the session
-    speaks, and ``model`` names the model, such as ``assemblyai-tts-1``.
-    Unset, the server uses its default voice, the voice's own language (else
-    English) and the default model of that language.
+    slug the AssemblyAI dashboard shows. It defaults to Sara
+    (``DEFAULT_VOICE_ID``); ``None`` leaves the voice to the server.
+    ``language`` is the language the session speaks, and ``model`` names the
+    model, such as ``assemblyai-tts-1``. Unset, the session speaks the voice's
+    own language and runs on that language's default model.
     """
 
     pass
@@ -134,9 +138,12 @@ class AssemblyAITTSService(WebsocketTTSService):
 
     Example::
 
+        # Speaks in Sara, the default voice.
+        tts = AssemblyAITTSService(api_key=os.getenv("ASSEMBLYAI_API_KEY"))
+
+        # Another voice, by its ID: Keegan.
         tts = AssemblyAITTSService(
             api_key=os.getenv("ASSEMBLYAI_API_KEY"),
-            # Keegan, a male voice from AssemblyAI's public voice library.
             settings=AssemblyAITTSService.Settings(voice="987db62e-a2c2-569a-9c4d-82460cdea1bd"),
         )
     """
@@ -168,7 +175,7 @@ class AssemblyAITTSService(WebsocketTTSService):
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
-        default_settings = self.Settings(model=None, voice=None, language=None)
+        default_settings = self.Settings(model=None, voice=DEFAULT_VOICE_ID, language=None)
         if settings is not None:
             default_settings.apply_update(settings)
 
