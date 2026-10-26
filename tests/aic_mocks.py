@@ -7,7 +7,7 @@
 """Shared aic_sdk test mocks for the AIC test suite.
 
 Importing in: ``tests/test_aic_filter.py``, ``tests/test_aic_quail_vad.py`` and
-``tests/test_aic_tyto_processor.py``.
+``tests/test_aic_tyto_observer.py``.
 Keep behavior aligned with the live ``aic_sdk`` 3.0 surface so the suite stays
 representative.
 """

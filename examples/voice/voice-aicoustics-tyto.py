@@ -14,6 +14,7 @@ from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.vad.aic_quail_vad import AICQuailVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.observers.aic_tyto_observer import AICTytoObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -21,7 +22,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.audio.aic_tyto_processor import AICTytoProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -56,18 +56,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, aic_fi
     )
 
     # The filter feeds Tyto the audio before enhancement.
-    tyto = AICTytoProcessor(
+    tyto = AICTytoObserver(
         license_key=os.environ["AIC_SDK_LICENSE"],
         audio_filter=aic_filter,
     )
 
     @tyto.event_handler("on_analysis_result")
-    async def on_analysis_result(processor, data):
-        logger.info(f"Tyto risk score at {data.audio_secs:.0f}s: {data.value.risk_score:.2f}")
+    async def on_analysis_result(observer, scores, audio_secs):
+        logger.info(f"Tyto risk score at {audio_secs:.0f}s: {scores.risk_score:.2f}")
 
     @tyto.event_handler("on_call_summary")
-    async def on_call_summary(processor, data):
-        summary = data.value
+    async def on_call_summary(observer, summary):
         logger.info(
             f"Tyto call summary: {summary.windows} windows, "
             f"mean risk {summary.mean.risk_score:.2f}, "
@@ -86,7 +85,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, aic_fi
     pipeline = Pipeline(
         [
             transport.input(),
-            tyto,
             stt,
             user_aggregator,
             llm,
@@ -103,6 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, aic_fi
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        observers=[tyto],
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
