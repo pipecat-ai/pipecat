@@ -1179,6 +1179,59 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(strategy.calls, 1)
         self.assertTrue(captured[-1].confirms_speculation)
 
+    async def test_a_half_migrated_override_reports_once(self):
+        """An override of the old method that calls the new one through super()."""
+        with self.assertWarns(DeprecationWarning):
+
+            class HalfMigrated(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    await super().report_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = HalfMigrated()
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped(enable_user_speaking_frames=False)
+
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual([p.enable_user_speaking_frames for p in captured], [False])
+
+    async def test_a_half_migrated_override_reports_once_from_its_own_task(self):
+        """As the custom external turn strategy example does after a grace period."""
+        with self.assertWarns(DeprecationWarning):
+
+            class DelayedHalfMigrated(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    self.create_task(self._report_later(enable_user_speaking_frames))
+
+                async def _report_later(self, enable_user_speaking_frames):
+                    await asyncio.sleep(0.05)
+                    await super().report_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = DelayedHalfMigrated()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped()
+        await asyncio.sleep(0.2)
+
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual(len(captured), 1)
+        await strategy.cleanup()
+
     async def test_the_deprecated_speculation_methods_still_fire(self):
         strategy = BaseUserTurnStopStrategy()
         speculations, cancels = [], []

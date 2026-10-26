@@ -6,6 +6,7 @@
 
 """Base user turn stop strategy for determining when the user stopped speaking."""
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from loguru import logger
@@ -15,6 +16,10 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated, warn_deprecated
+
+# The stop strategy whose override of the deprecated trigger_user_turn_stopped()
+# is running.
+_running_override: ContextVar[object | None] = ContextVar("_running_stop_override", default=None)
 
 
 @dataclass
@@ -278,11 +283,20 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         # Backward compatibility: a custom strategy may still override the
         # deprecated trigger_user_turn_stopped(), which never confirmed a
-        # speculation, so its override gets every other report.
-        if self._overrides_trigger_user_turn_stopped and not confirms_speculation:
-            await self.trigger_user_turn_stopped(
-                enable_user_speaking_frames=enable_user_speaking_frames
-            )
+        # speculation, so its override gets every other report. A report the
+        # override makes itself, directly or from a task it starts, fires.
+        if (
+            self._overrides_trigger_user_turn_stopped
+            and not confirms_speculation
+            and _running_override.get() is not self
+        ):
+            token = _running_override.set(self)
+            try:
+                await self.trigger_user_turn_stopped(
+                    enable_user_speaking_frames=enable_user_speaking_frames
+                )
+            finally:
+                _running_override.reset(token)
         else:
             await self._fire_user_turn_stopped(enable_user_speaking_frames, confirms_speculation)
 

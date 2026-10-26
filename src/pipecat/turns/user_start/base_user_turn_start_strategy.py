@@ -6,6 +6,7 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
@@ -13,6 +14,10 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated, warn_deprecated
+
+# The start strategy whose override of the deprecated
+# trigger_user_turn_started() is running.
+_running_override: ContextVar[object | None] = ContextVar("_running_start_override", default=None)
 
 
 @dataclass
@@ -233,12 +238,18 @@ class BaseUserTurnStartStrategy(BaseObject):
                 emitted it.
         """
         # Backward compatibility: a custom strategy may still override the
-        # deprecated trigger_user_turn_started(), so its override gets the report.
-        if self._overrides_trigger_user_turn_started:
-            await self.trigger_user_turn_started(
-                enable_interruptions=enable_interruptions,
-                enable_user_speaking_frames=enable_user_speaking_frames,
-            )
+        # deprecated trigger_user_turn_started(), so its override gets the
+        # report. A report the override makes itself, directly or from a task
+        # it starts, fires.
+        if self._overrides_trigger_user_turn_started and _running_override.get() is not self:
+            token = _running_override.set(self)
+            try:
+                await self.trigger_user_turn_started(
+                    enable_interruptions=enable_interruptions,
+                    enable_user_speaking_frames=enable_user_speaking_frames,
+                )
+            finally:
+                _running_override.reset(token)
         else:
             await self._fire_user_turn_started(enable_interruptions, enable_user_speaking_frames)
 
