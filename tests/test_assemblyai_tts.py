@@ -246,7 +246,7 @@ async def test_llm_turn_flushes_each_sentence_into_one_context():
 @pytest.mark.asyncio
 async def test_missing_word_boundaries_still_close_the_context(monkeypatch):
     """Without WordBoundaries the context closes after the grace period and keeps its text."""
-    monkeypatch.setattr(assemblyai_tts, "WORD_BOUNDARIES_GRACE_S", 0.05)
+    monkeypatch.setattr(assemblyai_tts, "_WORD_BOUNDARIES_GRACE_S", 0.05)
     captured: dict = {"messages": []}
     async with serve(_server(captured, word_boundaries=False), "127.0.0.1", 0) as server:
         down_frames, _ = await run_test(
@@ -447,7 +447,7 @@ async def test_begin_limits_size_generate_messages():
 @pytest.mark.asyncio
 async def test_idle_session_is_kept_alive(monkeypatch):
     """An idle session sends KeepAlive, since the server closes sessions that go quiet."""
-    monkeypatch.setattr(assemblyai_tts, "KEEPALIVE_INTERVAL_S", 0.1)
+    monkeypatch.setattr(assemblyai_tts, "_KEEPALIVE_INTERVAL_S", 0.1)
     captured: dict = {"messages": []}
     async with serve(_server(captured), "127.0.0.1", 0) as server:
         await run_test(_service(server), frames_to_send=[SleepFrame(sleep=0.35)])
@@ -501,7 +501,7 @@ def test_default_voice_is_sent_and_language_is_left_to_the_server():
     service = AssemblyAITTSService(api_key="test-key")
     service._sample_rate = 24000
     query = parse_qs(urlparse(service._build_websocket_url()).query)
-    assert query["voice_id"] == [assemblyai_tts.DEFAULT_VOICE_ID]
+    assert query["voice_id"] == [assemblyai_tts._DEFAULT_VOICE_ID]
     assert "language" not in query
 
 

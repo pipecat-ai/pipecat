@@ -36,26 +36,26 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import is_given
 
 # Sara, a voice from AssemblyAI's public voice library.
-DEFAULT_VOICE_ID = "110c952f-38ba-54b6-b3b4-b49e96c30eaa"
+_DEFAULT_VOICE_ID = "110c952f-38ba-54b6-b3b4-b49e96c30eaa"
 
 # Longest text one Generate message accepts, when Begin doesn't report a limit.
-MAX_GENERATE_CHARS = 2000
+_MAX_GENERATE_CHARS = 2000
 
 # How long before a session's expires_at to replace it between requests, at
 # most half the session's length. The server stops reading text at expires_at,
 # which would cut off a reply that straddles it.
-SESSION_RENEWAL_MARGIN_S = 120.0
+_SESSION_RENEWAL_MARGIN_S = 120.0
 
 # How often to send KeepAlive. Every session closes after 120 s without a frame
 # either way, and a bot can be silent that long while the user speaks.
-KEEPALIVE_INTERVAL_S = 30.0
+_KEEPALIVE_INTERVAL_S = 30.0
 
 # How long to wait, after a turn's last FlushDone, for the WordBoundaries frame
 # that trails it. It is best-effort, so the turn closes without it after this.
-WORD_BOUNDARIES_GRACE_S = 1.0
+_WORD_BOUNDARIES_GRACE_S = 1.0
 
 # Retryable errors that end a session in the normal course of things.
-ROUTINE_ERROR_TYPES = frozenset({"inactivity_timeout", "session_expired", "service_restart"})
+_ROUTINE_ERROR_TYPES = frozenset({"inactivity_timeout", "session_expired", "service_restart"})
 
 
 def language_to_assemblyai_tts_language(language: Language) -> str:
@@ -95,7 +95,7 @@ class AssemblyAITTSSettings(TTSSettings):
     ``voice`` is the API's ``voice_id``: any voice by its ID, an AssemblyAI
     voice by its library slug, such as ``aai-jane``, or a cloned voice by the
     slug the AssemblyAI dashboard shows. It defaults to Sara
-    (``DEFAULT_VOICE_ID``); ``None`` leaves the voice to the server.
+    (``_DEFAULT_VOICE_ID``); ``None`` leaves the voice to the server.
     ``language`` is the language the session speaks, and ``model`` names the
     model, such as ``assemblyai-tts-1``. Unset, the session speaks the voice's
     own language and runs on that language's default model.
@@ -175,7 +175,7 @@ class AssemblyAITTSService(WebsocketTTSService):
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
-        default_settings = self.Settings(model=None, voice=DEFAULT_VOICE_ID, language=None)
+        default_settings = self.Settings(model=None, voice=_DEFAULT_VOICE_ID, language=None)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -196,7 +196,7 @@ class AssemblyAITTSService(WebsocketTTSService):
         # Session state reported by Begin. A session ID means Begin arrived.
         self._session_id: str | None = None
         self._renew_at: float | None = None
-        self._max_generate_chars = MAX_GENERATE_CHARS
+        self._max_generate_chars = _MAX_GENERATE_CHARS
         self._word_boundaries = False
         # The wait an Error asked for before the next connection attempt.
         self._reconnect_delay = 0.0
@@ -289,7 +289,7 @@ class AssemblyAITTSService(WebsocketTTSService):
         await super()._connect()
         self._reconnect_delay = 0.0
         await self._open_session()
-        self._create_keepalive_task(KEEPALIVE_INTERVAL_S)
+        self._create_keepalive_task(_KEEPALIVE_INTERVAL_S)
 
     async def _disconnect(self):
         """Disconnect from AssemblyAI and stop the receive and keepalive tasks."""
@@ -382,7 +382,7 @@ class AssemblyAITTSService(WebsocketTTSService):
         self._cancels_pending = 0
         self._session_id = None
         self._renew_at = None
-        self._max_generate_chars = MAX_GENERATE_CHARS
+        self._max_generate_chars = _MAX_GENERATE_CHARS
         self._word_boundaries = False
 
     async def _close_connection_contexts(self):
@@ -431,7 +431,7 @@ class AssemblyAITTSService(WebsocketTTSService):
         await self._close_context(context_id)
 
     async def _word_boundaries_grace(self, context_id: str):
-        await asyncio.sleep(WORD_BOUNDARIES_GRACE_S)
+        await asyncio.sleep(_WORD_BOUNDARIES_GRACE_S)
         state = self._contexts.get(context_id)
         if state:
             logger.debug(f"{self}: no WordBoundaries for flushes {state.awaiting_words}")
@@ -542,9 +542,9 @@ class AssemblyAITTSService(WebsocketTTSService):
         self._session_id = msg.get("id")
         expires_at = msg.get("expires_at")
         if expires_at:
-            margin = min(SESSION_RENEWAL_MARGIN_S, (expires_at - time.time()) / 2)
+            margin = min(_SESSION_RENEWAL_MARGIN_S, (expires_at - time.time()) / 2)
             self._renew_at = expires_at - margin
-        self._max_generate_chars = limits.get("max_generate_text_length") or MAX_GENERATE_CHARS
+        self._max_generate_chars = limits.get("max_generate_text_length") or _MAX_GENERATE_CHARS
         self._word_boundaries = configuration.get("word_boundaries") is True
         logger.debug(f"{self}: session {self._session_id} started: {configuration}")
 
@@ -609,7 +609,7 @@ class AssemblyAITTSService(WebsocketTTSService):
 
         if msg.get("retryable"):
             self._reconnect_delay = float(msg.get("retry_after_seconds") or 0)
-            if error_type in ROUTINE_ERROR_TYPES:
+            if error_type in _ROUTINE_ERROR_TYPES:
                 logger.debug(f"{self}: {text}")
                 return
             category = ErrorCategory.RATE_LIMIT if code == 3009 else ErrorCategory.SERVER
