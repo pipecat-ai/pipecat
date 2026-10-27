@@ -31,7 +31,6 @@ from pipecat.services.elevenlabs.tts_base import (
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
-    calculate_word_times,
     elevenlabs_language_code,
 )
 from pipecat.services.settings import TTSSettings
@@ -397,12 +396,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                     ("chars", "charStartTimesMs", "charDurationsMs"),
                     context.in_audio_tag,
                 )
-            word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
-                joined,
-                self._cumulative_time,
-                self._partial_word,
-                self._partial_word_start_time,
-            )
+            word_times = self._word_times_from_alignment(received_ctx_id, alignment, joined)
 
             if word_times:
                 await self.add_word_timestamps(
@@ -416,19 +410,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                         else None
                     ),
                 )
-
-            # Alignment times restart at zero in every message, so the clock
-            # advances by each chunk's span. It has to advance for chunks that
-            # complete no word too — trailing punctuation arrives on its own —
-            # or every later word is timestamped early by the shortfall.
-            char_start_times_ms = alignment.get("charStartTimesMs", [])
-            char_durations_ms = alignment.get("charDurationsMs", [])
-
-            if char_start_times_ms and char_durations_ms:
-                chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                self._cumulative_time += chunk_end_time_ms / 1000.0
-            elif word_times:
-                self._cumulative_time = word_times[-1][1]
 
     async def _register_keepalive_context(self):
         """Open a context that exists only to keep the connection alive.
