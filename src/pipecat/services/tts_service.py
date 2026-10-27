@@ -2034,7 +2034,8 @@ class TTSService(AIService):
         For WAV data, use `strip_wav_header=True` to strip the header and
         auto-detect the source sample rate. For raw PCM data, pass
         `in_sample_rate` directly. Audio is resampled to `self.sample_rate` when
-        the source rate differs.
+        the source rate differs. Each iterator has its own resampler, which is
+        flushed when the iterator finishes.
 
         Args:
             iterator: Async iterator yielding audio bytes.
@@ -2047,10 +2048,11 @@ class TTSService(AIService):
         buffer = bytearray()
         source_sample_rate = in_sample_rate
         need_to_strip_wav_header = strip_wav_header
+        resampler = create_stream_resampler(clear_after_secs=None)
 
         async def maybe_resample(audio: bytes) -> bytes:
             if source_sample_rate and source_sample_rate != self.sample_rate:
-                return await self._resampler.resample(audio, source_sample_rate, self.sample_rate)
+                return await resampler.resample(audio, source_sample_rate, self.sample_rate)
             return audio
 
         async for chunk in iterator:
@@ -2082,6 +2084,10 @@ class TTSService(AIService):
                 buffer.extend(b"\x00")
             audio = await maybe_resample(bytes(buffer))
             yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+
+        tail = await resampler.flush()
+        if tail:
+            yield TTSAudioRawFrame(tail, self.sample_rate, 1, context_id=context_id)
 
     #
     # Word frames
