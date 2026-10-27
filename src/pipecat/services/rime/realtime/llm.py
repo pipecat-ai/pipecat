@@ -58,10 +58,19 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregatorParams,
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import FunctionCallRunnerItem, LLMService
 from pipecat.services.rime.realtime._adapter import RimeRealtimeLLMAdapter
+from pipecat.services.rime.realtime._aggregators import (
+    RimeContextAggregatorPair,
+    _RimeContextFrame,
+)
 from pipecat.services.rime.realtime._history import History
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -119,6 +128,7 @@ class _Response:
 @dataclass
 class _Operation:
     messages: list | None = None
+    append_messages: list | None = None
     tools: Any = NOT_GIVEN
     tool_choice: Any = NOT_GIVEN
     delta: LLMSettings | None = None
@@ -127,7 +137,7 @@ class _Operation:
 
 
 class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
-    """One Prism conversation using the standard context aggregators and transports.
+    """One Prism conversation using Rime context aggregators and standard transports.
 
     Text input is imported into history before requesting a reply. Aggregators
     own the local conversation record; rejected provider edits do not roll it
@@ -269,6 +279,30 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             user_turn_strategies=ExternalUserTurnStrategies(),
         )
 
+    def create_context_aggregator(
+        self,
+        context: LLMContext,
+        *,
+        user_params: LLMUserAggregatorParams | None = None,
+        assistant_params: LLMAssistantAggregatorParams | None = None,
+    ) -> LLMContextAggregatorPair:
+        """Create the aggregator pair required for this Prism conversation.
+
+        Speech transcripts update local context without requesting a second
+        reply. Application message frames preserve append or replace intent.
+
+        Args:
+            context: Shared conversation record.
+            user_params: Standard user aggregator configuration.
+            assistant_params: Standard assistant aggregator configuration.
+
+        Returns:
+            User and assistant aggregators for the pipeline.
+        """
+        return RimeContextAggregatorPair(
+            context, user_params=user_params, assistant_params=assistant_params
+        )
+
     async def get_history(self) -> tuple[r.HistoryItem, ...]:
         """Read completed server history without changing local context."""
         if self._connection_task is None:
@@ -371,10 +405,21 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             else:
                 await super().process_frame(frame, direction)
             if isinstance(frame, LLMContextFrame):
+                initial = self._context is None
                 self._bind_context(frame.context)
+                messages = None
+                append_messages = None
+                if initial or not isinstance(frame, _RimeContextFrame):
+                    messages = copy.deepcopy(frame.context.get_messages())
+                elif frame.history_update is not None:
+                    if frame.history_update.append:
+                        append_messages = frame.history_update.messages
+                    else:
+                        messages = frame.history_update.messages
                 await self._enqueue(
                     _Operation(
-                        messages=copy.deepcopy(frame.context.get_messages()),
+                        messages=messages,
+                        append_messages=append_messages,
                         tools=frame.context.tools,
                         tool_choice=frame.context.tool_choice,
                         run_llm=True,
@@ -431,6 +476,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     raise ValueError("Prism only supports automatic tool selection")
                 if operation.messages is not None:
                     await self._ledger.sync(operation.messages)
+                if operation.append_messages is not None:
+                    await self._ledger.edit(operation.append_messages, append=True)
                 if is_given(operation.tools) and operation.tools != self._settings.tools:
                     await self._settings_operation(self.Settings(tools=operation.tools))
                 if operation.delta is not None:

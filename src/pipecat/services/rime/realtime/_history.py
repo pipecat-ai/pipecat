@@ -41,8 +41,8 @@ class Record:
 class History:
     """Own conversion and mutations for one SDK conversation.
 
-    Live provider items are matched to later aggregator records by content and
-    order. Local edits are synchronized on context frames, without rollback.
+    Explicit context replacements match provider items by content and order.
+    Transcript aggregation never changes provider history. Edits have no rollback.
     """
 
     def __init__(self, session: r.RealtimeSession):
@@ -76,10 +76,8 @@ class History:
         self.records.append(Record(message, server_ids, bound=False))
 
     async def sync(self, messages: list) -> None:
-        """Import local edits without re-importing provider-created conversation items.
+        """Apply an explicit context snapshot while retaining matching provider items.
 
-        Unmatched live records can still be awaiting aggregation. Only records
-        already observed in local context participate in deletion or replacement.
         Identical replacements cannot be distinguished from retained messages.
         """
         known_calls = {
@@ -127,7 +125,7 @@ class History:
                 used.add(match.identity)
                 match.message = message
                 match.bound = True
-        bound = [record for record in self.records if record.bound]
+        bound = list(self.records)
         retained = [record for record in matches if record is not None]
         if len(retained) == len(filtered) and bound == retained:
             return

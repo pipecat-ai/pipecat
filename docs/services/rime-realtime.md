@@ -1,6 +1,6 @@
 # Rime Prism realtime conversations
 
-`RimeRealtimeLLMService` uses Prism for speech input, generated speech, and tools through the direct Rime SDK session. It works with Pipecat's standard context aggregators and output transports. Install the optional dependency:
+`RimeRealtimeLLMService` uses Prism for speech input, generated speech, and tools through the direct Rime SDK session. It provides a context aggregator pair and uses Pipecat's standard output transports. Install the optional dependency:
 
 ```sh
 uv pip install 'pipecat-ai[rime-realtime]'
@@ -24,13 +24,15 @@ llm = RimeRealtimeLLMService(
 
 ## Pipeline and turns
 
-Use `LLMContextAggregatorPair(context)` with this pipeline:
+Create the pair with `user, assistant = llm.create_context_aggregator(context)` and use this pipeline:
 
 ```text
 transport.input() → user aggregator → Rime → transport.output() → assistant aggregator
 ```
 
 The service advertises realtime mode and external turn strategies through existing service metadata. Prism detects speech turns. Pipecat handles local interruption and output queues through its normal frames. Avoid adding another turn detector that also interrupts on the same speech.
+
+The Rime pair reuses Pipecat's turn handling. It records speech transcripts without requesting another reply and preserves application history edits. Use this pair for Prism conversations.
 
 Queue `LLMRunFrame()` to send initial context and request a reply. An opening reply with no useful history can fail on some deployments. The example includes system history that asks for a greeting.
 
@@ -50,9 +52,11 @@ The SDK acknowledgment controls accepted provider settings. Normal Pipecat aggre
 
 ## History and recovery
 
-Append, update, and transform message frames change local context through the standard aggregators. On the next context frame, Rime synchronizes supported history and requests a reply. An edit with `run_llm=False` remains local until another operation sends context.
+Append, update, and transform message frames change local context through the Rime pair. Appends import only the supplied messages. Updates and transforms replace supported provider history. An edit with `run_llm=False` remains local until another operation requests inference through either aggregator.
 
-The private history ledger matches provider-created turns to later aggregator records by content and order. It avoids importing speech, assistant replies, and tool results twice. Identical replacement messages can match retained messages because a context snapshot does not preserve the original edit intent.
+Ordinary transcript and assistant aggregation never replace provider history. A later `LLMRunFrame` applies pending application edits and requests a reply. Direct `LLMContextFrame` input is an explicit history snapshot. Change messages through these frames; changes made directly to an already-bound context are not synchronized by `LLMRunFrame`.
+
+The private history ledger matches explicit replacement messages to provider records by content and order. Identical messages can retain their server identities.
 
 History imports support user, assistant, and system text plus completed tool calls and results. Imported text messages have a 4000-character limit. Images, video, pending tool-call imports, and arbitrary developer messages are unsupported. Loading completed calls never executes them.
 

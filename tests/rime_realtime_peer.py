@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService
 from pipecat.transports.base_output import BaseOutputTransport
@@ -274,7 +273,7 @@ async def conversation(*, context=None, enabled=True, unversioned=False, **optio
             service = RimeRealtimeLLMService(
                 client=client, endpoint=endpoint, shutdown_timeout=0.4, **options
             )
-            pair = LLMContextAggregatorPair(context)
+            pair = service.create_context_aggregator(context)
             output = Output(enabled=enabled)
             pipeline = Pipeline(
                 [

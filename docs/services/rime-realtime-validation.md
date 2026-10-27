@@ -1,12 +1,12 @@
 # Rime Prism validation
 
-The local protocol tests use the published `rimelabs-sdk` with a WebSocket peer and a `PipelineWorker`. They exercise the standard context aggregators and output transport. Shared runtime modules match this branch's `main`. On October 26, 2026, all 38 Rime protocol tests and 443 related regression tests passed. Ruff, Pyright, lock consistency, registry checks, and the changelog draft also passed.
+The local protocol tests use the published `rimelabs-sdk` with a WebSocket peer and a `PipelineWorker`. They exercise the Rime context aggregator pair and standard output transport. Shared runtime modules match this branch's `main`. On October 26, 2026, all 49 Rime protocol tests passed within a set of 284 protocol and related regression tests. The 36 deprecation checks, Ruff, Pyright, registry checks, and changelog draft also passed.
 
 ```sh
 uv run --extra rime-realtime pytest -n 0 tests/test_rime_realtime_service.py
 ```
 
-The tests cover typed history input, speech transcripts, successive turns, tool continuation, settings and filler updates, history edits, interruption, audio conversion, and cleanup. The peer controls provider acknowledgments, rejection, and readiness events. These tests establish frame and protocol behavior, not public endpoint behavior or physical playback.
+The tests cover typed history input, speech transcripts, successive turns, tool continuation, settings and filler updates, history edits, interruption, audio conversion, and cleanup. They check that speech aggregation requests no duplicate reply, partial local text does not replace provider history, and deferred application edits work through either aggregator. The peer controls provider acknowledgments, rejection, and readiness events. These tests establish frame and protocol behavior, not public endpoint behavior or physical playback.
 
 The saved scenarios cover typed tools and handoff, voice memory, interruption followed by another turn, and voice tools and handoff:
 
@@ -20,6 +20,8 @@ uv run pipecat eval run evals/release/scenarios/scripted/rime_prism.yaml \
 
 Audio scenarios are in `evals/release/scenarios/scripted/rime_prism_audio.yaml`. See the [release eval guide](../../evals/release/README.md) for caller speech, transcription, and judge setup.
 
-Public endpoint checks recorded on October 24, 2026 used the earlier implementation with shared operation and playback contracts. Those results do not validate the current implementation. Public endpoint checks must be repeated with `RIME_API_KEY` available. Audio judgment also needs the configured speech, transcription, and judge dependencies.
+Public endpoint checks on October 26, 2026 used the current Rime aggregator pair with direct output and a LiveKit room. Both runs passed spoken turns without extra proactive replies, typed recall, three caller interruptions followed by spoken turns, application interruption, and explicit history replacement. All owned clients closed, and test rooms were absent after cleanup.
+
+The caller used synthetic speech. Checks compared provider text with expected content and verified nonzero output audio. They did not independently transcribe the generated audio. These checks do not establish reliable use of tools replaced during a session; that provider behavior remains unresolved.
 
 Playback positions are estimates. Device timing, physical audibility, and remote listener timing are not measured by this implementation.
