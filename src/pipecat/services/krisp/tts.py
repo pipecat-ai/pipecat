@@ -12,6 +12,7 @@ untagged 24 kHz PCM. The server answers every ``text`` message with one
 a turn's audio is complete.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -43,6 +44,10 @@ KRISP_TTS_URL = "wss://streaming.krisp.ai/tts"
 
 # The API streams 24 kHz mono 16-bit PCM.
 KRISP_TTS_SAMPLE_RATE = 24000
+
+# Longest pause between sentences of one reply (e.g. a slow LLM) that keeps the
+# reply open; after it, the base idle timeout ends the reply.
+_MAX_SENTENCE_GAP_SECS = 15.0
 
 
 def language_to_krisp_tts_language(language: Language) -> str:
@@ -145,6 +150,13 @@ class KrispTTSService(InterruptibleTTSService):
         # Incremented on every new connection; texts sent on an earlier one
         # will never be answered.
         self._connection_id = 0
+        # Contexts whose text is fully sent (flush_audio) and contexts that got
+        # audio: a flushed context that completes without audio means the
+        # session stalled.
+        self._text_done_contexts: set[str] = set()
+        self._contexts_with_audio: set[str] = set()
+        # Keeps the reply open while the LLM pauses between sentences.
+        self._gap_task: asyncio.Task | None = None
         # Set when a settings change arrives while the bot is speaking; the
         # reconnect that applies it waits until the bot stops.
         self._reconnect_after_turn = False
@@ -236,7 +248,10 @@ class KrispTTSService(InterruptibleTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._cancel_gap_task()
         await self._disconnect_websocket()
+        self._text_done_contexts.clear()
+        self._contexts_with_audio.clear()
         # The reply is torn down here, not on every reconnect: a reconnect
         # inside ``send_with_retry`` keeps the reply going.
         await self.remove_active_audio_context()
@@ -317,6 +332,7 @@ class KrispTTSService(InterruptibleTTSService):
         if not flush_id:
             return
         self._flushed_context_id = flush_id
+        self._text_done_contexts.add(flush_id)
         await self._maybe_finish_context()
 
     async def on_audio_context_interrupted(self, context_id: str):
@@ -326,7 +342,73 @@ class KrispTTSService(InterruptibleTTSService):
             context_id: The interrupted context.
         """
         await self.stop_all_metrics()
+        await self._cancel_gap_task()
+        self._text_done_contexts.discard(context_id)
+        self._contexts_with_audio.discard(context_id)
         await super().on_audio_context_interrupted(context_id)
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Reconnect if a reply's text was fully sent but produced no audio.
+
+        Krisp can accept text on a stalled session without answering or
+        erroring; the next reply then gets a fresh session.
+
+        Args:
+            context_id: The completed context.
+        """
+        await super().on_audio_context_completed(context_id)
+        text_done = context_id in self._text_done_contexts
+        got_audio = context_id in self._contexts_with_audio
+        self._text_done_contexts.discard(context_id)
+        self._contexts_with_audio.discard(context_id)
+        if text_done and not got_audio:
+            logger.warning(f"{self}: Krisp TTS produced no audio for a reply; reconnecting")
+            await self._abandon_session()
+
+    async def _abandon_session(self):
+        """Close the session; the next ``run_tts`` opens a fresh one.
+
+        ``_disconnecting`` keeps the receive loop from reconnecting on its own
+        and racing ``run_tts``; ``_connect`` clears it.
+        """
+        self._disconnecting = True
+        await self._cancel_gap_task()
+        websocket = self._websocket
+        if websocket and websocket.state is State.OPEN:
+            try:
+                await websocket.close()
+            except Exception as e:
+                logger.warning(f"{self}: error closing websocket: {e}")
+
+    async def _end_reply(self, context_id: str | None):
+        """End a reply now: its remaining texts will never be answered."""
+        self._pending_texts = 0
+        self._flushed_context_id = None
+        if context_id:
+            self._text_done_contexts.discard(context_id)
+            self._contexts_with_audio.discard(context_id)
+        if context_id and self.audio_context_available(context_id):
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+    async def _keep_reply_open(self, context_id: str):
+        """Refresh the reply's idle timeout while the LLM pauses between sentences."""
+        interval = self._stop_frame_timeout_s / 2
+        deadline = asyncio.get_running_loop().time() + _MAX_SENTENCE_GAP_SECS
+        while asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(interval)
+            if (
+                self._pending_texts
+                or context_id in self._text_done_contexts
+                or not self.audio_context_available(context_id)
+            ):
+                return
+            self._refresh_audio_context(context_id)
+
+    async def _cancel_gap_task(self):
+        if self._gap_task:
+            await self.cancel_task(self._gap_task)
+            self._gap_task = None
 
     async def _maybe_finish_context(self):
         context_id = self._flushed_context_id
@@ -342,6 +424,7 @@ class KrispTTSService(InterruptibleTTSService):
             if isinstance(message, bytes):
                 context_id = self.get_active_audio_context_id()
                 if context_id and self.audio_context_available(context_id):
+                    self._contexts_with_audio.add(context_id)
                     frame = TTSAudioRawFrame(
                         audio=message,
                         sample_rate=self.sample_rate,
@@ -356,15 +439,24 @@ class KrispTTSService(InterruptibleTTSService):
             if msg_type == "end_of_sentence":
                 self._pending_texts = max(0, self._pending_texts - 1)
                 await self._maybe_finish_context()
+                context_id = self.get_active_audio_context_id()
+                if (
+                    context_id
+                    and not self._pending_texts
+                    and context_id not in self._text_done_contexts
+                    and not (self._gap_task and not self._gap_task.done())
+                ):
+                    # Caught up while the reply's text is still streaming in.
+                    self._gap_task = self.create_task(self._keep_reply_open(context_id))
             elif msg_type == "error":
                 error = KrispServiceError.from_message(msg)
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Krisp TTS error: {error}", exception=error)
-                if error.is_permanent:
-                    # The error marks the service unusable, so the receive loop
-                    # won't reconnect; close the session client-side.
-                    await self._get_websocket().close()
-                    return
+                # Close first, then end the reply: ending it resumes the paused
+                # pipeline, whose next run_tts must find the session closed.
+                await self._abandon_session()
+                await self._end_reply(self.get_active_audio_context_id())
+                return
             # "all_processed", "info" and "Done" carry nothing the service needs.
 
     @traced_tts

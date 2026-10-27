@@ -6,7 +6,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import web
@@ -533,6 +533,8 @@ def _tts(messages=()) -> KrispTTSService:
     service.remove_audio_context = AsyncMock()
     service.audio_context_available = lambda ctx: True
     service.get_active_audio_context_id = lambda: "ctx"
+    # Background tasks (the sentence-gap keepalive) aren't run unless a test opts in.
+    service.create_task = lambda coro, *a, **kw: coro.close()
     return service
 
 
@@ -761,3 +763,94 @@ async def test_connect_replaces_a_finished_receive_task(make):
 
     service.cancel_task.assert_awaited_once_with(finished)
     assert service._receive_task is new_task
+
+
+def _closing_websocket(service):
+    """Make the fake socket report CLOSED once closed, like a real one."""
+    ws = service._websocket
+
+    async def close():
+        ws.state = State.CLOSED
+
+    ws.close = AsyncMock(side_effect=close)
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_tts_error_mid_reply_closes_the_session_and_ends_the_reply():
+    error = {"type": "error", "error": {"code": "internal_server_error", "status_code": 500}}
+    service = _tts([error, b"\x00\x00" * 240])
+    service.push_error = AsyncMock()
+    ws = _closing_websocket(service)
+    await _run_tts(service, "Hello there.", "ctx")
+
+    await service._receive_messages()
+
+    service.push_error.assert_awaited_once()
+    ws.close.assert_awaited_once()
+    assert service._disconnecting  # the receive loop must not reconnect on its own
+    ((ctx, frame),) = _appended(service)  # reply ended; later audio not read
+    assert ctx == "ctx" and isinstance(frame, TTSStoppedFrame)
+    service.remove_audio_context.assert_awaited_once_with("ctx")
+    assert service._pending_texts == 0
+
+
+@pytest.mark.asyncio
+async def test_tts_next_reply_after_an_error_opens_a_fresh_session():
+    service = _tts()
+    _closing_websocket(service)
+    await service._abandon_session()
+    service._connect = AsyncMock()
+    service.send_with_retry = AsyncMock()
+
+    await _run_tts(service, "Hello again.", "ctx")
+
+    service._connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tts_silent_reply_reconnects():
+    service = _tts()
+    ws = _closing_websocket(service)
+    await _run_tts(service, "Hello.", "ctx")
+    await service.flush_audio("ctx")
+
+    await service.on_audio_context_completed("ctx")
+
+    ws.close.assert_awaited_once()
+    assert service._disconnecting
+
+
+@pytest.mark.asyncio
+async def test_tts_reply_with_audio_keeps_the_session():
+    service = _tts([b"\x00\x00" * 240])
+    ws = _closing_websocket(service)
+    await _run_tts(service, "Hello.", "ctx")
+    await service._receive_messages()
+    await service.flush_audio("ctx")
+
+    await service.on_audio_context_completed("ctx")
+
+    ws.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tts_pause_between_sentences_keeps_the_reply_open():
+    service = _tts([{"type": "end_of_sentence"}])
+    service._stop_frame_timeout_s = 0.02
+    service._refresh_audio_context = MagicMock()
+    tasks = []
+    service.create_task = lambda coro, *a, **kw: (
+        tasks.append(asyncio.create_task(coro)) or tasks[-1]
+    )
+    await _run_tts(service, "First sentence.", "ctx")
+
+    await service._receive_messages()  # caught up; the LLM hasn't sent more text yet
+    await asyncio.sleep(0.1)
+    refreshes = service._refresh_audio_context.call_count
+    assert refreshes >= 3
+
+    await service.flush_audio("ctx")  # the reply's text is complete: stop refreshing
+    await asyncio.sleep(0.05)
+    assert service._refresh_audio_context.call_count <= refreshes + 1
+    await asyncio.wait_for(tasks[0], 1)
