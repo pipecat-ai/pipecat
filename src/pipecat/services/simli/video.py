@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import ServiceSettings
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 try:
     from av.audio.frame import AudioFrame
@@ -181,7 +181,7 @@ class SimliVideoService(AIService):
         api_key: str,
         face_id: str,
         simli_url: str = "https://api.simli.ai",
-        is_trinity_avatar: bool = False,
+        is_trinity_avatar: bool | None = None,
         params: InputParams | None = None,
         max_session_length: int | None = None,
         max_idle_time: int | None = None,
@@ -198,8 +198,12 @@ class SimliVideoService(AIService):
                 to use a different emotion than the default.
             simli_url: URL of the simli servers. Can be changed for custom deployments
                 of enterprise users.
-            is_trinity_avatar: Boolean to tell simli client that this is a Trinity avatar
-                which reduces latency when using Trinity.
+            is_trinity_avatar: Has no effect: the bot's audio goes to Simli as it
+                arrives, whatever the face.
+
+                .. deprecated:: 1.15.0
+                    No replacement. Will be removed in 2.0.0.
+
             params: Additional input parameters for session configuration.
 
                 .. deprecated:: 0.0.106
@@ -230,6 +234,13 @@ class SimliVideoService(AIService):
                 max_idle_time = params.max_idle_time
             if enable_logging is None and hasattr(params, "enable_logging"):
                 enable_logging = params.enable_logging
+        if is_trinity_avatar is not None:
+            warn_deprecated(
+                "`SimliVideoService(is_trinity_avatar=...)` is deprecated since 1.15.0 and "
+                "will be removed in 2.0.0. No replacement. It has no effect: the bot's audio "
+                "goes to Simli as it arrives, whatever the face.",
+                stacklevel=2,
+            )
 
         # 3. Apply settings delta
         if settings is not None:
@@ -272,9 +283,6 @@ class SimliVideoService(AIService):
 
         self._audio_task: asyncio.Task | None = None
         self._video_task: asyncio.Task | None = None
-        self._is_trinity_avatar = is_trinity_avatar
-        self._previously_interrupted = is_trinity_avatar
-        self._audio_buffer = bytearray()
         # Whether the bot's voice last came as a speech stream
         # (SpeechOutputAudioRawFrame) rather than as TTS audio.
         self._speech_stream = False
@@ -398,44 +406,17 @@ class SimliVideoService(AIService):
                 resampled_frames = self._simli_resampler.resample(old_frame)
                 for resampled_frame in resampled_frames:
                     audioBytes = resampled_frame.to_ndarray().astype(np.int16).tobytes()
-                    if self._previously_interrupted and self._speech_stream:
-                        # A speech stream comes at the pace it plays at, so holding
-                        # it back to fill the buffer below would only delay the
-                        # avatar. Send what's buffered and go on.
-                        if self._audio_buffer:
-                            await self._simli_client.sendImmediate(bytes(self._audio_buffer))
-                            self._audio_buffer = bytearray()
-                        self._previously_interrupted = False
-                    if self._previously_interrupted:
-                        self._audio_buffer.extend(audioBytes)
-                        if len(self._audio_buffer) >= 128000:
-                            try:
-                                for flushFrame in self._simli_resampler.resample(None):
-                                    self._audio_buffer.extend(
-                                        flushFrame.to_ndarray().astype(np.int16).tobytes()
-                                    )
-                            finally:
-                                await self._simli_client.sendImmediate(bytes(self._audio_buffer))
-                                self._previously_interrupted = False
-                                self._audio_buffer = bytearray()
-                    else:
-                        await self._simli_client.send(audioBytes)
+                    await self._simli_client.send(audioBytes)
                 return
             except Exception as e:
                 await self.push_error(error_msg=f"Error sending audio: {e}", exception=e)
         elif isinstance(frame, TTSStoppedFrame):
-            try:
-                if self._previously_interrupted and len(self._audio_buffer) > 0:
-                    await self._simli_client.sendImmediate(bytes(self._audio_buffer))
-                    self._previously_interrupted = False
-                    self._audio_buffer = bytearray()
-            except Exception as e:
-                await self.push_error(error_msg=f"Error stopping TTS: {e}", exception=e)
+            # Simli sends the avatar's voice back in real time, after a TTS burst
+            # has finished, so the output transport would take this as the bot
+            # having stopped speaking while the avatar is still talking.
             return
         elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
-            if not self._previously_interrupted:
-                await self._simli_client.clearBuffer()
-            self._previously_interrupted = self._is_trinity_avatar
+            await self._simli_client.clearBuffer()
 
         await self.push_frame(frame, direction)
 

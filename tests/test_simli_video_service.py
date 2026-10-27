@@ -312,10 +312,12 @@ async def test_tts_audio_animates_avatar(simli_video):
 
 
 @pytest.mark.asyncio
-async def test_trinity_buffers_tts_audio_until_tts_stops(simli_video):
-    service = simli_video.SimliVideoService(api_key="key", face_id="face", is_trinity_avatar=True)
+async def test_audio_goes_to_simli_as_it_arrives(simli_video):
+    """Nothing is held back until TTSStoppedFrame, which isn't pushed on: the
+    avatar's voice comes back from Simli after it."""
+    service = simli_video.SimliVideoService(api_key="key", face_id="face")
 
-    await run_test(
+    down, _ = await run_test(
         service,
         frames_to_send=[
             TTSAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
@@ -325,28 +327,48 @@ async def test_trinity_buffers_tts_audio_until_tts_stops(simli_video):
         ],
     )
 
-    assert service._simli_client.sent == []
-    assert service._simli_client.sent_immediately == [SPEECH + SPEECH]
+    assert service._simli_client.sent == [SPEECH, SPEECH]
+    assert service._simli_client.sent_immediately == []
+    assert not any(isinstance(f, TTSStoppedFrame) for f in down)
 
 
 @pytest.mark.asyncio
-async def test_trinity_sends_speech_stream_as_it_comes(simli_video):
-    """A speech stream plays in real time, so it isn't held back to fill
-    the Trinity buffer, and an interruption still clears Simli's buffer."""
-    service = simli_video.SimliVideoService(api_key="key", face_id="face", is_trinity_avatar=True)
+async def test_every_interruption_clears_simli_buffer(simli_video):
+    service = simli_video.SimliVideoService(api_key="key", face_id="face")
 
     await run_test(
         service,
         frames_to_send=[
             SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
-            SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
             SleepFrame(sleep=0.1),
             InterruptionFrame(),
             SleepFrame(sleep=0.1),
         ],
     )
 
-    assert service._simli_client.sent == [SPEECH, SPEECH]
+    assert service._simli_client.buffer_clears == 2
+
+
+@pytest.mark.asyncio
+async def test_is_trinity_avatar_is_deprecated_and_ignored(simli_video):
+    with pytest.warns(DeprecationWarning, match="is_trinity_avatar"):
+        service = simli_video.SimliVideoService(
+            api_key="key", face_id="face", is_trinity_avatar=True
+        )
+
+    await run_test(
+        service,
+        frames_to_send=[
+            TTSAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_client.sent == [SPEECH]
     assert service._simli_client.sent_immediately == []
     assert service._simli_client.buffer_clears == 1
 
