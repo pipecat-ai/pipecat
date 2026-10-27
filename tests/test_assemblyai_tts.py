@@ -110,6 +110,7 @@ def _server(
                         await ws.send(json.dumps(frame))
                         # Cancelled audio still holds its place on the timeline.
                         session_ms += CHUNK_MS
+                        flush_id += 1
                         buffer = ""
                         continue
                     await ws.send(json.dumps(frame))
@@ -246,7 +247,7 @@ async def test_llm_turn_flushes_each_sentence_into_one_context():
 @pytest.mark.asyncio
 async def test_missing_word_boundaries_still_close_the_context(monkeypatch):
     """Without WordBoundaries the context closes after the grace period and keeps its text."""
-    monkeypatch.setattr(assemblyai_tts, "WORD_BOUNDARIES_GRACE_S", 0.05)
+    monkeypatch.setattr(assemblyai_tts, "_WORD_BOUNDARIES_GRACE_S", 0.05)
     captured: dict = {"messages": []}
     async with serve(_server(captured, word_boundaries=False), "127.0.0.1", 0) as server:
         down_frames, _ = await run_test(
@@ -447,7 +448,7 @@ async def test_begin_limits_size_generate_messages():
 @pytest.mark.asyncio
 async def test_idle_session_is_kept_alive(monkeypatch):
     """An idle session sends KeepAlive, since the server closes sessions that go quiet."""
-    monkeypatch.setattr(assemblyai_tts, "KEEPALIVE_INTERVAL_S", 0.1)
+    monkeypatch.setattr(assemblyai_tts, "_KEEPALIVE_INTERVAL_S", 0.1)
     captured: dict = {"messages": []}
     async with serve(_server(captured), "127.0.0.1", 0) as server:
         await run_test(_service(server), frames_to_send=[SleepFrame(sleep=0.35)])
@@ -477,6 +478,79 @@ async def test_expiring_session_is_renewed_between_requests():
     assert words == ["First", "reply.", "Second", "reply."]
 
 
+@pytest.mark.asyncio
+async def test_session_renewed_mid_turn_keeps_word_times():
+    """A turn that spans a renewal keeps its word times measured from its first audio."""
+    captured: dict = {"messages": []}
+    tokens = ["Hi ", "there! ", "Thanks ", "for ", "calling. ", "Bye."]
+    async with serve(_server(captured, expires_in=1.0), "127.0.0.1", 0) as server:
+        down_frames, _ = await run_test(
+            _service(server),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                *[LLMTextFrame(text=token) for token in tokens[:3]],
+                # The first sentence is spoken and the session nears expires_at.
+                SleepFrame(sleep=0.8),
+                *[LLMTextFrame(text=token) for token in tokens[3:]],
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
+
+    assert captured["connections"] == 2
+    word_frames = [f for f in down_frames if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in word_frames] == [token.strip() for token in tokens]
+    # Each sentence's words follow the audio of the sentences before it.
+    start = word_frames[0].pts
+    offsets_ms = [(f.pts - start) // 1_000_000 for f in word_frames]
+    assert offsets_ms == [
+        0,
+        WORD_MS,
+        2 * CHUNK_MS,
+        2 * CHUNK_MS + WORD_MS,
+        2 * CHUNK_MS + 2 * WORD_MS,
+        4 * CHUNK_MS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_recreated_after_quiet_timeout_restarts_word_times():
+    """Words after a context times out mid-turn are timed from the recreated context's audio."""
+    captured: dict = {"messages": []}
+    async with serve(_server(captured), "127.0.0.1", 0) as server:
+        service = _service(server, stop_frame_timeout_s=0.3)
+        word_times = []
+        add_word_timestamps = service.add_word_timestamps
+
+        async def record_word_times(times, context_id=None, **kwargs):
+            word_times.extend(times)
+            await add_word_timestamps(times, context_id, **kwargs)
+
+        service.add_word_timestamps = record_word_times
+        down_frames, _ = await run_test(
+            service,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(text="Hi there! "),
+                LLMTextFrame(text="Thanks "),
+                # The turn goes quiet for longer than stop_frame_timeout_s.
+                SleepFrame(sleep=0.8),
+                LLMTextFrame(text="for calling. "),
+                LLMTextFrame(text="Bye."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.3),
+                BotStoppedSpeakingFrame(),
+            ],
+        )
+
+    assert sum(isinstance(f, TTSStartedFrame) for f in down_frames) == 2
+    assert [word for word, _ in word_times] == ["Hi", "there!", "Thanks", "for", "calling.", "Bye."]
+    # The recreated context's words start again from zero.
+    offsets_ms = [round(time * 1000) for _, time in word_times]
+    assert offsets_ms == [0, WORD_MS, 0, WORD_MS, 2 * WORD_MS, 2 * CHUNK_MS]
+
+
 def test_language_is_sent_when_set():
     service = AssemblyAITTSService(
         api_key="test-key",
@@ -501,7 +575,7 @@ def test_default_voice_is_sent_and_language_is_left_to_the_server():
     service = AssemblyAITTSService(api_key="test-key")
     service._sample_rate = 24000
     query = parse_qs(urlparse(service._build_websocket_url()).query)
-    assert query["voice_id"] == [assemblyai_tts.DEFAULT_VOICE_ID]
+    assert query["voice_id"] == [assemblyai_tts._DEFAULT_VOICE_ID]
     assert "language" not in query
 
 

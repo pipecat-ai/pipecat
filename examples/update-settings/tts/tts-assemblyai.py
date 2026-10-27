@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -12,7 +12,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -22,8 +22,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.services.assemblyai.tts import AssemblyAITTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -33,9 +33,6 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -63,15 +60,12 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    # AssemblyAI on both sides of the conversation: streaming STT for the
-    # user's speech, and streaming TTS for the bot's replies.
-    stt = AssemblyAISTTService(api_key=os.environ["ASSEMBLYAI_API_KEY"])
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = AssemblyAITTSService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         settings=AssemblyAITTSService.Settings(
-            # Audrey, a voice from AssemblyAI's public voice library.
-            voice=os.getenv("ASSEMBLYAI_VOICE_ID", "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"),
+            voice="49c443a4-8a1d-5f7e-b70b-98bdbd9823c3",  # Audrey
         ),
     )
 
@@ -90,13 +84,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            transport.input(),
+            stt,
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -117,14 +111,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
         context.add_message(
-            {
-                "role": "developer",
-                "content": "Please introduce yourself to the user.",
-            }
+            {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
+
+        await asyncio.sleep(10)
+        logger.info(
+            'Updating AssemblyAI TTS settings: voice="987db62e-a2c2-569a-9c4d-82460cdea1bd"'
+        )
+        await worker.queue_frame(
+            TTSUpdateSettingsFrame(
+                delta=AssemblyAITTSService.Settings(
+                    voice="987db62e-a2c2-569a-9c4d-82460cdea1bd",  # Keegan
+                )
+            )
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
