@@ -146,3 +146,18 @@ async def test_a_model_that_cant_load_leaves_the_reader_unusable_and_the_pipelin
     assert [f for f in up if isinstance(f, ErrorFrame)]
     assert not [f for f in down if isinstance(f, PerceptionMetadataFrame)]
     assert [f.perception for f in down if isinstance(f, TranscriptionFrame)] == [None]
+
+
+@pytest.mark.asyncio
+async def test_the_model_downloads_at_the_release_asked_for(monkeypatch):
+    asked = []
+
+    def download(**kwargs):
+        asked.append(kwargs)
+        return FakeReaderModel()
+
+    monkeypatch.setattr(PipecatToneReaderModel, "download", download)
+    for reader in (PipecatToneReader(), PipecatToneReader(revision="reader-rc9")):
+        await run_test(reader, frames_to_send=[])
+
+    assert [a["revision"] for a in asked] == ["reader-rc1", "reader-rc9"]

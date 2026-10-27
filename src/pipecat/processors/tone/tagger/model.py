@@ -9,7 +9,7 @@
 import json
 import threading
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 from loguru import logger
@@ -29,7 +29,6 @@ except ModuleNotFoundError as e:
 TAGGER_REPO = "pipecat-ai/tone-models"
 TAGGER_REVISION = "tagger-rc1"
 
-_TAGGER_FOLDER = "tagger/17m"
 _INPUTS = ("input_ids", "attention_mask", "sentence_mask")
 # A span or stressed word's tokens, as the model classes them.
 _OUTSIDE, _BEGIN, _INSIDE = 0, 1, 2
@@ -71,21 +70,25 @@ class PipecatToneTaggerModel:
 
     @classmethod
     def download(
-        cls, *, revision: str = TAGGER_REVISION, threads: int = 1
+        cls,
+        *,
+        size: Literal["17m", "32m"] = "17m",
+        revision: str = TAGGER_REVISION,
+        threads: int = 1,
     ) -> "PipecatToneTaggerModel":
         """Load the model from Hugging Face, downloading its files the first time.
 
         Args:
-            revision: The model's revision.
+            size: The model's size, ``"17m"`` or ``"32m"``.
+            revision: The model's release, such as ``"tagger-rc1"``.
             threads: The CPU threads for one sentence.
 
         Returns:
             The model.
         """
-        root = snapshot_download(
-            TAGGER_REPO, revision=revision, allow_patterns=[f"{_TAGGER_FOLDER}/*"]
-        )
-        return cls(Path(root) / _TAGGER_FOLDER, threads=threads)
+        folder = f"tagger/{size}"
+        root = snapshot_download(TAGGER_REPO, revision=revision, allow_patterns=[f"{folder}/*"])
+        return cls(Path(root) / folder, threads=threads)
 
     def tag(self, turn: TurnContext, earlier: list[str], sentence: str) -> SentenceLabels:
         """Label one sentence of a reply.

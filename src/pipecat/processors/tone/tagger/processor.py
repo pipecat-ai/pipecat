@@ -9,6 +9,7 @@
 import asyncio
 import random
 from dataclasses import replace
+from typing import Literal
 
 from loguru import logger
 
@@ -32,7 +33,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone._models import load_model
 from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
 from pipecat.processors.tone.tagger._labels import LabelSpace, ReplyRenderer, SentenceLabels
-from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
+from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
@@ -73,18 +74,26 @@ class PipecatToneTagger(LLMTextProcessor):
     def __init__(
         self,
         *,
+        size: Literal["17m", "32m"] = "17m",
+        revision: str = TAGGER_REVISION,
         threads: int = 1,
         **kwargs,
     ):
         """Initialize the processor.
 
         Args:
+            size: The model's size: ``"17m"``, or ``"32m"``, which agrees with its
+                teacher a little more often and takes nearly three times as long a
+                sentence.
+            revision: The model's release on Hugging Face, such as ``"tagger-rc1"``.
             threads: The CPU threads for one sentence.
             **kwargs: Additional arguments passed to the parent.
         """
         super().__init__(text_aggregator=SkipTagsAggregator(EXPRESSION_TAGS), **kwargs)
         self.add_text_transformer(self._tag, TextType.SENTENCE)
         self._model: PipecatToneTaggerModel | None = None
+        self._size: Literal["17m", "32m"] = size
+        self._revision = revision
         self._threads = threads
         self._policy = ExpressionPolicy()
         self._space: LabelSpace | None = None
@@ -114,8 +123,10 @@ class PipecatToneTagger(LLMTextProcessor):
             return
         self._model = await load_model(
             self,
-            ("tagger", self._threads),
-            lambda: PipecatToneTaggerModel.download(threads=self._threads),
+            ("tagger", self._size, self._revision, self._threads),
+            lambda: PipecatToneTaggerModel.download(
+                size=self._size, revision=self._revision, threads=self._threads
+            ),
         )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

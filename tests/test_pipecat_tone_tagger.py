@@ -33,6 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone import _models
 from pipecat.processors.tone.tagger import PipecatToneTagger
+from pipecat.processors.tone.tagger import model as tagger_model
 from pipecat.processors.tone.tagger._input import Layout, Message, TurnContext, encode
 from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels, Span
 from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
@@ -609,3 +610,45 @@ async def test_every_tagger_shares_one_model(monkeypatch):
         await run_test(PipecatToneTagger(), frames_to_send=[], pipeline_params=EXPRESSIVE)
 
     assert len(loads) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_model_downloads_at_the_size_and_release_asked_for(monkeypatch):
+    asked = []
+
+    def download(**kwargs):
+        asked.append(kwargs)
+        return FakeTaggerModel()
+
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", download)
+    for tagger in (PipecatToneTagger(), PipecatToneTagger(size="32m", revision="tagger-rc9")):
+        await run_test(tagger, frames_to_send=[], pipeline_params=EXPRESSIVE)
+
+    assert asked == [
+        {"size": "17m", "revision": "tagger-rc1", "threads": 1},
+        {"size": "32m", "revision": "tagger-rc9", "threads": 1},
+    ]
+
+
+def test_each_size_downloads_its_own_folder(monkeypatch, tmp_path):
+    seen = {}
+
+    def snapshot_download(repo, revision, allow_patterns):
+        seen.update(repo=repo, revision=revision, patterns=allow_patterns)
+        return str(tmp_path)
+
+    monkeypatch.setattr(tagger_model, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(
+        PipecatToneTaggerModel,
+        "__init__",
+        lambda self, model_dir, threads: seen.update(dir=model_dir),
+    )
+
+    PipecatToneTaggerModel.download(size="32m")
+
+    assert seen == {
+        "repo": "pipecat-ai/tone-models",
+        "revision": "tagger-rc1",
+        "patterns": ["tagger/32m/*"],
+        "dir": tmp_path / "tagger" / "32m",
+    }
