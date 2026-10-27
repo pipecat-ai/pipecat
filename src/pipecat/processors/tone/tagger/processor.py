@@ -8,6 +8,7 @@
 
 import asyncio
 import random
+import time
 from dataclasses import replace
 from typing import Literal
 
@@ -210,6 +211,7 @@ class PipecatToneTagger(LLMTextProcessor):
         plain = " ".join(sentence.split())
         earlier = list(self._sentences)
         self._sentences.append(plain)
+        started = time.perf_counter()
         try:
             labels = await asyncio.to_thread(self._model.tag, self._turn, earlier, plain)
             labels = self._capped_breaths(labels)
@@ -218,6 +220,7 @@ class PipecatToneTagger(LLMTextProcessor):
             # A transform that raises drops the sentence, so it's spoken untagged.
             await self.push_error(f"{self}: couldn't tag a sentence, spoken untagged: {e}", e)
             return plain
+        logger.debug(f"{self}: tagged in {(time.perf_counter() - started) * 1000:.1f} ms: {tagged}")
         # The next reply's model reads a breath as a breath, whatever kind it was drawn as.
         self._labels.append(labels)
         return tagged
