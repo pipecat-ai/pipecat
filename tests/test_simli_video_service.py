@@ -99,22 +99,23 @@ class _FakeSimliClient:
 
 
 @dataclass
-class _SimliConfig20:
-    """simli-ai 2.0.x's SimliConfig: no framing fields, sent as ``__dict__``."""
+class _CameraSetting:
+    """simli-ai 2.1's CameraSetting: neutral by default."""
 
-    faceId: str
-    handleSilence: bool = True
-    maxSessionLength: int = 600
-    maxIdleTime: int = 30
-    model: str = "fasttalk"
-
-    def request(self) -> dict:
-        return dict(self.__dict__)
+    pos_x_off: float = 0.0
+    pos_y_off: float = 0.0
+    pos_z_off: float = 0.0
+    rot_x_off: float = 0.0
+    rot_y_off: float = 0.0
+    rot_z_off: float = 0.0
+    zoom: float = 1.0
+    orbit_x_off: float = 0.0
+    orbit_y_off: float = 0.0
 
 
 @dataclass
-class _SimliConfigWithFraming:
-    """A SimliConfig that declares the framing fields and leaves unset ones out."""
+class _SimliConfig:
+    """simli-ai 2.1's SimliConfig: the request leaves out the fields left as None."""
 
     faceId: str
     handleSilence: bool = True
@@ -125,9 +126,11 @@ class _SimliConfigWithFraming:
     streaming_height: int | None = None
     avatar_position_x: float | None = None
     avatar_position_y: float | None = None
-    camera: dict | None = None
+    camera: _CameraSetting | None = None
+    background_id: str | None = None
+    foreground_id: str | None = None
 
-    def request(self) -> dict:
+    def toRequest(self) -> dict:
         return {key: value for key, value in asdict(self).items() if value is not None}
 
 
@@ -158,7 +161,7 @@ class _IdleStreamingSimliClient(_FakeSimliClient):
         await asyncio.Event().wait()
 
 
-def _load_simli_video(monkeypatch, config_class=_SimliConfig20, client_class=_FakeSimliClient):
+def _load_simli_video(monkeypatch, client_class=_FakeSimliClient):
     av = types.ModuleType("av")
     av_audio = types.ModuleType("av.audio")
     av_audio_frame = types.ModuleType("av.audio.frame")
@@ -166,8 +169,9 @@ def _load_simli_video(monkeypatch, config_class=_SimliConfig20, client_class=_Fa
     av_audio_resampler = types.ModuleType("av.audio.resampler")
     av_audio_resampler.AudioResampler = _FakeAudioResampler
     simli = types.ModuleType("simli")
+    simli.CameraSetting = _CameraSetting
     simli.SimliClient = client_class
-    simli.SimliConfig = config_class
+    simli.SimliConfig = _SimliConfig
 
     monkeypatch.setitem(sys.modules, "av", av)
     monkeypatch.setitem(sys.modules, "av.audio", av_audio)
@@ -181,13 +185,6 @@ def _load_simli_video(monkeypatch, config_class=_SimliConfig20, client_class=_Fa
 @pytest.fixture
 def simli_video(monkeypatch):
     module = _load_simli_video(monkeypatch)
-    yield module
-    sys.modules.pop("pipecat.services.simli.video", None)
-
-
-@pytest.fixture
-def simli_video_with_framing_fields(monkeypatch):
-    module = _load_simli_video(monkeypatch, _SimliConfigWithFraming)
     yield module
     sys.modules.pop("pipecat.services.simli.video", None)
 
@@ -216,37 +213,25 @@ def test_framing_goes_into_session_request(simli_video):
         api_key="key", face_id="face", framing=_framing(simli_video)
     )
 
-    request = service._simli_client.config.request()
+    request = service._simli_client.config.toRequest()
 
     assert request["faceId"] == "face"
     assert request["streaming_width"] == 1366
     assert request["streaming_height"] == 768
     assert request["avatar_position_x"] == 0.25
     assert request["avatar_position_y"] == 1.0
-    # Only the camera fields that were set, so the rest stay neutral.
-    assert request["camera"] == {"zoom": 1.2, "orbit_y_off": 15}
+    # The SDK's CameraSetting: the fields that were set, the rest neutral.
+    assert request["camera"] == asdict(_CameraSetting(zoom=1.2, orbit_y_off=15))
     # Unset fields keep Simli's defaults.
     assert "background_id" not in request
     assert "foreground_id" not in request
-
-
-def test_framing_fills_declared_config_fields(simli_video_with_framing_fields):
-    module = simli_video_with_framing_fields
-    service = module.SimliVideoService(api_key="key", face_id="face", framing=_framing(module))
-
-    config = service._simli_client.config
-    assert config.streaming_width == 1366
-    assert config.streaming_height == 768
-    request = config.request()
-    assert request["avatar_position_x"] == 0.25
-    assert request["camera"] == {"zoom": 1.2, "orbit_y_off": 15}
 
 
 def test_background_and_foreground_ids(simli_video):
     framing = simli_video.SimliVideoService.Framing(background_id="bg-id", foreground_id="fg-id")
     service = simli_video.SimliVideoService(api_key="key", face_id="face", framing=framing)
 
-    request = service._simli_client.config.request()
+    request = service._simli_client.config.toRequest()
 
     assert request["background_id"] == "bg-id"
     assert request["foreground_id"] == "fg-id"
@@ -256,7 +241,7 @@ def test_background_and_foreground_ids(simli_video):
 def test_no_framing_leaves_session_request_unchanged(simli_video):
     service = simli_video.SimliVideoService(api_key="key", face_id="face")
 
-    assert service._simli_client.config.request() == {
+    assert service._simli_client.config.toRequest() == {
         "faceId": "face",
         "handleSilence": True,
         "maxSessionLength": 605,

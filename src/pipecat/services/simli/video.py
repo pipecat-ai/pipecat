@@ -33,7 +33,7 @@ from pipecat.utils.deprecation import deprecated
 try:
     from av.audio.frame import AudioFrame
     from av.audio.resampler import AudioResampler
-    from simli import SimliClient, SimliConfig
+    from simli import CameraSetting, SimliClient, SimliConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Simli, you need to `uv add "pipecat-ai[simli]"`.')
@@ -246,14 +246,13 @@ class SimliVideoService(AIService):
             config_kwargs["maxSessionLength"] = max_session_length
         if max_idle_time is not None:
             config_kwargs["maxIdleTime"] = max_idle_time
+        if framing is not None:
+            framing_kwargs = framing.model_dump(exclude_none=True)
+            if "camera" in framing_kwargs:
+                framing_kwargs["camera"] = CameraSetting(**framing_kwargs["camera"])
+            config_kwargs.update(framing_kwargs)
 
         config = SimliConfig(**config_kwargs)
-        if framing is not None:
-            # simli-ai 2.0.x's SimliConfig has no fields for these, but the SDK sends
-            # every attribute of the config as the session request. Later releases
-            # declare them as fields, which setting them also fills.
-            for key, value in framing.model_dump(exclude_none=True).items():
-                setattr(config, key, value)
 
         self._initialized = False
         # Add buffer time to session limits
