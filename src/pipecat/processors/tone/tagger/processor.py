@@ -14,6 +14,7 @@ from typing import Literal
 
 from loguru import logger
 
+from pipecat.expressive.expression import TAGGER_BREATH_KINDS, TAGGER_DELIVERY, TAGGER_SOUNDS
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
@@ -33,7 +34,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone._models import load_model
 from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
-from pipecat.processors.tone.tagger._labels import LabelSpace, ReplyRenderer, SentenceLabels
+from pipecat.processors.tone.tagger._labels import (
+    LabelSpace,
+    ReplyRenderer,
+    SentenceLabels,
+    TaggerLabel,
+)
 from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
@@ -78,6 +84,7 @@ class PipecatToneTagger(LLMTextProcessor):
         size: Literal["17m", "32m"] = "17m",
         revision: str = TAGGER_REVISION,
         threads: int = 1,
+        vocabulary: dict[TaggerLabel, list[str]] | None = None,
         **kwargs,
     ):
         """Initialize the processor.
@@ -88,14 +95,26 @@ class PipecatToneTagger(LLMTextProcessor):
                 sentence.
             revision: The model's release on Hugging Face, such as ``"tagger-rc1"``.
             threads: The CPU threads for one sentence.
+            vocabulary: Names to write first for a delivery, sound or kind of breath
+                (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``, ``TAGGER_BREATH_KINDS``),
+                best first, such as ``{"warm": ["cheerful"]}``. A name is written only
+                where the TTS service performs it and the policy offers it; elsewhere
+                the service's own names stand.
             **kwargs: Additional arguments passed to the parent.
+
+        Raises:
+            ValueError: The vocabulary names a label the tagger doesn't write.
         """
+        labels = (*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS)
+        if unknown := sorted(set(vocabulary or {}) - set(labels)):
+            raise ValueError(f"the tagger writes none of {unknown}; it writes {list(labels)}")
         super().__init__(text_aggregator=SkipTagsAggregator(EXPRESSION_TAGS), **kwargs)
         self.add_text_transformer(self._tag, TextType.SENTENCE)
         self._model: PipecatToneTaggerModel | None = None
         self._size: Literal["17m", "32m"] = size
         self._revision = revision
         self._threads = threads
+        self._vocabulary = vocabulary or {}
         self._policy = ExpressionPolicy()
         self._space: LabelSpace | None = None
         self._messages: list[Message] = []
@@ -173,7 +192,9 @@ class PipecatToneTagger(LLMTextProcessor):
             )
             self._space = None
             return
-        self._space = LabelSpace.resolve(frame.expression, self._policy, frame.service_name)
+        self._space = LabelSpace.resolve(
+            frame.expression, self._policy, frame.service_name, self._vocabulary
+        )
 
     def _on_user_turn(self, frame: LLMContextUserTurnFrame):
         message = Message("user", frame.text, fold(frame.perception), frame.speculation)

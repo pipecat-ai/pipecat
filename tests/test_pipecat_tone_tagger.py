@@ -652,3 +652,31 @@ def test_each_size_downloads_its_own_folder(monkeypatch, tmp_path):
         "patterns": ["tagger/32m/*"],
         "dir": tmp_path / "tagger" / "32m",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_vocabulary_names_a_label_first_where_the_service_performs_it(monkeypatch):
+    model = FakeTaggerModel()
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", lambda **kwargs: model)
+    vocabulary = {"warm": ["cheerful"], "laugh": ["giggles"]}
+
+    for tts in (ELEVENLABS, CARTESIA):
+        monkeypatch.setattr(_models, "_models", {})
+        await run_test(
+            PipecatToneTagger(vocabulary=vocabulary),
+            frames_to_send=[tts, *_reply("Hi.")],
+            pipeline_params=EXPRESSIVE,
+        )
+
+    elevenlabs, cartesia = (turn.space for turn, _, _ in model.calls)
+    # ElevenLabs takes free text, so it performs both names.
+    assert elevenlabs.deliveries["warm"] == "cheerful"
+    assert elevenlabs.sounds["laugh"] == "giggles"
+    # Cartesia performs neither, so its own names stand.
+    assert cartesia.deliveries["warm"] == "content"
+    assert cartesia.sounds["laugh"] == "laughter"
+
+
+def test_a_vocabulary_for_a_label_the_tagger_doesnt_write_is_refused():
+    with pytest.raises(ValueError, match="cheerful"):
+        PipecatToneTagger(vocabulary={"cheerful": ["happy"]})

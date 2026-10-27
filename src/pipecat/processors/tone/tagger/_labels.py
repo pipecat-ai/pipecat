@@ -63,6 +63,7 @@ class LabelSpace:
         capabilities: ExpressionCapabilities,
         policy: ExpressionPolicy,
         service_name: str = "",
+        vocabulary: dict[TaggerLabel, list[str]] | None = None,
     ):
         """The labels the service performs and the policy offers.
 
@@ -74,18 +75,22 @@ class LabelSpace:
             policy: The pipeline's expression policy.
             service_name: The service's name, such as ``"ElevenLabsTTSService#0"``,
                 which says which of the services the model was trained with it is.
+            vocabulary: Names to try first for a label, before the service's own.
         """
+        # A developer's own names for a label come before the service's.
+        names = dict(capabilities.tagger_vocabulary)
+        for label, own in (vocabulary or {}).items():
+            names[label] = [*own, *names.get(label, [label])]
         sounds: list[TaggerSound] = [s for s in TAGGER_SOUNDS if s != "breath" or _breathes(policy)]
-        vocabulary = capabilities.tagger_vocabulary
         resolved = _resolve(
-            sounds, capabilities.sounds, capabilities.free_text_sounds, vocabulary, policy.sounds
+            sounds, capabilities.sounds, capabilities.free_text_sounds, names, policy.sounds
         )
         return cls(
             deliveries=_resolve(
                 TAGGER_DELIVERY,
                 capabilities.delivery,
                 capabilities.free_text_delivery,
-                vocabulary,
+                names,
                 policy.delivery,
             ),
             sounds=resolved,
@@ -96,7 +101,7 @@ class LabelSpace:
                 TAGGER_BREATH_KINDS,
                 capabilities.sounds,
                 capabilities.free_text_sounds,
-                vocabulary,
+                names,
                 policy.sounds,
             )
             if "breath" in resolved
