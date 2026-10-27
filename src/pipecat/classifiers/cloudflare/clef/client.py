@@ -136,7 +136,8 @@ class ClefClient:
                 response = await self._http.get(
                     "/models/schema", params={"model": f"@cf/cloudflare/{self._model}"}
                 )
-            except httpx.HTTPError as e:
+            except (httpx.HTTPError, OSError) as e:
+                # A broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"could not connect to Clef: {e}") from e
             if response.status_code != 200:
                 raise ClassifierError(f"Clef refused the connection: {self._failure(response)}")
@@ -180,8 +181,9 @@ class ClefClient:
             attempt += 1
             try:
                 response = await self._http.post(f"/run/@cf/cloudflare/{self._model}", json=body)
-            except httpx.HTTPError as e:
-                # Some httpx errors, such as a timeout, carry no message.
+            except (httpx.HTTPError, OSError) as e:
+                # Some httpx errors, such as a timeout, carry no message, and a
+                # broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"Clef request failed: {e!r}") from e
             if response.status_code == _TOO_MANY_REQUESTS:
                 if attempt > self._max_retries:
