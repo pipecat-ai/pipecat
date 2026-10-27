@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     LLMMessagesAppendFrame,
+    LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
     LLMSetToolsFrame,
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService
 from tests.rime_realtime_peer import conversation, until
 
@@ -100,9 +102,144 @@ async def test_voice_transcript_and_reply_are_recorded_once_without_reimport():
         )
         assert context.get_messages().count({"role": "user", "content": "Voice question"}) == 1
         assert len([f for f in downstream if isinstance(f, TranscriptionFrame)]) == 1
+        await asyncio.sleep(0.05)
+        assert len(sent(peer, "response.create")) == 1
         await worker.queue_frame(LLMRunFrame())
         await answer(peer, text="Next")
         assert not sent(peer, "conversation.item.create")
+
+
+@pytest.mark.asyncio
+async def test_interrupted_local_text_does_not_replace_provider_history():
+    from pipecat.frames.frames import TTSTextFrame
+
+    async with conversation() as (peer, service, worker, context, output, upstream, _):
+        push_frame = output.push_frame
+
+        async def heard_text(frame, direction=None):
+            if isinstance(frame, TTSTextFrame):
+                frame.text = "Heard portion"
+            if direction is None:
+                await push_frame(frame)
+            else:
+                await push_frame(frame, direction)
+
+        output.push_frame = heard_text
+        response = await peer.start()
+        await peer.message(response, text="Complete generated answer", samples=24000, done=False)
+        await until(lambda: bool(output.writes))
+        await worker.queue_frame(InterruptionFrame())
+        await until(lambda: bool(sent(peer, "conversation.item.truncate")))
+        await until(
+            lambda: {"role": "assistant", "content": "Heard portion"} in context.get_messages()
+        )
+        await worker.queue_frame(LLMRunFrame())
+        await answer(peer, text="Next answer")
+        assert not sent(peer, "conversation.item.delete")
+        assert not sent(peer, "conversation.item.create")
+        assert service.is_usable
+        assert not any(isinstance(frame, ErrorFrame) for frame in upstream)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_llm", [False, True])
+@pytest.mark.parametrize("direction", list(FrameDirection))
+async def test_application_append_does_not_reconcile_unmatched_live_text(run_llm, direction):
+    async with conversation() as (peer, service, worker, context, *_):
+        response = await peer.start()
+        await peer.message(response, text="Provider answer", samples=0)
+        await peer.end(response)
+        await until(lambda: bool(context.get_messages()))
+        # Local playback records can differ from generated provider text.
+        context.get_messages()[0]["content"] = "Heard portion"
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "Next question"}], run_llm=run_llm
+            ),
+            direction,
+        )
+        if not run_llm:
+            await until(lambda: len(context.get_messages()) == 2)
+            assert not sent(peer, "conversation.item.create")
+            # Both halves must share the deferred edit.
+            opposite = (
+                FrameDirection.UPSTREAM
+                if direction == FrameDirection.DOWNSTREAM
+                else FrameDirection.DOWNSTREAM
+            )
+            await worker.queue_frame(LLMRunFrame(), opposite)
+        await answer(peer)
+        assert [event["item"]["text"] for event in sent(peer, "conversation.item.create")] == [
+            "Next question"
+        ]
+        assert not sent(peer, "conversation.item.delete")
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transform", [False, True])
+@pytest.mark.parametrize("direction", list(FrameDirection))
+async def test_explicit_replacement_removes_live_history(transform, direction):
+    async with conversation() as (peer, service, worker, context, *_):
+        response = await peer.start()
+        await peer.message(response, text="Old provider answer", samples=0)
+        await peer.end(response)
+        await until(lambda: bool(context.get_messages()))
+        messages = [{"role": "user", "content": "Replacement"}]
+        edit = (
+            LLMMessagesTransformFrame(transform=lambda _: messages, run_llm=False)
+            if transform
+            else LLMMessagesUpdateFrame(messages=messages, run_llm=False)
+        )
+        await worker.queue_frame(edit, direction)
+        await until(lambda: context.get_messages() == messages)
+        assert not sent(peer, "conversation.item.delete")
+        await worker.queue_frame(LLMRunFrame(), direction)
+        await answer(peer)
+        assert [event["item_id"] for event in sent(peer, "conversation.item.delete")] == [
+            f"message-{response}"
+        ]
+        assert peer.history[-1]["text"] == "Replacement"
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_assistant_aggregation_keeps_a_deferred_application_append():
+    async with conversation() as (peer, service, worker, context, *_):
+        response = await peer.start()
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Deferred question"}])
+        )
+        await until(lambda: len(context.get_messages()) == 1)
+        await peer.message(response, text="Current answer", samples=0)
+        await peer.end(response)
+        await until(lambda: len(context.get_messages()) == 2)
+        assert not sent(peer, "conversation.item.create")
+        assert len(sent(peer, "response.create")) == 1
+        await worker.queue_frame(LLMRunFrame())
+        await answer(peer)
+        assert [event["item"]["text"] for event in sent(peer, "conversation.item.create")] == [
+            "Deferred question"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_reply_start_during_explicit_rebuild_keeps_partial_failure_guard():
+    context = LLMContext([{"role": "user", "content": "Original"}])
+    async with conversation(context=context) as (peer, service, worker, *_):
+        gate = peer.gates["conversation.item.delete"] = asyncio.Event()
+        await worker.queue_frame(
+            LLMMessagesUpdateFrame(
+                messages=[{"role": "user", "content": "Replacement"}], run_llm=True
+            )
+        )
+        await until(lambda: bool(sent(peer, "conversation.item.delete")))
+        response = await peer.start()
+        await until(lambda: response in service._ledger.active_responses)
+        gate.set()
+        await until(lambda: not service.is_usable)
+        assert str(service._failure) == "Prism history edit partially applied"
+        assert len(sent(peer, "conversation.item.create")) == 1
 
 
 @pytest.mark.asyncio
