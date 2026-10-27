@@ -411,6 +411,81 @@ async def test_interruption_cancels_reply_and_sends_estimated_position():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kept_text", [None, "", "Retained words"])
+async def test_retained_text_event_is_forwarded_without_replacing_context(kept_text):
+    observed = []
+    async with conversation() as (peer, service, worker, context, *_):
+
+        @service.event_handler("on_rime_event")
+        async def on_event(service, event):
+            if isinstance(event.payload, r.ItemTruncated):
+                observed.append(event.payload)
+
+        response = await peer.start()
+        await peer.message(response, text="Generated answer", samples=0)
+        await peer.end(response)
+        await until(lambda: bool(context.get_messages()))
+        await peer.emit(
+            "conversation.item.truncated",
+            item_id=f"message-{response}",
+            content_index=0,
+            audio_end_ms=120,
+            **({} if kept_text is None else {"prism_kept_text": kept_text}),
+        )
+        await until(lambda: bool(observed))
+        assert observed == [
+            r.ItemTruncated(
+                item_id=f"message-{response}",
+                content_index=0,
+                audio_end_ms=120,
+                kept_text=kept_text,
+            )
+        ]
+        assert context.get_messages() == [{"role": "assistant", "content": "Generated answer"}]
+        assert not sent(peer, "conversation.item.create")
+        assert not sent(peer, "conversation.item.delete")
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "summary",
+    [None, {"items_left_out": 3}, {"items_left_out": 3, "first_kept_item_id": "kept-item"}],
+)
+async def test_prompt_truncation_summary_is_forwarded_without_deleting_history(summary):
+    observed = []
+    context = LLMContext([{"role": "user", "content": "Keep this history"}])
+    async with conversation(context=context) as (peer, service, worker, context, *_):
+
+        @service.event_handler("on_rime_event")
+        async def on_event(service, event):
+            if isinstance(event.payload, r.ResponseEnded):
+                observed.append(event.payload)
+
+        response = await peer.start()
+        await peer.message(response, text="Answer", samples=0)
+        await peer.emit(
+            "response.done",
+            response={
+                "id": response,
+                "status": "completed",
+                **({} if summary is None else {"prism_truncation": summary}),
+            },
+        )
+        await peer.emit("prism.typed_input.ready")
+        await until(lambda: any(event.response.response_id == response for event in observed))
+        ended = next(event for event in observed if event.response.response_id == response)
+        assert ended.truncation == (r.ResponseTruncation(**summary) if summary else None)
+        await worker.queue_frame(LLMRunFrame())
+        await answer(peer, text="Next answer")
+        assert peer.history[0]["text"] == "Keep this history"
+        assert context.get_messages()[0] == {"role": "user", "content": "Keep this history"}
+        assert len(sent(peer, "conversation.item.create")) == 1
+        assert not sent(peer, "conversation.item.delete")
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
 async def test_unversioned_settings_changes_do_not_require_revision_tracking():
     async with conversation(unversioned=True) as (peer, service, worker, *_):
         await worker.queue_frame(
