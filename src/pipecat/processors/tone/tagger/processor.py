@@ -207,19 +207,12 @@ class PipecatToneTagger(LLMTextProcessor):
         return tagged
 
     def _capped_breaths(self, labels: SentenceLabels) -> SentenceLabels:
-        """The labels without a breath past the model's limit for a reply."""
+        """The labels without a breath past the model's limit for a reply.
+
+        The model breathes only before a sentence.
+        """
         cap = self._model.breaths_per_reply if self._model else None
-        if cap is None:
+        if cap is None or labels.sound_before != "breath":
             return labels
-        taken = sum(_breaths(sentence) for sentence in self._labels or [])
-        if labels.sound_before == "breath":
-            if taken >= cap:
-                labels = replace(labels, sound_before=None)
-            taken += 1
-        if labels.sound_after == "breath" and taken >= cap:
-            labels = replace(labels, sound_after=None)
-        return labels
-
-
-def _breaths(labels: SentenceLabels) -> int:
-    return (labels.sound_before == "breath") + (labels.sound_after == "breath")
+        taken = sum(sentence.sound_before == "breath" for sentence in self._labels or [])
+        return replace(labels, sound_before=None) if taken >= cap else labels

@@ -27,7 +27,7 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 TAGGER_REPO = "pipecat-ai/tone-models"
-TAGGER_REVISION = "tagger-rc4"
+TAGGER_REVISION = "tagger-rc1"
 
 _TAGGER_FOLDER = "tagger/17m"
 _INPUTS = ("input_ids", "attention_mask", "sentence_mask")
@@ -110,20 +110,30 @@ class PipecatToneTaggerModel:
         space: LabelSpace,
     ) -> SentenceLabels:
         """The labels from one sentence's heads, from those the space holds."""
-        delivery, before, after, spans, emphasis = heads
+        delivery, before, after, spans, emphasis, breath = heads
         sounds = self.config["sounds"]
-        # A sound's calibration shifts its logit by one number, or by the sentence's
-        # words: [[most words, shift], ..., [None, shift]].
+        # Calibration shifts a sound's logit by the sentence's words:
+        # [[most words, shift], ..., [None, shift]].
         bias = self.config.get("sound_bias") or {}
         words = sum(any(c.isalnum() for c in token) for token in sentence.split())
-        shift = np.array([_shift(bias.get(sound, 0.0), words) for sound in sounds])
-        before, after = before + shift, after + shift
+        shift = {sound: _shift(steps, words) for sound, steps in bias.items()}
+        sound_shift = np.array([shift.get(sound, 0.0) for sound in sounds])
+        # A breath has a head of its own, so the sound heads never choose one.
+        others = [sound for sound in space.sounds if sound != "breath"]
 
         labels = SentenceLabels(
             delivery=_choose(delivery, self.config["deliveries"], space.deliveries),
-            sound_before=_choose(before, sounds, space.sounds),
-            sound_after=_choose(after, sounds, space.sounds),
+            sound_before=_choose(before + sound_shift, sounds, others),
+            sound_after=_choose(after + sound_shift, sounds, others),
         )
+        # A breath goes before the sentence, where its logit, shifted, is above zero
+        # and no other sound starts the sentence.
+        if (
+            not labels.sound_before
+            and "breath" in space.sounds
+            and breath[0] + shift.get("breath", 0.0) > 0
+        ):
+            labels.sound_before = "breath"
         n = len(offsets)
         if "slow" in space.deliveries:
             slow = _ranges(spans[:n].argmax(-1).tolist(), offsets, sentence)
@@ -164,10 +174,8 @@ class PipecatToneTaggerModel:
         return self._tokenizer.encode(first, second)
 
 
-def _shift(bias: float | list, words: int) -> float:
-    if isinstance(bias, list):
-        return next(shift for most, shift in bias if most is None or words <= most)
-    return bias
+def _shift(steps: list, words: int) -> float:
+    return next(shift for most, shift in steps if most is None or words <= most)
 
 
 def _choose(logits: np.ndarray, classes: list[str], allowed) -> str | None:

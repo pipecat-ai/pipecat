@@ -8,6 +8,7 @@
 
 import time
 
+import numpy as np
 import pytest
 
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
@@ -262,22 +263,46 @@ async def test_breaths_past_the_models_limit_for_a_reply_are_dropped(monkeypatch
     assert tagged == ["[[short breath]] One.", "Two."]
 
 
-@pytest.mark.asyncio
-async def test_a_breath_after_a_sentence_counts_toward_the_limit(monkeypatch):
-    model = FakeTaggerModel(
-        {
-            "One.": SentenceLabels(sound_after="breath"),
-            "Two.": SentenceLabels(sound_before="breath"),
-        },
-        breaths_per_reply=1,
-    )
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
+def _decoded(before: list[float], breath: float, sentence: str = "Hi.") -> SentenceLabels:
+    """A sentence's labels from a model's six heads: the sound before's logits and the breath head's."""
+    model = object.__new__(PipecatToneTaggerModel)
+    model.config = {
+        "deliveries": ["none", "calm"],
+        "sounds": ["none", "laugh", "chuckle", "sigh", "breath"],
+        "sound_bias": {"breath": [[5, -1.0], [None, 0.0]]},
+    }
+    space = LabelSpace({"calm": "calm"}, {"laugh": "laughs", "breath": "quick breath"}, False)
+    quiet = np.array([9.0, 0.0, 0.0, 0.0, 0.0])
+    tokens = np.array([[9.0, 0.0, 0.0]])
+    heads = [
+        np.array([9.0, 0.0]),
+        np.array(before),
+        quiet,
+        tokens,
+        tokens,
+        np.array([breath]),
+    ]
+    return model._decode(heads, [(0, 2)], sentence, space)
 
-    tagged = await _tagged(
-        monkeypatch, model, ELEVENLABS, *_reply("One. Two."), params=_expressive(policy)
-    )
 
-    assert tagged == ["One. [[short breath]]", "Two."]
+def test_a_breath_comes_from_its_own_head_shifted_for_the_sentences_length():
+    quiet = [9.0, 0.0, 0.0, 0.0, 0.0]
+
+    # Up to five words, the breath head's logit is shifted down by one.
+    assert _decoded(quiet, 0.5).sound_before is None
+    assert _decoded(quiet, 0.5, "Hi " * 6).sound_before == "breath"
+
+
+def test_the_sound_heads_never_choose_a_breath():
+    breath_class_wins = [0.0, 0.0, 0.0, 0.0, 9.0]
+
+    assert _decoded(breath_class_wins, -1.0, "Hi " * 6).sound_before is None
+
+
+def test_a_breath_goes_only_where_no_other_sound_starts_the_sentence():
+    laugh = [0.0, 9.0, 0.0, 0.0, 0.0]
+
+    assert _decoded(laugh, 9.0, "Hi " * 6).sound_before == "laugh"
 
 
 def test_a_layout_that_reads_no_turns_reads_none_of_the_call():
