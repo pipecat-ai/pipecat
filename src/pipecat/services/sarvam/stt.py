@@ -65,6 +65,10 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Sarvam, you need to `uv add "pipecat-ai[sarvam]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+# Sarvam closes a connection with this code when it rejects a connection
+# parameter (model, language, VAD tuning) or the account isn't enabled for it.
+_REJECTED_SETTINGS_CLOSE_CODE = 4000
+
 
 def language_to_sarvam_language(language: Language) -> str:
     """Convert a Language enum to Sarvam's language code format.
@@ -391,6 +395,8 @@ class SarvamSTTService(STTService):
         # Stops retrying a connection that keeps failing right after it opens
         # (e.g. a handshake that is refused every time).
         self._quick_failure_tracker = QuickFailureTracker()
+        # Whether Sarvam's VAD has sent START_SPEECH without its END_SPEECH.
+        self._speech_active = False
         # Warn only once per unrecognized language code, so a session stuck
         # detecting one unmapped language doesn't spam a warning per turn.
         self._unmapped_language_codes_warned: set[str] = set()
@@ -645,6 +651,7 @@ class SarvamSTTService(STTService):
         logger.debug("Connecting to Sarvam")
         self._quick_failure_tracker.reset()
         self._connection_settled.clear()
+        self._speech_active = False
         self._connection_task = self.create_task(self._connection_handler())
         self._create_keepalive_task()
         await self._connection_settled.wait()
@@ -671,8 +678,10 @@ class SarvamSTTService(STTService):
         connection. A connection that had been up for a while is reopened at
         once; quick failures back off exponentially, and enough of them in a row
         give up. An ``ApiError`` whose status marks a permanent failure (e.g. an
-        invalid API key rejected at the handshake) gives up at once. Giving up
-        leaves the service unusable, so a ``ServiceSwitcher`` can move off it.
+        invalid API key rejected at the handshake) gives up at once, as does a
+        close rejecting the connection's settings, which Sarvam sends right
+        after the handshake. Giving up leaves the service unusable, so a
+        ``ServiceSwitcher`` can move off it.
         """
         try:
             while True:
@@ -694,6 +703,18 @@ class SarvamSTTService(STTService):
                         await self._call_event_handler("on_connected")
 
                         await socket_client.start_listening()
+
+                    for error in close_errors:
+                        close = error.rcvd if isinstance(error, ConnectionClosedError) else None
+                        if close is not None and close.code == _REJECTED_SETTINGS_CLOSE_CODE:
+                            msg = f"Sarvam rejected the connection: {close.reason}"
+                            await self._call_event_handler("on_connection_error", msg)
+                            await self.push_error(
+                                error_msg=msg,
+                                exception=error,
+                                category=ErrorCategory.INVALID_REQUEST,
+                            )
+                            return
 
                     reason = close_errors[0] if close_errors else "closed by the server"
                     logger.warning(f"{self}: connection lost ({reason}), reconnecting")
@@ -718,6 +739,8 @@ class SarvamSTTService(STTService):
                     if connected_at is not None:
                         await self._call_event_handler("on_disconnected")
 
+                await self._end_speech_cut_short()
+
                 # How long the connection lasted, which is nothing at all when
                 # the handshake never completed.
                 uptime = time.monotonic() - connected_at if connected_at is not None else 0.0
@@ -738,6 +761,20 @@ class SarvamSTTService(STTService):
             # service to connect can stop waiting.
             self._connection_settled.set()
 
+    async def _end_speech_cut_short(self):
+        """End the user's speech when its connection closed before END_SPEECH.
+
+        Speech lives in one connection, so a new connection never sends the old
+        one's END_SPEECH. Without this, turn detection would wait on a boundary
+        that is never coming.
+        """
+        if not self._speech_active:
+            return
+        self._speech_active = False
+        logger.debug(f"{self}: connection closed mid-speech, ending the user's speech")
+        await self._call_event_handler("on_speech_stopped")
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
     async def _handle_message(self, message):
         """Handle incoming WebSocket message from Sarvam SDK.
 
@@ -757,11 +794,13 @@ class SarvamSTTService(STTService):
 
                 if signal == "START_SPEECH":
                     logger.debug("User started speaking")
+                    self._speech_active = True
                     await self._call_event_handler("on_speech_started")
                     await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")
+                    self._speech_active = False
                     await self._call_event_handler("on_speech_stopped")
                     await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
@@ -934,10 +973,6 @@ SUPPORTED_SAMPLE_RATES = {8000, 16000}
 # about how often the client should send. Audio goes out on a fixed cadence so
 # transcript latency doesn't scale with the chosen profile.
 _CLIENT_CHUNK_MS = 50
-
-# Sarvam closes a connection with this code when it rejects a connection
-# parameter (model, language, VAD tuning) or the account isn't enabled for it.
-_REJECTED_SETTINGS_CLOSE_CODE = 4000
 
 # Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
 # `language_code`; the rest share their `Settings` names. Of these,

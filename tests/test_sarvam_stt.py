@@ -1761,8 +1761,8 @@ async def test_keyterms_cannot_be_updated_mid_stream():
         await service.update_config(keyterms=["Sarvam"])
 
 
-def _legacy_service_for(port: int) -> SarvamSTTService:
-    service = SarvamSTTService(api_key="secret-key", sample_rate=16000)
+def _legacy_service_for(port: int, **kwargs) -> SarvamSTTService:
+    service = SarvamSTTService(api_key="secret-key", sample_rate=16000, **kwargs)
     service._sarvam_client = AsyncSarvamAI(
         api_subscription_key="secret-key",
         environment=SarvamAIEnvironment(
@@ -1907,3 +1907,68 @@ async def test_legacy_failed_first_connect_is_retried_in_the_background(monkeypa
 
     assert len(handshakes) == 2
     assert [permanent for _, permanent, _ in errors] == [False]
+
+
+@pytest.mark.asyncio
+async def test_legacy_rejected_settings_give_up_at_once(monkeypatch):
+    """Sarvam rejects a setting with a 4000 close right after the handshake."""
+    monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0)
+    handshakes = []
+    reason = "Invalid model 'saarika:nope'."
+
+    async def endpoint(websocket):
+        handshakes.append(websocket)
+        await websocket.close(4000, reason)
+
+    errors = []
+    async with serve(endpoint, "127.0.0.1", 0) as server:
+        service = _legacy_service_for(server.sockets[0].getsockname()[1])
+        monkeypatch.setattr(service, "push_error", _capture_errors(errors))
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            await _wait_for(lambda: service._connection_task.done())
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert len(handshakes) == 1
+    assert len(errors) == 1
+    message, permanent, category = errors[0]
+    assert permanent
+    assert category is ErrorCategory.INVALID_REQUEST
+    assert reason in message
+
+
+@pytest.mark.asyncio
+async def test_legacy_drop_mid_speech_ends_the_speech(monkeypatch):
+    """A new connection never sends the old one's END_SPEECH, so the drop ends the speech."""
+    monkeypatch.setattr("pipecat.services.sarvam.stt.exponential_backoff_time", lambda _: 0)
+    handshakes = []
+    start_speech = json.dumps(
+        {"type": "events", "data": {"signal_type": "START_SPEECH", "occured_at": 1.0}}
+    )
+
+    async def endpoint(websocket):
+        handshakes.append(websocket)
+        if len(handshakes) == 1:
+            await websocket.send(start_speech)
+            await asyncio.sleep(0.05)
+            await websocket.close(1011, "internal server error")
+            return
+        await websocket.wait_closed()
+
+    broadcasted = []
+    async with serve(endpoint, "127.0.0.1", 0) as server:
+        service = _legacy_service_for(
+            server.sockets[0].getsockname()[1],
+            settings=SarvamSTTService.Settings(model="saaras:v3", vad_signals=True),
+        )
+        monkeypatch.setattr(service, "broadcast_frame", _capture_class(broadcasted))
+        await service.setup(frame_processor_setup(TaskManager()))
+        try:
+            await _wait_for(lambda: len(handshakes) == 2 and service._socket_client is not None)
+        finally:
+            await service._disconnect()
+            await service.cleanup()
+
+    assert broadcasted == [ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame]
