@@ -6,9 +6,10 @@
 
 """The labels Pipecat Tone's tagger chooses, and the expression tags they're written as.
 
-The tagger labels with ``TAGGER_DELIVERY`` and ``TAGGER_SOUNDS``. A call's label space holds
-those its TTS service performs and its policy offers, each with the name the service
-performs it by, and a sentence's labels are written as tags in those names.
+The tagger labels with ``TAGGER_DELIVERY`` and ``TAGGER_SOUNDS``, and draws a breath as
+one of ``TAGGER_BREATH_KINDS``. A call's label space holds those its TTS service performs
+and its policy offers, each with the name the service performs it by, and a sentence's
+labels are written as tags in those names.
 """
 
 from collections.abc import Iterable
@@ -16,14 +17,19 @@ from dataclasses import dataclass, field
 
 from pipecat.expressive.expression import (
     NEUTRAL_DELIVERY,
+    TAGGER_BREATH_KINDS,
     TAGGER_DELIVERY,
     TAGGER_SOUNDS,
     ExpressionCapabilities,
     ExpressionTerm,
+    TaggerBreathKind,
     TaggerDelivery,
     TaggerSound,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+
+# A label the tagger writes: a delivery, a sound or the kind a breath is drawn as.
+TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
 
 
 @dataclass(frozen=True)
@@ -34,20 +40,28 @@ class LabelSpace:
         deliveries: Delivery label to the name to write, in ``TAGGER_DELIVERY`` order.
         sounds: Sound label to the name to write, in ``TAGGER_SOUNDS`` order.
         emphasis: Whether the service stresses ``^^words^^``.
+        breaths: Kind of breath to the name to write, in ``TAGGER_BREATH_KINDS``
+            order, where a breath is offered. The model chooses only a breath,
+            and the tagger draws its kind.
     """
 
     deliveries: dict[str, str]
     sounds: dict[str, str]
     emphasis: bool
+    breaths: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def resolve(cls, capabilities: ExpressionCapabilities, policy: ExpressionPolicy):
         """The labels the service performs and the policy offers.
 
-        A breath is offered only with ``ExpressionGuidance.BREATHE`` in the policy.
+        A breath, and its kinds, are offered only with ``ExpressionGuidance.BREATHE``
+        in the policy.
         """
         sounds: list[TaggerSound] = [s for s in TAGGER_SOUNDS if s != "breath" or _breathes(policy)]
         vocabulary = capabilities.tagger_vocabulary
+        resolved = _resolve(
+            sounds, capabilities.sounds, capabilities.free_text_sounds, vocabulary, policy.sounds
+        )
         return cls(
             deliveries=_resolve(
                 TAGGER_DELIVERY,
@@ -56,15 +70,23 @@ class LabelSpace:
                 vocabulary,
                 policy.delivery,
             ),
-            sounds=_resolve(
-                sounds,
+            sounds=resolved,
+            emphasis=capabilities.emphasis,
+            # Each kind of breath is a sound of its own.
+            breaths=_resolve(
+                TAGGER_BREATH_KINDS,
                 capabilities.sounds,
                 capabilities.free_text_sounds,
                 vocabulary,
                 policy.sounds,
-            ),
-            emphasis=capabilities.emphasis,
+            )
+            if "breath" in resolved
+            else {},
         )
+
+    def sound_name(self, label: str) -> str | None:
+        """The name to write for a sound or a kind of breath, if the space holds it."""
+        return self.sounds.get(label) or self.breaths.get(label)
 
 
 @dataclass(frozen=True)
@@ -135,9 +157,9 @@ class ReplyRenderer:
             text = text[:at] + tag + text[at:]
 
         if kept.sound_before:
-            text = f"[[{self._space.sounds[kept.sound_before]}]] {text}"
+            text = f"[[{self._space.sound_name(kept.sound_before)}]] {text}"
         if kept.sound_after:
-            text = f"{text} [[{self._space.sounds[kept.sound_after]}]]"
+            text = f"{text} [[{self._space.sound_name(kept.sound_after)}]]"
         delivery = names[kept.delivery] if kept.delivery else None
         if delivery != self._delivery:
             text = f"<<{delivery or NEUTRAL_DELIVERY}>> {text}"
@@ -150,10 +172,10 @@ def _breathes(policy: ExpressionPolicy) -> bool:
 
 
 def _resolve(
-    labels: Iterable[TaggerDelivery | TaggerSound],
+    labels: Iterable[TaggerLabel],
     terms: list[ExpressionTerm],
     free_text: bool,
-    vocabulary: dict[TaggerDelivery | TaggerSound, list[str]],
+    vocabulary: dict[TaggerLabel, list[str]],
     offered: list[str] | None,
 ) -> dict[str, str]:
     """Each label's first name the service performs and the policy offers.
@@ -194,8 +216,8 @@ def _keep(sentence: str, labels: SentenceLabels, space: LabelSpace) -> SentenceL
         delivery=labels.delivery if labels.delivery in space.deliveries else None,
         spans=spans,
         emphasis=emphasis,
-        sound_before=labels.sound_before if labels.sound_before in space.sounds else None,
-        sound_after=labels.sound_after if labels.sound_after in space.sounds else None,
+        sound_before=labels.sound_before if space.sound_name(labels.sound_before or "") else None,
+        sound_after=labels.sound_after if space.sound_name(labels.sound_after or "") else None,
     )
 
 

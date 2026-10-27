@@ -56,9 +56,11 @@ class FakeTaggerModel:
         labels: dict[str, SentenceLabels] | None = None,
         breaths_per_reply: int | None = None,
         error: Exception | None = None,
+        breath_kinds: dict[str, float] | None = None,
     ):
         self.labels = labels or {}
         self.breaths_per_reply = breaths_per_reply
+        self.breath_kinds = breath_kinds or {}
         self.calls: list[tuple[TurnContext, list[str], str]] = []
         self._error = error
 
@@ -208,9 +210,14 @@ async def test_a_breath_is_offered_only_with_the_breathe_preset(monkeypatch):
         params=_expressive(ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])),
     )
 
-    without, with_breathe = (turn.space.sounds for turn, _, _ in model.calls)
-    assert "breath" not in without
-    assert with_breathe["breath"] == "short breath"
+    without, with_breathe = (turn.space for turn, _, _ in model.calls)
+    assert "breath" not in without.sounds and without.breaths == {}
+    assert with_breathe.sounds["breath"] == "quick breath"
+    assert with_breathe.breaths == {
+        "light breath": "quick breath",
+        "deep breath": "deep breath",
+        "exhale": "exhales softly",
+    }
 
 
 @pytest.mark.asyncio
@@ -260,7 +267,80 @@ async def test_breaths_past_the_models_limit_for_a_reply_are_dropped(monkeypatch
         monkeypatch, model, ELEVENLABS, *_reply("One. Two."), params=_expressive(policy)
     )
 
-    assert tagged == ["[[short breath]] One.", "Two."]
+    assert tagged == ["[[quick breath]] One.", "Two."]
+
+
+BREATHE = _expressive(ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,written",
+    [
+        ("light breath", "quick breath"),
+        ("deep breath", "deep breath"),
+        ("exhale", "exhales softly"),
+    ],
+)
+async def test_each_breath_is_drawn_as_a_kind_at_the_models_shares(monkeypatch, kind, written):
+    model = FakeTaggerModel(
+        {"One.": SentenceLabels(sound_before="breath")}, breath_kinds={kind: 1.0}
+    )
+
+    tagged = await _tagged(monkeypatch, model, ELEVENLABS, *_reply("One."), params=BREATHE)
+
+    assert tagged == [f"[[{written}]] One."]
+
+
+@pytest.mark.asyncio
+async def test_a_call_draws_its_breaths_alike_each_time(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    kinds = {"light breath": 0.59, "deep breath": 0.36, "exhale": 0.05}
+    replies = [frame for n in range(8) for frame in _reply(f"Reply {n}.")]
+    labels = {f"Reply {n}.": breath for n in range(8)}
+
+    first, second = [
+        await _tagged(
+            monkeypatch,
+            FakeTaggerModel(labels, breath_kinds=kinds),
+            ELEVENLABS,
+            *replies,
+            params=BREATHE,
+        )
+        for _ in range(2)
+    ]
+
+    assert first == second
+    assert {tagged.split("]]")[0] for tagged in first} <= {
+        "[[quick breath",
+        "[[deep breath",
+        "[[exhales softly",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_next_reply_reads_a_drawn_breath_as_a_breath(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel({"One.": breath}, breath_kinds={"exhale": 1.0})
+
+    await _tagged(monkeypatch, model, ELEVENLABS, *_reply("One."), *_reply("Two."), params=BREATHE)
+
+    second = model.calls[1][0]
+    assert second.previous == [breath]
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_names_one_breath_draws_only_that_kind(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel(
+        {f"Reply {n}.": breath for n in range(6)}, breath_kinds={"light breath": 0.5, "exhale": 0.5}
+    )
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["quick breath"])
+    replies = [frame for n in range(6) for frame in _reply(f"Reply {n}.")]
+
+    tagged = await _tagged(monkeypatch, model, ELEVENLABS, *replies, params=_expressive(policy))
+
+    assert tagged == [f"[[quick breath]] Reply {n}." for n in range(6)]
 
 
 def _decoded(before: list[float], breath: float, sentence: str = "Hi.") -> SentenceLabels:

@@ -56,6 +56,8 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
                 "laugh": ["laughs"],
                 "sigh": ["sighs"],
                 "breath": ["breath", "inhale"],
+                "light breath": ["breath"],
+                "deep breath": ["inhale"],
             },
         )
 

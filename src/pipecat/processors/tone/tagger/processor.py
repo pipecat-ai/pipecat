@@ -7,6 +7,7 @@
 """The processor that tags an LLM's plain replies with Pipecat Tone's tagger."""
 
 import asyncio
+import random
 from dataclasses import replace
 
 from loguru import logger
@@ -94,6 +95,8 @@ class PipecatToneTagger(LLMTextProcessor):
         # The labels of the reply being tagged, which the next reply's model
         # reads; None before the first reply.
         self._labels: list[SentenceLabels] | None = None
+        # Draws each breath's kind, seeded by the call so far, so a call replays alike.
+        self._draw = random.Random()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with the pipeline's expression policy, and load its model.
@@ -180,6 +183,7 @@ class PipecatToneTagger(LLMTextProcessor):
         self._turn = TurnContext(list(self._messages), self._space, self._policy, self._labels)
         self._renderer = ReplyRenderer(self._space)
         self._labels = []
+        self._draw = random.Random("\n".join(m.text for m in self._turn.messages))
 
     async def _tag(self, sentence: str, text_type: TextType | str) -> str:
         """Tag one sentence of the reply; text that isn't spoken stays as written."""
@@ -198,13 +202,28 @@ class PipecatToneTagger(LLMTextProcessor):
         try:
             labels = await asyncio.to_thread(self._model.tag, self._turn, earlier, plain)
             labels = self._capped_breaths(labels)
-            tagged = self._renderer.render(plain, labels)
+            tagged = self._renderer.render(plain, self._drawn(labels))
         except Exception as e:
             # A transform that raises drops the sentence, so it's spoken untagged.
             await self.push_error(f"{self}: couldn't tag a sentence, spoken untagged: {e}", e)
             return plain
+        # The next reply's model reads a breath as a breath, whatever kind it was drawn as.
         self._labels.append(labels)
         return tagged
+
+    def _drawn(self, labels: SentenceLabels) -> SentenceLabels:
+        """The labels with a breath drawn as a kind the service performs, at the model's shares.
+
+        A breath stays plain when the model or the service has no kinds.
+        """
+        if labels.sound_before != "breath" or not self._model or not self._turn:
+            return labels
+        breaths = self._turn.space.breaths
+        kinds = {k: share for k, share in self._model.breath_kinds.items() if k in breaths}
+        if not kinds:
+            return labels
+        kind = self._draw.choices(list(kinds), list(kinds.values()))[0]
+        return replace(labels, sound_before=kind)
 
     def _capped_breaths(self, labels: SentenceLabels) -> SentenceLabels:
         """The labels without a breath past the model's limit for a reply.

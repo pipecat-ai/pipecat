@@ -64,6 +64,11 @@ class PipecatToneTaggerModel:
         """The most breaths a reply takes, or None for no limit."""
         return self.config.get("breaths_per_reply")
 
+    @property
+    def breath_kinds(self) -> dict[str, float]:
+        """The kinds a breath is drawn as, with their shares; empty for a plain breath."""
+        return self.config.get("breath_kinds") or {}
+
     @classmethod
     def download(
         cls, *, revision: str = TAGGER_REVISION, threads: int = 1

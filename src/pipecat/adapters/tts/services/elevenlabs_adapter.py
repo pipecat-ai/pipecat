@@ -121,7 +121,9 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
                 "laugh": ["laughs"],
                 "chuckle": ["chuckles"],
                 "sigh": ["sighs"],
-                "breath": ["short breath", "inhales deeply"],
+                "breath": ["quick breath"],
+                "light breath": ["quick breath"],
+                "exhale": ["exhales softly"],
             },
         )
 
