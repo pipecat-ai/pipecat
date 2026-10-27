@@ -15,6 +15,18 @@ from pipecat.frames.frames import TextType
 _STAR = ""
 
 
+def _strip_atx_header(match: re.Match[str]) -> str:
+    """Return heading content without its optional closing marker."""
+    content = match[1]
+    line_ending = "\r" if content.endswith("\r") else ""
+    body = content.removesuffix("\r")
+    trimmed = body.rstrip(" \t")
+    before_closing = trimmed.rstrip("#")
+    if before_closing != trimmed and (not before_closing or before_closing[-1] in " \t"):
+        return before_closing.rstrip(" \t") + line_ending
+    return content
+
+
 class StripMarkdown:
     r"""Transform that removes Markdown formatting symbols with no spoken equivalent.
 
@@ -89,7 +101,9 @@ class StripMarkdown:
         text = re.sub(r"\*(?=\S)(.+?)(?<=\S)\*", r"\1", text)
         text = re.sub(r"\b_(.+?)_\b", r"\1", text)
         # ATX headers (# ## ### etc.)
-        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(
+            r"^#{1,6}(?:[ \t]+|(?=\r?$))(.*)", _strip_atx_header, text, flags=re.MULTILINE
+        )
         # Blockquotes
         text = re.sub(r"^>\s?", "", text, flags=re.MULTILINE)
         return text.replace(_STAR, "*")

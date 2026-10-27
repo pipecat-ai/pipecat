@@ -1,0 +1,1 @@
+- StripMarkdown removes closing ATX heading markers while preserving heading text and line breaks.
