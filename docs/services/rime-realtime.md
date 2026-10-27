@@ -6,6 +6,8 @@
 uv pip install 'pipecat-ai[rime-realtime]'
 ```
 
+The extra requires `rimelabs-sdk>=0.1.0a24,<0.2`.
+
 Set `RIME_API_KEY`. The default endpoint is `wss://prism.api.rime.ai/v1/realtime`. Use `endpoint=` for a custom deployment. An injected `client=Rime(...)` remains caller-owned. Use one service instance per conversation.
 
 ```python
@@ -77,6 +79,10 @@ Early speech hints remain available through `on_rime_event` but do not change ou
 ## Events and limits
 
 `on_session_updated` supplies acknowledged SDK session information. `on_rime_event` supplies SDK events with provider request IDs, response metadata, and diagnostics. Failures use normal Pipecat error frames.
+
+SDK `ItemTruncated` events report the item ID, audio position, and retained server text when available. `kept_text=None` means unavailable; an empty string means no words remain. Retained text can differ from audible words. The event does not change Pipecat's local context.
+
+`ResponseEnded.truncation` reports conversation items excluded from that reply's prompt, with an optional first retained item ID. Those items remain in provider history. The summary is `None` when no exclusions are reported or the information is unavailable.
 
 Microphone input accepts PCM16 at 8–192 kHz with 1–32 channels. Unsupported SDK formats are converted before submission. Queue and input-byte limits bound pending work. Shutdown has a configurable deadline and does not wait for playback receipts.
 
