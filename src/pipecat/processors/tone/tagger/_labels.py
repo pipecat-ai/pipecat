@@ -31,6 +31,11 @@ from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 # A label the tagger writes: a delivery, a sound or the kind a breath is drawn as.
 TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
 
+# The services the model was trained with, by the names it reads for them. It reads
+# "other" for any other.
+TRAINED_SERVICES = ("cartesia", "elevenlabs", "fish", "minimax")
+OTHER_SERVICE = "other"
+
 
 @dataclass(frozen=True)
 class LabelSpace:
@@ -40,6 +45,7 @@ class LabelSpace:
         deliveries: Delivery label to the name to write, in ``TAGGER_DELIVERY`` order.
         sounds: Sound label to the name to write, in ``TAGGER_SOUNDS`` order.
         emphasis: Whether the service stresses ``^^words^^``.
+        tts: The service, by the name the model was trained to read for it.
         breaths: Kind of breath to the name to write, in ``TAGGER_BREATH_KINDS``
             order, where a breath is offered. The model chooses only a breath,
             and the tagger draws its kind.
@@ -48,14 +54,26 @@ class LabelSpace:
     deliveries: dict[str, str]
     sounds: dict[str, str]
     emphasis: bool
+    tts: str = OTHER_SERVICE
     breaths: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def resolve(cls, capabilities: ExpressionCapabilities, policy: ExpressionPolicy):
+    def resolve(
+        cls,
+        capabilities: ExpressionCapabilities,
+        policy: ExpressionPolicy,
+        service_name: str = "",
+    ):
         """The labels the service performs and the policy offers.
 
         A breath, and its kinds, are offered only with ``ExpressionGuidance.BREATHE``
         in the policy.
+
+        Args:
+            capabilities: What the service performs.
+            policy: The pipeline's expression policy.
+            service_name: The service's name, such as ``"ElevenLabsTTSService#0"``,
+                which says which of the services the model was trained with it is.
         """
         sounds: list[TaggerSound] = [s for s in TAGGER_SOUNDS if s != "breath" or _breathes(policy)]
         vocabulary = capabilities.tagger_vocabulary
@@ -72,6 +90,7 @@ class LabelSpace:
             ),
             sounds=resolved,
             emphasis=capabilities.emphasis,
+            tts=_trained_service(service_name),
             # Each kind of breath is a sound of its own.
             breaths=_resolve(
                 TAGGER_BREATH_KINDS,
@@ -165,6 +184,11 @@ class ReplyRenderer:
             text = f"<<{delivery or NEUTRAL_DELIVERY}>> {text}"
             self._delivery = delivery
         return text
+
+
+def _trained_service(service_name: str) -> str:
+    name = service_name.lower()
+    return next((service for service in TRAINED_SERVICES if service in name), OTHER_SERVICE)
 
 
 def _breathes(policy: ExpressionPolicy) -> bool:

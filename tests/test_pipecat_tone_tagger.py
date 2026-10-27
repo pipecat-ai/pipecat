@@ -385,6 +385,53 @@ def test_a_breath_goes_only_where_no_other_sound_starts_the_sentence():
     assert _decoded(laugh, 9.0, "Hi " * 6).sound_before == "laugh"
 
 
+def test_a_sentence_is_read_as_the_text_the_model_was_trained_on():
+    policy = ExpressionPolicy(
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            ExpressionGuidance.BREATHE,
+        ]
+    )
+    heard = [PerceptionSignal("tone", labels=[("frustrated", 0.62), ("neutral", 0.3)])]
+    space = LabelSpace.resolve(
+        ElevenLabsAudioTagExpressionAdapter().capabilities(), policy, "ElevenLabsTTSService#0"
+    )
+    turn = TurnContext(
+        [
+            Message("assistant", "Thanks for calling. How can I help?"),
+            Message("user", "I need my new booking code.", heard),
+        ],
+        space,
+        policy,
+        [SentenceLabels(delivery="calm"), SentenceLabels(sound_before="breath")],
+    )
+    # tagger-rc1's layout.
+    layout = Layout(earlier=1, max_tokens=160, previous_tags=True)
+
+    call, sentence, start = encode(turn, ["Sure, one moment."], "Your new code is AB12CD.", layout)
+
+    # What training wrote for this turn.
+    assert call == "caller (tone frustrated likely, neutral guess): I need my new booking code."
+    assert sentence == (
+        "tts elevenlabs | can calm sympathetic apologetic warm excited surprised sad grateful "
+        "curious confident slow fast | sounds laugh chuckle sigh breath | stress yes | policy "
+        "match style, slow for details, breathe | caller sounded tone frustrated likely, neutral "
+        "guess | last reply calm breath | state new detail | reply so far: Sure, one moment. | "
+        "sentence: Your new code is AB12CD."
+    )
+    assert start == 354
+
+
+def test_a_service_the_model_wasnt_trained_with_is_read_as_other():
+    capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+
+    assert LabelSpace.resolve(capabilities, ExpressionPolicy(), "ElevenLabsTTSService#0").tts == (
+        "elevenlabs"
+    )
+    assert LabelSpace.resolve(capabilities, ExpressionPolicy(), "MyTTSService#0").tts == "other"
+
+
 def test_a_layout_that_reads_no_turns_reads_none_of_the_call():
     turn = TurnContext(
         [Message("user", "My order is late.")], LabelSpace({}, {}, False), ExpressionPolicy(), None

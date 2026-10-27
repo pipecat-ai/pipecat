@@ -161,7 +161,7 @@ class PipecatToneTagger(LLMTextProcessor):
             )
             self._space = None
             return
-        self._space = LabelSpace.resolve(frame.expression, self._policy)
+        self._space = LabelSpace.resolve(frame.expression, self._policy, frame.service_name)
 
     def _on_user_turn(self, frame: LLMContextUserTurnFrame):
         message = Message("user", frame.text, fold(frame.perception), frame.speculation)
