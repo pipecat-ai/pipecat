@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, develop]
     paths: ['pyproject.toml']
+  # Scheduled and manual runs ignore uv.lock and install the newest allowed
+  # versions, as a user's fresh install would, so upstream releases that break
+  # an install show up without any change here.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   test-compatibility:
@@ -15,12 +21,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11.15', '3.12.13', '3.13.12', '3.14.3']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     name: Python ${{ matrix.python-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
         timeout-minutes: 10
@@ -39,9 +45,10 @@ jobs:
             pkg-config
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 'latest'
+          enable-cache: false
 
       - name: Set up Python ${{ matrix.python-version }}
         run: |
@@ -50,7 +57,7 @@ jobs:
 
       - name: Test uv sync with all extras
         run: |
-          uv sync --group dev --all-extras
+          uv sync --group dev --all-extras ${{ github.event_name != 'push' && github.event_name != 'pull_request' && '--upgrade' || '' }}
 
       - name: Verify installation
         run: |

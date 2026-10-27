@@ -21,10 +21,8 @@ import pytest
 import pytest_asyncio
 from openai import BadRequestError
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     InputAudioRawFrame,
     InterruptionFrame,

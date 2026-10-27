@@ -6,6 +6,7 @@
 
 """Ordered sequencer for AggregatedTextFrame slots through TTS processing."""
 
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.markup_utils import strip_complete_markup
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -161,7 +163,8 @@ class _ParallelSentenceAggregator:
             or ``None`` when nothing substantive is buffered.
         """
         await self._aggregator.flush()
-        if self._user.strip():
+        # A trailing tag has no words to show, but is still text the LLM wrote.
+        if self._user.strip() or self._llm.strip():
             result = _ParallelAggregation(self._tts, self._llm, self._user)
             self._reset()
             return result
@@ -295,6 +298,9 @@ class AggregatedFrameSequencer:
         """
         self._name = name
         self._streaming = streaming
+        # Tags only the LLM's text carries, such as expressive conversation's,
+        # which word tracking passes over in it. Set by the TTS service.
+        self.llm_markup: re.Pattern[str] | None = None
         self._slots: list[_AggregatedFrameSlot] = []
         self._context_append_to_context: dict[str, bool] = {}
         # Transient per-context pending-sentence state, keyed by context ID. An entry
@@ -362,6 +368,7 @@ class AggregatedFrameSequencer:
                     tts_text,
                     llm_text=frame.raw_text or frame.text,
                     user_facing_text=frame.text,
+                    llm_markup=self.llm_markup,
                 )
                 if build_tracker
                 else None,
@@ -675,13 +682,23 @@ class AggregatedFrameSequencer:
                 if slot.tracker:
                     remaining_text = slot.tracker.get_remaining_tts_text()
                     raw_remaining = slot.tracker.get_remaining_llm_text()
-                    if raw_remaining and remaining_text and remaining_text not in raw_remaining:
+                    # The words left, not the markup the service was sent for its
+                    # tags, are what the LLM's text has to hold, read without its
+                    # own tags.
+                    remaining_words = " ".join(strip_complete_markup(remaining_text).split())
+                    llm_words = raw_remaining or ""
+                    if self.llm_markup:
+                        llm_words = self.llm_markup.sub("", llm_words)
+                    llm_words = " ".join(llm_words.split())
+                    if raw_remaining and remaining_words and remaining_words not in llm_words:
                         logger.warning(
                             f"{self._name} force-complete: raw_remaining {repr(raw_remaining)} "
                             f"does not contain remaining_text {repr(remaining_text)}, discarding"
                         )
                         raw_remaining = None
-                    if remaining_text:
+                    # A slot that is only tags, such as a sound, has LLM text and
+                    # nothing left to say.
+                    if remaining_text or raw_remaining:
                         logger.debug(
                             f"{self._name} force-completing slot with remaining text "
                             f"{repr(remaining_text)}"
@@ -802,9 +819,11 @@ class AggregatedFrameSequencer:
             The sentence frame, followed — for push_text_frames=True services — by
             the whole-sentence TTSTextFrame and any skipped frames it unblocks,
             followed by any frames unblocked by replaying previously-buffered
-            words. Empty if the aggregated text is entirely whitespace.
+            words. Empty if the sentence has no text in any channel.
         """
-        if not agg.user_facing_text.strip():
+        # A sentence that is only tags has no words to show, but its text still
+        # reaches the context in order.
+        if not agg.user_facing_text.strip() and not agg.llm_text.strip():
             return []
 
         frame = AggregatedTextFrame(
@@ -815,19 +834,24 @@ class AggregatedFrameSequencer:
         frame.append_to_context = False
         tracker = (
             WordCompletionTracker(
-                agg.tts_text, llm_text=agg.llm_text or None, user_facing_text=agg.user_facing_text
+                agg.tts_text,
+                llm_text=agg.llm_text or None,
+                user_facing_text=agg.user_facing_text,
+                llm_markup=self.llm_markup,
             )
             if sc.build_tracker
             else None
         )
         self._append_spoken_slot(frame, context_id, tracker, sc.append_to_context, False)
-        frames: list[Frame] = [frame]
+        frames: list[Frame] = [frame] if agg.user_facing_text.strip() else []
 
         if not sc.build_tracker:
+            # Trimmed like a sentence-mode unit: the context joins its parts with
+            # a space, and a streamed sentence keeps the spaces of its tokens.
             word_frame = TTSTextFrame(
-                agg.user_facing_text,
+                agg.user_facing_text.strip(),
                 sc.text_type,
-                raw_text=agg.llm_text or None,
+                raw_text=agg.llm_text.strip() or None,
                 segment_id=frame.id,
             )
             word_frame.context_id = context_id

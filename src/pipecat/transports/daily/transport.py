@@ -1860,8 +1860,14 @@ class DailyTransportClient(EventHandler):
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
-            await callback(*args)
-            queue.task_done()
+            # A failing callback must not end this task, or every later
+            # callback on this queue would be dropped.
+            try:
+                await callback(*args)
+            except Exception:
+                logger.exception(f"{self} uncaught exception in callback {callback.__name__}")
+            finally:
+                queue.task_done()
 
     async def _flush_join_messages(self):
         """Send any messages that were queued before join completed."""
@@ -3184,9 +3190,16 @@ class DailyTransport(BaseTransport):
         logger.debug(f"{self} DTMF event: {data}")
         await self._call_event_handler("on_dtmf_event", data)
 
-        if self._input:
-            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
-            await self._input.push_frame(frame)
+        if not self._input:
+            return
+
+        try:
+            button = KeypadEntry(data["tone"])
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {data['tone']!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""

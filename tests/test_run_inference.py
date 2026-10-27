@@ -10,10 +10,10 @@ import pytest
 from openai import NotGiven
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMInvocationParams
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMInvocationParams
-from pipecat.adapters.services.gemini_adapter import GeminiLLMInvocationParams
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMInvocationParams
+from pipecat.adapters.llm.services.bedrock_adapter import AWSBedrockLLMInvocationParams
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService

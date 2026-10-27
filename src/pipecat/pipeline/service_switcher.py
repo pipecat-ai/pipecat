@@ -252,11 +252,14 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     `ServiceSwitcherFrame` frames and delegated to a pluggable
     `ServiceSwitcherStrategy`.
 
-    `ServiceUpdateSettingsFrame` is the exception to the gating. A settings
-    update addressed to a member service (``service=``) reaches it whether or
-    not it is active, and one marked ``reach_inactive_services`` reaches every
-    member, so whichever service becomes active later is already configured. Any
-    other settings update applies to the active service alone.
+    Two kinds of frame are exceptions to the gating. A settings update
+    (`ServiceUpdateSettingsFrame`) addressed to a member service (``service=``)
+    reaches it whether or not it is active, and one marked
+    ``reach_inactive_services`` reaches every member, so whichever service
+    becomes active later is already configured. Any other settings update
+    applies to the active service alone. And a `ServiceMetadataFrame` from a
+    service outside the switcher reaches every member, so a member that reads
+    another service's metadata has it when it becomes active.
 
     Example::
 
@@ -505,6 +508,23 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
             if isinstance(frame, ServiceUpdateSettingsFrame):
                 await self._update_inactive_services(frame, direction)
+            elif isinstance(frame, ServiceMetadataFrame):
+                await self._share_metadata(frame, direction)
+
+    async def _share_metadata(self, frame: ServiceMetadataFrame, direction: FrameDirection):
+        """Hand metadata from a service outside the switcher to the inactive members.
+
+        The active service receives it through its branch. The copies the
+        inactive ones pass on go no further than the switcher, since only the
+        active member's own metadata leaves it.
+
+        Args:
+            frame: The metadata to hand over.
+            direction: The direction the metadata is travelling.
+        """
+        for service in self.services:
+            if service is not self.strategy.active_service:
+                await service.queue_frame(replace(frame), direction)
 
     async def _update_inactive_services(
         self, frame: ServiceUpdateSettingsFrame, direction: FrameDirection

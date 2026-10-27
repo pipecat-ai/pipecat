@@ -43,6 +43,7 @@ from pipecat.bus.ui.messages import (
 )
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
@@ -173,6 +174,13 @@ class PipelineParams(BaseModel):
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). TTS services then read the
+            expression tags an LLM writes into its reply instead of speaking them.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them, with expressive conversation on. Defaults to None,
+            which offers every tag the TTS service performs, with no guidance.
+            Part of expressive conversation (alpha).
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
@@ -188,6 +196,8 @@ class PipelineParams(BaseModel):
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
+    expression_policy: ExpressionPolicy | None = None
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
@@ -433,6 +443,14 @@ class PipelineWorker(BaseWorker):
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()
+        if (
+            self._params.expression_policy is not None
+            and not self._params.enable_expressive_conversation
+        ):
+            logger.warning(
+                f"{self}: expression_policy has no effect without "
+                "enable_expressive_conversation=True"
+            )
         self._capabilities_override = capabilities or BotCapabilities()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -1409,9 +1427,11 @@ class PipelineWorker(BaseWorker):
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
+            enable_expressive_conversation=self._params.enable_expressive_conversation,
             enable_metrics=self._params.enable_metrics,
             enable_tracing=self._enable_tracing,
             enable_usage_metrics=self._params.enable_usage_metrics,
+            expression_policy=self._params.expression_policy,
             observer=self._observer,
             pipeline_worker=self,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,

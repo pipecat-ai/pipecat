@@ -4,19 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the eval transport's per-connection flags, over its server and over an accepted WebSocket."""
+"""Tests for the eval transport, over its server and over an accepted WebSocket."""
 
 import asyncio
+import base64
+import io
+import json
 import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
+from PIL import Image
+
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.fastapi_transport import (
     EvalFastAPIWebsocketInputTransport,
     EvalFastAPIWebsocketOutputTransport,
     EvalFastAPIWebsocketTransport,
 )
-from pipecat.evals.serializer import EvalConnectionFlags, EvalSerializer
+from pipecat.evals.serializer import EVAL_IMAGE_MESSAGE_TYPE, EvalConnectionFlags, EvalSerializer
 from pipecat.evals.transport import (
     CAPTURE_AUDIO_QUERY_PARAM,
     CAPTURE_IMAGES_QUERY_PARAM,
@@ -25,7 +31,7 @@ from pipecat.evals.transport import (
     EvalTransportParams,
     _query_flag,
 )
-from pipecat.frames.frames import LLMConfigureOutputFrame
+from pipecat.frames.frames import LLMConfigureOutputFrame, UserImageRawFrame, UserImageRequestFrame
 
 
 def _ws(path=None, request_path=None):
@@ -146,6 +152,64 @@ class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
 
         await transport._on_client_connected(MagicMock())
         return await asyncio.wait_for(greeting_settings.get(), timeout=1)
+
+
+class TestUserImageRequests(unittest.IsolatedAsyncioTestCase):
+    async def test_request_without_an_image_is_answered_with_an_error(self):
+        for input_transport in self._input_transports():
+            with self.subTest(transport=type(input_transport).__name__):
+                input_transport.push_frame = AsyncMock()
+                result_callback = AsyncMock()
+                request = UserImageRequestFrame(user_id="user", result_callback=result_callback)
+
+                await input_transport._serve_user_image(request)
+
+                result_callback.assert_awaited_once()
+                self.assertIn("error", result_callback.await_args.args[0])
+                input_transport.push_frame.assert_not_awaited()
+
+    async def test_request_with_an_image_is_served_the_image(self):
+        for input_transport in self._input_transports():
+            with self.subTest(transport=type(input_transport).__name__):
+                await self._register_image(input_transport._params.serializer)
+                input_transport.push_frame = AsyncMock()
+                result_callback = AsyncMock()
+                request = UserImageRequestFrame(user_id="user", result_callback=result_callback)
+
+                await input_transport._serve_user_image(request)
+
+                frame = input_transport.push_frame.await_args.args[0]
+                self.assertIsInstance(frame, UserImageRawFrame)
+                self.assertIs(frame.request, request)
+                result_callback.assert_not_awaited()
+
+    def _input_transports(self):
+        """The input of the eval transport over its server and over an accepted WebSocket."""
+        with self.assertWarns(DeprecationWarning):
+            server = EvalTransport(params=EvalTransportParams(serializer=EvalSerializer()))
+        self.addAsyncCleanup(server.cleanup)
+        accepted = EvalFastAPIWebsocketTransport(
+            MagicMock(), EvalTransportParams(serializer=EvalSerializer()), EvalConnectionFlags()
+        )
+        return [server.input(), accepted.input()]
+
+    async def _register_image(self, serializer: EvalSerializer):
+        """Register an image with the serializer, as the harness's eval-image message does."""
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 3), (255, 0, 0)).save(buffer, format="PNG")
+        message = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "1",
+            "data": {
+                "t": EVAL_IMAGE_MESSAGE_TYPE,
+                "d": {
+                    "image": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                    "format": "image/png",
+                },
+            },
+        }
+        await serializer.deserialize(json.dumps(message))
 
 
 if __name__ == "__main__":

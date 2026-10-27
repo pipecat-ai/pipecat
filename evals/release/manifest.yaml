@@ -252,6 +252,8 @@ suite:
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-sarvam.py
     scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-smallest.py
+    scenarios: [scripted/weather_function_call]
 
   #
   # Async function calling: the tool keeps running after the LLM's turn ends
@@ -403,6 +405,23 @@ suite:
   #
   - bot: features/features-voicemail-detection.py
     scenarios: [scripted/voicemail_detection]
+
+  #
+  # Expressive conversation: the LLM writes expression tags, and the TTS
+  # performs them rather than speaking them. The Tone bot reads how each user
+  # turn was meant; Tone reads a flat transcript as neutral, which holds back
+  # the tags expressive_conversation asks for, so it runs perception alone.
+  #
+  - bot: expressive-conversation/expressive-conversation-cartesia.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-elevenlabs.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-fish.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-minimax.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-tone.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services

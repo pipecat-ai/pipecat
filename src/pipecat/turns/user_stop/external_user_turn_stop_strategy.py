@@ -18,9 +18,9 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
 
@@ -43,7 +43,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
       strategy adopts that decision and emits nothing.
 
     To shift the timing further, subclass this strategy and override
-    :meth:`~pipecat.turns.user_stop.BaseUserTurnStopStrategy.trigger_user_turn_stopped`,
+    :meth:`~pipecat.turns.user_stop.BaseUserTurnStopStrategy.report_user_turn_stopped`,
     which both paths reach once they decide the turn is over. Its
     ``enable_user_speaking_frames`` argument already carries whichever path got
     there, so pass it through when the override eventually finalizes. See
@@ -60,8 +60,9 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Initialize the external user turn stop strategy.
 
         Args:
-            timeout: A short delay used internally to handle consecutive or
-                slightly delayed transcriptions.
+            timeout: How long to wait after a final transcription for more of
+                them, so a turn whose transcription arrives late or in pieces
+                is decided once the text has settled.
             wait_for_transcript: When True (default), turn-stop signaling
                 waits for transcript text to arrive after the external
                 stop signal. When False, the strategy signals turn-stop as
@@ -81,8 +82,11 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._seen_interim_results = False
         self._turn_announced_elsewhere = False
         self._turn_open = False
-        self._event = asyncio.Event()
-        self._task: asyncio.Task | None = None
+        # Whether this strategy decided since the user last spoke or new text
+        # arrived. The controller clears the decisions on speech, so it decides
+        # again after that, but never repeats a decision that still counts.
+        self._decided = False
+        self._transcript_task: asyncio.Task | None = None
 
     @property
     def resolves_proposed_turn_stop_frames(self) -> bool:
@@ -114,25 +118,15 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._user_speaking = False
         self._seen_interim_results = False
         self._turn_announced_elsewhere = False
-        self._event.clear()
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the strategy.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        await super().setup(setup)
-        self._task = self.create_task(self._task_handler(), f"{self}::_task_handler")
+        self._decided = False
+        await self._cancel_transcript_timer()
 
     async def cleanup(self):
         """Cleanup the strategy."""
         await super().cleanup()
-        if self._task:
-            await self.task_manager.cancel_task(self._task)
-            self._task = None
+        await self._cancel_transcript_timer()
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Process an incoming frame to update strategy state.
 
         Updates internal transcription text and speaking state. The user end
@@ -140,9 +134,6 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, ProposedUserStartedSpeakingFrame):
             await self._handle_user_started_speaking(announced_elsewhere=False)
@@ -152,23 +143,28 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_user_started_speaking(announced_elsewhere=True)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(announced_elsewhere=True)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # The controller clears the decisions on any speech, even speech the
+            # service doesn't hear, so this strategy decides again after it.
+            self._decided = False
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._maybe_report_user_turn_stopped()
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
 
-        return ProcessFrameResult.CONTINUE
-
     async def _handle_user_started_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user is speaking."""
         self._user_speaking = True
+        self._decided = False
         self._turn_announced_elsewhere = announced_elsewhere
 
     async def _handle_user_stopped_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user has stopped speaking."""
         self._user_speaking = False
         self._turn_announced_elsewhere = announced_elsewhere
-        await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_report_user_turn_stopped()
 
     async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         self._seen_interim_results = True
@@ -178,30 +174,26 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text += frame.text
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
-        # Reset aggregation timer.
-        self._event.set()
+        # The new text is worth a decision of its own, once no more arrives.
+        self._decided = False
+        await self._cancel_transcript_timer()
+        self._transcript_task = self.create_task(
+            self._transcript_timer_handler(), f"{self}::_transcript_timer_handler"
+        )
 
-    async def _task_handler(self):
-        """Asynchronously monitor transcriptions and trigger user end turn when ready.
+    async def _transcript_timer_handler(self):
+        """Decide once no more transcriptions arrive for a while."""
+        await asyncio.sleep(self._timeout)
+        self._transcript_task = None
+        if self._turn_open:
+            await self._maybe_report_user_turn_stopped()
 
-        If transcription text exists and the user is not currently speaking,
-        triggers the user end turn. Handles multiple or delayed transcriptions
-        gracefully.
+    async def _cancel_transcript_timer(self):
+        if self._transcript_task:
+            task, self._transcript_task = self._transcript_task, None
+            await self.cancel_task(task)
 
-        """
-        while True:
-            try:
-                await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
-                self._event.clear()
-            except TimeoutError:
-                # Note: with wait_for_transcript off (realtime mode) this fires
-                # on every tick. The _turn_open check protects against
-                # unnecessarily triggering over and over (harmless, since the
-                # controller drops repeated triggers, but noisy).
-                if self._turn_open:
-                    await self._maybe_trigger_user_turn_stopped()
-
-    async def _trigger_user_turn_stopped(self):
+    async def _report_user_turn_stopped(self):
         """End the turn, emitting the turn frame unless it was already announced.
 
         Reads the flag rather than taking it as an argument: finalization can
@@ -212,17 +204,18 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             logger.debug(f"{self}: adopting a user turn stop decided elsewhere")
         else:
             logger.debug(f"{self}: resolving a proposed user turn stop")
-        await self.trigger_user_turn_stopped(
+        self._decided = True
+        await self.report_user_turn_stopped(
             enable_user_speaking_frames=False if self._turn_announced_elsewhere else None
         )
 
-    async def _maybe_trigger_user_turn_stopped(self):
-        if self._user_speaking:
+    async def _maybe_report_user_turn_stopped(self):
+        if self._user_speaking or self._decided:
             return
         if not self._wait_for_transcript:
             # Fire as soon as the external stop signal arrives —
             # transcripts (if any) are off the latency critical path.
-            await self._trigger_user_turn_stopped()
+            await self._report_user_turn_stopped()
             return
         if not self._seen_interim_results and self._text:
-            await self._trigger_user_turn_stopped()
+            await self._report_user_turn_stopped()

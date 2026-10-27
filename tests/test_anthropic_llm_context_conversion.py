@@ -12,7 +12,7 @@ import anthropic
 import httpx
 import pytest
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 

@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.volume import AudioVolumeTracker
+from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -169,7 +170,9 @@ class RTVIObserverParams:
             and ``remove_ignored_source()``.
         skip_text_types: List of text types to skip sending as tts/output messages.
             Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
-            later; add ``"backchannel"`` here to keep it from every client.
+            later, and expression sounds and pauses (``expression_sound``,
+            ``expression_pause``) to clients of 2.3.0 or later; add a type here to
+            keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled, and leave llm_raw_text_enabled off, to avoid leaking through
             LLM messages.
@@ -359,6 +362,11 @@ class RTVIObserver(BaseObserver):
     def _client_supports_backchannels(self) -> bool:
         """Return True when the connected client supports the backchannel text type (2.2.0+)."""
         return self._client_is_at_least([2, 2, 0])
+
+    @property
+    def _client_supports_expression(self) -> bool:
+        """Return True when the connected client supports expression sounds and pauses (2.3.0+)."""
+        return self._client_is_at_least([2, 3, 0])
 
     @property
     def _client_supports_raw_text(self) -> bool:
@@ -913,13 +921,14 @@ class RTVIObserver(BaseObserver):
                 data=RTVI.BotOutputMessageData(
                     text=text,
                     will_be_spoken=True,
-                    text_type=text_type,
+                    output_type=text_type,
                     segment_id=frame.segment_id,
                     spoken_status=spoken_status,
                     spoken_progress=RTVI.SpokenProgressData(
                         accumulated_text=accumulated,
                         remaining_text=remaining,
                     ),
+                    delivery=frame.delivery,
                 )
             )
             await self.send_rtvi_message(message)
@@ -937,6 +946,13 @@ class RTVIObserver(BaseObserver):
         # A client that doesn't support backchannels would show one as part of the
         # bot's response.
         if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
+            return True
+        # Expression sounds and pauses are part of protocol 2.3.0; an earlier client
+        # would take one for part of the bot's response.
+        if (
+            text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE)
+            and not self._client_supports_expression
+        ):
             return True
         skip_types = self._params.skip_text_types
         return bool(skip_types and text_type in skip_types)
@@ -958,6 +974,9 @@ class RTVIObserver(BaseObserver):
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
         if self._is_skipped(frame):
+            return
+        # A unit that is only tags reaches the context, with no words to show.
+        if not frame.text.strip():
             return
 
         text_type = frame.text_type
@@ -1007,20 +1026,28 @@ class RTVIObserver(BaseObserver):
                 text=text,
                 spoken=isTTS,
                 will_be_spoken=will_be_spoken,
-                text_type=text_type,
+                output_type=text_type,
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
+                delivery=frame.delivery if isinstance(frame, TTSTextFrame) else None,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
-        if isTTS and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
+        # A sound or pause isn't a word the bot spoke: bot-output alone carries
+        # it, with its text type.
+        spoken_words = isTTS and text_type not in (
+            TextType.EXPRESSION_SOUND,
+            TextType.EXPRESSION_PAUSE,
+        )
+
+        if spoken_words and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
                 RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
             )
 
-        if isTTS and self._params.bot_tts_enabled:
+        if spoken_words and self._params.bot_tts_enabled:
             tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
@@ -1060,6 +1087,7 @@ class RTVIObserver(BaseObserver):
                 timestamp=frame.timestamp,
                 final=final,
                 user_id=frame.user_id,
+                perception=frame.perception,
             )
         if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
@@ -1089,8 +1117,20 @@ class RTVIObserver(BaseObserver):
         final: bool,
         user_id: str | None = None,
         msg_id: str | None = None,
+        perception: list[PerceptionSignal] | None = None,
     ):
         """Send a user input message."""
+        signals = None
+        if perception:
+            signals = []
+            for signal in perception:
+                labels = [
+                    RTVI.UserPerceptionLabel(label=label, confidence=confidence)
+                    for label, confidence in signal.labels
+                ]
+                signals.append(
+                    RTVI.UserPerceptionSignal(name=signal.name, labels=labels, value=signal.value)
+                )
         message = RTVI.UserInputMessage(
             data=RTVI.UserInputMessageData(
                 text=text,
@@ -1099,6 +1139,7 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=user_id,
                 msg_id=msg_id,
+                perception=signals,
             )
         )
         await self.send_rtvi_message(message)

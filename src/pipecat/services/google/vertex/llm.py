@@ -20,7 +20,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from loguru import logger
 
-from pipecat.adapters.services.gemini_adapter import GeminiVertexLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import GeminiVertexLLMAdapter
 from pipecat.services.google.llm import GoogleLLMService
 
 try:
