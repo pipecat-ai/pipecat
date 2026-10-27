@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock
 import pytest
 from websockets.protocol import State
 
-from pipecat.frames.frames import CancelFrame, EndFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -156,3 +162,92 @@ async def test_translation_without_error_still_pushes_translation_frame():
     service.push_frame.assert_awaited_once()
     pushed_frame = service.push_frame.call_args.args[0]
     assert pushed_frame.text == "Bonjour"
+
+
+@pytest.mark.asyncio
+async def test_vad_stop_sends_finalize_when_enabled():
+    """With ``finalize_on_vad_stop``, the end of speech asks for the final right away."""
+    service, websocket = _connected_service()
+    service._finalize_on_vad_stop = True
+    service.push_frame = AsyncMock()
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert _message_types(websocket) == ["finalize"]
+    assert service._finalize_requested
+
+
+@pytest.mark.asyncio
+async def test_vad_stop_sends_nothing_by_default():
+    """Off by default: an API without ``finalize`` gets nothing new."""
+    service, websocket = _connected_service()
+    service.push_frame = AsyncMock()
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert _message_types(websocket) == []
+
+
+def _final(text, *, from_finalize=False):
+    data = {
+        "id": "00_00000000",
+        "is_final": True,
+        "utterance": {"text": text, "language": "en", "start": 0.0, "end": 1.0},
+    }
+    if from_finalize:
+        data["from_finalize"] = True
+    return {"type": "transcript", "data": data}
+
+
+@pytest.mark.asyncio
+async def test_a_final_from_finalize_is_marked_finalized():
+    """The final Gladia closed for our request is pushed as finalized."""
+    service, _ = _connected_service(incoming=[_final("hello there", from_finalize=True)])
+    service.request_finalize()
+    pushed = []
+
+    async def push(frame, *_args, **_kwargs):
+        pushed.append(frame)
+
+    service.push_frame = push
+    service.emit_stt_usage_metrics = AsyncMock()
+
+    await service._receive_messages()
+
+    assert service._finalize_pending
+    assert any(isinstance(f, TranscriptionFrame) for f in pushed)
+
+
+@pytest.mark.asyncio
+async def test_a_final_without_from_finalize_is_not_confirmed():
+    service, _ = _connected_service(incoming=[_final("hello there")])
+    service.request_finalize()
+    service.push_frame = AsyncMock()
+    service.emit_stt_usage_metrics = AsyncMock()
+
+    await service._receive_messages()
+
+    assert not service._finalize_pending
+    assert service._finalize_requested
+
+
+@pytest.mark.asyncio
+async def test_nothing_to_finalize_reports_ttfb_at_once():
+    """``finalized: false``: the final already went out, TTFB is reported now."""
+    service, _ = _connected_service(
+        incoming=[
+            {
+                "type": "finalize",
+                "acknowledged": True,
+                "error": None,
+                "data": {"channel": 0, "finalized": False, "utterance_id": None},
+            }
+        ]
+    )
+    service.stop_ttfb_metrics = AsyncMock()
+    service._cancel_ttfb_timeout = AsyncMock()
+
+    await service._receive_messages()
+
+    service.stop_ttfb_metrics.assert_awaited_once()
+    service._cancel_ttfb_timeout.assert_awaited_once()
