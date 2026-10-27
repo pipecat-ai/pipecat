@@ -423,15 +423,19 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
 
-        Always send ``response.cancel`` so in-flight assistant audio stops on
-        the wire promptly. When server VAD is off, also clear the input buffer
-        (manual turn mode owns commit/cancel). With server VAD on, leave the
-        input buffer intact so the interrupting user speech is not wiped.
+        With server VAD on, the API interrupts its own response ("In VAD mode,
+        interruptions are automatic"), so nothing is cancelled here and the
+        input buffer is left intact so the interrupting user speech is not
+        wiped. A ``response.cancel`` would race the response the API starts for
+        the interrupting turn: on a one-word turn, whose ``speech_started`` and
+        ``speech_stopped`` arrive together, it lands on that response and the
+        bot says nothing. When server VAD is off, manual turn mode owns
+        commit/cancel, so the input buffer is cleared and the response
+        cancelled.
         """
         if not self._is_turn_detection_enabled():
             await self.send_client_event(events.InputAudioBufferClearEvent())
-
-        await self.send_client_event(events.ResponseCancelEvent())
+            await self.send_client_event(events.ResponseCancelEvent())
 
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
@@ -1165,7 +1169,12 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                     )
                 ]
 
-                await self.run_function_calls(function_calls)
+                # The calls of one response are one group, so the LLM runs once,
+                # after the last of them completes: the API asks that
+                # response.create wait until every function call output of the
+                # response has been submitted. Each call still runs as soon as
+                # its arguments are done.
+                await self.run_function_calls(function_calls, group_id=self._current_response_id)
                 logger.debug(f"Processed function call: {evt.name}")
             else:
                 logger.warning(f"No tracked function call found for call_id: {evt.call_id}")
