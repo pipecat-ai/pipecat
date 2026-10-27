@@ -14,11 +14,19 @@ hang-up request authenticates with the matching Basic Auth pair, while
 account_sid stays in the URL.
 """
 
+import base64
 import json
+import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.frames.frames import AudioRawFrame, InterruptionFrame
+from pipecat.serializers.exotel import ExotelFrameSerializer
+from pipecat.serializers.genesys import GenesysAudioHookSerializer
+from pipecat.serializers.plivo import PlivoFrameSerializer
+from pipecat.serializers.telnyx import TelnyxFrameSerializer
 from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.serializers.vonage import VonageFrameSerializer
 from tests.frame_processor_helpers import frame_processor_setup
 
 STREAM_SID = "stream123"
@@ -169,6 +177,88 @@ class TestHangUpBasicAuth(unittest.IsolatedAsyncioTestCase):
 
         url = self.session.post.call_args.args[0]
         self.assertTrue(url.startswith(f"{BASE_URL}/"), url)
+
+
+class TestTelephonySerializerResamplerLifecycle(unittest.IsolatedAsyncioTestCase):
+    async def test_default_clear_after_secs_preserves_inbound_audio_across_gaps(self):
+        """Inbound stream resampling preserves buffered samples across >200 ms delivery gaps."""
+        serializer = TwilioFrameSerializer(
+            stream_sid=STREAM_SID,
+            params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+        )
+        self.assertIsNone(serializer._params.resampler_clear_after_secs)
+        await serializer.setup(
+            frame_processor_setup(audio_in_sample_rate=16000, audio_out_sample_rate=24000)
+        )
+
+        msg = json.dumps(
+            {
+                "event": "media",
+                "media": {
+                    "track": "inbound",
+                    "payload": base64.b64encode(b"\xff" * 160).decode(),
+                },
+            }
+        )
+        got_with_gap = 0
+        for i in range(1, 21):
+            if i == 10:
+                time.sleep(0.25)
+            frame = await serializer.deserialize(msg)
+            if frame:
+                got_with_gap += len(frame.audio) // 2
+
+        serializer_no_gap = TwilioFrameSerializer(
+            stream_sid=STREAM_SID,
+            params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+        )
+        await serializer_no_gap.setup(
+            frame_processor_setup(audio_in_sample_rate=16000, audio_out_sample_rate=24000)
+        )
+        got_no_gap = 0
+        for _ in range(1, 21):
+            frame = await serializer_no_gap.deserialize(msg)
+            if frame:
+                got_no_gap += len(frame.audio) // 2
+
+        self.assertEqual(got_with_gap, got_no_gap)
+
+    async def test_interruption_frame_resets_output_resampler_across_telephony_serializers(self):
+        """Serializing an InterruptionFrame resets the output resampler filter state."""
+        genesys = GenesysAudioHookSerializer()
+        genesys.create_opened_response()
+        serializers = [
+            TwilioFrameSerializer(
+                stream_sid=STREAM_SID,
+                params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+            ),
+            PlivoFrameSerializer(
+                stream_id=STREAM_SID,
+                params=PlivoFrameSerializer.InputParams(auto_hang_up=False),
+            ),
+            TelnyxFrameSerializer(
+                stream_id=STREAM_SID,
+                outbound_encoding="PCMU",
+                inbound_encoding="PCMU",
+                params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
+            ),
+            VonageFrameSerializer(),
+            ExotelFrameSerializer(stream_sid=STREAM_SID),
+            genesys,
+        ]
+        chunk_24k = b"\x10\x27" * 480
+        for s in serializers:
+            with self.subTest(serializer=type(s).__name__):
+                await s.setup(
+                    frame_processor_setup(audio_in_sample_rate=16000, audio_out_sample_rate=24000)
+                )
+                for _ in range(5):
+                    await s.serialize(
+                        AudioRawFrame(audio=chunk_24k, sample_rate=24000, num_channels=1)
+                    )
+                await s.serialize(InterruptionFrame())
+                flushed = await s._output_resampler.flush()
+                self.assertEqual(flushed, b"")
 
 
 if __name__ == "__main__":

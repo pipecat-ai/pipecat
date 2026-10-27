@@ -600,6 +600,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return bytes(serialized_data)
 
         elif isinstance(frame, InterruptionFrame):
+            await self._output_resampler.reset()
             return json.dumps(self.create_barge_in_event())
 
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
