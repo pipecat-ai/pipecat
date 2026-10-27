@@ -79,11 +79,11 @@ Fields:
     value from the run, no judge involved, and the metric scores 1 inside the
     range and 0 outside, which fails the run. ``turns`` is the persona's
     turns, ``duration`` the conversation's seconds from its first line to the
-    hang-up, ``words`` the longest bot reply in words, and ``latency`` the slowest
-    reply in seconds: from the persona's send to the reply's first token in
-    text mode, from the bot noticing the persona stop to its first spoken
-    sentence in audio mode, which a failure's reason spells out, since the two
-    are not comparable. The per-reply measures bound every reply.
+    hang-up, ``words`` the longest bot reply in words (each Chinese or Japanese
+    character counting as one), and ``latency`` the slowest reply in seconds:
+    from the persona's send to the reply's first token in text mode, from the
+    bot noticing the persona stop to its first spoken sentence in audio mode,
+    which a failure's reason spells out, since the two are not comparable. The per-reply measures bound every reply.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and
