@@ -56,6 +56,8 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
             "# Press `#`": "Press #",
             "# **Title ##**": "Title ##",
             "# [Press #](https://example.com)": "Press #",
+            "# Press #```removed```": "Press #",
+            "# Press #~~~removed~~~": "Press #",
             "# - item ##": "- item",
             "# --- ##": "---",
             "## C#": "C#",

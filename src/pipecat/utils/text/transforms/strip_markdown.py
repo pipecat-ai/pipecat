@@ -73,16 +73,16 @@ class StripMarkdown:
         Returns:
             Text with Markdown formatting symbols removed.
         """
-        # Fenced code blocks (``` or ~~~)
-        text = re.sub(r"```[\s\S]*?```", "", text)
-        text = re.sub(r"~~~[\s\S]*?~~~", "", text)
-        # Recognize block-level closing markers before stripping inline syntax.
+        # Recognize closing markers before removing syntax that can expose literal hashes.
         text = re.sub(
             r"^(#{1,6})([ \t]+|(?=\r?$))(.*)",
             _strip_atx_closing_marker,
             text,
             flags=re.MULTILINE,
         )
+        # Fenced code blocks (``` or ~~~)
+        text = re.sub(r"```[\s\S]*?```", "", text)
+        text = re.sub(r"~~~[\s\S]*?~~~", "", text)
         # Images and links, keeping the alt text or label
         if self._strip_urls:
             text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
