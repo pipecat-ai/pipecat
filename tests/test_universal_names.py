@@ -76,7 +76,7 @@ def test_a_service_names_universal_names_by_names_it_performs(adapter):
             declared = capabilities.sounds
             performed = capabilities.sound_name(universal)
         assert performed in names
-        if not capabilities.free_text:
+        if not capabilities.allows_free_text:
             assert set(names) & {term.name for term in declared}
 
 

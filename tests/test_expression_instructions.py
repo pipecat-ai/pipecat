@@ -30,7 +30,7 @@ FIXED = ExpressionCapabilities(
 FREE_TEXT = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughs"), ExpressionTerm("woo", "an excited whoop")],
     delivery=[ExpressionTerm("excited"), ExpressionTerm("whispers", "speaking in a whisper")],
-    free_text=True,
+    allows_free_text=True,
     emphasis=True,
     service_vocabulary={ExpressionDelivery.WHISPERING: ["whispers"]},
 )
@@ -159,7 +159,7 @@ def test_a_service_that_performs_speed_is_offered_slow_with_when_to_use_it():
 
 
 def test_a_free_text_service_with_no_examples_is_offered_the_core_names():
-    capabilities = ExpressionCapabilities(free_text=True)
+    capabilities = ExpressionCapabilities(allows_free_text=True)
 
     instructions = expression_instructions(capabilities)
 
@@ -169,7 +169,7 @@ def test_a_free_text_service_with_no_examples_is_offered_the_core_names():
 
 
 def test_a_free_text_service_is_taught_none_of_a_kind_the_policy_names_none_of():
-    capabilities = ExpressionCapabilities(free_text=True, emphasis=True)
+    capabilities = ExpressionCapabilities(allows_free_text=True, emphasis=True)
 
     instructions = expression_instructions(capabilities, ExpressionPolicy(delivery=[], sounds=[]))
 

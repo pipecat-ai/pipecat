@@ -149,7 +149,7 @@ async def test_short_audio_chunks_are_kept():
 class TestS2ExpressionAdapter:
     def test_capabilities(self):
         capabilities = FishAudioS2ExpressionAdapter().capabilities()
-        assert capabilities.free_text
+        assert capabilities.allows_free_text
         assert capabilities.emphasis
         assert "laughing" in [term.name for term in capabilities.sounds]
         # A delivery tag separates its names by spaces.

@@ -296,7 +296,7 @@ class ExpressionCapabilities:
         sounds: Sounds the service can make at one point, by its own names.
         delivery: Deliveries the service can apply to the words that follow, by
             its own names.
-        free_text: Whether the service also accepts sounds and deliveries
+        allows_free_text: Whether the service also accepts sounds and deliveries
             outside ``sounds`` and ``delivery``, described in a few words.
         pause_range_ms: The shortest and longest pause the service can make,
             in milliseconds, or None when it can't pause.
@@ -313,7 +313,7 @@ class ExpressionCapabilities:
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
     delivery: list[ExpressionTerm] = field(default_factory=list)
-    free_text: bool = False
+    allows_free_text: bool = False
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
@@ -353,7 +353,7 @@ class ExpressionCapabilities:
         declared = {term.name for term in terms}
         vocabulary = cast(dict[str, list[str]], self.service_vocabulary)
         for candidate in [*vocabulary.get(name, []), name]:
-            if self.free_text or candidate in declared:
+            if self.allows_free_text or candidate in declared:
                 return candidate
         return None
 
