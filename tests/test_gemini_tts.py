@@ -384,6 +384,34 @@ async def test_genai_38_request_shape(mock_genai_client_class):
 @requires_speech_metadata
 @pytest.mark.asyncio
 @patch("google.genai.Client")
+async def test_genai_custom_voice_request_shape(mock_genai_client_class):
+    """A custom ``voice_...`` ID is sent as ``voice``, not as a prebuilt voice name."""
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+
+    mock_stream = AsyncMock()
+    mock_client.aio.models.generate_content_stream = mock_stream
+
+    async def mock_generator(*args, **kwargs):
+        yield MockChunk(b"\x00" * 4800)
+
+    mock_stream.side_effect = mock_generator
+
+    tts = GeminiTTSService(
+        api_key="test-api-key",
+        settings=GeminiTTSService.Settings(model="gemini-3.8-flash-tts", voice="voice_abc123"),
+    )
+
+    await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hello world.")])
+
+    voice_config = mock_stream.call_args.kwargs["config"].speech_config.voice_config
+    assert voice_config.voice == "voice_abc123"
+    assert voice_config.prebuilt_voice_config is None
+
+
+@requires_speech_metadata
+@pytest.mark.asyncio
+@patch("google.genai.Client")
 async def test_genai_38_strips_wav_header(mock_genai_client_class):
     """A RIFF header on a 3.8 response is stripped rather than played as audio."""
     mock_client = MagicMock()
