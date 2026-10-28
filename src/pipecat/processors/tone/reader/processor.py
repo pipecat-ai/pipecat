@@ -10,7 +10,6 @@ import asyncio
 from pathlib import Path
 from typing import Literal
 
-from pipecat.expressive.formatter import strip_expression_tags
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
 from pipecat.frames.frames import (
     Frame,
@@ -130,8 +129,7 @@ class PipecatToneReader(FrameProcessor):
         if isinstance(frame, TranscriptionFrame) and frame.text.strip() and self._model:
             frame.perception = await self._read(frame.text)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            # The model was trained on plain words, so tags the LLM wrote aren't read.
-            self._previous = strip_expression_tags(frame.text)
+            self._previous = frame.text
         await self.push_frame(frame, direction)
 
     def _capabilities(self) -> PerceptionCapabilities:

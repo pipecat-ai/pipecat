@@ -108,24 +108,6 @@ async def test_a_turn_is_read_against_the_bots_words_before_it(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_bots_words_are_read_without_the_tags_it_wrote(monkeypatch):
-    model = FakeReaderModel()
-
-    await run_test(
-        _reader(monkeypatch, model),
-        frames_to_send=[
-            LLMContextAssistantTurnFrame(
-                text="<<apologetic>> The next visit is in ^^forty^^ minutes. [[sighs]] Sorry.",
-                timestamp="now",
-            ),
-            _transcription("Oh great."),
-        ],
-    )
-
-    assert model.reads == [("Oh great.", "The next visit is in forty minutes. Sorry.")]
-
-
-@pytest.mark.asyncio
 async def test_interim_transcriptions_are_not_read(monkeypatch):
     model = FakeReaderModel()
 
