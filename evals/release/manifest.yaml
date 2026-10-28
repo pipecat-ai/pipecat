@@ -411,6 +411,7 @@ suite:
   # performs them rather than speaking them. The Tone bot reads how each user
   # turn was meant; Tone reads a flat transcript as neutral, which holds back
   # the tags expressive_conversation asks for, so it runs perception alone.
+  # The Tone tagger bot's LLM writes plain words and a tagger writes the tags.
   #
   - bot: expressive-conversation/expressive-conversation-cartesia.py
     scenarios: [scripted/expressive_conversation]
@@ -422,6 +423,8 @@ suite:
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-tone.py
     scenarios: [scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-tone-tagger.py
+    scenarios: [scripted/expression_tagger, scripted/perception]
 
   #
   # Video avatar services

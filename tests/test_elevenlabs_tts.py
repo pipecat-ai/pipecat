@@ -688,7 +688,33 @@ async def test_http_word_timestamps_report_audio_tags_as_words():
     async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
         pass
 
-    assert reported[:4] == ["It's", "[excited]", "back", "[shortpause]"]
+    assert reported[:4] == ["It's", "[excited]", "back", "[short pause]"]
+
+
+@pytest.mark.asyncio
+async def test_http_audio_tag_ending_the_reply_is_reported_whole():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            chunks = ["Thanks. [inhales ", "deeply]"]
+            return _StreamingHttpResponse([_http_chunk(c) for c in chunks])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    async for _ in service.run_tts("Thanks. [inhales deeply]", "ctx-1"):
+        pass
+
+    assert reported == ["Thanks.", "[inhales deeply]"]
 
 
 @pytest.mark.asyncio

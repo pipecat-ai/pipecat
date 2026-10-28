@@ -42,7 +42,7 @@ from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
-    _join_audio_tags,
+    _ends_in_audio_tag,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
@@ -988,13 +988,17 @@ class ElevenLabsHttpTTSService(TTSService):
             # End of turn - reset previous text
             self._previous_text = ""
 
-    def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> list[tuple[str, float]]:
+    def calculate_word_times(
+        self, alignment_info: Mapping[str, Any], *, audio_tags: bool = False
+    ) -> list[tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
         This method handles partial words that may span across multiple alignment chunks.
 
         Args:
             alignment_info: Character timing data from ElevenLabs.
+            audio_tags: Whether a bracketed audio tag, such as ``[short pause]``,
+                is one word, spaces and all.
 
         Returns:
             List of (word, timestamp) pairs for complete words in this chunk.
@@ -1026,9 +1030,12 @@ class ElevenLabsHttpTTSService(TTSService):
         # Start with any partial word from previous chunk
         current_word = self._partial_word
         word_start_time = self._partial_word_start_time if self._partial_word else None
+        in_tag = audio_tags and _ends_in_audio_tag(current_word)
 
         for i, char in enumerate(chars):
-            if char == " ":
+            if audio_tags and char in "[]":
+                in_tag = char == "["
+            if char == " " and not in_tag:
                 if current_word:  # Only add non-empty words
                     words.append(current_word)
                     word_start_times.append(word_start_time)
@@ -1122,7 +1129,6 @@ class ElevenLabsHttpTTSService(TTSService):
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0
                 alignment_started = False
-                in_audio_tag = False
                 async for line in response.content:
                     line_str = line.decode("utf-8").strip()
                     if not line_str:
@@ -1164,23 +1170,10 @@ class ElevenLabsHttpTTSService(TTSService):
                                 # Update to the longest end time seen so far
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
-                            # Calculate word timestamps
-                            joined = alignment
-                            if self._expression_formatter:
-                                # The audio tags expressive conversation sends mark
-                                # when its sounds are performed.
-                                joined, in_audio_tag = _join_audio_tags(
-                                    alignment,
-                                    (
-                                        "characters",
-                                        "character_start_times_seconds",
-                                        "character_end_times_seconds",
-                                    ),
-                                    in_audio_tag,
-                                )
-                            # A chunk can be only the spaces inside a tag, leaving nothing.
-                            word_times = (
-                                self.calculate_word_times(joined) if joined["characters"] else []
+                            # Calculate word timestamps. The audio tags expressive
+                            # conversation sends mark when its sounds are performed.
+                            word_times = self.calculate_word_times(
+                                alignment, audio_tags=bool(self._expression_formatter)
                             )
                             if word_times:
                                 await self.add_word_timestamps(

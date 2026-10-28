@@ -19,10 +19,11 @@ from pipecat.expressive.expression import (
 # The audio tag each speed delivery is written as.
 _SPEED_TAGS = {SLOW_DELIVERY: "slowly", FAST_DELIVERY: "quickly"}
 
-# The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, sorted
-# into sounds made at one point and deliveries that last. Their guide doesn't
-# draw that line. Multi-word deliveries, such as accents, aren't listed; written
-# in a tag, they're passed on as free text.
+# The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, and a
+# short breath, a light one beside the guide's deep one, sorted into sounds made
+# at one point and deliveries that last. Their guide doesn't draw that line.
+# Multi-word deliveries, such as accents, aren't listed; written in a tag,
+# they're passed on as free text.
 _AUDIO_TAG_SOUNDS = [
     ExpressionTerm("laughs"),
     ExpressionTerm("laughs harder"),
@@ -38,6 +39,7 @@ _AUDIO_TAG_SOUNDS = [
     ExpressionTerm("exhales"),
     ExpressionTerm("exhales sharply"),
     ExpressionTerm("inhales deeply"),
+    ExpressionTerm("short breath"),
     ExpressionTerm("clears throat"),
     ExpressionTerm("gulps"),
     ExpressionTerm("swallows"),
@@ -109,6 +111,22 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
             free_text_delivery=True,
             pause_range_ms=(100, 3000),
             emphasis=True,
+            tagger_vocabulary={
+                "calm": ["calm", "reassuring"],
+                "apologetic": ["apologetic", "sheepishly"],
+                "warm": ["warmly"],
+                "excited": ["excited", "delighted"],
+                "grateful": ["grateful", "warmly"],
+                "confident": ["confident", "professional"],
+                "laugh": ["laughs"],
+                "chuckle": ["chuckles"],
+                "sigh": ["sighs"],
+                "breath": ["quick breath"],
+                # A policy that leaves out a kind's own name gets its next best.
+                "light breath": ["quick breath", "short breath"],
+                "deep breath": ["deep breath", "inhales deeply"],
+                "exhale": ["exhales softly", "exhales"],
+            },
         )
 
     def format_text(

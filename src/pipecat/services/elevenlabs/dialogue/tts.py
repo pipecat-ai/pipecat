@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
 from pipecat.services.elevenlabs.tts_base import (
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
-    _join_audio_tags,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
@@ -125,13 +124,11 @@ class _DialogueContext:
         new_turn_pending: Whether the next input should reset prosody.
         alignment_started: Whether an alignment message has been seen, so
             leading spaces are only stripped from the first one.
-        in_audio_tag: Whether the alignment so far ends inside an audio tag.
     """
 
     registered: bool = True
     new_turn_pending: bool = True
     alignment_started: bool = False
-    in_audio_tag: bool = False
 
 
 class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
@@ -392,16 +389,11 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                 not context.alignment_started,
             )
             context.alignment_started = True
-            joined = alignment
-            if self._expression_formatter:
-                # The audio tags expressive conversation sends mark when its sounds
-                # are performed.
-                joined, context.in_audio_tag = _join_audio_tags(
-                    alignment,
-                    ("chars", "charStartTimesMs", "charDurationsMs"),
-                    context.in_audio_tag,
-                )
-            word_times = self._word_times_from_alignment(received_ctx_id, alignment, joined)
+            # The audio tags expressive conversation sends mark when its sounds
+            # are performed.
+            word_times = self._word_times_from_alignment(
+                received_ctx_id, alignment, audio_tags=bool(self._expression_formatter)
+            )
 
             if word_times:
                 await self.add_word_timestamps(

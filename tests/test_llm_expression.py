@@ -13,7 +13,12 @@ from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.instructions import expression_instructions
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.frames.frames import Frame, PerceptionMetadataFrame, TTSMetadataFrame
+from pipecat.frames.frames import (
+    ExpressionMetadataFrame,
+    Frame,
+    PerceptionMetadataFrame,
+    TTSMetadataFrame,
+)
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
@@ -244,3 +249,68 @@ async def test_every_llm_in_a_switcher_is_taught_the_perception():
     taught = f"APP\n\n{expression_instructions(None, perception=TONE)}"
     assert first._settings.system_instruction == taught
     assert second._settings.system_instruction == taught
+
+
+TAGGER = ExpressionMetadataFrame(service_name="tagger")
+
+
+@pytest.mark.asyncio
+async def test_a_tagger_after_the_llm_leaves_it_taught_no_tags():
+    policy = ExpressionPolicy(
+        guidance=[ExpressionGuidance.MATCH_STYLE, "Apologize once."], sounds=["sighs"]
+    )
+    llm = _llm()
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        await run_test(
+            llm,
+            frames_to_send=[PerceptionMetadataFrame(service_name="tone", perception=TONE)],
+            pipeline_params=_expressive(policy),
+        )
+        up = await _send_up(llm, TAGGER, _metadata(CALM_HAPPY), params=_expressive(policy))
+    finally:
+        logger.remove(handler_id)
+
+    # The tagger follows the policy's presets; the LLM keeps the developer's own lines.
+    assert llm._settings.system_instruction == (
+        f"APP\n\n{expression_instructions(None, perception=TONE)}\n\nApologize once."
+    )
+    assert not [w for w in warnings if "expression policy" in w]
+    assert [f for f in up if isinstance(f, ExpressionMetadataFrame)]
+
+
+@pytest.mark.asyncio
+async def test_a_tagger_announced_after_the_tts_unteaches_its_tags():
+    llm = _llm()
+
+    await _send_up(llm, _metadata(CALM_HAPPY), TAGGER)
+
+    assert llm._settings.system_instruction == "APP"
+
+
+@pytest.mark.asyncio
+async def test_an_llm_before_a_tagger_without_a_reading_is_given_no_guidance():
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE, "Apologize once."])
+    llm = _llm()
+
+    await _send_up(llm, TAGGER, _metadata(CALM_HAPPY), params=_expressive(policy))
+
+    # With no tags to write and no reading to act on, the LLM has no part to play.
+    assert llm._settings.system_instruction == "APP"
+
+
+@pytest.mark.asyncio
+async def test_every_llm_in_a_switcher_learns_of_the_tagger():
+    first, second = _llm("first"), _llm("second")
+
+    # Sent up as a tagger and TTS service after the switcher would, while the first is active.
+    await run_test(
+        LLMSwitcher(llms=[first, second]),
+        frames_to_send=[TAGGER, _metadata(CALM_HAPPY)],
+        frames_to_send_direction=FrameDirection.UPSTREAM,
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert first._settings.system_instruction == "APP"
+    assert second._settings.system_instruction == "APP"

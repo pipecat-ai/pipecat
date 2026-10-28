@@ -28,6 +28,7 @@ tags to write.
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal, get_args
 
 # The delivery that returns to the voice's baseline. Part of the protocol, so it is
 # a delivery whatever a service declares.
@@ -40,6 +41,33 @@ EMPHASIS_DELIVERY = "emphasis"
 # so every service that performs speed names them the same.
 SLOW_DELIVERY = "slow"
 FAST_DELIVERY = "fast"
+
+# The deliveries and sounds a tagger chooses from: a processor after the LLM that
+# writes the tags from a fixed set of labels, rather than from what a service
+# declares. A service lists the names it performs each by in its capabilities'
+# ``tagger_vocabulary``.
+TaggerDelivery = Literal[
+    "calm",
+    "sympathetic",
+    "apologetic",
+    "warm",
+    "excited",
+    "surprised",
+    "sad",
+    "grateful",
+    "curious",
+    "confident",
+    "slow",
+    "fast",
+]
+TaggerSound = Literal["laugh", "chuckle", "sigh", "breath"]
+# The kinds a tagger draws a breath as, each written as a sound of its own.
+TaggerBreathKind = Literal["light breath", "deep breath", "exhale"]
+# A label a tagger writes: a delivery, a sound or the kind a breath is drawn as.
+TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
+TAGGER_DELIVERY: tuple[TaggerDelivery, ...] = get_args(TaggerDelivery)
+TAGGER_SOUNDS: tuple[TaggerSound, ...] = get_args(TaggerSound)
+TAGGER_BREATH_KINDS: tuple[TaggerBreathKind, ...] = get_args(TaggerBreathKind)
 
 
 class DeliveryScope(Enum):
@@ -109,6 +137,13 @@ class ExpressionCapabilities:
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
         delivery_scope: Where in a response the service can change delivery.
+        tagger_vocabulary: The names the service performs each of a tagger's
+            labels and kinds of breath by (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``,
+            ``TAGGER_BREATH_KINDS``), best first, such as ``{"calm": ["calm",
+            "peaceful"], "laugh": ["laughter"]}``. A later name stands in when an
+            expression policy leaves out the ones before it. A label left out is
+            performed by its own name, when the service declares it or accepts
+            free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
@@ -118,6 +153,7 @@ class ExpressionCapabilities:
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
+    tagger_vocabulary: dict[TaggerLabel, list[str]] = field(default_factory=dict)
 
 
 # Slow and fast, as a service that performs them declares them.

@@ -11,10 +11,19 @@ import json
 import unittest
 
 import pytest
+from loguru import logger
 from websockets.protocol import State
 
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TextType,
+    TTSTextFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
     ElevenLabsDialogueTTSService,
@@ -22,10 +31,9 @@ from pipecat.services.elevenlabs.dialogue.tts import (
     _normalize_ttd_alignment,
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
-from pipecat.services.elevenlabs.tts_base import (
-    _join_audio_tags,
-)
 from pipecat.services.tts_service import TextAggregationMode
+from pipecat.tests.utils import run_test
+from tests.test_tts_frame_ordering import _MockWordTimestampHttpTTSService
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
 
@@ -580,25 +588,24 @@ def _alignment(text: str, start_ms: int = 0) -> dict:
     }
 
 
-def test_audio_tags_are_joined_into_words_of_their_own():
-    joined, in_tag = _join_audio_tags(
-        _alignment("four, [short pause] two"), _WS_ALIGNMENT_KEYS, False
+def test_an_audio_tag_is_one_word():
+    word_times, partial, _ = calculate_word_times(
+        _alignment("10\u00a0000, [short pause] two"), 0.0, audio_tags=True
     )
 
-    assert "".join(joined["chars"]) == "four, [shortpause] two"
-    assert not in_tag
-    word_times, partial, _ = calculate_word_times(joined, 0.0)
-    assert [word for word, _ in word_times] == ["four,", "[shortpause]"]
+    assert [word for word, _ in word_times] == ["10\u00a0000,", "[short pause]"]
     assert partial == "two"
 
 
-def test_audio_tag_split_across_chunks_is_joined():
-    first, in_tag = _join_audio_tags(_alignment("[clear th"), _WS_ALIGNMENT_KEYS, False)
-    second, in_tag = _join_audio_tags(_alignment("roat] It's"), _WS_ALIGNMENT_KEYS, in_tag)
+def test_an_audio_tag_split_across_chunks_is_one_word():
+    first, partial, start = calculate_word_times(_alignment("[clear th"), 0.0, audio_tags=True)
+    second, partial, _ = calculate_word_times(
+        _alignment("roat] It's"), 0.0, partial, start, audio_tags=True
+    )
 
-    assert "".join(first["chars"]) == "[clearth"
-    assert "".join(second["chars"]) == "roat] It's"
-    assert not in_tag
+    assert first == []
+    assert [word for word, _ in second] == ["[clear throat]"]
+    assert partial == "It's"
 
 
 @pytest.mark.asyncio
@@ -627,7 +634,7 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
             }
         )
 
-    assert reported == ["[excited]", "Good", "news", "[clearthroat]", "it's"]
+    assert reported == ["[excited]", "Good", "news", "[clear throat]", "it's"]
     assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
 
 
@@ -672,3 +679,38 @@ class TestAudioTagExpressionAdapter:
         adapter = ElevenLabsAudioTagExpressionAdapter()
         assert adapter.format_pause(500) == " [short pause] "
         assert adapter.format_pause(1500) == " [long pause] "
+
+
+class _AlignedTTSService(_MockWordTimestampHttpTTSService):
+    """Reports the words of what it's sent as ElevenLabs aligns them, audio tags whole."""
+
+    expression_adapter_class = ElevenLabsAudioTagExpressionAdapter
+
+    async def run_tts(self, text: str, context_id: str):
+        word_times, partial, start = calculate_word_times(_alignment(text), 0.0, audio_tags=True)
+        self._word_times = word_times + ([(partial, start)] if partial else [])
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tag", ["[[inhales deeply]]", "[[clears throat]]", "[[pause 400]]"])
+async def test_every_word_around_a_tag_of_several_words_is_reported(tag):
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        down, _ = await run_test(
+            _AlignedTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(f"Here's a story. {tag} Every night, a lighthouse blinked."),
+                LLMFullResponseEndFrame(),
+            ],
+            pipeline_params=PipelineParams(enable_expressive_conversation=True),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    words = [f.text for f in down if isinstance(f, TTSTextFrame) and f.text_type == TextType.WORD]
+    assert words == ["Here's", "a", "story.", "Every", "night,", "a", "lighthouse", "blinked."]
+    assert not [w for w in warnings if "Dropping word" in w]

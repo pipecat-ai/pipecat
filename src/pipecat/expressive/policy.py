@@ -25,8 +25,8 @@ class ExpressionGuidance(StrEnum):
     combine with other presets and with the developer's own lines. A preset
     is a string, so it joins with them as written, but stays a member of this
     enum in a policy, apart from a line of the developer's with the same text.
-    An LLM taught no tags, such as one whose replies a tagger marks up, is
-    given the developer's lines without the presets.
+    Presets are about writing tags, so an LLM taught none, such as one whose
+    replies a tagger marks up, isn't given them.
 
     Parameters:
         MATCH_STYLE: Answer in the user's mood and energy, but stay calm with
@@ -34,6 +34,10 @@ class ExpressionGuidance(StrEnum):
         SLOW_FOR_DETAILS: Say just what the user may need to write down
             slowly, in a span. For a service that performs the ``slow``
             delivery.
+        BREATHE: Take an audible breath before a long or difficult sentence
+            now and then, at most once a reply. For a service that performs a
+            breath. A tagger reads it as a switch for breaths of its own
+            choosing.
     """
 
     MATCH_STYLE = (
@@ -47,6 +51,13 @@ class ExpressionGuidance(StrEnum):
         "email address, say just that slowly: Your code is <<slow: A B 7 4 9>>. Anything else?"
     )
 
+    BREATHE = (
+        "Now and then, take an audible breath before a sentence that is long, carries hard news "
+        "or starts a careful explanation, as a person on the phone does. At most one breath a "
+        "reply, and most replies need none: rarely before a short or routine sentence, never by "
+        "habit at the start of every reply, and never right after another sound."
+    )
+
 
 class ExpressionPolicy(BaseModel):
     """Which expression tags an LLM is offered, and when to use them.
@@ -54,7 +65,11 @@ class ExpressionPolicy(BaseModel):
     Parameters:
         guidance: Lines on when and how much to express, such as
             ``ExpressionGuidance.MATCH_STYLE`` or the developer's own. They are
-            joined in order, so a later line can refine an earlier one.
+            joined in order, so a later line can refine an earlier one. The
+            developer's lines reach the LLM whenever it has a part to play in
+            expressive conversation: tags to write, or a reading of the user
+            to act on. The presets are about writing tags, so they go to
+            whoever writes them: the LLM, or a tagger in its place.
         delivery: The deliveries to offer, or None for every delivery the TTS
             service declares. Deliveries a service with a fixed list lacks are
             left out; a service that accepts any delivery is offered these as

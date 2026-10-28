@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.perception.tone import PipecatToneReader
+from pipecat.processors.tone.reader import PipecatToneReader
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -119,7 +119,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "giggles",
             "sighs",
             "exhales",
-            "inhales deeply",
+            "short breath",
             "clears throat",
             "gulps",
         ],

@@ -405,45 +405,9 @@ def _select_alignment(
     return msg.get(alignment_key) or msg.get(normalized_key)
 
 
-def _join_audio_tags(
-    alignment: Mapping[str, Any], keys: tuple[str, str, str], in_tag: bool
-) -> tuple[dict[str, Any], bool]:
-    """Join each bracketed audio tag, such as ``[short pause]``, into one word of the alignment.
-
-    Eleven v3 and v4 return the tags they perform as characters in the
-    alignment. Without the spaces inside it, a tag reaches the word timestamps
-    as a word of its own, which completes the sound or pause it performs. A
-    tag can span alignment chunks, so whether one is still open is carried
-    from chunk to chunk.
-
-    Args:
-        alignment: Alignment dict from the API.
-        keys: Tuple of (chars_key, start_times_key, durations_or_end_times_key)
-            naming the three parallel arrays.
-        in_tag: Whether a tag was still open at the end of the previous chunk.
-
-    Returns:
-        The alignment without the spaces inside tags, and whether a tag is
-        still open at its end.
-    """
-    chars_key, starts_key, tail_key = keys
-    chars = alignment.get(chars_key) or []
-    starts = alignment.get(starts_key) or []
-    tails = alignment.get(tail_key) or []
-    kept = []
-    for i, char in enumerate(chars):
-        if char == "[":
-            in_tag = True
-        elif char == "]":
-            in_tag = False
-        elif char == " " and in_tag:
-            continue
-        kept.append(i)
-    joined = dict(alignment)
-    joined[chars_key] = [chars[i] for i in kept]
-    joined[starts_key] = [starts[i] for i in kept]
-    joined[tail_key] = [tails[i] for i in kept] if tails else []
-    return joined, in_tag
+def _ends_in_audio_tag(word: str) -> bool:
+    """Whether a word ends inside a bracketed audio tag, as one cut off between chunks does."""
+    return word.rfind("[") > word.rfind("]")
 
 
 def _strip_utterance_leading_spaces(
@@ -486,6 +450,8 @@ def calculate_word_times(
     cumulative_time: float,
     partial_word: str = "",
     partial_word_start_time: float = 0.0,
+    *,
+    audio_tags: bool = False,
 ) -> tuple[list[tuple[str, float]], str, float]:
     """Calculate word timestamps from character alignment information.
 
@@ -494,6 +460,10 @@ def calculate_word_times(
         cumulative_time: Base time offset for this chunk.
         partial_word: Partial word carried over from previous chunk.
         partial_word_start_time: Start time of the partial word.
+        audio_tags: Whether a bracketed audio tag, such as ``[short pause]``,
+            is one word, spaces and all. Eleven v3 and v4 return the tags they
+            perform in the alignment, and a tag reported whole matches the text
+            it was sent in.
 
     Returns:
         Tuple of (word_times, new_partial_word, new_partial_word_start_time):
@@ -515,9 +485,12 @@ def calculate_word_times(
     word_start_times = []
     current_word = partial_word  # Start with any partial word from previous chunk
     word_start_time = partial_word_start_time if partial_word else None
+    in_tag = audio_tags and _ends_in_audio_tag(current_word)
 
     for i, char in enumerate(chars):
-        if char == " ":
+        if audio_tags and char in "[]":
+            in_tag = char == "["
+        if char == " " and not in_tag:
             # End of current word
             if current_word:  # Only add non-empty words
                 words.append(current_word)
@@ -820,27 +793,27 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         self,
         context_id: str,
         alignment: Mapping[str, Any],
-        word_alignment: Mapping[str, Any] | None = None,
+        *,
+        audio_tags: bool = False,
     ) -> list[tuple[str, float]]:
         """Complete words from one alignment chunk, on its context's own clock.
 
         Args:
             context_id: The context the chunk belongs to.
             alignment: The chunk's alignment, in ``calculate_word_times`` shape.
-                Its span advances the clock.
-            word_alignment: The alignment to build words from, when it differs
-                from ``alignment`` (e.g. with audio tags joined). Defaults to
-                ``alignment``.
+            audio_tags: Whether a bracketed audio tag is one word. See
+                :func:`calculate_word_times`.
 
         Returns:
             The (word, start seconds) pairs the chunk completes.
         """
         clock = self._word_clocks.setdefault(context_id, _WordClock())
         word_times, clock.partial_word, clock.partial_word_start_time = calculate_word_times(
-            word_alignment if word_alignment is not None else alignment,
+            alignment,
             clock.cumulative_time,
             clock.partial_word,
             clock.partial_word_start_time,
+            audio_tags=audio_tags,
         )
 
         # Alignment times restart at zero in every message, so the clock
