@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -24,7 +25,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.tavus.transport import TavusParams, TavusTransport
+from pipecat.transports.tavus.transport import (
+    TAVUS_DELIVERY_EMOTIONS,
+    TavusParams,
+    TavusTransport,
+)
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -91,7 +96,9 @@ async def main():
                 enable_usage_metrics=True,
                 # The LLM writes expression tags into its responses, the TTS
                 # performs them, and the replica's face follows their emotion.
+                # It's offered the deliveries Tavus has an emotion for.
                 enable_expressive_conversation=True,
+                expression_policy=ExpressionPolicy(delivery=list(TAVUS_DELIVERY_EMOTIONS)),
             ),
             processor_unusable_policy=ProcessorUnusablePolicy.END,
         )

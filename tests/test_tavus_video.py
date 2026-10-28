@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipecat.expressive.expression import ExpressionDelivery
 from pipecat.frames.frames import InterruptionFrame, StartFrame, TextType, TTSTextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
@@ -50,13 +51,13 @@ async def test_the_emotion_changes_when_the_word_is_heard():
     service, client = await _make_service()
 
     await service.process_frame(
-        _word("Wow", ["surprised"], 0.2, service), FrameDirection.DOWNSTREAM
+        _word("Wow", [ExpressionDelivery.SURPRISED], 0.2, service), FrameDirection.DOWNSTREAM
     )
     await asyncio.sleep(0.1)
     client.update_emotion.assert_not_awaited()
 
     await asyncio.sleep(0.2)
-    client.update_emotion.assert_awaited_once_with(["surprised"])
+    client.update_emotion.assert_awaited_once_with([ExpressionDelivery.SURPRISED])
     await service._cancel_emotion_task()
 
 
@@ -65,7 +66,7 @@ async def test_an_interruption_drops_the_emotion_of_words_not_yet_heard():
     service, client = await _make_service()
 
     await service.process_frame(
-        _word("Wow", ["surprised"], 0.2, service), FrameDirection.DOWNSTREAM
+        _word("Wow", [ExpressionDelivery.SURPRISED], 0.2, service), FrameDirection.DOWNSTREAM
     )
     await service.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
     await asyncio.sleep(0.3)

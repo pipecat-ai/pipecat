@@ -16,8 +16,9 @@ import base64
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from enum import StrEnum
 from functools import partial
-from typing import Any, Literal
+from typing import Any
 
 import aiohttp
 from daily.daily import AudioData
@@ -25,7 +26,12 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.expressive.expression import NEUTRAL_DELIVERY
+from pipecat.expressive.expression import (
+    EMPHASIS_DELIVERY,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    ExpressionDelivery,
+)
 from pipecat.frames.frames import (
     BotConnectedFrame,
     BotStoppedSpeakingFrame,
@@ -142,47 +148,30 @@ class TavusApi:
             return response["persona_name"]
 
 
-TavusEmotion = Literal[
-    "neutral", "happiness", "sadness", "anger", "fear", "surprise", "disgust", "contempt"
-]
-"""A facial emotion the Tavus replica can express."""
+class TavusEmotion(StrEnum):
+    """A facial emotion the Tavus replica can express."""
 
-# The replica's emotion for each of Pipecat's standard delivery names. Names left
-# out, such as "slow", "fast" and "emphasis", keep the current emotion.
+    NEUTRAL = "neutral"
+    HAPPINESS = "happiness"
+    SADNESS = "sadness"
+    ANGER = "anger"
+    FEAR = "fear"
+    SURPRISE = "surprise"
+    DISGUST = "disgust"
+    CONTEMPT = "contempt"
+
+
+# The Tavus emotion each universal delivery converts to. Any other delivery, and the
+# voice's baseline, converts to neutral.
 TAVUS_DELIVERY_EMOTIONS: dict[str, TavusEmotion] = {
-    NEUTRAL_DELIVERY: "neutral",
-    "calm": "neutral",
-    "curious": "neutral",
-    "confident": "neutral",
-    "warm": "happiness",
-    "excited": "happiness",
-    "grateful": "happiness",
-    "sympathetic": "sadness",
-    "apologetic": "sadness",
-    "sad": "sadness",
-    "surprised": "surprise",
+    ExpressionDelivery.HAPPY: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.SAD: TavusEmotion.SADNESS,
+    ExpressionDelivery.ANGRY: TavusEmotion.ANGER,
+    ExpressionDelivery.SCARED: TavusEmotion.FEAR,
+    ExpressionDelivery.SURPRISED: TavusEmotion.SURPRISE,
+    ExpressionDelivery.DISGUSTED: TavusEmotion.DISGUST,
+    ExpressionDelivery.CONTEMPTUOUS: TavusEmotion.CONTEMPT,
 }
-
-
-def tavus_emotion(delivery: list[str] | None) -> TavusEmotion | None:
-    """The replica's emotion for a delivery.
-
-    Args:
-        delivery: A ``TTSTextFrame``'s delivery: empty for the voice's baseline,
-            None when the text carries none.
-
-    Returns:
-        The emotion of the first name in the delivery that has one, "neutral"
-        for the baseline, or None when the emotion should stay as it is.
-    """
-    if delivery is None:
-        return None
-    if not delivery:
-        return "neutral"
-    return next(
-        (TAVUS_DELIVERY_EMOTIONS[name] for name in delivery if name in TAVUS_DELIVERY_EMOTIONS),
-        None,
-    )
 
 
 class TavusCallbacks(BaseModel):
@@ -274,6 +263,8 @@ class TavusTransportClient:
         self._realtime_inference_id: str | None = None
         # The emotion last sent to the replica (see update_emotion).
         self._emotion: TavusEmotion | None = None
+        # Deliveries with no Tavus emotion, already warned about.
+        self._unconverted_deliveries: set[str] = set()
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
@@ -517,7 +508,7 @@ class TavusTransportClient:
         Args:
             delivery: The delivery of a ``TTSTextFrame``.
         """
-        emotion = tavus_emotion(delivery)
+        emotion = self._delivery_emotion(delivery)
         if emotion is None or emotion == self._emotion:
             return
         self._emotion = emotion
@@ -526,10 +517,33 @@ class TavusTransportClient:
                 "message_type": "conversation",
                 "event_type": "conversation.set_emotion",
                 "conversation_id": self._conversation_id,
-                "properties": {"emotion": emotion},
+                "properties": {"emotion": emotion.value},
             }
         )
         await self.send_message(transport_frame)
+
+    def _delivery_emotion(self, delivery: list[str] | None) -> TavusEmotion | None:
+        """The emotion of a delivery's mood, neutral without one, or None to keep the current one."""
+        if delivery is None:
+            return None
+        mood = next(
+            (
+                name
+                for name in delivery
+                if name not in (EMPHASIS_DELIVERY, SLOW_DELIVERY, FAST_DELIVERY)
+            ),
+            None,
+        )
+        return self._tavus_emotion(mood) if mood else TavusEmotion.NEUTRAL
+
+    def _tavus_emotion(self, delivery: str) -> TavusEmotion:
+        """The Tavus emotion a delivery converts to, neutral with a warning once when there's none."""
+        if delivery not in TAVUS_DELIVERY_EMOTIONS and delivery not in self._unconverted_deliveries:
+            self._unconverted_deliveries.add(delivery)
+            logger.warning(
+                f"Tavus has no emotion for the delivery '{delivery}', so the replica shows neutral"
+            )
+        return TAVUS_DELIVERY_EMOTIONS.get(delivery, TavusEmotion.NEUTRAL)
 
     async def encode_audio_and_send(
         self, audio: bytes, done: bool, inference_id: str | None
