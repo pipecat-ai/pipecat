@@ -1,0 +1,1 @@
+- Added `moderation` to `OpenAIImageGenService.Settings`, which sets the content-moderation level OpenAI's Images API applies to generated images (`"low"` for less restrictive filtering, or `"auto"`).
