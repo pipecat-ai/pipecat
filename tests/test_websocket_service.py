@@ -11,7 +11,7 @@ import base64
 import hashlib
 import io
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -22,8 +22,9 @@ from websockets.frames import Close
 from pipecat.frames.frames import ErrorFrame
 from pipecat.services.websocket_service import (
     WS_CLOSE_TIMEOUT,
+    WS_SEND_TIMEOUT,
     WebsocketService,
-    _BoundedCloseConnection,
+    _BoundedConnection,
 )
 
 # Magic value RFC 6455 requires when deriving the handshake accept header.
@@ -268,6 +269,87 @@ async def test_stable_connection_resets_quick_failure_counter(service, report_er
 
 
 # ---------------------------------------------------------------------------
+# Waiting for the server to confirm a connection
+# ---------------------------------------------------------------------------
+
+
+async def _messages(*items: str, then_hang: bool = False):
+    for item in items:
+        yield item
+    if then_hang:
+        await asyncio.Event().wait()
+
+
+def _confirm_on(confirmation: str, confirmed: asyncio.Event, handled: list[str]):
+    async def handle(message):
+        handled.append(message)
+        if message == confirmation:
+            confirmed.set()
+
+    return handle
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_stops_after_confirmation(service):
+    """Messages up to the confirmation are handled; the rest are left for the caller."""
+    confirmed = asyncio.Event()
+    handled = []
+    messages = _messages("hello", "connected", "after")
+
+    result = await service._receive_until_confirmed(
+        messages, confirmed, _confirm_on("connected", confirmed, handled), timeout=1.0
+    )
+
+    assert result is True
+    assert handled == ["hello", "connected"]
+    assert [m async for m in messages] == ["after"]
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_returns_false_when_closed_first(service):
+    """A connection that closes before confirming returns False."""
+    confirmed = asyncio.Event()
+    handled = []
+
+    result = await service._receive_until_confirmed(
+        _messages("hello"), confirmed, _confirm_on("connected", confirmed, handled), timeout=1.0
+    )
+
+    assert result is False
+    assert handled == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_times_out_as_a_quick_failure(service):
+    """A missing confirmation raises ConnectionError and restarts the connection's lifetime."""
+    confirmed = asyncio.Event()
+    service._last_connect_time = 0.0
+
+    with pytest.raises(ConnectionError, match="did not confirm the connection"):
+        await service._receive_until_confirmed(
+            _messages("hello", then_hang=True),
+            confirmed,
+            _confirm_on("connected", confirmed, []),
+            timeout=0.05,
+        )
+
+    assert time.monotonic() - service._last_connect_time < 1.0
+
+
+@pytest.mark.asyncio
+async def test_receive_until_confirmed_propagates_handler_errors(service):
+    """An error raised while handling a message reaches the caller."""
+
+    async def reject(message):
+        raise ValueError("rejected")
+
+    with pytest.raises(ValueError, match="rejected"):
+        await service._receive_until_confirmed(
+            _messages("error"), asyncio.Event(), reject, timeout=1.0
+        )
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle and guards
 # ---------------------------------------------------------------------------
 
@@ -359,7 +441,7 @@ async def test_websocket_connect_installs_bounded_close_connection(service, conn
     """Connections are created as the class that reports an overrunning close."""
     await service._websocket_connect("wss://example.test")
 
-    assert connect_mock.await_args.kwargs["create_connection"] is _BoundedCloseConnection
+    assert connect_mock.await_args.kwargs["create_connection"] is _BoundedConnection
 
 
 @pytest.fixture
@@ -376,7 +458,7 @@ def log_sink():
 @pytest.mark.asyncio
 async def test_bounded_close_logs_when_handshake_overruns(log_sink):
     """An unacknowledged close is logged so a silent teardown cost leaves a trace."""
-    conn = _BoundedCloseConnection.__new__(_BoundedCloseConnection)
+    conn = _BoundedConnection.__new__(_BoundedConnection)
     conn.close_timeout = 0.05
 
     async def slow_close(self, code=1000, reason=""):
@@ -391,7 +473,7 @@ async def test_bounded_close_logs_when_handshake_overruns(log_sink):
 @pytest.mark.asyncio
 async def test_bounded_close_silent_when_handshake_completes(log_sink):
     """A clean close logs nothing."""
-    conn = _BoundedCloseConnection.__new__(_BoundedCloseConnection)
+    conn = _BoundedConnection.__new__(_BoundedConnection)
     conn.close_timeout = 5.0
 
     async def fast_close(self, code=1000, reason=""):
@@ -435,7 +517,7 @@ async def test_bounded_close_against_unresponsive_peer(log_sink):
     service = ConcreteWebsocketService(ws_close_timeout=0.3)
     try:
         websocket = await service._websocket_connect(f"ws://127.0.0.1:{port}", ping_interval=None)
-        assert isinstance(websocket, _BoundedCloseConnection)
+        assert isinstance(websocket, _BoundedConnection)
 
         started = time.monotonic()
         await websocket.close()
@@ -448,4 +530,125 @@ async def test_bounded_close_against_unresponsive_peer(log_sink):
         assert "did not acknowledge the websocket close" in log_sink.getvalue()
     finally:
         handshake_done.set()
+        server.close()
+
+
+# ---------------------------------------------------------------------------
+# Send timeout — bounding a send to a peer that has stopped reading
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_applies_default_send_timeout(service, connect_mock):
+    """Connections get the default send timeout without the caller asking."""
+    connect_mock.return_value = _BoundedConnection.__new__(_BoundedConnection)
+
+    websocket = await service._websocket_connect("wss://example.test")
+
+    assert websocket.send_timeout == WS_SEND_TIMEOUT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [3.5, None])
+async def test_websocket_connect_honors_send_timeout_override(connect_mock, timeout):
+    """ws_send_timeout passed at construction reaches the connection."""
+    service = ConcreteWebsocketService(ws_send_timeout=timeout)
+    connect_mock.return_value = _BoundedConnection.__new__(_BoundedConnection)
+
+    websocket = await service._websocket_connect("wss://example.test")
+
+    assert websocket.send_timeout == timeout
+
+
+@pytest.mark.asyncio
+async def test_bounded_send_passes_through_without_timeout():
+    """With no send timeout the send is awaited unchanged."""
+    conn = _BoundedConnection.__new__(_BoundedConnection)
+    sent = AsyncMock()
+
+    with patch.object(ClientConnection, "send", sent):
+        await conn.send(b"audio")
+
+    sent.assert_awaited_once_with(b"audio")
+
+
+@pytest.mark.asyncio
+async def test_bounded_send_aborts_transport_when_send_stalls(log_sink):
+    """A send that outlasts the timeout drops the connection and fails as closed."""
+    conn = _BoundedConnection.__new__(_BoundedConnection)
+    conn.send_timeout = 0.05
+    conn.transport = MagicMock()
+    conn.request = MagicMock(headers={"Host": "stt.example.test"})
+    conn.protocol = MagicMock(close_exc=ConnectionClosedError(None, None))
+    conn.connection_lost_waiter = asyncio.get_running_loop().create_future()
+    conn.connection_lost_waiter.set_result(None)
+
+    async def stalled_send(self, *args, **kwargs):
+        await _real_sleep(5)
+
+    with patch.object(ClientConnection, "send", stalled_send):
+        with pytest.raises(ConnectionClosedError):
+            await conn.send(b"audio")
+
+    conn.transport.abort.assert_called_once_with()
+    assert "send to stt.example.test did not complete" in log_sink.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bounded_send_leaves_other_timeouts_alone():
+    """A TimeoutError raised by the send itself is not mistaken for the bound expiring."""
+    conn = _BoundedConnection.__new__(_BoundedConnection)
+    conn.send_timeout = 5.0
+    conn.transport = MagicMock()
+
+    with patch.object(ClientConnection, "send", AsyncMock(side_effect=TimeoutError("inner"))):
+        with pytest.raises(TimeoutError, match="inner"):
+            await conn.send(b"audio")
+
+    conn.transport.abort.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bounded_send_against_peer_that_stops_reading():
+    """End to end: a send that cannot drain is bounded and closes the connection.
+
+    Pausing writes on the connection is what the transport does once a peer stops
+    reading and the write buffer fills, which leaves the send waiting on the peer.
+    """
+    release_peer = asyncio.Event()
+
+    async def deaf_peer(reader, writer):
+        request = await reader.readuntil(b"\r\n\r\n")
+        key = next(
+            line.split(":", 1)[1].strip()
+            for line in request.decode().split("\r\n")
+            if line.lower().startswith("sec-websocket-key:")
+        )
+        accept = base64.b64encode(
+            hashlib.sha1((key + _WS_GUID).encode()).digest()  # noqa: S324 - required by RFC 6455
+        ).decode()
+        writer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: " + accept.encode() + b"\r\n\r\n"
+        )
+        await writer.drain()
+        await release_peer.wait()
+
+    server = await asyncio.start_server(deaf_peer, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    service = ConcreteWebsocketService(ws_send_timeout=0.3, ws_close_timeout=0.1)
+    try:
+        websocket = await service._websocket_connect(f"ws://127.0.0.1:{port}", ping_interval=None)
+        websocket.pause_writing()
+
+        started = time.monotonic()
+        with pytest.raises(ConnectionClosedError):
+            await websocket.send(b"audio")
+        elapsed = time.monotonic() - started
+
+        assert 0.3 <= elapsed < 3.0
+        assert websocket.close_code == 1006
+    finally:
+        release_peer.set()
         server.close()

@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock
 import ormsgpack
 import pytest
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
 from pipecat.services.fish.tts import FishAudioTTSService
 from pipecat.utils.types import NOT_GIVEN
 
@@ -142,3 +144,64 @@ async def test_short_audio_chunks_are_kept():
     await service._receive_messages()
 
     assert appended == chunks
+
+
+class TestS2ExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = FishAudioS2ExpressionAdapter().capabilities()
+        assert capabilities.free_text_delivery and capabilities.free_text_sounds
+        assert capabilities.emphasis
+        assert "laughing" in [term.name for term in capabilities.sounds]
+        # A delivery tag separates its names by spaces.
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
+
+    def test_slow_and_fast_are_written_as_speaking_tags(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm][speaking slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], None) == "[speaking quickly] Hi."
+
+    def test_a_pace_is_set_back_where_a_speed_delivery_ends(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        # Within a request, the words after the slow ones set the pace back...
+        assert adapter.format_text(", thanks.", ["calm"], ["calm", "slow"]) == (
+            "[normal pace][calm] , thanks."
+        )
+        # ...and a request that ends slow sets it back at its end.
+        assert adapter.format_end(["calm", "slow"]) == " [normal pace]"
+        assert adapter.format_end(["calm"]) == ""
+
+    def test_tags_where_delivery_changes(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispering"], None) == "[sad][whispering] Hi."
+
+    def test_return_to_baseline_writes_no_tag(self):
+        # Fish reads a [neutral] tag as a delivery of its own.
+        assert FishAudioS2ExpressionAdapter().format_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.format_text("now", ["emphasis"], None) == "[emphasis] now"
+        assert adapter.format_text("now", ["excited", "emphasis"], ["excited"]) == "[emphasis] now"
+
+    def test_sounds_and_pauses(self):
+        adapter = FishAudioS2ExpressionAdapter()
+        assert adapter.format_sound("clear throat") == "[clear throat]"
+        assert adapter.format_pause(600) == "[break]"
+        assert adapter.format_pause(1200) == "[long-break]"
+
+
+@pytest.mark.parametrize(
+    "model, adapter",
+    [
+        ("s2.1-pro", FishAudioS2ExpressionAdapter),
+        ("s2-pro", FishAudioS2ExpressionAdapter),
+        ("s1", BaseExpressionAdapter),
+        ("drama-3", BaseExpressionAdapter),
+    ],
+)
+def test_expression_adapter_follows_the_model(model, adapter):
+    service = FishAudioTTSService(api_key="key", settings=FishAudioTTSService.Settings(model=model))
+    assert type(service.get_expression_adapter()) is adapter

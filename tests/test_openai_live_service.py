@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     FunctionCallCancelFrame,

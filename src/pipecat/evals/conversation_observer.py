@@ -93,6 +93,9 @@ class EvalConversationObserver(BaseObserver):
         if frame.broadcast_sibling_id is not None and data.direction != FrameDirection.DOWNSTREAM:
             return
 
+        if isinstance(frame, LLMContextUserTurnFrame) and frame.speculation:
+            # The turn is added once it ends, as written to the context.
+            return
         if isinstance(frame, (LLMContextUserTurnFrame, RTVISendTextFrame)):
             self._conversation.add_user_message(frame.text)
         elif isinstance(frame, LLMContextAssistantTurnFrame):

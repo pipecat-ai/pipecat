@@ -14,15 +14,21 @@ import pytest
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     BotConnectedFrame,
+    InputDTMFFrame,
+    OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     STTMetadataFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.transports.daily.transport import (
     DailyOutputDTMFFrame,
     DailyParams,
     DailyTransport,
 )
+from pipecat.workers.runner import WorkerRunner
 
 
 def _make_transport(**params_kwargs) -> DailyTransport:
@@ -261,6 +267,73 @@ async def test_sip_refer_errors_without_any_session_id():
 
 
 @pytest.mark.asyncio
+async def test_dtmf_event_pushes_input_dtmf_frame():
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    transport._call_event_handler = AsyncMock()
+
+    await transport._on_dtmf_event({"sessionId": "s", "tone": "5"})
+
+    transport._call_event_handler.assert_awaited_once_with(
+        "on_dtmf_event", {"sessionId": "s", "tone": "5"}
+    )
+    (frame,) = transport._input.push_frame.await_args.args
+    assert isinstance(frame, InputDTMFFrame)
+    assert frame.button == KeypadEntry.FIVE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tone", ["A", "D"])
+async def test_dtmf_event_ignores_tone_outside_keypad(tone):
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    transport._call_event_handler = AsyncMock()
+
+    await transport._on_dtmf_event({"sessionId": "s", "tone": tone})
+
+    transport._call_event_handler.assert_awaited_once()
+    transport._input.push_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tone_outside_keypad_keeps_daily_events_flowing():
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    client = transport._client
+    client._joined_event.set()
+    queue = asyncio.Queue()
+    task = asyncio.create_task(client._callback_task_handler(queue))
+    next_event = AsyncMock()
+
+    await queue.put((transport._on_dtmf_event, {"sessionId": "s", "tone": "A"}))
+    await queue.put((next_event, {"id": "caller"}))
+    await asyncio.wait_for(queue.join(), timeout=1)
+
+    next_event.assert_awaited_once_with({"id": "caller"})
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_failing_callback_keeps_daily_events_flowing():
+    client = _make_transport()._client
+    client._joined_event.set()
+    queue = asyncio.Queue()
+    task = asyncio.create_task(client._callback_task_handler(queue))
+    next_event = AsyncMock()
+
+    async def failing_callback(data):
+        raise RuntimeError("boom")
+
+    await queue.put((failing_callback, {"id": "caller"}))
+    await queue.put((next_event, {"id": "caller"}))
+    await asyncio.wait_for(queue.join(), timeout=1)
+
+    next_event.assert_awaited_once_with({"id": "caller"})
+    assert not task.done()
+    task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_dtmf_frame_pushes_error_when_send_fails():
     transport = _make_transport()
     output = transport.output()
@@ -362,6 +435,68 @@ async def test_send_message_sends_while_connected():
 
     assert error is None
     client._client.send_app_message.assert_called_once()
+
+
+class _BlockedSetup(FrameProcessor):
+    async def setup(self, setup):
+        await super().setup(setup)
+        await asyncio.Event().wait()
+
+
+async def _block_forever(*args, **kwargs):
+    await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "frame_type", [OutputTransportMessageFrame, OutputTransportMessageUrgentFrame]
+)
+@pytest.mark.parametrize("join_blocks", [False, True], ids=["joined", "join_blocks"])
+async def test_sends_after_setup_timeout_are_dropped(join_blocks, frame_type):
+    transport = _make_transport(audio_in_enabled=False, audio_out_enabled=False)
+    client = transport._client
+    call_client = client._client
+    if join_blocks:
+        client._join = AsyncMock(side_effect=_block_forever)
+        await client.send_message(frame_type(message={"n": 0}))
+    else:
+        client._join = AsyncMock(return_value=({}, None))
+    client._leave = AsyncMock(return_value=None)
+    for name in ("on_joined", "on_left", "on_before_leave", "on_error"):
+        setattr(client._callbacks, name, AsyncMock())
+    processors = [transport.input(), transport.output()]
+    if not join_blocks:
+        processors.append(_BlockedSetup())
+    worker = PipelineWorker(Pipeline(processors), setup_timeout_secs=0.5, enable_rtvi=False)
+    setup_timed_out = asyncio.Event()
+
+    @worker.event_handler("on_setup_timeout")
+    async def on_setup_timeout(worker):
+        setup_timed_out.set()
+
+    runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
+    await runner.add_workers(worker)
+    try:
+        await asyncio.wait_for(runner.run(), timeout=10)
+    finally:
+        await runner.cancel()
+
+    assert setup_timed_out.is_set()
+    client._join.assert_awaited_once()
+    # The pipeline never started, so the client was released without leave().
+    client._leave.assert_not_awaited()
+    call_client.release.assert_called_once()
+    assert client._client is None
+
+    error = await client.send_message(frame_type(message={"n": 1}))
+
+    assert error is None
+    assert not client._join_message_queue
+    call_client.send_app_message.assert_not_called()
+
+    error = await client.send_prebuilt_chat_message("hello")
+    assert error == "Can't send message if not joined"
+    call_client.send_prebuilt_chat_message.assert_not_called()
 
 
 @pytest.mark.asyncio

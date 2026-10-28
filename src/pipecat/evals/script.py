@@ -32,9 +32,10 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``, ``bot_backchannel``, ``user_backchannel``. The ``vad_*`` events are the raw
-VAD signal, useful as a timing anchor when a turn-detection strategy gates or defers the
-turn-level ``user_stopped_speaking`` (e.g. filtering incomplete turns).
+``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``. The ``vad_*``
+events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
+turns).
 
 ``image`` is an image the bot output, such as a generated one; the bot reports
 images only to a scenario that expects one::
@@ -118,6 +119,11 @@ Supported expectation fields (per event):
 
 ``text_excludes: <str>``
     the reverse: the event's text content must not hold this substring
+
+``text_matches: <regex> | [<regex>, ...]``
+    regular expressions (Python ``re.search``) the event's text content must
+    each match, such as a format the reply must open with. The failure names
+    the first pattern that did not match
 
 ``marker: <str>``
     for ``llm_marker`` — the marker's meaning: ``complete``, ``short``, ``long``,
@@ -320,6 +326,7 @@ relative to the scenario file's directory. This is handy for sharing the
     judge: !include judge_audio.yaml
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -336,12 +343,13 @@ from pipecat.evals.scenario_config import (
 from pipecat.utils.deprecation import deprecated
 
 # Events whose payloads carry bot-generated text the judge can sensibly
-# evaluate. Asserting ``eval:`` on anything else but a function call (user
-# transcripts, interruption signals) produces a parser warning — the test
-# controls user input deterministically, so judging it adds cost without
-# signal. ``response`` is the modality-agnostic alias, resolved to one of the
-# others after parsing (see _resolve_response_events).
-JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response"})
+# evaluate, including the expression the bot's TTS performed. Asserting
+# ``eval:`` on anything else but a function call (user transcripts,
+# interruption signals) produces a parser warning — the test controls user
+# input deterministically, so judging it adds cost without signal.
+# ``response`` is the modality-agnostic alias, resolved to one of the others
+# after parsing (see _resolve_response_events).
+JUDGEABLE_EVENTS = frozenset({"response", "llm_response", "tts_response", "expression"})
 
 # Events carrying a function call, matched by name and arguments rather than by
 # text: ``function_call`` when one starts, ``function_call_stopped`` when it ends
@@ -399,15 +407,19 @@ class EvalExpectation:
         text_excludes: Optional substring the event's text content must not
             hold. Checked on the text the expectation matched; with
             ``text_contains``, on the reply accumulated up to the match.
+        text_matches: Optional regular expressions (``re.search``) the event's
+            text content must each match, checked on the same text as
+            ``text_excludes``.
         calls: For a ``function_call`` event, the set of calls expected in the
             turn. They are matched by name in any order and the expectation passes
             only when all of them are found. Built from ``calls:`` in the YAML, or
             from the single ``name:``/``args:`` shorthand.
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Meaningful on the
-            bot-generated text events (``response``, ``llm_response``, and
-            ``tts_response``) and on the function-call events, where it is
-            about each matched call's name and arguments rather than text.
+            bot-generated text events (``response``, ``llm_response``,
+            ``tts_response``, and the ``expression`` its TTS performed) and on
+            the function-call events, where it is about each matched call's
+            name and arguments rather than text.
         marker: For an ``llm_marker`` event, the meaning the marker must have:
             one of :data:`MARKER_KINDS`, where ``incomplete`` accepts ``short``
             or ``long``.
@@ -424,14 +436,15 @@ class EvalExpectation:
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
-            ``text_contains``, ``text_excludes``, ``eval``, ``calls`` and the
-            marker checks are not allowed alongside it.
+            ``text_contains``, ``text_excludes``, ``text_matches``, ``eval``,
+            ``calls`` and the marker checks are not allowed alongside it.
     """
 
     event: str
     within_ms: int | None = None
     text_contains: str | None = None
     text_excludes: str | None = None
+    text_matches: list[str] | None = None
     calls: list[EvalFunctionCall] | None = None
     eval: str | None = None
     marker: str | None = None
@@ -445,10 +458,11 @@ class EvalExpectation:
     def aggregates(self) -> bool:
         """Whether the check accumulates text across events rather than matching one.
 
-        A reply with a content check accumulates the bot's segments; a
+        A reply with a content check accumulates the bot's segments, and an
+        ``expression`` check the expression performed in the turn; a
         ``user_transcription`` with ``text_contains`` accumulates an STT's pieces.
         """
-        if self.event in ("response", "llm_response", "tts_response"):
+        if self.event in ("response", "llm_response", "tts_response", "expression"):
             return self.text_contains is not None or self.eval is not None
         if self.event == "user_transcription":
             return self.text_contains is not None and self.eval is None
@@ -1009,6 +1023,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             for key in (
                 "text_contains",
                 "text_excludes",
+                "text_matches",
                 "eval",
                 "calls",
                 "name",
@@ -1047,11 +1062,24 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         ):
             raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
 
+    text_matches = e.get("text_matches")
+    if isinstance(text_matches, str):
+        text_matches = [text_matches]
+    if text_matches is not None:
+        if not isinstance(text_matches, list) or not all(isinstance(p, str) for p in text_matches):
+            raise ValueError(f"{where} 'text_matches:' must be a pattern or a list of patterns")
+        for pattern in text_matches:
+            try:
+                re.compile(pattern)
+            except re.error as ex:
+                raise ValueError(f"{where} 'text_matches:' pattern {pattern!r}: {ex}") from ex
+
     return EvalExpectation(
         event=event,
         within_ms=e.get("within_ms"),
         text_contains=e.get("text_contains"),
         text_excludes=e.get("text_excludes"),
+        text_matches=text_matches,
         calls=calls,
         eval=criterion,
         marker=marker,

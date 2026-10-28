@@ -9,6 +9,9 @@ import dataclasses
 import unittest
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 from pipecat.frames.frames import InterimTranscriptionFrame
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
@@ -466,6 +469,39 @@ async def test_empty_update_pushes_nothing():
     await service._handle_turn_info({"event": "Update", "transcript": ""})
 
     assert pushed == []
+
+
+@pytest.mark.asyncio
+async def test_refused_handshake_reports_deepgram_reason():
+    """Deepgram's reason for refusing the handshake reaches the error and the event."""
+    service = DeepgramFluxSTTService(api_key="test-key")
+    service._websocket_url = "wss://example.invalid/v2/listen"
+    reason = "eager_eot_threshold cannot be greater than eot_threshold."
+    refusal = InvalidStatus(Response(400, "Bad Request", Headers({"dg-error": reason}), b""))
+
+    async def refuse(*args, **kwargs):
+        raise refusal
+
+    errors = []
+    connection_errors = []
+
+    async def record_error(error_msg, exception=None):
+        errors.append((error_msg, exception))
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    service._websocket_connect = refuse
+    service.push_error = record_error
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    expected = f"Deepgram refused the connection (HTTP 400): {reason}"
+    assert errors == [(expected, refusal)]
+    assert connection_errors == [expected]
 
 
 if __name__ == "__main__":

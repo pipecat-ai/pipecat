@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.DOCS_BOT_APP_ID }}
           private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
@@ -44,12 +44,12 @@ jobs:
             docs
 
       - name: Checkout pipecat
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Checkout docs
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pipecat-ai/docs
           token: ${{ steps.app-token.outputs.token }}
@@ -97,7 +97,7 @@ jobs:
           fi
 
       - name: Update documentation
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
         env:
           DOCS_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
@@ -265,7 +265,7 @@ jobs:
         id: review
         if: steps.draft.outputs.changed == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -306,7 +306,7 @@ jobs:
       # contributors produce.
       - name: Set up Node
         if: steps.draft.outputs.changed == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: _docs/.nvmrc
 

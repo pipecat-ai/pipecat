@@ -12,7 +12,7 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, MagicMock
 
-from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage, BusTTSSpeakMessage
 from pipecat.bus.ui.messages import (
     UI_SNAPSHOT_EVENT_NAME,

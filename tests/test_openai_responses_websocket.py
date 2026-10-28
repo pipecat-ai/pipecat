@@ -655,6 +655,101 @@ class TestReceiveResponseEventsErrors:
         assert "Internal server error" in service.push_error.call_args.kwargs["error_msg"]
 
 
+class TestReceiveResponseEventsEmpty:
+    """A response that completes with no text and no function call is reported."""
+
+    async def _receive(self, *events, incremental=False):
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+        service.run_function_calls = AsyncMock()
+        service.push_error = AsyncMock()
+        service._websocket = _ws_events(*events)
+
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            await service._receive_response_events(
+                MagicMock(spec=LLMContext), [], incremental=incremental
+            )
+        return service, mock_logger
+
+    @staticmethod
+    def _completed(output):
+        return {
+            "type": "response.completed",
+            "response": {"id": "resp_1", "model": "gpt-5.4-mini", "output": output},
+        }
+
+    @pytest.mark.asyncio
+    async def test_reasoning_only_response_pushes_error(self):
+        service, mock_logger = await self._receive(
+            self._completed([{"type": "reasoning", "id": "rs_1", "summary": []}]),
+            incremental=True,
+        )
+
+        service.push_error.assert_awaited_once()
+        assert "resp_1" in service.push_error.call_args.kwargs["error_msg"]
+        warning = mock_logger.warning.call_args.args[0]
+        assert "['reasoning']" in warning
+        assert "incremental: True" in warning
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_named_in_the_warning(self):
+        service, mock_logger = await self._receive(
+            self._completed(
+                [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "refusal", "refusal": "I can't help with that."}],
+                    }
+                ]
+            ),
+        )
+
+        service.push_error.assert_awaited_once()
+        warning = mock_logger.warning.call_args.args[0]
+        assert "['message[refusal]']" in warning
+        assert "incremental: False" in warning
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_text_pushes_error(self):
+        service, _ = await self._receive(
+            {"type": "response.output_text.delta", "delta": " \n"},
+            self._completed([]),
+        )
+
+        service.push_error.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_text_response_pushes_no_error(self):
+        service, mock_logger = await self._receive(
+            {"type": "response.output_text.delta", "delta": "Hello"},
+            self._completed([]),
+        )
+
+        service.push_error.assert_not_awaited()
+        mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_function_call_only_response_pushes_no_error(self):
+        call = {
+            "type": "function_call",
+            "id": "fc_1",
+            "name": "end_session",
+            "call_id": "call_1",
+            "arguments": "{}",
+        }
+        service, _ = await self._receive(
+            {"type": "response.output_item.added", "item": {**call, "arguments": ""}},
+            {"type": "response.output_item.done", "item": call},
+            self._completed([call]),
+        )
+
+        service.push_error.assert_not_awaited()
+        service.run_function_calls.assert_awaited_once()
+
+
 class TestDrainCancelledResponse:
     @pytest.mark.asyncio
     async def test_drain_discards_events_until_terminal(self):
@@ -1275,7 +1370,7 @@ class TestRetryOnTimeout:
 
         timeouts = []
 
-        async def receive(context, full_input, output_timeout_secs=None):
+        async def receive(context, full_input, output_timeout_secs=None, incremental=False):
             timeouts.append(output_timeout_secs)
             if len(timeouts) == 1:
                 raise _ResponseTimeoutError("no output")

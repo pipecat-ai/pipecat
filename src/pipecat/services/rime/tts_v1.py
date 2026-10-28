@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import ClassVar, Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from google.protobuf import json_format
 from loguru import logger
@@ -35,7 +35,10 @@ except ModuleNotFoundError as e:
 
 WebSocketProtocol = Literal["binary", "json"]
 
-_DEFAULT_WEBSOCKET_URL = "wss://api.rime.ai/coda/ws"
+_MODEL_WEBSOCKET_URLS = {
+    "coda": "wss://coda.api.rime.ai/ws",
+    "mistv3": "wss://mist.api.rime.ai/ws",
+}
 _PROTOCOL_VERSION = 1
 _READY_TIMEOUT_S = 10.0
 _SUBPROTOCOLS: dict[str, str] = {"binary": "rime.v1.binary", "json": "rime.v1.json"}
@@ -76,17 +79,6 @@ def language_to_rime_v1_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP)
 
 
-def _model_from_websocket_url(websocket_url: str) -> str | None:
-    """Return the model from a ``/{model}/ws`` path, or None for a dedicated ``/ws`` endpoint."""
-    segments = [segment for segment in urlsplit(websocket_url).path.split("/") if segment]
-    if not segments or segments[-1] != "ws":
-        raise ValueError("Rime WebSocket v1 websocket_url path must end with /ws")
-    if len(segments) == 1:
-        return None
-    model = unquote(segments[-2]).lower()
-    return "mistv3" if model == "mist" else model
-
-
 def _error_message(error: proto.WebSocketError) -> str:
     message = f"Rime error ({error.kind}): {error.message}"
     if error.HasField("request_id"):
@@ -109,6 +101,8 @@ class RimeV1TTSSettings(TTSSettings):
     Each context uses the settings in effect when it starts.
 
     Parameters:
+        model: Required at construction. ``"coda"`` and ``"mistv3"`` select their
+            public endpoints unless ``websocket_url`` is provided.
         time_scale_factor: Audio playback speed factor. Values above 1.0 slow down
             the audio; values below 1.0 speed it up. Not supported by mistv2.
         text_lookahead_tokens: Number of input tokens to collect before audio
@@ -134,11 +128,12 @@ class RimeV1TTSService(WebsocketTTSService):
     connection that carries a synthesis context per Pipecat turn. Interruptions
     cancel the turn's context without reconnecting. Text is sent as whole
     sentences by default; with ``TextAggregationMode.TOKEN``, LLM tokens are
-    sent as they arrive and Rime accumulates them into sentences. The model is
-    read from the endpoint path (``/coda/ws``, ``/mist/ws``); a dedicated
-    ``/ws`` endpoint requires ``settings.model``. A context leaves out, with a
-    warning, any setting its model does not accept, including a model other
-    than the endpoint's. WebSocket v1 does not report word timestamps.
+    sent as they arrive and Rime accumulates them into sentences. ``settings.model``
+    is required and selects the public endpoint at construction: ``"coda"`` uses
+    ``wss://coda.api.rime.ai/ws`` and ``"mistv3"`` uses ``wss://mist.api.rime.ai/ws``.
+    Pass ``websocket_url`` to use a custom deployment. The model is not inferred
+    from the URL hostname or path. A context leaves out, with a warning, any
+    setting its model does not accept. WebSocket v1 does not report word timestamps.
 
     Requires the ``rime`` extra: ``uv add "pipecat-ai[rime]"``.
     """
@@ -150,7 +145,7 @@ class RimeV1TTSService(WebsocketTTSService):
         self,
         *,
         api_key: str,
-        websocket_url: str = _DEFAULT_WEBSOCKET_URL,
+        websocket_url: str | None = None,
         websocket_protocol: WebSocketProtocol = "binary",
         sample_rate: int | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -161,14 +156,17 @@ class RimeV1TTSService(WebsocketTTSService):
 
         Args:
             api_key: Rime API key for authentication.
-            websocket_url: Rime WebSocket v1 endpoint. Its path selects the model.
+            websocket_url: Rime WebSocket v1 endpoint override. Defaults to the
+                public endpoint for ``settings.model``. Custom URLs can use any path.
+                Models without a public default require an explicit URL.
             websocket_protocol: Envelope encoding, ``"binary"`` or ``"json"``.
             sample_rate: Audio sample rate in Hz.
             text_aggregation_mode: How to aggregate text before synthesis.
                 Defaults to ``TextAggregationMode.SENTENCE``.
                 ``TextAggregationMode.TOKEN`` streams LLM tokens and has Rime
                 accumulate them into sentences.
-            settings: Runtime-updatable settings.
+            settings: Settings with an explicit ``model``. Other fields can be
+                updated at runtime; changing ``model`` does not switch endpoints.
             **kwargs: Additional arguments passed to parent class.
         """
         if websocket_protocol not in _SUBPROTOCOLS:
@@ -187,15 +185,16 @@ class RimeV1TTSService(WebsocketTTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        endpoint_model = _model_from_websocket_url(websocket_url)
-        explicit_model = assert_given(default_settings.model)
-        if endpoint_model is None:
-            if explicit_model is None:
-                raise ValueError("Rime WebSocket v1 requires a model for a dedicated endpoint")
-            endpoint_model = explicit_model
-        elif explicit_model not in (None, endpoint_model):
-            raise ValueError("settings.model does not match the v1 endpoint model")
-        default_settings.model = endpoint_model
+        model = assert_given(default_settings.model)
+        if not model:
+            raise ValueError("Rime WebSocket v1 requires settings.model")
+        if websocket_url is None:
+            websocket_url = _MODEL_WEBSOCKET_URLS.get(model)
+            if websocket_url is None:
+                raise ValueError("websocket_url is required for models other than coda and mistv3")
+        parts = urlsplit(websocket_url)
+        if parts.scheme not in ("ws", "wss") or parts.hostname is None:
+            raise ValueError("Rime WebSocket v1 websocket_url must be an absolute ws or wss URL")
 
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
@@ -216,7 +215,7 @@ class RimeV1TTSService(WebsocketTTSService):
         self._api_key = api_key
         self._websocket_url = websocket_url
         self._websocket_protocol = websocket_protocol
-        self._endpoint_model = endpoint_model
+        self._endpoint_model = model
 
         self._receive_task = None
         # Contexts open on the current connection, from their start until done,

@@ -505,9 +505,10 @@ class _CallState(Enum):
 
     ``INTERRUPTED`` is still in the call, which Daily reports as joined, while
     daily-core reconnects the signalling connection that carries app messages.
-    ``LEFT`` covers both ``leave()`` and a call that ends without it (the bot
-    is ejected, or the room or meeting ends). App messages can't be delivered
-    in either state.
+    ``LEFT`` covers ``leave()``, a call that ends without it (the bot is
+    ejected, or the room or meeting ends), and a client released by
+    ``cleanup()`` without ``leave()`` when the pipeline never starts. App
+    messages can't be delivered in either state.
     """
 
     NOT_JOINED = "not_joined"
@@ -867,6 +868,9 @@ class DailyTransportClient(EventHandler):
         if self._video_task and self._task_manager:
             await self._task_manager.cancel_task(self._video_task)
             self._video_task = None
+        # Stop sends on the event loop before releasing the client in a thread.
+        self._call_state = _CallState.LEFT
+        self._join_message_queue.clear()
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await asyncio.to_thread(self._cleanup)
@@ -1856,8 +1860,14 @@ class DailyTransportClient(EventHandler):
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
-            await callback(*args)
-            queue.task_done()
+            # A failing callback must not end this task, or every later
+            # callback on this queue would be dropped.
+            try:
+                await callback(*args)
+            except Exception:
+                logger.exception(f"{self} uncaught exception in callback {callback.__name__}")
+            finally:
+                queue.task_done()
 
     async def _flush_join_messages(self):
         """Send any messages that were queued before join completed."""
@@ -2717,6 +2727,10 @@ class DailyTransport(BaseTransport):
     async def send_dtmf(self, settings) -> CallClientError | None:
         """Send DTMF tones during a call.
 
+        Sends at once, ahead of audio still queued in the pipeline. To send the
+        tones after queued audio has played, push a :class:`DailyOutputDTMFFrame`
+        instead.
+
         Args:
             settings: DTMF settings including tones and target session.
 
@@ -2765,6 +2779,10 @@ class DailyTransport(BaseTransport):
     async def sip_call_transfer(self, settings) -> CallClientError | None:
         """Transfer a SIP call to another destination.
 
+        Transfers at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To transfer after
+        queued audio has played, push a :class:`DailySIPTransferFrame` instead.
+
         Args:
             settings: SIP call transfer settings.
 
@@ -2780,6 +2798,10 @@ class DailyTransport(BaseTransport):
 
     async def sip_refer(self, settings) -> CallClientError | None:
         """Send a SIP REFER request.
+
+        Sends at once, ahead of audio still queued in the pipeline, so the
+        caller can miss the end of what the bot is saying. To send it after
+        queued audio has played, push a :class:`DailySIPReferFrame` instead.
 
         Args:
             settings: SIP REFER settings.
@@ -2979,6 +3001,10 @@ class DailyTransport(BaseTransport):
     ) -> CallClientError | None:
         """Update settings for remote participants.
 
+        Applies at once, ahead of audio still queued in the pipeline. To apply
+        the update after queued audio has played, push a
+        :class:`DailyUpdateRemoteParticipantsFrame` instead.
+
         Args:
             remote_participants: Remote participant configuration settings.
 
@@ -3164,9 +3190,16 @@ class DailyTransport(BaseTransport):
         logger.debug(f"{self} DTMF event: {data}")
         await self._call_event_handler("on_dtmf_event", data)
 
-        if self._input:
-            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
-            await self._input.push_frame(frame)
+        if not self._input:
+            return
+
+        try:
+            button = KeypadEntry(data["tone"])
+        except ValueError:
+            logger.warning(f"{self} Ignoring unsupported DTMF tone: {data['tone']!r}")
+            return
+
+        await self._input.push_frame(InputDTMFFrame(button=button))
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""

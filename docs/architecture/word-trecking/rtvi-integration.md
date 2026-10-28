@@ -146,7 +146,7 @@ onBotOutput: (data) => {
   }
   // Anything else (including spoken_status "new") → render a new bubble element
   this.addConversationMessage(
-    data.text, 'bot', data.text_type, data.segment_id,
+    data.text, 'bot', data.output_type, data.segment_id,
   );
 }
 
@@ -159,7 +159,7 @@ highlightSpokenText(data) {
 }
 ```
 
-`data.text_type` carries the segment type, so the client also renders a `code` segment
+`data.output_type` carries the segment type, so the client also renders a `code` segment
 as a syntax-highlighted `<pre>` block and a `link` segment as an anchor — **without parsing
 any tags itself**.
 

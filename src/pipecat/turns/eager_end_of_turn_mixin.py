@@ -11,8 +11,8 @@ from typing import Any
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transcriptions.language import Language
@@ -143,7 +143,7 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
 
         logger.trace(f"{self}: eager end of turn withdrawn")
         self._eager_end_of_turn_pending = False
-        await self.push_frame(EagerEndOfTurnCancelFrame())
+        await self.push_frame(UserTurnResponseCancelFrame())
 
     def _clear_eager_end_of_turn(self):
         """Resolve the prediction without withdrawing it.

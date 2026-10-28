@@ -19,6 +19,7 @@ from typing import Any, ClassVar, Union
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
@@ -141,12 +142,14 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     Turbo v2.5, and Multilingual models — it has a fuller set of voice controls.
 
     Eleven v3 and v4 perform inline audio tags such as ``[laughs]`` and
-    ``[excited]``. They come back as spoken characters in the alignment, so they
-    reach the LLM context as text unless a text filter removes them.
+    ``[excited]``. They come back as characters in the alignment, and reach
+    the word timestamps as words of their own: a sound's or a pause's marks
+    when it is performed, and other markup isn't spoken.
     """
 
     Settings = ElevenLabsDialogueTTSSettings
     _settings: Settings
+    expression_adapter_class = ElevenLabsAudioTagExpressionAdapter
 
     CONNECTION_NAME = "ElevenLabs Text-to-Dialogue"
 
@@ -382,11 +385,14 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                 not context.alignment_started,
             )
             context.alignment_started = True
+            # The audio tags expressive conversation sends mark when its sounds
+            # are performed.
             word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
                 alignment,
                 self._cumulative_time,
                 self._partial_word,
                 self._partial_word_start_time,
+                audio_tags=bool(self._expression_formatter),
             )
 
             if word_times:

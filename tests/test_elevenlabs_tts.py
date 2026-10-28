@@ -8,6 +8,7 @@
 
 import json
 import unittest
+import unittest.mock
 from typing import Any
 
 import pytest
@@ -15,6 +16,11 @@ from websockets.exceptions import ConnectionClosedOK
 from websockets.frames import Close
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import TTSMetadataFrame, TTSUpdateSettingsFrame
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.elevenlabs.tts import (
     ElevenLabsHttpTTSService,
     ElevenLabsTTSService,
@@ -31,6 +37,7 @@ from pipecat.services.elevenlabs.tts_base import (
     elevenlabs_language_code,
     language_to_elevenlabs_language,
 )
+from pipecat.tests.utils import run_test
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
@@ -505,3 +512,185 @@ def test_every_mapped_language_is_accepted_by_some_model():
             assert elevenlabs_language_code("eleven_v3", code) == code
         if code in ELEVENLABS_V4_LANGUAGES:
             assert elevenlabs_language_code("eleven_v4_turbo", code) == code
+
+
+class _MessagesWebSocket:
+    """Yields the given server messages, then ends."""
+
+    def __init__(self, messages: list[dict]):
+        self.state = State.OPEN
+        self._messages = [json.dumps(m) for m in messages]
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for message in self._messages:
+            yield message
+
+
+@pytest.mark.asyncio
+async def test_wordless_alignment_still_advances_the_clock():
+    """Trailing punctuation can arrive on its own; its span must not be dropped."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word_times)
+
+    service.add_word_timestamps = _record
+    service._websocket = _MessagesWebSocket(
+        [{"contextId": "ctx-1", "alignment": _chunk(text)} for text in ("Hi there", "!", " Bye ")]
+    )
+
+    await service._receive_messages()
+
+    assert [word for word, _ in reported] == ["Hi", "there!", "Bye"]
+    # "Bye" starts after the 8 characters of the first chunk, the "!", and its space.
+    assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)
+
+
+@pytest.mark.parametrize(
+    "model, adapter",
+    [
+        ("eleven_flash_v2_5", BaseExpressionAdapter),
+        ("eleven_multilingual_v2", BaseExpressionAdapter),
+        ("eleven_v3", ElevenLabsAudioTagExpressionAdapter),
+        ("eleven_v4_turbo", ElevenLabsAudioTagExpressionAdapter),
+    ],
+)
+def test_http_expression_adapter_follows_the_model(model, adapter):
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_FakeHttpSession(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
+    )
+    assert type(service.get_expression_adapter()) is adapter
+
+
+@pytest.mark.asyncio
+async def test_http_model_change_to_one_without_audio_tags_is_broadcast():
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_FakeHttpSession(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+
+    _, up = await run_test(
+        service,
+        frames_to_send=[
+            TTSUpdateSettingsFrame(
+                delta=ElevenLabsHttpTTSService.Settings(model="eleven_flash_v2_5")
+            )
+        ],
+        pipeline_params=PipelineParams(enable_expressive_conversation=True),
+    )
+
+    metadata = [f for f in up if isinstance(f, TTSMetadataFrame)]
+    assert metadata[0].expression is not None
+    assert metadata[-1].expression is None
+
+
+class _StreamingHttpResponse:
+    """A 200 response streaming the given JSON lines."""
+
+    status = 200
+
+    def __init__(self, lines: list[dict]):
+        self.content = self._lines([json.dumps(line).encode() + b"\n" for line in lines])
+
+    async def _lines(self, lines):
+        for line in lines:
+            yield line
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _http_chunk(text: str) -> dict:
+    return {
+        "alignment": {
+            "characters": list(text),
+            "character_start_times_seconds": [i * 0.1 for i in range(len(text))],
+            "character_end_times_seconds": [(i + 1) * 0.1 for i in range(len(text))],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_http_word_timestamps_report_audio_tags_as_words():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            chunks = ["It's ", "[excited]", " back [sh", "ort pause] up."]
+            return _StreamingHttpResponse([_http_chunk(c) for c in chunks])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
+        pass
+
+    assert reported[:4] == ["It's", "[excited]", "back", "[short pause]"]
+
+
+@pytest.mark.asyncio
+async def test_http_audio_tag_ending_the_reply_is_reported_whole():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            chunks = ["Thanks. [inhales ", "deeply]"]
+            return _StreamingHttpResponse([_http_chunk(c) for c in chunks])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    async for _ in service.run_tts("Thanks. [inhales deeply]", "ctx-1"):
+        pass
+
+    assert reported == ["Thanks.", "[inhales deeply]"]
+
+
+@pytest.mark.asyncio
+async def test_http_alignment_is_left_as_is_without_expressive_conversation():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            return _StreamingHttpResponse([_http_chunk("Press [ to open the menu now.")])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    async for _ in service.run_tts("Press [ to open the menu now.", "ctx-1"):
+        pass
+
+    assert reported == ["Press", "[", "to", "open", "the", "menu", "now."]

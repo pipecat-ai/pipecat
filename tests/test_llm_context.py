@@ -12,7 +12,7 @@ import unittest
 
 from PIL import Image
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,

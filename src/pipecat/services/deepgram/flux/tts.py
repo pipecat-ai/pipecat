@@ -17,6 +17,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.services.deepgram._errors import describe_refusal
 from pipecat.services.deepgram.flux.tts_base import (
     DeepgramFluxTTSBase,
     DeepgramFluxTTSSettings,
@@ -189,10 +190,12 @@ class DeepgramFluxTTSService(DeepgramFluxTTSBase, WebsocketService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
+            refusal = describe_refusal(e)
+            await self.push_error_frame(
+                ErrorFrame(error=refusal or f"{self} error: {e}", exception=e)
+            )
             self._websocket = None
-            await self._call_event_handler("on_connection_error", f"{e}")
+            await self._call_event_handler("on_connection_error", refusal or f"{e}")
 
     async def _disconnect_websocket(self):
         """Close WebSocket connection and reset state."""

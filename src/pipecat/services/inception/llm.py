@@ -11,7 +11,7 @@ from typing import Literal
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
@@ -40,7 +40,7 @@ class InceptionLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Inception's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-    Supports Mercury-2, Inception's diffusion-based reasoning model.
+    Supports Mercury-3, Inception's diffusion-based reasoning model.
     """
 
     # Inception doesn't support the "developer" message role.
@@ -67,7 +67,7 @@ class InceptionLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         default_settings = self.Settings(
-            model="mercury-2",
+            model="mercury-3",
             reasoning_effort=None,
             realtime=True,
         )

@@ -7,11 +7,11 @@
 """Expand numeric expressions into spoken form for TTS."""
 
 import re
-from collections.abc import Callable
 
 from num2words import num2words
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.text.transforms.text_transform import TextTransform
 
 # Matches integers and decimals, with optional thousand separators.
 _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
@@ -19,7 +19,7 @@ _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
 
 def expand_numbers(
     digit_cutoff: int | None = 2025,
-) -> Callable[[str, str | TextType], object]:
+) -> TextTransform:
     """Return a transform that expands numbers to their spoken form.
 
     When *digit_cutoff* is set, numbers above it are read digit-by-digit

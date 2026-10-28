@@ -8,19 +8,20 @@ import asyncio
 import unittest
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     FunctionCallFromLLM,
-    InterruptionFrame,
     LLMContextFrame,
+    LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -82,6 +83,11 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         # The real context is untouched: the turn hasn't ended.
         assert context.messages == [{"role": "system", "content": "Be brief."}]
 
+        # The turn the inference answers goes ahead of it, as a speculation.
+        turn = next(f for f in down if isinstance(f, LLMContextUserTurnFrame))
+        assert (turn.text, turn.speculation) == ("book a flight", True)
+        assert down.index(turn) < down.index(provisional)
+
     async def test_matching_transcript_ends_the_turn_and_keeps_the_response(self):
         context = LLMContext()
 
@@ -102,7 +108,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
         stops = [f for f in down if isinstance(f, UserStoppedSpeakingFrame)]
 
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in down)
         # One inference, the speculative one: the confirmed turn is written to
         # the context without answering it a second time.
         assert len(contexts) == 1
@@ -110,6 +116,12 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         # The turn end is what releases the held response.
         assert len(stops) == 1
         assert context.messages == [{"role": "user", "content": "book a flight"}]
+        # The turn is broadcast as a speculation, then as written once it ends.
+        turns = [f for f in down if isinstance(f, LLMContextUserTurnFrame)]
+        assert [(t.text, t.speculation) for t in turns] == [
+            ("book a flight", True),
+            ("book a flight", False),
+        ]
 
     async def test_differing_transcript_withdraws_the_speculation(self):
         context = LLMContext()
@@ -129,11 +141,11 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         )
 
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
-        cancel = next(f for f in down if isinstance(f, EagerEndOfTurnCancelFrame))
+        cancel = next(f for f in down if isinstance(f, UserTurnResponseCancelFrame))
 
         # The speculative inference, then a second one on the committed transcript.
         assert [c.speculation for c in contexts] == [True, False]
-        assert isinstance(cancel, EagerEndOfTurnCancelFrame)
+        assert isinstance(cancel, UserTurnResponseCancelFrame)
         assert contexts[1].context.messages[-1] == {
             "role": "user",
             "content": "i want to cancel, actually reschedule it",
@@ -157,7 +169,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
                 eager("i think"),
                 SleepFrame(),
                 # The service withdraws the prediction it made.
-                EagerEndOfTurnCancelFrame(),
+                UserTurnResponseCancelFrame(),
                 SleepFrame(),
                 final("i think i'll book it tomorrow"),
                 SleepFrame(),
@@ -167,7 +179,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         )
 
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
-        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+        cancels = [f for f in down if isinstance(f, UserTurnResponseCancelFrame)]
 
         # The service's withdrawal travels on its own; the strategy adds none of
         # its own, since the prediction was already withdrawn.
@@ -197,7 +209,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
 
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
 
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in down)
         assert len(contexts) == 1
         # The eager transcript drove the response; the committed one is what the
         # context records.
@@ -224,7 +236,7 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
 
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
 
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in down)
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in down)
         assert len(contexts) == 1
         assert not contexts[0].speculation
         assert any(isinstance(f, UserStoppedSpeakingFrame) for f in down)
@@ -286,7 +298,7 @@ class TestSpeculativeToolCalls(unittest.IsolatedAsyncioTestCase):
         down, up = await run_test(llm, frames_to_send=[speculative, SleepFrame()])
 
         assert calls == []
-        withdrawals = [f for f in [*down, *up] if isinstance(f, EagerEndOfTurnCancelFrame)]
+        withdrawals = [f for f in [*down, *up] if isinstance(f, UserTurnResponseCancelFrame)]
         assert len(withdrawals) == 2
 
     async def test_committed_inference_executes_tools(self):
@@ -303,7 +315,7 @@ class TestSpeculativeToolCalls(unittest.IsolatedAsyncioTestCase):
         )
 
         assert len(calls) == 1
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in [*down, *up])
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in [*down, *up])
 
 
 class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
@@ -362,7 +374,7 @@ class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
         )
 
         contexts = [f for f in down if isinstance(f, LLMContextFrame)]
-        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+        cancels = [f for f in down if isinstance(f, UserTurnResponseCancelFrame)]
 
         # Only the speculative inference ran, and it was withdrawn.
         assert [c.speculation for c in contexts] == [True]
@@ -414,7 +426,7 @@ class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        cancels = [f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]
+        cancels = [f for f in down if isinstance(f, UserTurnResponseCancelFrame)]
         assert len(cancels) == 1
         assert context.messages == [{"role": "user", "content": "Book a flight to Tokyo."}]
 
@@ -484,7 +496,7 @@ class TestLLMServiceHoldsTheSpeculation(unittest.IsolatedAsyncioTestCase):
             frames_to_send=[
                 self.context_frame(speculation=True),
                 SleepFrame(),
-                EagerEndOfTurnCancelFrame(),
+                UserTurnResponseCancelFrame(),
                 SleepFrame(),
             ],
         )
@@ -545,7 +557,7 @@ class TestATurnOutlastingTheHoldIsStillAnswered(unittest.IsolatedAsyncioTestCase
         assert context.messages == [{"role": "user", "content": "Book a flight."}]
         # Withdrawn where every other discard is withdrawn, so the gate drops
         # the held response rather than relying on a later one to supersede it.
-        assert len([f for f in down if isinstance(f, EagerEndOfTurnCancelFrame)]) == 1
+        assert len([f for f in down if isinstance(f, UserTurnResponseCancelFrame)]) == 1
 
     async def test_a_hold_that_does_not_expire_is_released_as_before(self):
         context, user_aggregator, llm = self.aggregator_and_llm(5.0)
@@ -584,6 +596,33 @@ class EchoLLM(LLMService):
         await self.push_frame(LLMFullResponseEndFrame())
 
 
+class TestTheSpeculatedTurnPassesTheLLM(unittest.IsolatedAsyncioTestCase):
+    async def test_the_turn_reaches_processors_after_the_llm_before_its_response(self):
+        down, _ = await run_test(
+            Pipeline([aggregator(LLMContext()), EchoLLM()]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+                final("book a flight"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        order = [
+            (type(f).__name__, getattr(f, "speculation", None))
+            for f in down
+            if isinstance(f, (LLMContextUserTurnFrame, LLMFullResponseStartFrame))
+        ]
+        assert order[:2] == [
+            ("LLMContextUserTurnFrame", True),
+            ("LLMFullResponseStartFrame", None),
+        ]
+
+
 class TestAWithdrawnResponseIsNeverSpoken(unittest.IsolatedAsyncioTestCase):
     """A withdrawal has to reach the gate before the turn end that follows it.
 
@@ -619,9 +658,9 @@ class TestAWithdrawnResponseIsNeverSpoken(unittest.IsolatedAsyncioTestCase):
         order = [
             type(f).__name__
             for f in down
-            if isinstance(f, (EagerEndOfTurnCancelFrame, UserStoppedSpeakingFrame))
+            if isinstance(f, (UserTurnResponseCancelFrame, UserStoppedSpeakingFrame))
         ]
-        assert order == ["EagerEndOfTurnCancelFrame", "UserStoppedSpeakingFrame"]
+        assert order == ["UserTurnResponseCancelFrame", "UserStoppedSpeakingFrame"]
 
 
 class StreamingToolCallLLM(LLMService):
@@ -671,7 +710,7 @@ class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def withdrawals(down, up):
-        return [f for f in [*down, *up] if isinstance(f, EagerEndOfTurnCancelFrame)]
+        return [f for f in [*down, *up] if isinstance(f, UserTurnResponseCancelFrame)]
 
     async def test_a_turn_confirmed_mid_stream_lets_the_call_run(self):
         # The committed end of turn arrives while the response is still
@@ -740,3 +779,28 @@ class TestToolCallsAcrossTheConfirmation(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSpeechVoidsTheConfirmation(unittest.IsolatedAsyncioTestCase):
+    """Speech after a confirmation voids the turn's answer, and the confirmation with it."""
+
+    async def test_a_decision_after_speech_confirms_nothing(self):
+        strategy = EagerUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        decisions = []
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            decisions.append(params)
+
+        await strategy.handle_user_turn_started()
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(eager("Book a flight"))
+        await strategy.process_frame(final("Book a flight"))
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([d.confirms_speculation for d in decisions], [True, False])
+        await strategy.cleanup()

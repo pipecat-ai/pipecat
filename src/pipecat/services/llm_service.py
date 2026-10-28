@@ -27,14 +27,18 @@ from typing_extensions import TypeVar
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
+from pipecat.expressive.perception import PerceptionCapabilities
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     ErrorFrame,
+    ExpressionMetadataFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -52,7 +56,10 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    PerceptionMetadataFrame,
     StartFrame,
+    TTSMetadataFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
@@ -394,9 +401,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             )
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         self._reports_ttfat: bool | None = None
-        # Turn completion is owned by LLMTurnCompletionUserTurnStopStrategy, which
-        # enables it over an LLMUpdateSettingsFrame once the pipeline starts.
-        self._filter_incomplete_user_turns: bool = False
         self._logged_thinking_default_model: str | None = None
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
@@ -416,6 +420,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # The instruction as last composed, so a recomposition that changes
         # nothing (every tool sync recomposes) is not logged again.
         self._composed_system_instruction: str | None = None
+        # With expressive conversation on, the expression the TTS service
+        # downstream performs, from its latest TTSMetadataFrame, and the
+        # signals perceived of how the user spoke, from the latest
+        # PerceptionMetadataFrame, and the pipeline's policy on which tags to
+        # offer and when. A tagger after the LLM, announced by an
+        # ExpressionMetadataFrame, writes the tags instead, so the LLM
+        # is taught none.
+        self._expressive = False
+        self._tagged_after_llm = False
+        self._tts_expression: ExpressionCapabilities | None = None
+        self._perception: PerceptionCapabilities | None = None
+        self._expression_policy: ExpressionPolicy | None = None
+        # The last warning about the policy, so it isn't repeated.
+        self._policy_warning: str | None = None
         # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
         # don't need to spell out the generic parameter just to subclass
         # (backward compatibility for 3rd-party providers outside this repo).
@@ -458,7 +476,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if cls.adapter_class is not None:
             return cls.adapter_class
 
-        from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+        from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 
         return OpenAILLMAdapter
 
@@ -790,6 +808,35 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 stacklevel=4,
             )
 
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._expressive = setup.enable_expressive_conversation
+        self._expression_policy = setup.expression_policy
+
+    def _handle_tts_metadata(self, frame: TTSMetadataFrame):
+        """Teach the expression the TTS service performs, replacing any before it."""
+        self._tts_expression = frame.expression
+        self._warn_about_policy()
+        self._compose_system_instruction()
+
+    def _warn_about_policy(self):
+        """Warn about what the policy asks for that the TTS service can't perform.
+
+        Each warning is given once, until what is left out changes, so a switch
+        to a service with the same gap doesn't repeat it.
+        """
+        if self._tagged_after_llm:
+            return
+        warning = expression_policy_warning(self._tts_expression, self._expression_policy)
+        if warning and warning != self._policy_warning:
+            logger.warning(f"{self}: {warning}")
+        self._policy_warning = warning
+
     def append_system_instruction(self, instruction: str) -> None:
         """Append durable text to the system instruction, preserving the user's prompt.
 
@@ -825,7 +872,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Joins the user's base system instruction (the single source of truth,
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
-        guide), turn completion instructions (when enabled), and async tool
+        guide), how to read perception and the expression tags the TTS service
+        performs (with expressive conversation on), turn completion instructions (when enabled), and async tool
         cancellation instructions (when enabled). Safe to call repeatedly — it
         always rebuilds from the base, so it never compounds, and it logs the
         result only when it differs from the previous composition.
@@ -833,6 +881,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         base = self._base_system_instruction
         parts = [base] if base else []
         parts.extend(self._appended_system_instructions)
+        expression = expression_instructions(
+            None if self._tagged_after_llm else self._tts_expression,
+            self._expression_policy,
+            perception=self._perception,
+        )
+        if expression:
+            parts.append(expression)
         if self._filter_incomplete_user_turns:
             parts.append(self._user_turn_completion_config.completion_instructions)
         if self._cancel_tool_names:
@@ -897,8 +952,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
-            await self._handle_eager_end_of_turn_cancel(frame)
+        elif isinstance(frame, UserTurnResponseCancelFrame):
+            await self._handle_user_turn_response_cancel(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
         elif isinstance(frame, LLMUpdateSettingsFrame):
@@ -918,6 +973,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
+        elif isinstance(frame, TTSMetadataFrame) and self._expressive:
+            self._handle_tts_metadata(frame)
+        elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
+            self._perception = frame.perception
+            self._compose_system_instruction()
+        elif isinstance(frame, ExpressionMetadataFrame) and self._expressive:
+            self._tagged_after_llm = True
+            self._compose_system_instruction()
 
         if isinstance(frame, LLMContextFrame):
             # Runs before the subclass starts the completion, so the gate knows
@@ -946,6 +1009,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
+
+        await self._track_pushed_frame(frame)
 
         # The gate decides synchronously, so its verdict can't be torn by
         # another task pushing at the same time. Everything it hands back is
@@ -979,7 +1044,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
 
-    async def _handle_eager_end_of_turn_cancel(self, frame: EagerEndOfTurnCancelFrame):
+    async def _handle_user_turn_response_cancel(self, frame: UserTurnResponseCancelFrame):
         """Stop generating a response whose user turn turned out to be unfinished.
 
         The tokens are wasted either way; stopping keeps us from paying for the
@@ -1654,9 +1719,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Note:
             This removes the handler but does not stop advertising the tool to
-            the LLM. To remove a tool cleanly, prefer an ``LLMSetToolsFrame`` with
-            the updated tool set — that both stops advertising it and avoids the
-            LLM trying to call a tool that's no longer there.
+            the LLM. To remove a tool, push an ``LLMSetToolsFrame`` without it.
+            That also drops a handler that came with the tool definition (a
+            direct function, or a ``FunctionSchema`` with a ``handler``). A
+            handler added with :meth:`register_function` needs this call too,
+            made after the updated tool set takes effect, since removing the
+            handler of a still-advertised tool leaves the LLM able to call a
+            handler that's gone.
 
         Args:
             function_name: The name of the function handler to remove.
@@ -1749,7 +1818,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             # A turn confirmed before the call was reached leaves nothing
             # pending, and the call runs as an ordinary one.
             logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
-            await self.broadcast_frame(EagerEndOfTurnCancelFrame)
+            await self.broadcast_frame(UserTurnResponseCancelFrame)
             return
 
         # Exclude the built-in cancel tool — it's an internal mechanism and

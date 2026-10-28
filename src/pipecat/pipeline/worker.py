@@ -43,6 +43,7 @@ from pipecat.bus.ui.messages import (
 )
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
@@ -173,6 +174,13 @@ class PipelineParams(BaseModel):
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). TTS services then read the
+            expression tags an LLM writes into its reply instead of speaking them.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them, with expressive conversation on. Defaults to None,
+            which offers every tag the TTS service performs, with no guidance.
+            Part of expressive conversation (alpha).
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
@@ -188,6 +196,8 @@ class PipelineParams(BaseModel):
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
+    expression_policy: ExpressionPolicy | None = None
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
@@ -433,6 +443,14 @@ class PipelineWorker(BaseWorker):
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()
+        if (
+            self._params.expression_policy is not None
+            and not self._params.enable_expressive_conversation
+        ):
+            logger.warning(
+                f"{self}: expression_policy has no effect without "
+                "enable_expressive_conversation=True"
+            )
         self._capabilities_override = capabilities or BotCapabilities()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -954,13 +972,13 @@ class PipelineWorker(BaseWorker):
     async def flush_pipeline(self, timeout: float = 5.0) -> bool:
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
-        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream;
-        the sink bounces it back upstream, the source turns it around, and its
-        event is set when it reaches the sink a second time. By then every
-        frame queued ahead of it has been processed, along with anything a
-        processor started by pushing upstream. The probe goes on the worker's
-        push queue, behind whatever is already waiting there, and bypasses any
-        ``queue_frame`` override (e.g. tool-call deferral).
+        Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream
+        to the sink, then a new probe back up to the source and a third down to
+        the sink again, and waits for that last one to arrive. By then every
+        frame queued ahead of the flush has been processed, along with anything
+        a processor started by pushing upstream. The first probe goes on the
+        worker's push queue, behind whatever is already waiting there, and
+        bypasses any ``queue_frame`` override (e.g. tool-call deferral).
 
         Args:
             timeout: Seconds of no progress before giving up. Progress is a
@@ -979,16 +997,16 @@ class PipelineWorker(BaseWorker):
 
         logger.debug(f"{self}: pushing flush probe downstream")
 
-        self._flush_progress[probe.id] = 0
+        self._flush_progress[probe.flush_id] = 0
         try:
             await self._push_queue.put(probe)
             while True:
-                frames, reports = self._frames_reaching_sink, self._flush_progress[probe.id]
+                frames, reports = self._frames_reaching_sink, self._flush_progress[probe.flush_id]
                 try:
                     await asyncio.wait_for(event.wait(), timeout)
                     return True
                 except TimeoutError:
-                    reported = self._flush_progress[probe.id] != reports
+                    reported = self._flush_progress[probe.flush_id] != reports
                     if self._frames_reaching_sink == frames and not reported:
                         logger.warning(
                             f"{self}: pipeline flush gave up after {timeout}s of no progress"
@@ -997,7 +1015,7 @@ class PipelineWorker(BaseWorker):
                     if reported:
                         logger.debug(f"{self}: flush still in flight, whoever has it is working")
         finally:
-            self._flush_progress.pop(probe.id, None)
+            self._flush_progress.pop(probe.flush_id, None)
 
     def track_flush_probe(self, frame: PipelineFlushFrame) -> None:
         """Report progress on a probe from another worker while we hold it.
@@ -1010,7 +1028,7 @@ class PipelineWorker(BaseWorker):
             frame: The flush probe entering this pipeline.
         """
         if self._handle_flush_frame and frame.origin and frame.origin != self.name:
-            self._foreign_probes[frame.id] = frame.origin
+            self._foreign_probes[frame.flush_id] = frame.origin
 
     async def on_bus_message(self, message: BusMessage) -> None:
         """Handle outbound bus messages: TTS playback and RTVI UI translation.
@@ -1409,9 +1427,11 @@ class PipelineWorker(BaseWorker):
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
+            enable_expressive_conversation=self._params.enable_expressive_conversation,
             enable_metrics=self._params.enable_metrics,
             enable_tracing=self._enable_tracing,
             enable_usage_metrics=self._params.enable_usage_metrics,
+            expression_policy=self._params.expression_policy,
             observer=self._observer,
             pipeline_worker=self,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
@@ -1542,7 +1562,8 @@ class PipelineWorker(BaseWorker):
         pushing upstream: an ``LLMContextFrame`` pushed up after a function
         call result, say, whose response only comes back down afterwards. A
         probe that stopped at the source would return while that response was
-        still being generated, or still being synthesized.
+        still being generated, or still being synthesized. Each leg is pushed
+        as a new probe with the same ``flush_id``.
 
         Args:
             frame: The probe, carrying the event its initiator awaits.
@@ -1550,14 +1571,19 @@ class PipelineWorker(BaseWorker):
         """
         if not at_sink:
             logger.debug(f"{self}: flush probe reached source — sending it down again")
-            frame.returning = True
-            await self._source.push_frame(frame, FrameDirection.DOWNSTREAM)
+            probe = PipelineFlushFrame(
+                event=frame.event, origin=frame.origin, flush_id=frame.flush_id, returning=True
+            )
+            await self._source.push_frame(probe, FrameDirection.DOWNSTREAM)
         elif not frame.returning:
             logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
-            await self._sink.push_frame(frame, FrameDirection.UPSTREAM)
+            probe = PipelineFlushFrame(
+                event=frame.event, origin=frame.origin, flush_id=frame.flush_id
+            )
+            await self._sink.push_frame(probe, FrameDirection.UPSTREAM)
         else:
             logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
-            self._foreign_probes.pop(frame.id, None)
+            self._foreign_probes.pop(frame.flush_id, None)
             if frame.event:
                 frame.event.set()
 
