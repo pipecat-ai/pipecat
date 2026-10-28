@@ -243,19 +243,32 @@ async def test_the_emotion_is_sent_only_when_it_changes():
     """Words in the same emotion, and names with no emotion, send nothing new."""
     client = _make_emotion_client()
 
-    for delivery in (
-        ["sad"],
-        ["sad"],
-        ["apologetic"],
-        ["slow"],
-        None,
-        ["surprised"],
-        [],
-        ["calm"],
-    ):
+    for delivery in (["sad"], ["sad"], ["apologetic"], ["slow"], ["surprised"], ["surprised"]):
         await client.update_emotion(delivery)
 
-    assert _sent_emotions(client) == ["sadness", "surprise", "neutral"]
+    assert _sent_emotions(client) == ["sadness", "surprise"]
+
+
+@pytest.mark.asyncio
+async def test_words_without_a_delivery_tag_return_the_replica_to_neutral():
+    """Words the LLM wrote no tag for are in the voice's baseline, an empty delivery."""
+    client = _make_emotion_client()
+
+    await client.update_emotion(["excited"])
+    await client.update_emotion([])
+
+    assert _sent_emotions(client) == ["happiness", "neutral"]
+
+
+@pytest.mark.asyncio
+async def test_words_without_any_delivery_keep_the_emotion():
+    """With expressive conversation off, words carry no delivery at all."""
+    client = _make_emotion_client()
+
+    await client.update_emotion(["excited"])
+    await client.update_emotion(None)
+
+    assert _sent_emotions(client) == ["happiness"]
 
 
 @pytest.mark.asyncio
