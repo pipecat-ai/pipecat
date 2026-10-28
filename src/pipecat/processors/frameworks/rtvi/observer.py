@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     MetricsFrame,
+    PerceptionMetadataFrame,
     TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -320,6 +321,11 @@ class RTVIObserver(BaseObserver):
         self._skipped_segment_ids: set[int] = set()
         # Whether an interruption cut off the skipped segments still remembered
         self._skipped_segments_interrupted = False
+        # Processors that read how the user spoke, from their
+        # PerceptionMetadataFrame, and the transcriptions pushed to one that
+        # haven't been read yet (see _handle_transcription_push)
+        self._perceivers: set[FrameProcessor] = set()
+        self._unread_transcription_ids: set[int] = set()
 
         self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
@@ -666,9 +672,15 @@ class RTVIObserver(BaseObserver):
         ):
             return
 
+        if isinstance(frame, PerceptionMetadataFrame) and data.first_push:
+            self._perceivers.add(src)
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            await self._handle_transcription_push(data)
+            return
+
         # A frame is handled the first time it is pushed, except aggregated
         # text, which is handled once it has gone through the output
-        # transport and has the right timing.
+        # transport and has the right timing, and transcriptions (above).
         if not data.first_push and not isinstance(
             frame, (AggregatedTextFrame, AggregatedTextProgressFrame)
         ):
@@ -693,8 +705,6 @@ class RTVIObserver(BaseObserver):
             await self._handle_bot_speaking(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_bot_interrupted()
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
             await self._send_user_input(
                 frame.text,
@@ -1074,6 +1084,26 @@ class RTVIObserver(BaseObserver):
                 )
             )
             self._bot_transcription = ""
+
+    async def _handle_transcription_push(self, data: FramePushed):
+        """Handle a transcription once every perceiver it's pushed to has read it.
+
+        A processor after the STT, such as ``PipecatToneReader``, sets the
+        reading on the transcription it passes along. Handled on the STT's
+        push, the user-input message would go out before the reader had read
+        it, without its perception. So a transcription pushed to a perceiver
+        waits until it's pushed on to a processor that isn't one.
+        """
+        frame = data.frame
+        if data.destination in self._perceivers:
+            if data.first_push:
+                self._unread_transcription_ids.add(frame.id)
+            return
+        if frame.id in self._unread_transcription_ids:
+            self._unread_transcription_ids.discard(frame.id)
+        elif not data.first_push:
+            return
+        await self._handle_user_transcriptions(frame)
 
     async def _handle_user_transcriptions(
         self, frame: TranscriptionFrame | InterimTranscriptionFrame
