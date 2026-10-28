@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.expression import ExpressionDelivery
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -93,22 +94,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "support, use sympathetic.",
         ],
         delivery=[
-            "slow",
-            "calm",
-            "content",
-            "sympathetic",
-            "apologetic",
-            "grateful",
-            "happy",
-            "excited",
-            "curious",
-            "confident",
-            "sad",
-            "surprised",
-            "amazed",
-            "hesitant",
-            "anxious",
-            "proud",
+            ExpressionDelivery.SLOW,
+            ExpressionDelivery.CALM,
+            ExpressionDelivery.CONTENT,
+            ExpressionDelivery.SYMPATHETIC,
+            ExpressionDelivery.APOLOGETIC,
+            ExpressionDelivery.GRATEFUL,
+            ExpressionDelivery.HAPPY,
+            ExpressionDelivery.EXCITED,
+            ExpressionDelivery.CURIOUS,
+            ExpressionDelivery.CONFIDENT,
+            ExpressionDelivery.SAD,
+            ExpressionDelivery.SURPRISED,
+            ExpressionDelivery.AMAZED,
+            ExpressionDelivery.HESITANT,
+            ExpressionDelivery.ANXIOUS,
+            ExpressionDelivery.PROUD,
         ],
     )
 

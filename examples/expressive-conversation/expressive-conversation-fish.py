@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.expression import ExpressionDelivery, ExpressionSound
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -78,28 +79,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     expression_policy = ExpressionPolicy(
         guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS],
         delivery=[
-            "slow",
-            "happy",
-            "excited",
-            "delighted",
-            "curious",
-            "calm",
-            "empathetic",
-            "sympathetic",
-            "hopeful",
-            "nervous",
-            "sad",
-            "disappointed",
-            "frustrated",
-            "sarcastic",
-            "whispering",
+            ExpressionDelivery.SLOW,
+            ExpressionDelivery.HAPPY,
+            ExpressionDelivery.EXCITED,
+            ExpressionDelivery.DELIGHTED,
+            ExpressionDelivery.CURIOUS,
+            ExpressionDelivery.CALM,
+            ExpressionDelivery.EMPATHETIC,
+            ExpressionDelivery.SYMPATHETIC,
+            ExpressionDelivery.HOPEFUL,
+            ExpressionDelivery.NERVOUS,
+            ExpressionDelivery.SAD,
+            ExpressionDelivery.DISAPPOINTED,
+            ExpressionDelivery.FRUSTRATED,
+            ExpressionDelivery.SARCASTIC,
+            ExpressionDelivery.WHISPERING,
         ],
         sounds=[
-            "laugh",
-            "chuckle",
-            "sigh",
-            "gasp",
-            "clear throat",
+            ExpressionSound.LAUGH,
+            ExpressionSound.CHUCKLE,
+            ExpressionSound.SIGH,
+            ExpressionSound.GASP,
+            ExpressionSound.CLEAR_THROAT,
         ],
     )
 
