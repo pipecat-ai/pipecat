@@ -17,12 +17,17 @@ import pipecat.adapters.llm
 NEW_PREFIX = "pipecat.adapters.llm."
 OLD_PREFIX = "pipecat.adapters."
 
+# Modules added after the move, which never had an old path to keep.
+ADDED_AFTER_MOVE = {
+    "pipecat.adapters.llm.services.gemini_interactions_adapter",
+}
+
 
 def _moved_modules() -> list[str]:
     return sorted(
         info.name
         for info in pkgutil.walk_packages(pipecat.adapters.llm.__path__, NEW_PREFIX)
-        if not info.ispkg
+        if not info.ispkg and info.name not in ADDED_AFTER_MOVE
     )
 
 
