@@ -116,13 +116,16 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
             ],
             pause_range_ms=(100, 5000),
             delivery_scope=DeliveryScope.SENTENCE,
-            tagger_vocabulary={
+            service_names={
                 "calm": ["calm", "peaceful", "serene"],
                 "warm": ["content", "happy"],
                 "excited": ["excited", "enthusiastic"],
                 "sad": ["sad", "disappointed"],
                 "laugh": ["laughter"],
                 "chuckle": ["laughter"],
+                "trusting": ["trust"],
+                "anticipating": ["anticipation"],
+                "contemptuous": ["contempt"],
             },
         )
 

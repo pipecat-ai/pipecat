@@ -42,11 +42,159 @@ EMPHASIS_DELIVERY = "emphasis"
 SLOW_DELIVERY = "slow"
 FAST_DELIVERY = "fast"
 
-# The deliveries and sounds a tagger chooses from: a processor after the LLM that
-# writes the tags from a fixed set of labels, rather than from what a service
-# declares. A service lists the names it performs each by in its capabilities'
-# ``tagger_vocabulary``.
-TaggerDelivery = Literal[
+# The deliveries and sounds Pipecat names the same on every TTS service, each in one
+# spelling: together, everything the services with an expression adapter perform. An
+# LLM writes them, frames and clients are told them, and each service's adapter
+# sends them by its own names (``ExpressionCapabilities.service_names``).
+UniversalDelivery = Literal[
+    "affectionate",
+    "agitated",
+    "alarmed",
+    "amazed",
+    "angry",
+    "annoyed",
+    "anticipating",
+    "anxious",
+    "apologetic",
+    "appalled",
+    "ashamed",
+    "bored",
+    "calm",
+    "cautious",
+    "compassionate",
+    "confident",
+    "confused",
+    "contemplative",
+    "contemptuous",
+    "content",
+    "crying",
+    "curious",
+    "cute",
+    "deadpan",
+    "dejected",
+    "delighted",
+    "depressed",
+    "desperate",
+    "determined",
+    "disappointed",
+    "disdainful",
+    "disgusted",
+    "dismissive",
+    "distant",
+    "doubtful",
+    "dramatic",
+    "elated",
+    "embarrassed",
+    "empathetic",
+    "enthusiastic",
+    "envious",
+    "euphoric",
+    "excited",
+    "fast",
+    "fearful",
+    "flirtatious",
+    "frustrated",
+    "grateful",
+    "guilty",
+    "happy",
+    "hesitant",
+    "hopeful",
+    "hurt",
+    "hysterical",
+    "impressed",
+    "indifferent",
+    "insecure",
+    "ironic",
+    "jealous",
+    "lonely",
+    "mad",
+    "melancholic",
+    "mischievous",
+    "moved",
+    "muttering",
+    "mysterious",
+    "nervous",
+    "nostalgic",
+    "optimistic",
+    "outraged",
+    "panicked",
+    "peaceful",
+    "pessimistic",
+    "professional",
+    "proud",
+    "questioning",
+    "reassuring",
+    "regretful",
+    "rejected",
+    "relaxed",
+    "resigned",
+    "sad",
+    "sarcastic",
+    "satisfied",
+    "scared",
+    "screaming",
+    "serene",
+    "sheepish",
+    "shouting",
+    "singing",
+    "skeptical",
+    "slow",
+    "surprised",
+    "sympathetic",
+    "thoughtful",
+    "threatened",
+    "tired",
+    "triumphant",
+    "trusting",
+    "uncertain",
+    "unhappy",
+    "upset",
+    "warm",
+    "whispering",
+    "wistful",
+    "worried",
+]
+UniversalSound = Literal[
+    "breath",
+    "burp",
+    "chuckle",
+    "clear throat",
+    "cough",
+    "deep breath",
+    "exhale",
+    "gasp",
+    "giggle",
+    "groan",
+    "gulp",
+    "hiss",
+    "hum",
+    "inhale",
+    "laugh",
+    "laugh harder",
+    "light breath",
+    "lip smack",
+    "pant",
+    "sharp exhale",
+    "sigh",
+    "sneeze",
+    "sniff",
+    "snore",
+    "snort",
+    "sob",
+    "start laughing",
+    "swallow",
+    "um",
+    "wheeze",
+    "woo",
+    "yawn",
+]
+UniversalName = UniversalDelivery | UniversalSound
+UNIVERSAL_DELIVERY: tuple[UniversalDelivery, ...] = get_args(UniversalDelivery)
+UNIVERSAL_SOUNDS: tuple[UniversalSound, ...] = get_args(UniversalSound)
+
+# The universal deliveries and sounds an LLM is taught when nothing narrows them, and
+# that Pipecat Tone's tagger writes.
+CORE_DELIVERY: tuple[UniversalDelivery, ...] = (
     "calm",
     "sympathetic",
     "apologetic",
@@ -59,15 +207,8 @@ TaggerDelivery = Literal[
     "confident",
     "slow",
     "fast",
-]
-TaggerSound = Literal["laugh", "chuckle", "sigh", "breath"]
-# The kinds a tagger draws a breath as, each written as a sound of its own.
-TaggerBreathKind = Literal["light breath", "deep breath", "exhale"]
-# A label a tagger writes: a delivery, a sound or the kind a breath is drawn as.
-TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
-TAGGER_DELIVERY: tuple[TaggerDelivery, ...] = get_args(TaggerDelivery)
-TAGGER_SOUNDS: tuple[TaggerSound, ...] = get_args(TaggerSound)
-TAGGER_BREATH_KINDS: tuple[TaggerBreathKind, ...] = get_args(TaggerBreathKind)
+)
+CORE_SOUNDS: tuple[UniversalSound, ...] = ("laugh", "chuckle", "sigh", "breath")
 
 
 class DeliveryScope(Enum):
@@ -137,14 +278,14 @@ class ExpressionCapabilities:
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
         delivery_scope: Where in a response the service can change delivery.
-        tagger_vocabulary: The names the service performs each of a tagger's
-            labels and kinds of breath by (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``,
-            ``TAGGER_BREATH_KINDS``), best first, such as ``{"calm": ["calm",
-            "peaceful"], "laugh": ["laughter"]}``. A label written in a tag is
-            sent by the first of these the service performs. A later name stands
-            in when an expression policy leaves out the ones before it. A label
-            left out is performed by its own name, when the service declares it
-            or accepts free text.
+        service_names: The names the service performs universal deliveries and
+            sounds by (``UNIVERSAL_DELIVERY``, ``UNIVERSAL_SOUNDS``), best first,
+            where they differ from the universal names, such as ``{"warm":
+            ["content", "happy"], "laugh": ["laughter"]}``. A universal name
+            written in a tag is sent by the first of these the service performs.
+            A later name stands in when an expression policy leaves out the ones
+            before it. A universal name left out is performed by its own, when the
+            service declares it or accepts free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
@@ -154,12 +295,12 @@ class ExpressionCapabilities:
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
-    tagger_vocabulary: dict[TaggerLabel, list[str]] = field(default_factory=dict)
+    service_names: dict[UniversalName, list[str]] = field(default_factory=dict)
 
     def delivery_name(self, name: str) -> str | None:
         """The name the service performs a delivery by, or None when it can't.
 
-        A label in ``tagger_vocabulary`` is performed by its first name there the
+        A universal name is performed by its first name in ``service_names`` the
         service performs, else by its own; any other name by itself. The service
         performs a name it declares, or any name when it accepts free text.
 
@@ -186,7 +327,7 @@ class ExpressionCapabilities:
 
     def _performed_name(self, name: str, terms: list[ExpressionTerm], free_text: bool):
         declared = {term.name for term in terms}
-        vocabulary = cast(dict[str, list[str]], self.tagger_vocabulary)
+        vocabulary = cast(dict[str, list[str]], self.service_names)
         for candidate in [*vocabulary.get(name, []), name]:
             if free_text or candidate in declared:
                 return candidate

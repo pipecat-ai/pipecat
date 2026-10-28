@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for the names TTS services perform a tagger's labels by."""
+"""Tests for the universal expression names, and the names TTS services perform them by."""
 
 import pytest
 
@@ -13,9 +13,10 @@ from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagE
 from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
 from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.expressive.expression import (
-    TAGGER_BREATH_KINDS,
-    TAGGER_DELIVERY,
-    TAGGER_SOUNDS,
+    CORE_DELIVERY,
+    CORE_SOUNDS,
+    UNIVERSAL_DELIVERY,
+    UNIVERSAL_SOUNDS,
     ExpressionCapabilities,
     ExpressionTerm,
 )
@@ -29,6 +30,18 @@ ADAPTERS = [
     MiniMaxExpressionAdapter,
 ]
 
+# Sounds services declare that aren't a voice, so they have no universal name.
+NOT_A_VOICE = {
+    "applause",
+    "clapping",
+    "gunshot",
+    "explosion",
+    "fart",
+    "audience laughing",
+    "background laughter",
+    "crowd laughing",
+}
+
 
 def tagger_name(
     capabilities: ExpressionCapabilities, label: str, offered: list[str] | None = None
@@ -41,15 +54,50 @@ def tagger_name(
     return {**space.deliveries, **space.sounds, **space.breaths}.get(label)
 
 
-@pytest.mark.parametrize("adapter", ADAPTERS)
-def test_every_name_in_an_adapters_vocabulary_is_one_it_performs(adapter):
-    capabilities = adapter().capabilities()
-    vocabulary = capabilities.tagger_vocabulary
+def test_a_name_is_either_a_delivery_or_a_sound():
+    assert not set(UNIVERSAL_DELIVERY) & set(UNIVERSAL_SOUNDS)
 
-    assert set(vocabulary) <= {*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS}
-    for label, names in vocabulary.items():
-        for name in names:
-            assert tagger_name(capabilities, label, offered=[name]) == name
+
+def test_the_core_names_are_universal():
+    assert set(CORE_DELIVERY) <= set(UNIVERSAL_DELIVERY)
+    assert set(CORE_SOUNDS) <= set(UNIVERSAL_SOUNDS)
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_a_service_names_universal_names_by_names_it_performs(adapter):
+    capabilities = adapter().capabilities()
+
+    assert set(capabilities.service_names) <= {*UNIVERSAL_DELIVERY, *UNIVERSAL_SOUNDS}
+    for universal, names in capabilities.service_names.items():
+        if universal in UNIVERSAL_DELIVERY:
+            free_text, declared = capabilities.free_text_delivery, capabilities.delivery
+            performed = capabilities.delivery_name(universal)
+        else:
+            free_text, declared = capabilities.free_text_sounds, capabilities.sounds
+            performed = capabilities.sound_name(universal)
+        assert performed in names
+        if not free_text:
+            assert set(names) & {term.name for term in declared}
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_every_voice_a_service_declares_is_reached_by_a_universal_name(adapter):
+    capabilities = adapter().capabilities()
+    reached = {name for names in capabilities.service_names.values() for name in names}
+    universal = {*UNIVERSAL_DELIVERY, *UNIVERSAL_SOUNDS}
+
+    for term in [*capabilities.delivery, *capabilities.sounds]:
+        assert term.name in universal | reached | NOT_A_VOICE, term.name
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_every_core_name_the_tagger_writes_is_one_the_service_performs(adapter):
+    capabilities = adapter().capabilities()
+
+    for name in CORE_DELIVERY:
+        assert tagger_name(capabilities, name) in (capabilities.delivery_name(name), None)
+    for name in CORE_SOUNDS:
+        assert tagger_name(capabilities, name) in (capabilities.sound_name(name), None)
 
 
 @pytest.mark.parametrize(
@@ -100,7 +148,7 @@ def test_a_policy_that_names_only_a_kind_still_breathes(offered, breaths):
 def test_the_best_name_the_policy_offers_is_chosen():
     capabilities = ExpressionCapabilities(
         delivery=[ExpressionTerm("calm"), ExpressionTerm("reassuring")],
-        tagger_vocabulary={"calm": ["calm", "reassuring"]},
+        service_names={"calm": ["calm", "reassuring"]},
     )
 
     assert tagger_name(capabilities, "calm") == "calm"
@@ -112,7 +160,7 @@ def test_a_label_left_out_is_performed_by_its_own_name_when_the_service_declares
     capabilities = ExpressionCapabilities(
         sounds=[ExpressionTerm("laughter")],
         delivery=[ExpressionTerm("calm")],
-        tagger_vocabulary={"laugh": ["laughter"]},
+        service_names={"laugh": ["laughter"]},
     )
 
     assert tagger_name(capabilities, "calm") == "calm"
@@ -123,7 +171,7 @@ def test_a_label_left_out_is_performed_by_its_own_name_when_the_service_declares
 
 def test_a_service_that_takes_free_text_also_takes_the_label_last():
     capabilities = ExpressionCapabilities(
-        free_text_sounds=True, free_text_delivery=True, tagger_vocabulary={"warm": ["warmly"]}
+        free_text_sounds=True, free_text_delivery=True, service_names={"warm": ["warmly"]}
     )
 
     assert tagger_name(capabilities, "grateful") == "grateful"
@@ -133,7 +181,7 @@ def test_a_service_that_takes_free_text_also_takes_the_label_last():
 
 def test_a_name_the_service_doesnt_perform_is_passed_over():
     capabilities = ExpressionCapabilities(
-        delivery=[ExpressionTerm("happy")], tagger_vocabulary={"warm": ["content", "happy"]}
+        delivery=[ExpressionTerm("happy")], service_names={"warm": ["content", "happy"]}
     )
 
     assert tagger_name(capabilities, "warm") == "happy"

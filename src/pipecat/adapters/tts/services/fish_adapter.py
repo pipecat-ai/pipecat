@@ -80,7 +80,7 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
             free_text_delivery=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
-            tagger_vocabulary={
+            service_names={
                 "calm": ["calm", "relaxed"],
                 "sympathetic": ["sympathetic", "empathetic", "compassionate"],
                 "apologetic": ["regretful"],
@@ -92,6 +92,12 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
                 "breath": ["inhaling"],
                 "light breath": ["inhaling"],
                 "exhale": ["exhaling"],
+                "sob": ["sobbing", "crying loudly"],
+                "groan": ["groaning"],
+                "pant": ["panting"],
+                "gasp": ["gasping"],
+                "yawn": ["yawning"],
+                "snore": ["snoring"],
             },
         )
 

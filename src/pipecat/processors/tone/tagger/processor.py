@@ -16,10 +16,9 @@ from typing import Literal
 from loguru import logger
 
 from pipecat.expressive.expression import (
-    TAGGER_BREATH_KINDS,
-    TAGGER_DELIVERY,
-    TAGGER_SOUNDS,
-    TaggerLabel,
+    CORE_DELIVERY,
+    CORE_SOUNDS,
+    UniversalName,
 )
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
@@ -41,6 +40,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone._models import load_model
 from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
 from pipecat.processors.tone.tagger._labels import (
+    BREATH_KINDS,
     LabelSpace,
     ReplyRenderer,
     SentenceLabels,
@@ -90,7 +90,7 @@ class PipecatToneTagger(LLMTextProcessor):
         revision: str = TAGGER_REVISION,
         model_dir: str | Path | None = None,
         threads: int = 1,
-        vocabulary: dict[TaggerLabel, list[str]] | None = None,
+        vocabulary: dict[UniversalName, list[str]] | None = None,
         **kwargs,
     ):
         """Initialize the processor.
@@ -105,7 +105,7 @@ class PipecatToneTagger(LLMTextProcessor):
                 trained or keep yourself. ``size`` and ``revision`` are then unused.
             threads: The CPU threads for one sentence.
             vocabulary: Names to write first for a delivery, sound or kind of breath
-                (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``, ``TAGGER_BREATH_KINDS``),
+                (``CORE_DELIVERY``, ``CORE_SOUNDS``, ``BREATH_KINDS``),
                 best first, such as ``{"warm": ["cheerful"]}``. A name is written only
                 where the TTS service performs it and the policy offers it; elsewhere
                 the service's own names stand. A name written for ``"breath"`` is
@@ -115,7 +115,7 @@ class PipecatToneTagger(LLMTextProcessor):
         Raises:
             ValueError: The vocabulary names a label the tagger doesn't write.
         """
-        labels = (*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS)
+        labels = (*CORE_DELIVERY, *CORE_SOUNDS, *BREATH_KINDS)
         if unknown := sorted(set(vocabulary or {}) - set(labels)):
             raise ValueError(f"the tagger writes none of {unknown}; it writes {list(labels)}")
         super().__init__(text_aggregator=SkipTagsAggregator(EXPRESSION_TAGS), **kwargs)

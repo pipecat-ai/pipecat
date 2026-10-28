@@ -226,7 +226,7 @@ class VocabularyAdapter(BracketAdapter):
         return ExpressionCapabilities(
             sounds=[ExpressionTerm("laughs")],
             delivery=[ExpressionTerm("warmly")],
-            tagger_vocabulary={"warm": ["warmly"], "laugh": ["laughs"]},
+            service_names={"warm": ["warmly"], "laugh": ["laughs"]},
         )
 
 

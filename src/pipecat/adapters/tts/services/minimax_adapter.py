@@ -50,7 +50,7 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
             + SPEED_DELIVERY,
             pause_range_ms=(10, 99990),
             delivery_scope=DeliveryScope.SENTENCE,
-            tagger_vocabulary={
+            service_names={
                 "warm": ["happy"],
                 "excited": ["happy"],
                 "laugh": ["laughs"],
@@ -58,6 +58,18 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
                 "breath": ["breath", "inhale"],
                 "light breath": ["breath"],
                 "deep breath": ["inhale"],
+                "cough": ["coughs"],
+                "clear throat": ["clear-throat"],
+                "groan": ["groans"],
+                "gasp": ["gasps"],
+                "sniff": ["sniffs"],
+                "snort": ["snorts"],
+                "burp": ["burps"],
+                "lip smack": ["lip-smacking"],
+                "hum": ["humming"],
+                "hiss": ["hissing"],
+                "um": ["emm"],
+                "sneeze": ["sneezes"],
             },
         )
 

@@ -75,9 +75,8 @@ from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import (
     EMPHASIS_DELIVERY,
     NEUTRAL_DELIVERY,
-    TAGGER_BREATH_KINDS,
-    TAGGER_DELIVERY,
-    TAGGER_SOUNDS,
+    UNIVERSAL_DELIVERY,
+    UNIVERSAL_SOUNDS,
     DeliveryScope,
     ExpressionCapabilities,
 )
@@ -355,10 +354,10 @@ class ExpressionFormatter:
         capabilities = self.capabilities()
         declared = capabilities or ExpressionCapabilities()
         sounds = {term.name for term in declared.sounds} | {
-            name for name in (*TAGGER_SOUNDS, *TAGGER_BREATH_KINDS) if declared.sound_name(name)
+            name for name in UNIVERSAL_SOUNDS if declared.sound_name(name)
         }
         delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)} | {
-            name for name in TAGGER_DELIVERY if declared.delivery_name(name)
+            name for name in UNIVERSAL_DELIVERY if declared.delivery_name(name)
         }
         segments: list[Segment] = []
         position = 0
