@@ -11,7 +11,7 @@ A small wording change can move a model in ways no unit test catches: gpt-4.1 st
 
 They use the bots in [`examples/multi-worker/llm-with-backend/`](../../../examples/multi-worker/llm-with-backend/): three with a text frontend (OpenAI Responses on gpt-4.1, Google on gemini-3.6-flash, Anthropic on claude-sonnet-4-6) and two speech-to-speech. Fastest first:
 
-1. **Frontend replay** (`frontend_replay/`, minutes). 75 recorded user turns, each labelled with whether it should be delegated. Runs one text frontend's model on each and lists the turns it gets wrong: a stop answered with no `delegate` call, or small talk delegated. Run it for each of the three.
+1. **Frontend replay** (`frontend_replay/`, minutes). 75 recorded user turns, each labelled with whether it should be delegated. Runs one text frontend's model on each and lists the turns it gets wrong: a stop answered with no `delegate` call, or small talk delegated. A delegated turn runs on to the model's reply after the call, as in the bot, and the acknowledgement the user would hear is reported with its length, since a change to the pairing instruction moves that too. Run it for each of the three.
 
    ```bash
    uv run python scripts/llm-with-backend/tuning/frontend_replay/replay.py --frontend <openai|google|anthropic> --samples 5
