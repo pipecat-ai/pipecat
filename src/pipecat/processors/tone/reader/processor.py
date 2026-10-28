@@ -7,6 +7,7 @@
 """The processor that reads how each user turn was meant with Pipecat Tone."""
 
 import asyncio
+from pathlib import Path
 from typing import Literal
 
 from pipecat.expressive.formatter import strip_expression_tags
@@ -65,6 +66,7 @@ class PipecatToneReader(FrameProcessor):
         self,
         *,
         revision: str = TONE_REVISION,
+        model_dir: str | Path | None = None,
         precision: Literal["fp16", "fp32"] = "fp16",
         threads: int = 4,
         **kwargs,
@@ -73,13 +75,16 @@ class PipecatToneReader(FrameProcessor):
 
         Args:
             revision: The model's release on Hugging Face, such as ``"reader-rc1"``.
-            precision: The weights to download: ``"fp16"`` or ``"fp32"``.
+            model_dir: A folder to load the model from instead of downloading one,
+                laid out as a release's ``reader``. ``revision`` is then unused.
+            precision: The weights to load: ``"fp16"`` or ``"fp32"``.
             threads: The CPU threads for one read.
             **kwargs: Additional arguments passed to the parent.
         """
         super().__init__(**kwargs)
         self._model: PipecatToneReaderModel | None = None
         self._revision = revision
+        self._model_dir = Path(model_dir) if model_dir else None
         self._precision: Literal["fp16", "fp32"] = precision
         self._threads = threads
         self._previous: str | None = None
@@ -93,10 +98,17 @@ class PipecatToneReader(FrameProcessor):
         await super().setup(setup)
         self._model = await load_model(
             self,
-            ("reader", self._revision, self._precision, self._threads),
-            lambda: PipecatToneReaderModel.download(
-                revision=self._revision, precision=self._precision, threads=self._threads
-            ),
+            ("reader", self._model_dir or self._revision, self._precision, self._threads),
+            self._open_model,
+        )
+
+    def _open_model(self) -> PipecatToneReaderModel:
+        if self._model_dir:
+            return PipecatToneReaderModel(
+                self._model_dir, precision=self._precision, threads=self._threads
+            )
+        return PipecatToneReaderModel.download(
+            revision=self._revision, precision=self._precision, threads=self._threads
         )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

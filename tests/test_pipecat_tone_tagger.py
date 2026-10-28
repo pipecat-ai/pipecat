@@ -655,6 +655,28 @@ def test_each_size_downloads_its_own_folder(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tmp_path):
+    loaded = []
+
+    def fail(**kwargs):
+        raise OSError("no network")
+
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", fail)
+    monkeypatch.setattr(
+        PipecatToneTaggerModel,
+        "__init__",
+        lambda self, model_dir, threads: loaded.append((model_dir, threads)),
+    )
+
+    for tagger in [PipecatToneTagger(model_dir=str(tmp_path), threads=2) for _ in range(2)]:
+        down, _ = await run_test(tagger, frames_to_send=[], pipeline_params=EXPRESSIVE)
+
+    # Loaded once a process, and shared.
+    assert loaded == [(tmp_path, 2)]
+    assert [f for f in down if isinstance(f, ExpressionMetadataFrame)]
+
+
+@pytest.mark.asyncio
 async def test_a_vocabulary_names_a_label_first_where_the_service_performs_it(monkeypatch):
     model = FakeTaggerModel()
     monkeypatch.setattr(PipecatToneTaggerModel, "download", lambda **kwargs: model)

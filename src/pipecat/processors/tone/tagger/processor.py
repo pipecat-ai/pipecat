@@ -10,6 +10,7 @@ import asyncio
 import random
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Literal
 
 from loguru import logger
@@ -83,6 +84,7 @@ class PipecatToneTagger(LLMTextProcessor):
         *,
         size: Literal["17m", "32m"] = "17m",
         revision: str = TAGGER_REVISION,
+        model_dir: str | Path | None = None,
         threads: int = 1,
         vocabulary: dict[TaggerLabel, list[str]] | None = None,
         **kwargs,
@@ -94,6 +96,9 @@ class PipecatToneTagger(LLMTextProcessor):
                 teacher a little more often and takes nearly three times as long a
                 sentence.
             revision: The model's release on Hugging Face, such as ``"tagger-rc1"``.
+            model_dir: A folder to load the model from instead of downloading one,
+                laid out as a release's ``tagger/17m``, such as for a model you
+                trained or keep yourself. ``size`` and ``revision`` are then unused.
             threads: The CPU threads for one sentence.
             vocabulary: Names to write first for a delivery, sound or kind of breath
                 (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``, ``TAGGER_BREATH_KINDS``),
@@ -113,6 +118,7 @@ class PipecatToneTagger(LLMTextProcessor):
         self._model: PipecatToneTaggerModel | None = None
         self._size: Literal["17m", "32m"] = size
         self._revision = revision
+        self._model_dir = Path(model_dir) if model_dir else None
         self._threads = threads
         self._vocabulary = vocabulary or {}
         self._policy = ExpressionPolicy()
@@ -143,10 +149,15 @@ class PipecatToneTagger(LLMTextProcessor):
             return
         self._model = await load_model(
             self,
-            ("tagger", self._size, self._revision, self._threads),
-            lambda: PipecatToneTaggerModel.download(
-                size=self._size, revision=self._revision, threads=self._threads
-            ),
+            ("tagger", self._model_dir or (self._size, self._revision), self._threads),
+            self._open_model,
+        )
+
+    def _open_model(self) -> PipecatToneTaggerModel:
+        if self._model_dir:
+            return PipecatToneTaggerModel(self._model_dir, threads=self._threads)
+        return PipecatToneTaggerModel.download(
+            size=self._size, revision=self._revision, threads=self._threads
         )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

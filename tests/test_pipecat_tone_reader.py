@@ -179,3 +179,25 @@ async def test_the_model_downloads_at_the_release_asked_for(monkeypatch):
         await run_test(reader, frames_to_send=[])
 
     assert [a["revision"] for a in asked] == ["reader-rc1", "reader-rc9"]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tmp_path):
+    loaded = []
+
+    def fail(**kwargs):
+        raise OSError("no network")
+
+    def load(self, model_dir, precision, threads):
+        loaded.append((model_dir, precision))
+        self.config = {"emotions": ["neutral", "happy"]}
+
+    monkeypatch.setattr(PipecatToneReaderModel, "download", fail)
+    monkeypatch.setattr(PipecatToneReaderModel, "__init__", load)
+
+    down, _ = await run_test(
+        PipecatToneReader(model_dir=str(tmp_path), precision="fp32"), frames_to_send=[]
+    )
+
+    assert loaded == [(tmp_path, "fp32")]
+    assert [f for f in down if isinstance(f, PerceptionMetadataFrame)]
