@@ -7,14 +7,14 @@
 """Together.ai LLM service implementation using OpenAI-compatible interface."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
 from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
 @dataclass
@@ -26,9 +26,16 @@ class TogetherLLMSettings(BaseOpenAILLMService.Settings):
             e.g. ``{"enabled": False}``. A reasoning model such as GLM runs a
             reasoning pass before every answer, which delays the first spoken
             token. ``None`` leaves the choice to the model's own default.
+        reasoning_effort: How much the model reasons before answering, one of
+            "low", "medium" or "high". A model that ignores ``reasoning``, such
+            as ``zai-org/GLM-5.3``, still shortens its reasoning pass for "low".
+            When unset, Together's per-model default applies.
     """
 
     reasoning: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reasoning_effort: Literal["low", "medium", "high"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class TogetherLLMService(OpenAILLMService):
@@ -72,7 +79,9 @@ class TogetherLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="zai-org/GLM-5.2", reasoning=None)
+        default_settings = self.Settings(
+            model="zai-org/GLM-5.2", reasoning=None, reasoning_effort=None
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -117,5 +126,9 @@ class TogetherLLMService(OpenAILLMService):
         params = super().build_chat_completion_params(params_from_context)
 
         self._merge_extra_body(params, {"reasoning": self._settings.reasoning})
+
+        reasoning_effort = self._settings.reasoning_effort
+        if is_given(reasoning_effort) and reasoning_effort is not None:
+            params.setdefault("reasoning_effort", reasoning_effort)
 
         return params

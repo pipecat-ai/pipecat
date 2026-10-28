@@ -1,0 +1,1 @@
+- Added `TogetherLLMSettings.reasoning_effort`, Together's "low"/"medium"/"high" reasoning control. It reaches models that ignore the `reasoning` toggle, such as `zai-org/GLM-5.3`.
