@@ -104,7 +104,9 @@ class BackendConnector:
                 request. Picked by frontend kind when omitted.
             frontend_pairing_instruction: How the model works with a backend,
                 appended to its system instruction:
-                :data:`FRONTEND_PAIRING_INSTRUCTION` unless given. One of its
+                :data:`FRONTEND_PAIRING_INSTRUCTION` unless given (both
+                constants named here are in
+                :mod:`~pipecat.pipeline.llm_with_backend.prompts`). One of its
                 own has to say what that one says: when and how to delegate,
                 that to the user there is one assistant, what to do after
                 delegating, and what to do with the backend's messages. The

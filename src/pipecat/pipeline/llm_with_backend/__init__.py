@@ -21,8 +21,9 @@ request is worded is the :class:`BackendRequestStrategy`'s business, and the
 :class:`BackendConnector` owns the tools, the session with the backend, and
 how each output is rendered into the conversation.
 
-Everything public is importable from this package, and lives in one of its
-modules:
+The classes an app builds with import from this package. The rest, such as
+the prompt texts an app may start from to write its own, import from the
+module that defines them:
 
 - :mod:`~pipecat.pipeline.llm_with_backend.prompts`: what the frontend's
   model reads, from the pairing instruction to the marks on the backend's
@@ -37,27 +38,9 @@ modules:
   :class:`LLMWithBackend`, which puts the pair where an LLM goes.
 """
 
-from pipecat.pipeline.llm_with_backend.connector import (
-    DELEGATE_TOOL_NAME,
-    BackendConnector,
-    ConnectorContext,
-)
+from pipecat.pipeline.llm_with_backend.connector import BackendConnector
 from pipecat.pipeline.llm_with_backend.llm_with_backend import LLMWithBackend
 from pipecat.pipeline.llm_with_backend.predictive_delegation import PredictiveDelegation
-from pipecat.pipeline.llm_with_backend.prompts import (
-    BACKEND_MESSAGE_PREFIX,
-    BACKEND_MESSAGE_RELAY_INSTRUCTION,
-    BACKEND_NOTE_PREFIX,
-    BACKEND_PREFIXES,
-    BACKEND_THOUGHT_PREFIX,
-    BACKEND_WORKING_PREFIX,
-    EXPLICIT_FRONTEND_INSTRUCTION,
-    EXPLICIT_TOOL_DESCRIPTION,
-    FRONTEND_PAIRING_INSTRUCTION,
-    PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER,
-    TRANSCRIPT_FRONTEND_INSTRUCTION,
-    TRANSCRIPT_TOOL_DESCRIPTION,
-)
 from pipecat.pipeline.llm_with_backend.request_strategies import (
     BackendRequestStrategy,
     ExplicitBackendRequestStrategy,
@@ -65,24 +48,10 @@ from pipecat.pipeline.llm_with_backend.request_strategies import (
 )
 
 __all__ = [
-    "BACKEND_MESSAGE_PREFIX",
-    "BACKEND_MESSAGE_RELAY_INSTRUCTION",
-    "BACKEND_NOTE_PREFIX",
-    "BACKEND_PREFIXES",
-    "BACKEND_THOUGHT_PREFIX",
-    "BACKEND_WORKING_PREFIX",
     "BackendConnector",
     "BackendRequestStrategy",
-    "ConnectorContext",
-    "DELEGATE_TOOL_NAME",
-    "EXPLICIT_FRONTEND_INSTRUCTION",
-    "EXPLICIT_TOOL_DESCRIPTION",
     "ExplicitBackendRequestStrategy",
-    "FRONTEND_PAIRING_INSTRUCTION",
     "LLMWithBackend",
-    "PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER",
     "PredictiveDelegation",
-    "TRANSCRIPT_FRONTEND_INSTRUCTION",
-    "TRANSCRIPT_TOOL_DESCRIPTION",
     "TranscriptBackendRequestStrategy",
 ]

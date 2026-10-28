@@ -43,9 +43,9 @@ sys.path.insert(0, str(HERE.parents[3] / "examples" / "multi-worker" / "llm-with
 from backend import FRONTEND_INSTRUCTIONS  # noqa: E402
 
 from pipecat.frames.frames import LLMContextFrame  # noqa: E402
-from pipecat.pipeline.llm_with_backend import (  # noqa: E402
+from pipecat.pipeline.llm_with_backend import BackendConnector  # noqa: E402
+from pipecat.pipeline.llm_with_backend.connector import (  # noqa: E402
     DELEGATE_TOOL_NAME,
-    BackendConnector,
     ConnectorContext,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402

@@ -42,14 +42,16 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
-    BACKEND_MESSAGE_RELAY_INSTRUCTION,
-    TRANSCRIPT_FRONTEND_INSTRUCTION,
     BackendConnector,
-    ConnectorContext,
     ExplicitBackendRequestStrategy,
     LLMWithBackend,
     PredictiveDelegation,
     TranscriptBackendRequestStrategy,
+)
+from pipecat.pipeline.llm_with_backend.connector import ConnectorContext
+from pipecat.pipeline.llm_with_backend.prompts import (
+    BACKEND_MESSAGE_RELAY_INSTRUCTION,
+    TRANSCRIPT_FRONTEND_INSTRUCTION,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
