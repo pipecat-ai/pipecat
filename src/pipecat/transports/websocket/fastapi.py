@@ -291,6 +291,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         self._params = params
         self._receive_task = None
         self._monitor_websocket_task = None
+        # Set on EndFrame: the receive loop keeps reading but drops messages.
+        self._draining = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the input transport with the frame processor setup.
@@ -332,11 +334,15 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
         await self.set_transport_ready(frame)
 
-    async def _stop_tasks(self):
-        """Stop all running tasks."""
+    async def _stop_monitor_task(self):
+        """Stop the session timeout task."""
         if self._monitor_websocket_task:
             await self.cancel_task(self._monitor_websocket_task)
             self._monitor_websocket_task = None
+
+    async def _stop_tasks(self):
+        """Stop all running tasks."""
+        await self._stop_monitor_task()
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -344,7 +350,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _teardown(self):
         """Cancel the receive/monitor tasks and disconnect the client.
 
-        Idempotent and shared by ``stop()``, ``cancel()``, and ``cleanup()`` so
+        Idempotent and shared by ``cancel()`` and ``cleanup()`` so
         the independent receive loop is always stopped and the WebSocket always
         disconnected, regardless of which teardown hook runs.
         """
@@ -354,11 +360,20 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def stop(self, frame: EndFrame):
         """Stop the input transport and cleanup resources.
 
+        The receive loop is not cancelled here. The output transport may still
+        be sending queued audio after the input transport sees the
+        ``EndFrame``, and a peer that applies backpressure (e.g. Twilio Media
+        Streams) can stall if nothing reads the socket. Incoming messages are
+        read and discarded until the WebSocket closes, and the receive loop is
+        cancelled in ``cleanup()``.
+
         Args:
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._teardown()
+        self._draining = True
+        await self._stop_monitor_task()
+        await self._client.disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and stop all processing.
@@ -373,7 +388,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         """Main message receiving loop for WebSocket messages."""
         try:
             async for message in self._client.receive():
-                if not self._params.serializer:
+                if self._draining or not self._params.serializer:
                     continue
 
                 frame = await self._params.serializer.deserialize(message)
