@@ -50,7 +50,10 @@ class AudioVolumeTracker:
             holds a measurable amount of audio.
         """
         if self._volume is None:
-            self._volume = calculate_audio_volume(self._buffer, self._sample_rate)
+            # Measure a copy. A view of the window outlives the measurement
+            # whenever another thread holds this thread's frame (a profiler or
+            # a stack sampler does), and the next update can't resize it.
+            self._volume = calculate_audio_volume(bytes(self._buffer), self._sample_rate)
         return self._volume
 
     def update(self, audio: bytes, sample_rate: int):

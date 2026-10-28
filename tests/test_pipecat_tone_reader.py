@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.tone import _models
 from pipecat.processors.tone.reader import PipecatToneReader
+from pipecat.processors.tone.reader import model as reader_model
 from pipecat.processors.tone.reader.model import PipecatToneReaderModel
 from pipecat.tests.utils import run_test
 
@@ -146,3 +147,64 @@ async def test_a_model_that_cant_load_leaves_the_reader_unusable_and_the_pipelin
     assert [f for f in up if isinstance(f, ErrorFrame)]
     assert not [f for f in down if isinstance(f, PerceptionMetadataFrame)]
     assert [f.perception for f in down if isinstance(f, TranscriptionFrame)] == [None]
+
+
+@pytest.mark.asyncio
+async def test_the_model_downloads_at_the_release_asked_for(monkeypatch):
+    asked = []
+
+    def download(**kwargs):
+        asked.append(kwargs)
+        return FakeReaderModel()
+
+    monkeypatch.setattr(PipecatToneReaderModel, "download", download)
+    for reader in (PipecatToneReader(), PipecatToneReader(revision="reader-rc9")):
+        await run_test(reader, frames_to_send=[])
+
+    assert [a["revision"] for a in asked] == ["reader-rc1", "reader-rc9"]
+
+
+def test_the_model_downloads_its_files_from_the_reader_folder(monkeypatch, tmp_path):
+    seen = {}
+
+    def snapshot_download(repo, revision, allow_patterns):
+        seen.update(repo=repo, revision=revision, patterns=allow_patterns)
+        return str(tmp_path)
+
+    monkeypatch.setattr(reader_model, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(
+        PipecatToneReaderModel,
+        "__init__",
+        lambda self, model_dir, precision, threads: seen.update(dir=model_dir),
+    )
+
+    PipecatToneReaderModel.download()
+
+    assert seen == {
+        "repo": "pipecat-ai/tone-models",
+        "revision": "reader-rc1",
+        "patterns": ["reader/config.json", "reader/tokenizer.json", "reader/model_fp16.onnx"],
+        "dir": tmp_path / "reader",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tmp_path):
+    loaded = []
+
+    def fail(**kwargs):
+        raise OSError("no network")
+
+    def load(self, model_dir, precision, threads):
+        loaded.append((model_dir, precision))
+        self.config = {"emotions": ["neutral", "happy"]}
+
+    monkeypatch.setattr(PipecatToneReaderModel, "download", fail)
+    monkeypatch.setattr(PipecatToneReaderModel, "__init__", load)
+
+    down, _ = await run_test(
+        PipecatToneReader(model_dir=str(tmp_path), precision="fp32"), frames_to_send=[]
+    )
+
+    assert loaded == [(tmp_path, "fp32")]
+    assert [f for f in down if isinstance(f, PerceptionMetadataFrame)]

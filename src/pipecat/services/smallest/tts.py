@@ -111,13 +111,22 @@ class SmallestTTSSettings(TTSSettings):
         content_filter: Check the text against Smallest's profanity word list
             before synthesis, taking this action on a match: ``"reject"`` fails
             the request with a ``CONTENT_FILTER_BLOCKED`` error and synthesizes
-            nothing; ``"flag"`` synthesizes normally and records the match. The
-            text is never rewritten. If None, the API default (off) applies.
+            nothing; ``"flag"`` synthesizes normally and records the match;
+            ``"redact"`` drops the matched term and speaks the rest, failing
+            like ``"reject"`` when nothing is left to speak. If None, the API
+            default (off) applies.
+        date_format: Order to read all-numeric dates in, independent of the
+            synthesis voice: ``"EU"`` reads ``05/03/2024`` day-first ("fifth
+            March, twenty twenty four"), ``"US"`` month-first ("May third,
+            twenty twenty four"). If None, the API default (``"US"``) applies.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    content_filter: Literal["reject", "flag"] | str | None | NotGiven = field(
+    content_filter: Literal["reject", "flag", "redact"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    date_format: Literal["EU", "US"] | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -199,6 +208,7 @@ class SmallestTTSService(InterruptibleTTSService):
             speed=None,
             math_notation=None,
             content_filter=None,
+            date_format=None,
         )
 
         if settings is not None:
@@ -303,6 +313,9 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.content_filter is not None:
             msg["content_filter"] = {"enabled": True, "action": self._settings.content_filter}
 
+        if self._settings.date_format is not None:
+            msg["date_format"] = self._settings.date_format
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -347,7 +360,7 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, math_notation, content_filter, voice, language)
+        All fields (model, speed, math_notation, content_filter, date_format, voice, language)
         take effect on the next ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)

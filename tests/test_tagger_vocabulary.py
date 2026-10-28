@@ -13,6 +13,7 @@ from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagE
 from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
 from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.expressive.expression import (
+    TAGGER_BREATH_KINDS,
     TAGGER_DELIVERY,
     TAGGER_SOUNDS,
     ExpressionCapabilities,
@@ -37,17 +38,63 @@ def tagger_name(
         guidance=[ExpressionGuidance.BREATHE], delivery=offered, sounds=offered
     )
     space = LabelSpace.resolve(capabilities, policy)
-    return {**space.deliveries, **space.sounds}.get(label)
+    return {**space.deliveries, **space.sounds, **space.breaths}.get(label)
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
 def test_every_name_in_an_adapters_vocabulary_is_one_it_performs(adapter):
     capabilities = adapter().capabilities()
+    vocabulary = capabilities.tagger_vocabulary
 
-    assert set(capabilities.tagger_vocabulary) <= {*TAGGER_DELIVERY, *TAGGER_SOUNDS}
-    for label, names in capabilities.tagger_vocabulary.items():
+    assert set(vocabulary) <= {*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS}
+    for label, names in vocabulary.items():
         for name in names:
             assert tagger_name(capabilities, label, offered=[name]) == name
+
+
+@pytest.mark.parametrize(
+    "adapter,names",
+    [
+        (CartesiaExpressionAdapter, {}),
+        (
+            ElevenLabsAudioTagExpressionAdapter,
+            {
+                "light breath": "quick breath",
+                "deep breath": "deep breath",
+                "exhale": "exhales softly",
+            },
+        ),
+        (
+            FishAudioS2ExpressionAdapter,
+            {"light breath": "inhaling", "deep breath": "deep breath", "exhale": "exhaling"},
+        ),
+        (
+            MiniMaxExpressionAdapter,
+            {"light breath": "breath", "deep breath": "inhale", "exhale": "exhale"},
+        ),
+    ],
+)
+def test_each_kind_of_breath_has_a_name_where_the_service_breathes(adapter, names):
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
+
+    assert LabelSpace.resolve(adapter().capabilities(), policy).breaths == names
+
+
+@pytest.mark.parametrize(
+    "offered,breaths",
+    [
+        (["deep breath"], {"deep breath": "deep breath"}),
+        (["sighs", "inhales deeply"], {"deep breath": "inhales deeply"}),
+        (["short breath", "exhales"], {"light breath": "short breath", "exhale": "exhales"}),
+    ],
+)
+def test_a_policy_that_names_only_a_kind_still_breathes(offered, breaths):
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=offered)
+
+    space = LabelSpace.resolve(ElevenLabsAudioTagExpressionAdapter().capabilities(), policy)
+
+    assert space.breaths == breaths
+    assert space.sounds["breath"] == next(iter(breaths.values()))
 
 
 def test_the_best_name_the_policy_offers_is_chosen():

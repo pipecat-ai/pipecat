@@ -8,6 +8,7 @@
 
 import time
 
+import numpy as np
 import pytest
 
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
@@ -32,6 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone import _models
 from pipecat.processors.tone.tagger import PipecatToneTagger
+from pipecat.processors.tone.tagger import model as tagger_model
 from pipecat.processors.tone.tagger._input import Layout, Message, TurnContext, encode
 from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels, Span
 from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
@@ -55,9 +57,11 @@ class FakeTaggerModel:
         labels: dict[str, SentenceLabels] | None = None,
         breaths_per_reply: int | None = None,
         error: Exception | None = None,
+        breath_kinds: dict[str, float] | None = None,
     ):
         self.labels = labels or {}
         self.breaths_per_reply = breaths_per_reply
+        self.breath_kinds = breath_kinds or {}
         self.calls: list[tuple[TurnContext, list[str], str]] = []
         self._error = error
 
@@ -207,9 +211,14 @@ async def test_a_breath_is_offered_only_with_the_breathe_preset(monkeypatch):
         params=_expressive(ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])),
     )
 
-    without, with_breathe = (turn.space.sounds for turn, _, _ in model.calls)
-    assert "breath" not in without
-    assert with_breathe["breath"] == "short breath"
+    without, with_breathe = (turn.space for turn, _, _ in model.calls)
+    assert "breath" not in without.sounds and without.breaths == {}
+    assert with_breathe.sounds["breath"] == "quick breath"
+    assert with_breathe.breaths == {
+        "light breath": "quick breath",
+        "deep breath": "deep breath",
+        "exhale": "exhales softly",
+    }
 
 
 @pytest.mark.asyncio
@@ -259,25 +268,212 @@ async def test_breaths_past_the_models_limit_for_a_reply_are_dropped(monkeypatch
         monkeypatch, model, ELEVENLABS, *_reply("One. Two."), params=_expressive(policy)
     )
 
-    assert tagged == ["[[short breath]] One.", "Two."]
+    assert tagged == ["[[quick breath]] One.", "Two."]
+
+
+BREATHE = _expressive(ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE]))
 
 
 @pytest.mark.asyncio
-async def test_a_breath_after_a_sentence_counts_toward_the_limit(monkeypatch):
+@pytest.mark.parametrize(
+    "kind,written",
+    [
+        ("light breath", "quick breath"),
+        ("deep breath", "deep breath"),
+        ("exhale", "exhales softly"),
+    ],
+)
+async def test_each_breath_is_drawn_as_a_kind_at_the_models_shares(monkeypatch, kind, written):
     model = FakeTaggerModel(
-        {
-            "One.": SentenceLabels(sound_after="breath"),
-            "Two.": SentenceLabels(sound_before="breath"),
-        },
-        breaths_per_reply=1,
+        {"One.": SentenceLabels(sound_before="breath")}, breath_kinds={kind: 1.0}
     )
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
+
+    tagged = await _tagged(monkeypatch, model, ELEVENLABS, *_reply("One."), params=BREATHE)
+
+    assert tagged == [f"[[{written}]] One."]
+
+
+@pytest.mark.asyncio
+async def test_a_call_draws_its_breaths_alike_each_time(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    kinds = {"light breath": 0.59, "deep breath": 0.36, "exhale": 0.05}
+    replies = [frame for n in range(8) for frame in _reply(f"Reply {n}.")]
+    labels = {f"Reply {n}.": breath for n in range(8)}
+
+    first, second = [
+        await _tagged(
+            monkeypatch,
+            FakeTaggerModel(labels, breath_kinds=kinds),
+            ELEVENLABS,
+            *replies,
+            params=BREATHE,
+        )
+        for _ in range(2)
+    ]
+
+    assert first == second
+    assert {tagged.split("]]")[0] for tagged in first} <= {
+        "[[quick breath",
+        "[[deep breath",
+        "[[exhales softly",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_next_reply_reads_a_drawn_breath_as_a_breath(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel({"One.": breath}, breath_kinds={"exhale": 1.0})
+
+    await _tagged(monkeypatch, model, ELEVENLABS, *_reply("One."), *_reply("Two."), params=BREATHE)
+
+    second = model.calls[1][0]
+    assert second.previous == [breath]
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_names_one_breath_draws_only_that_kind(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel(
+        {f"Reply {n}.": breath for n in range(6)}, breath_kinds={"light breath": 0.5, "exhale": 0.5}
+    )
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["quick breath"])
+    replies = [frame for n in range(6) for frame in _reply(f"Reply {n}.")]
+
+    tagged = await _tagged(monkeypatch, model, ELEVENLABS, *replies, params=_expressive(policy))
+
+    assert tagged == [f"[[quick breath]] Reply {n}." for n in range(6)]
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_names_only_a_kind_still_breathes(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel(
+        {"One.": breath}, breath_kinds={"light breath": 0.5, "deep breath": 0.5}
+    )
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["inhales deeply"])
 
     tagged = await _tagged(
-        monkeypatch, model, ELEVENLABS, *_reply("One. Two."), params=_expressive(policy)
+        monkeypatch, model, ELEVENLABS, *_reply("One."), params=_expressive(policy)
     )
 
-    assert tagged == ["One. [[short breath]]", "Two."]
+    assert tagged == ["[[inhales deeply]] One."]
+
+
+@pytest.mark.asyncio
+async def test_a_name_for_breath_is_written_for_every_breath(monkeypatch):
+    model = FakeTaggerModel(
+        {"One.": SentenceLabels(sound_before="breath")}, breath_kinds={"exhale": 1.0}
+    )
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", lambda **kwargs: model)
+
+    down, _ = await run_test(
+        PipecatToneTagger(vocabulary={"breath": ["inhales deeply"]}),
+        frames_to_send=[ELEVENLABS, *_reply("One.")],
+        pipeline_params=BREATHE,
+    )
+
+    assert [f.text for f in down if isinstance(f, AggregatedTextFrame)] == [
+        "[[inhales deeply]] One."
+    ]
+
+
+def test_a_models_breath_kinds_come_from_its_config():
+    model = object.__new__(PipecatToneTaggerModel)
+
+    model.config = {"breath_kinds": {"light breath": 0.6, "exhale": 0.4}}
+    assert model.breath_kinds == {"light breath": 0.6, "exhale": 0.4}
+    # A model without them writes a plain breath.
+    model.config = {}
+    assert model.breath_kinds == {}
+
+
+def _decoded(before: list[float], breath: float, sentence: str = "Hi.") -> SentenceLabels:
+    """A sentence's labels from a model's six heads: the sound before's logits and the breath head's."""
+    model = object.__new__(PipecatToneTaggerModel)
+    model.config = {
+        "deliveries": ["none", "calm"],
+        "sounds": ["none", "laugh", "chuckle", "sigh", "breath"],
+        "sound_bias": {"breath": [[5, -1.0], [None, 0.0]]},
+    }
+    space = LabelSpace({"calm": "calm"}, {"laugh": "laughs", "breath": "quick breath"}, False)
+    quiet = np.array([9.0, 0.0, 0.0, 0.0, 0.0])
+    tokens = np.array([[9.0, 0.0, 0.0]])
+    heads = [
+        np.array([9.0, 0.0]),
+        np.array(before),
+        quiet,
+        tokens,
+        tokens,
+        np.array([breath]),
+    ]
+    return model._decode(heads, [(0, 2)], sentence, space)
+
+
+def test_a_breath_comes_from_its_own_head_shifted_for_the_sentences_length():
+    quiet = [9.0, 0.0, 0.0, 0.0, 0.0]
+
+    # Up to five words, the breath head's logit is shifted down by one.
+    assert _decoded(quiet, 0.5).sound_before is None
+    assert _decoded(quiet, 0.5, "Hi " * 6).sound_before == "breath"
+
+
+def test_the_sound_heads_never_choose_a_breath():
+    breath_class_wins = [0.0, 0.0, 0.0, 0.0, 9.0]
+
+    assert _decoded(breath_class_wins, -1.0, "Hi " * 6).sound_before is None
+
+
+def test_a_breath_goes_only_where_no_other_sound_starts_the_sentence():
+    laugh = [0.0, 9.0, 0.0, 0.0, 0.0]
+
+    assert _decoded(laugh, 9.0, "Hi " * 6).sound_before == "laugh"
+
+
+def test_a_sentence_is_read_as_the_text_the_model_was_trained_on():
+    policy = ExpressionPolicy(
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            ExpressionGuidance.BREATHE,
+        ]
+    )
+    heard = [PerceptionSignal("tone", labels=[("frustrated", 0.62), ("neutral", 0.3)])]
+    space = LabelSpace.resolve(
+        ElevenLabsAudioTagExpressionAdapter().capabilities(), policy, "ElevenLabsTTSService#0"
+    )
+    turn = TurnContext(
+        [
+            Message("assistant", "Thanks for calling. How can I help?"),
+            Message("user", "I need my new booking code.", heard),
+        ],
+        space,
+        policy,
+        [SentenceLabels(delivery="calm"), SentenceLabels(sound_before="breath")],
+    )
+    # tagger-rc1's layout.
+    layout = Layout(earlier=1, max_tokens=160, previous_tags=True)
+
+    call, sentence, start = encode(turn, ["Sure, one moment."], "Your new code is AB12CD.", layout)
+
+    # What training wrote for this turn.
+    assert call == "caller (tone frustrated likely, neutral guess): I need my new booking code."
+    assert sentence == (
+        "tts elevenlabs | can calm sympathetic apologetic warm excited surprised sad grateful "
+        "curious confident slow fast | sounds laugh chuckle sigh breath | stress yes | policy "
+        "match style, slow for details, breathe | caller sounded tone frustrated likely, neutral "
+        "guess | last reply calm breath | state new detail | reply so far: Sure, one moment. | "
+        "sentence: Your new code is AB12CD."
+    )
+    assert start == 354
+
+
+def test_a_service_the_model_wasnt_trained_with_is_read_as_other():
+    capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+
+    assert LabelSpace.resolve(capabilities, ExpressionPolicy(), "ElevenLabsTTSService#0").tts == (
+        "elevenlabs"
+    )
+    assert LabelSpace.resolve(capabilities, ExpressionPolicy(), "MyTTSService#0").tts == "other"
 
 
 def test_a_layout_that_reads_no_turns_reads_none_of_the_call():
@@ -457,3 +653,95 @@ async def test_every_tagger_shares_one_model(monkeypatch):
         await run_test(PipecatToneTagger(), frames_to_send=[], pipeline_params=EXPRESSIVE)
 
     assert len(loads) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_model_downloads_at_the_size_and_release_asked_for(monkeypatch):
+    asked = []
+
+    def download(**kwargs):
+        asked.append(kwargs)
+        return FakeTaggerModel()
+
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", download)
+    for tagger in (PipecatToneTagger(), PipecatToneTagger(size="32m", revision="tagger-rc9")):
+        await run_test(tagger, frames_to_send=[], pipeline_params=EXPRESSIVE)
+
+    assert asked == [
+        {"size": "17m", "revision": "tagger-rc1", "threads": 1},
+        {"size": "32m", "revision": "tagger-rc9", "threads": 1},
+    ]
+
+
+def test_each_size_downloads_its_own_folder(monkeypatch, tmp_path):
+    seen = {}
+
+    def snapshot_download(repo, revision, allow_patterns):
+        seen.update(repo=repo, revision=revision, patterns=allow_patterns)
+        return str(tmp_path)
+
+    monkeypatch.setattr(tagger_model, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(
+        PipecatToneTaggerModel,
+        "__init__",
+        lambda self, model_dir, threads: seen.update(dir=model_dir),
+    )
+
+    PipecatToneTaggerModel.download(size="32m")
+
+    assert seen == {
+        "repo": "pipecat-ai/tone-models",
+        "revision": "tagger-rc1",
+        "patterns": ["tagger/32m/*"],
+        "dir": tmp_path / "tagger" / "32m",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tmp_path):
+    loaded = []
+
+    def fail(**kwargs):
+        raise OSError("no network")
+
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", fail)
+    monkeypatch.setattr(
+        PipecatToneTaggerModel,
+        "__init__",
+        lambda self, model_dir, threads: loaded.append((model_dir, threads)),
+    )
+
+    for tagger in [PipecatToneTagger(model_dir=str(tmp_path), threads=2) for _ in range(2)]:
+        down, _ = await run_test(tagger, frames_to_send=[], pipeline_params=EXPRESSIVE)
+
+    # Loaded once a process, and shared.
+    assert loaded == [(tmp_path, 2)]
+    assert [f for f in down if isinstance(f, ExpressionMetadataFrame)]
+
+
+@pytest.mark.asyncio
+async def test_a_vocabulary_names_a_label_first_where_the_service_performs_it(monkeypatch):
+    model = FakeTaggerModel()
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", lambda **kwargs: model)
+    vocabulary = {"warm": ["cheerful"], "laugh": ["giggles"]}
+
+    for tts in (ELEVENLABS, CARTESIA):
+        monkeypatch.setattr(_models, "_models", {})
+        await run_test(
+            PipecatToneTagger(vocabulary=vocabulary),
+            frames_to_send=[tts, *_reply("Hi.")],
+            pipeline_params=EXPRESSIVE,
+        )
+
+    elevenlabs, cartesia = (turn.space for turn, _, _ in model.calls)
+    # ElevenLabs takes free text, so it performs both names.
+    assert elevenlabs.deliveries["warm"] == "cheerful"
+    assert elevenlabs.sounds["laugh"] == "giggles"
+    # Cartesia performs neither, so its own names stand.
+    assert cartesia.deliveries["warm"] == "content"
+    assert cartesia.sounds["laugh"] == "laughter"
+
+
+def test_a_vocabulary_for_a_label_the_tagger_doesnt_write_is_refused():
+    with pytest.raises(ValueError, match="cheerful"):
+        PipecatToneTagger(vocabulary={"cheerful": ["happy"]})

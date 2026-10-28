@@ -90,6 +90,8 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
                 "chuckle": ["chuckling"],
                 "sigh": ["sighing"],
                 "breath": ["inhaling"],
+                "light breath": ["inhaling"],
+                "exhale": ["exhaling"],
             },
         )
 

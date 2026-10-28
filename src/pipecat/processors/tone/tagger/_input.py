@@ -175,9 +175,7 @@ def encode(
     custom = [g for g in guidance if g not in PRESET_NAMES] if layout.custom_guidance else []
     space = turn.space
     header = [
-        # Trained with each service's name, the model reads "other" for one it isn't
-        # told about and labels as it does for the names.
-        "tts other",
+        f"tts {space.tts}",
         "can " + (" ".join(space.deliveries) or "nothing"),
         "sounds " + (" ".join(space.sounds) or "none"),
         f"stress {'yes' if space.emphasis else 'no'}",

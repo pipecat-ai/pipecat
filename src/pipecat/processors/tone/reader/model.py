@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Tone's reader model, on the CPU, as its reference runtime runs it (Apache-2.0)."""
+"""Pipecat Tone's reader model, on the CPU."""
 
 import json
 import math
@@ -23,8 +23,10 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Pipecat Tone, you need to `uv add "pipecat-ai[tone]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
-TONE_REPO = "pipecat-ai/tone"
-TONE_REVISION = "rc1"
+TONE_REPO = "pipecat-ai/tone-models"
+TONE_REVISION = "reader-rc1"
+
+_FOLDER = "reader"
 
 _MODEL_FILES = {"fp16": "model_fp16.onnx", "fp32": "model.opt.onnx"}
 
@@ -83,12 +85,13 @@ class PipecatToneReaderModel:
         Returns:
             The model.
         """
-        model_dir = snapshot_download(
+        files = ("config.json", "tokenizer.json", _MODEL_FILES[precision])
+        root = snapshot_download(
             TONE_REPO,
             revision=revision,
-            allow_patterns=["config.json", "tokenizer.json", _MODEL_FILES[precision]],
+            allow_patterns=[f"{_FOLDER}/{name}" for name in files],
         )
-        return cls(model_dir, precision=precision, threads=threads)
+        return cls(Path(root) / _FOLDER, precision=precision, threads=threads)
 
     @property
     def emotions(self) -> list[str]:
