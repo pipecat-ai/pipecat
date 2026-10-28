@@ -63,8 +63,8 @@ class Gemini38ExpressionAdapter(BaseExpressionAdapter):
 
     Part of expressive conversation (alpha). Gemini 3.8 reads its text as a
     verbatim transcript and takes delivery as a free-text style with each
-    request, so it performs every universal delivery, such as ``calm, speaking
-    slowly``, and a delivery can change only between sentences. Sounds and pauses
+    request, so it performs any delivery described in a few words, such as
+    ``calm, speaking slowly``, and a delivery can change only between sentences. Sounds and pauses
     are its inline audio tags, such as ``<laugh>`` and ``<short pause>``, and
     emphasis is written in capitals.
     """

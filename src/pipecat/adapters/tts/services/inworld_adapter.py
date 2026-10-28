@@ -97,13 +97,13 @@ class InworldExpressionAdapter(InworldFlashExpressionAdapter):
     """Formats expression tags as Inworld TTS-2 audio markup.
 
     Part of expressive conversation (alpha). A delivery is an instruction tag,
-    which Inworld TTS-2 reads as free text, so it performs every universal
-    delivery: ``<<calm>>`` is written ``[calm]``, and several deliveries at once,
-    such as a slow span in a calm sentence, ``[calm and slow]``. An instruction
-    lasts past the sentence it is sent in, so a return to the voice's baseline
-    within a sentence writes ``[reset]``, and so does the end of a sentence
-    spoken in a delivery. Emphasis is written in capitals. Sounds are its
-    non-verbal tags, and pauses are ``<break>`` tags.
+    which Inworld TTS-2 reads as free text, so it performs any delivery
+    described in a few words: ``<<calm>>`` is written ``[calm]``, and several
+    deliveries at once, such as a slow span in a calm sentence, ``[calm and
+    slow]``. An instruction lasts past the sentence it is sent in, so a return
+    to the voice's baseline within a sentence writes ``[reset]``, and so does
+    the end of a sentence spoken in a delivery. Emphasis is written in capitals.
+    Sounds are its non-verbal tags, and pauses are ``<break>`` tags.
     """
 
     def capabilities(self) -> ExpressionCapabilities:
