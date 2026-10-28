@@ -10,7 +10,6 @@ import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapter
-from pipecat.services.mistral.tts import MistralTTSService
 
 
 class TestMistralExpressionAdapter:
@@ -57,5 +56,8 @@ class TestMistralExpressionAdapter:
     ],
 )
 def test_expression_adapter_follows_the_model(model, adapter):
-    service = MistralTTSService(api_key="key", settings=MistralTTSService.Settings(model=model))
+    tts = pytest.importorskip("pipecat.services.mistral.tts", exc_type=ImportError)
+    service = tts.MistralTTSService(
+        api_key="key", settings=tts.MistralTTSService.Settings(model=model)
+    )
     assert type(service.get_expression_adapter()) is adapter
