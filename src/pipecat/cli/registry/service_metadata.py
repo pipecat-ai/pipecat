@@ -359,6 +359,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="fish_stt",
+            label="Fish",
+            package="pipecat-ai[fish]",
+            class_name=["FishAudioSTTService"],
+            env_prefix="FISH",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="gemini_stt",
             label="Gemini Transcribe Live",
             package="pipecat-ai[google]",
