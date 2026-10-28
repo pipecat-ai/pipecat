@@ -859,7 +859,14 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Signal end of utterance when bot stops speaking."""
+        """Signal end of utterance when bot stops speaking, and follow the bot's delivery.
+
+        A ``TTSTextFrame`` with a presentation timestamp reaches here when the
+        transport's clock releases it, as its words are heard, so the replica's
+        emotion changes in step with the audio.
+        """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSTextFrame):
+            await self._client.update_emotion(frame.delivery)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, BotStoppedSpeakingFrame):
             # Handle BotStoppedSpeakingFrame because, by the time it is received, the base output transport
             # has already sent all audio frames via write_audio_frame(). At this point it is safe to mark
@@ -928,8 +935,6 @@ class TavusOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions()
-        elif isinstance(frame, TTSTextFrame) and direction == FrameDirection.DOWNSTREAM:
-            await self._client.update_emotion(frame.delivery)
 
     async def _handle_interruptions(self):
         """Handle interruption events by discarding buffered audio and sending interrupt message."""

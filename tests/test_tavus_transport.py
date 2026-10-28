@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.tavus.transport import (
     TavusOutputTransport,
     TavusParams,
@@ -258,12 +259,13 @@ async def test_the_emotion_is_sent_only_when_it_changes():
 
 
 @pytest.mark.asyncio
-async def test_a_tts_text_frame_sets_the_emotion_from_its_delivery():
+async def test_a_tts_text_frame_sets_the_emotion_when_the_clock_releases_it(monkeypatch):
+    """The output transport pushes a timed frame on when its words are heard."""
+    monkeypatch.setattr(BaseOutputTransport, "push_frame", AsyncMock())
     transport, client = _make_output_transport()
     client.update_emotion = AsyncMock()
-    transport.push_frame = AsyncMock()
 
-    await transport.process_frame(
+    await transport.push_frame(
         TTSTextFrame("Great", text_type=TextType.WORD, delivery=["excited"]),
         FrameDirection.DOWNSTREAM,
     )
