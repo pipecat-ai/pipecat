@@ -96,6 +96,12 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
             "Go to [example.com](https://example.com).": "Go to example.com.",
             "Visit https://example.com today": "Visit https://example.com today",
             "[**bold** link](x)": "bold link",
+            "See [Python (language)](https://en.wikipedia.org/wiki/Python_(language)) now.": (
+                "See Python (language) now."
+            ),
+            '![chart](c.png "Q3 (draft)")': "chart",
+            "Read [the [beta] guide](https://example.com/guide).": "Read the [beta] guide.",
+            "Open [the page](https://example.com/a_(b) now.": "Open the page now.",
         }
         for text, expected in cases.items():
             self.assertEqual(await strip_markdown(text, "*"), expected, text)
