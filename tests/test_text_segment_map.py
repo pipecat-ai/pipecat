@@ -125,10 +125,10 @@ class TestTextSegmentMapAdvance(unittest.TestCase):
 
 
 class TestTextSegmentMapWithLlmText(unittest.TestCase):
-    def test_llm_pos_advances_past_digits_stops_before_closing_tag(self):
+    def test_llm_pos_advances_past_digits_and_the_closing_tag_on_them(self):
         # Transformed segment: "$42" → "forty two dollars" (15 alnum)
         # advance_by_alnums("<card>$42</card>", 0, 2) counts "4" and "2",
-        # then the trailing loop hits "<" and stops — result is 9.
+        # then the trailing loop takes the "</card>" written against them.
         smap = TextSegmentMap(
             "forty two dollars",
             "$42",
@@ -137,10 +137,7 @@ class TestTextSegmentMapWithLlmText(unittest.TestCase):
         smap.advance_word("forty")
         smap.advance_word("two")
         smap.advance_word("dollars")
-        # Position 9 is the "<" that opens "</card>" — the two alnum digits
-        # have been consumed but the closing tag is still unread (it will be
-        # swept by WordCompletionTracker on the final "is_complete" word).
-        self.assertEqual(smap.llm_pos, 9)
+        self.assertEqual(smap.llm_pos, 16)
 
     def test_llm_pos_defaults_to_original_text_when_not_provided(self):
         # "50%" → "fifty percent" (12 alnum).  original_alnum_count = 2 ("50").

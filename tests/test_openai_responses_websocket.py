@@ -842,68 +842,173 @@ class TestReceiveResponseEventsEmpty:
         service.run_function_calls.assert_awaited_once()
 
 
-class TestDrainCancelledResponse:
+def _created(lane, response_id):
+    return {
+        "type": "response.created",
+        "stream_id": lane,
+        "response": {"id": response_id},
+    }
+
+
+def _delta(lane, text):
+    return {"type": "response.output_text.delta", "stream_id": lane, "delta": text}
+
+
+def _completed(lane, response_id, text):
+    return {
+        "type": "response.completed",
+        "stream_id": lane,
+        "response": {
+            "id": response_id,
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+            ],
+        },
+    }
+
+
+def _make_lane_service(*events):
+    """Create a service that runs inferences against a mock WebSocket."""
+    service = _make_service()
+    service._ensure_connected = AsyncMock()
+    service.start_ttfb_metrics = AsyncMock()
+    service.stop_ttfb_metrics = AsyncMock()
+    service.stop_processing_metrics = AsyncMock()
+    service.push_frame = AsyncMock()
+    service._push_llm_text = AsyncMock()
+    service._websocket = _ws_events(*events)
+    return service
+
+
+def _sent_requests(service):
+    return [json.loads(call.args[0]) for call in service._websocket.send.call_args_list]
+
+
+async def _run_inference(service, messages):
+    from pipecat.frames.frames import LLMContextFrame
+
+    await service.process_frame(
+        LLMContextFrame(context=LLMContext(messages=messages)), FrameDirection.DOWNSTREAM
+    )
+
+
+class TestResponseLanes:
     @pytest.mark.asyncio
-    async def test_drain_discards_events_until_terminal(self):
-        """Draining should discard events until a terminal event arrives."""
-        service = _make_service()
-        service._needs_drain = True
-
-        ws = _ws_events(
-            {"type": "response.output_text.delta", "delta": "stale"},
-            {"type": "response.output_text.delta", "delta": "also stale"},
-            {"type": "response.completed", "response": {"id": "resp_old"}},
-        )
-        service._websocket = ws
-
-        await service._drain_cancelled_response()
-
-        assert not service._needs_drain
-
-    @pytest.mark.asyncio
-    async def test_drain_handles_pending_cancel(self):
-        """If cancelled before response.created, drain should send cancel
-        once it sees the response.created, then continue draining."""
-        service = _make_service()
-        service._needs_drain = True
-        service._cancel_pending_response = True
-
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(
-            side_effect=[
-                json.dumps({"type": "response.created", "response": {"id": "resp_late"}}),
-                json.dumps({"type": "response.output_text.delta", "delta": "stale"}),
-                json.dumps({"type": "response.failed", "response": {"id": "resp_late"}}),
-            ]
-        )
-        mock_ws.send = AsyncMock()
-        service._websocket = mock_ws
-
-        await service._drain_cancelled_response()
-
-        assert not service._needs_drain
-        assert not service._cancel_pending_response
-        # Should have sent response.cancel
-        cancel_calls = [
-            call for call in mock_ws.send.call_args_list if "response.cancel" in call.args[0]
+    async def test_next_response_does_not_wait_for_an_abandoned_one(self):
+        """A cancelled response is abandoned on its lane; the next goes out at
+        once on another, continuing from the last completed response, and the
+        abandoned response's events are discarded."""
+        first = [{"role": "user", "content": "hi"}]
+        later = [
+            *first,
+            {"role": "assistant", "content": "Hello"},
+            {"role": "user", "content": "go"},
         ]
-        assert len(cancel_calls) == 1
+        service = _make_lane_service(
+            _created("lane-0", "resp_1"),
+            _completed("lane-0", "resp_1", "Hello"),
+        )
+
+        await _run_inference(service, first)
+
+        service._websocket.recv.side_effect = [
+            json.dumps(_created("lane-1", "resp_2")),
+            asyncio.CancelledError(),
+        ]
+        with pytest.raises(asyncio.CancelledError):
+            await _run_inference(service, later)
+
+        service._push_llm_text.reset_mock()
+        service._websocket.recv.side_effect = [
+            json.dumps(e)
+            for e in (
+                _delta("lane-1", "stale"),
+                _created("lane-2", "resp_3"),
+                _completed("lane-1", "resp_2", "stale"),
+                _delta("lane-2", "fresh"),
+                _completed("lane-2", "resp_3", "fresh"),
+            )
+        ]
+        await _run_inference(service, later)
+
+        requests = _sent_requests(service)
+        assert [r["type"] for r in requests] == ["response.create"] * 3
+        assert [r["stream_id"] for r in requests] == ["lane-0", "lane-1", "lane-2"]
+        assert requests[2]["previous_response_id"] == "resp_1"
+        service._push_llm_text.assert_awaited_once_with("fresh")
+        assert service._previous_response_id == "resp_3"
+        assert not service._draining_lanes
 
     @pytest.mark.asyncio
-    async def test_drain_timeout_clears_state(self):
-        """If draining times out, should clear cancellation state."""
-        service = _make_service()
-        service._needs_drain = True
+    async def test_responses_alternate_lanes(self):
+        """Each response goes on a lane other than the previous response's."""
+        service = _make_lane_service(
+            _completed("lane-0", "resp_1", "one"),
+            _completed("lane-1", "resp_2", "two"),
+            _completed("lane-0", "resp_3", "three"),
+        )
 
-        mock_ws = AsyncMock()
-        # recv() never returns a terminal event — times out
-        mock_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError)
-        service._websocket = mock_ws
+        messages = [{"role": "user", "content": "hi"}]
+        await _run_inference(service, messages)
+        messages = [*messages, {"role": "assistant", "content": "one"}]
+        await _run_inference(service, [*messages, {"role": "user", "content": "again"}])
+        messages = [*messages, {"role": "user", "content": "again"}]
+        messages = [*messages, {"role": "assistant", "content": "two"}]
+        await _run_inference(service, [*messages, {"role": "user", "content": "more"}])
 
-        await service._drain_cancelled_response()
+        requests = _sent_requests(service)
+        assert [r["stream_id"] for r in requests] == ["lane-0", "lane-1", "lane-0"]
+        assert [r.get("previous_response_id") for r in requests] == [None, "resp_1", "resp_2"]
 
-        assert not service._needs_drain
-        assert not service._cancel_pending_response
+    @pytest.mark.asyncio
+    async def test_cancellation_keeps_the_connection(self):
+        """A cancelled response is abandoned on its lane, with no request to
+        the server, and the connection is kept."""
+        service = _make_lane_service()
+        websocket = service._websocket
+        websocket.recv.side_effect = asyncio.CancelledError
+
+        with pytest.raises(asyncio.CancelledError):
+            await _run_inference(service, [{"role": "user", "content": "hi"}])
+
+        assert service._websocket is websocket
+        assert service._draining_lanes == {"lane-0"}
+        assert [r["type"] for r in _sent_requests(service)] == ["response.create"]
+
+    @pytest.mark.asyncio
+    async def test_an_abandoned_responses_error_is_not_reported(self):
+        service = _make_lane_service(
+            {"type": "error", "stream_id": "lane-1", "error": {"message": "stale"}},
+            _delta("lane-0", "Hello"),
+            _completed("lane-0", "resp_1", "Hello"),
+        )
+        service._draining_lanes = {"lane-1"}
+        service.push_error = AsyncMock()
+
+        await _run_inference(service, [{"role": "user", "content": "hi"}])
+
+        service.push_error.assert_not_called()
+        assert not service._draining_lanes
+
+    @pytest.mark.asyncio
+    async def test_every_lane_taken_reconnects(self):
+        """With every lane holding an abandoned response or the previous
+        response, the connection is closed, which ends the abandoned ones."""
+        service = _make_lane_service()
+        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}], [])
+        service._previous_response_lane = "lane-0"
+        service._draining_lanes = {f"lane-{i}" for i in range(1, 16)}
+        service.stop_all_metrics = AsyncMock()
+
+        assert await service._choose_next_response_lane() == "lane-0"
+
+        assert service._websocket is None
+        assert service._previous_response_id is None
+        assert not service._draining_lanes
 
 
 # ---------------------------------------------------------------------------
@@ -947,34 +1052,6 @@ class TestConnectionLifecycle:
 
         assert service._previous_response_id is None
         mock_ws.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_cancellation_preserves_connection_and_sets_drain(self):
-        """When process_frame is cancelled (e.g. interruption), the WebSocket
-        connection should be preserved and _needs_drain set."""
-        service = _make_service()
-        service.stop_processing_metrics = AsyncMock()
-        service.push_frame = AsyncMock()
-
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=asyncio.CancelledError)
-        mock_ws.send = AsyncMock()
-        service._websocket = mock_ws
-
-        context = MagicMock(spec=LLMContext)
-        context.tools = None
-        context.tool_choice = None
-        context.messages = [{"role": "user", "content": "hi"}]
-
-        from pipecat.frames.frames import LLMContextFrame
-
-        with pytest.raises(asyncio.CancelledError):
-            await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
-
-        # Connection should be preserved, not closed
-        assert service._websocket is mock_ws
-        # Should be flagged for draining before next inference
-        assert service._needs_drain
 
     @pytest.mark.asyncio
     async def test_ensure_connected_raises_on_failure(self):

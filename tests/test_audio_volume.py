@@ -136,5 +136,22 @@ class TestAudioVolumeTracker(unittest.IsolatedAsyncioTestCase):
                 self.assertGreater(tracker.volume, 0.0)
 
 
+class TestAudioVolumeTrackerHeldView(unittest.TestCase):
+    def test_update_succeeds_while_a_view_of_the_measured_audio_is_held(self):
+        """A frame sampler on another thread keeps the measured buffer's view
+        alive after the measurement returns."""
+        tracker = AudioVolumeTracker()
+        held = []
+
+        def measure_and_hold(data, sample_rate):
+            held.append(np.frombuffer(data, dtype=np.int16))
+            return 0.5
+
+        with patch("pipecat.audio.volume.calculate_audio_volume", measure_and_hold):
+            feed(tracker, audio(SAMPLE_RATE, 1000))
+
+        self.assertTrue(held)
+
+
 if __name__ == "__main__":
     unittest.main()

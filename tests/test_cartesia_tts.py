@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaExpressionAdapter,
+)
+from pipecat.expressive.expression import DeliveryScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -19,6 +23,8 @@ from pipecat.frames.frames import (
 from pipecat.services.cartesia.tts import (
     CartesiaHttpTTSService,
     CartesiaTTSService,
+    GenerationConfig,
+    _generation_config,
     language_to_cartesia_language,
 )
 from pipecat.services.settings import TTSSettings
@@ -83,6 +89,26 @@ async def test_requests_send_the_mapped_language(service_cls, model, language, e
 
     assert payload.get("language") == expected
     assert "locale" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
+@pytest.mark.parametrize("accent, expected", [("british", "british"), (None, None)])
+async def test_requests_send_the_accent_only_when_set(service_cls, accent, expected):
+    service = service_cls(
+        api_key="test",
+        settings=service_cls.Settings(voice="voice", accent=accent),
+    )
+    if service_cls is CartesiaTTSService:
+        payload = json.loads(service._build_msg(text="Hello", context_id="ctx"))
+    else:
+        response = MagicMock(status=200, read=AsyncMock(return_value=b"\x00\x00"))
+        service._session = MagicMock()
+        service._session.post.return_value.__aenter__.return_value = response
+        _ = [frame async for frame in service.run_tts("Hello", "ctx")]
+        payload = service._session.post.call_args.kwargs["json"]
+
+    assert payload.get("accent") == expected
 
 
 @pytest.mark.asyncio
@@ -245,6 +271,67 @@ def test_cartesia_tag_only_token_is_dropped():
     )
 
 
+def test_cartesia_laughter_token_is_kept():
+    """It marks when the laughter sound is performed."""
+    assert _process_word_timestamps(
+        words=["ancient.", "[laughter]", "Let"],
+        starts=[0.0, 0.5, 1.0],
+        language="en",
+    ) == [("ancient.", 0.0), ("[laughter]", 0.5), ("Let", 1.0)]
+
+
+class TestCartesiaExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = CartesiaExpressionAdapter().capabilities()
+        delivery = [term.name for term in capabilities.delivery]
+        assert "excited" in delivery
+        assert "neutral" not in delivery
+        assert [term.name for term in capabilities.sounds] == ["laughter"]
+        assert capabilities.delivery_scope == DeliveryScope.SENTENCE
+        assert not capabilities.emphasis
+
+    def test_emotion_formatted_where_it_changes(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == '<emotion value="excited"/> Hi.'
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad"], ["excited"]) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", [], None) == "Hi."
+
+    def test_return_to_baseline_formats_neutral(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", [], ["sad"]) == '<emotion value="neutral"/> Hi.'
+
+    def test_of_several_delivery_names_the_first_is_formatted(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_text("Hi.", ["sad", "calm"], None) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", ["sad", "tired"], ["sad", "calm"]) == "Hi."
+
+    def test_slow_and_fast_set_the_speed_not_the_emotion(self):
+        adapter = CartesiaExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["slow", "sad"], None) == '<emotion value="sad"/> Hi.'
+        assert adapter.format_text("Hi.", ["sad", "slow"], ["sad"]) == "Hi."
+        assert adapter.request_settings(["sad", "slow"]) == {"speed": 0.7}
+        assert adapter.request_settings(["fast"]) == {"speed": 1.3}
+        assert adapter.request_settings(["sad"]) == {}
+
+    def test_sounds_and_pauses(self):
+        adapter = CartesiaExpressionAdapter()
+        assert adapter.format_sound("laughter") == " [laughter] "
+        assert adapter.format_pause(600) == ' <break time="600ms"/> '
+
+
+def test_a_request_in_a_speed_delivery_states_its_speed():
+    assert _generation_config(None, {"speed": 0.7}) == {"speed": 0.7}
+    assert _generation_config(GenerationConfig(volume=1.2), {"speed": 1.3}) == {
+        "volume": 1.2,
+        "speed": 1.3,
+    }
+    # Without a speed delivery, the configured speed is kept.
+    assert _generation_config(GenerationConfig(speed=0.9), {}) == {"speed": 0.9}
+    assert _generation_config(None, {}) is None
+
+
 def test_cartesia_spell_token_matches_the_text_sent_for_synthesis():
     """Every normalized token has to be recognised by the word tracker.
 
@@ -285,6 +372,7 @@ class TestCartesiaUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTest
         )
         # Applying a settings delta reports the service usable again.
         service._is_usable = True
+        service._expression_formatter = None
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)
         service._aggregated_frame_sequencer = seq

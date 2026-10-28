@@ -252,11 +252,15 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     `ServiceSwitcherFrame` frames and delegated to a pluggable
     `ServiceSwitcherStrategy`.
 
-    `ServiceUpdateSettingsFrame` is the exception to the gating. A settings
-    update addressed to a member service (``service=``) reaches it whether or
-    not it is active, and one marked ``reach_inactive_services`` reaches every
-    member, so whichever service becomes active later is already configured. Any
-    other settings update applies to the active service alone.
+    Two kinds of frame are exceptions to the gating. A settings update
+    (`ServiceUpdateSettingsFrame`) addressed to a member service (``service=``)
+    reaches it whether or not it is active, and one marked
+    ``reach_inactive_services`` reaches every member, so whichever service
+    becomes active later is already configured. Any other settings update
+    applies to the active service alone. And a `ServiceMetadataFrame` from a
+    service outside the switcher reaches every member, so a member that reads
+    another service's metadata has it when it becomes active. It travels on
+    once, from the active member, as it would through that service alone.
 
     Example::
 
@@ -283,6 +287,9 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         # they can be consumed again on their way out. A small ring is enough: an
         # update crosses its service long before the ring wraps.
         self._inactive_service_updates: deque[int] = deque(maxlen=64)
+        # Ids of the metadata from outside handed to services that weren't
+        # active, consumed the same way.
+        self._inactive_service_metadata: deque[int] = deque(maxlen=64)
 
         # `is_usable` is read from the services, so keep the last value
         # announced: a service changing its own doesn't always change the
@@ -406,9 +413,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         all the filters let it pass, and `StartFrame` causes the service to
         generate `ServiceMetadataFrame`.
 
-        Also suppresses the copies of a `ServiceUpdateSettingsFrame` handed to
-        the inactive services, so that the update the rest of the pipeline sees
-        is the one travelling the active service's branch.
+        Also suppresses the copies of a `ServiceUpdateSettingsFrame` or of
+        another service's `ServiceMetadataFrame` handed to the inactive
+        services, so that the frame the rest of the pipeline sees is the one
+        travelling the active service's branch.
 
         Non-fatal ``ErrorFrame`` instances from the services being switched
         between are answered for here rather than travelling on, since the rest
@@ -429,9 +437,16 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             if frame.service == self.strategy.active_service:
                 return
 
-        # Only let metadata from the active service escape.
+        # Metadata escapes from the active service's branch: its own, or another
+        # service's passing through it.
         if isinstance(frame, ServiceMetadataFrame):
-            if frame.service_name != self.strategy.active_service.name:
+            # A copy of another service's metadata, handed to an inactive service.
+            if frame.id in self._inactive_service_metadata:
+                return
+            # An inactive service's own metadata, such as what it pushes at start.
+            if frame.service_name != self.strategy.active_service.name and any(
+                frame.service_name == service.name for service in self._services
+            ):
                 return
 
         # Consume the settings updates handed to the inactive services: they have
@@ -505,6 +520,25 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
             if isinstance(frame, ServiceUpdateSettingsFrame):
                 await self._update_inactive_services(frame, direction)
+            elif isinstance(frame, ServiceMetadataFrame):
+                await self._share_metadata(frame, direction)
+
+    async def _share_metadata(self, frame: ServiceMetadataFrame, direction: FrameDirection):
+        """Hand metadata from a service outside the switcher to the inactive members.
+
+        The active service receives it through its branch, and that frame
+        travels on. The copies the inactive ones pass on go no further than the
+        switcher.
+
+        Args:
+            frame: The metadata to hand over.
+            direction: The direction the metadata is travelling.
+        """
+        for service in self.services:
+            if service is not self.strategy.active_service:
+                copy = replace(frame)
+                self._inactive_service_metadata.append(copy.id)
+                await service.queue_frame(copy, direction)
 
     async def _update_inactive_services(
         self, frame: ServiceUpdateSettingsFrame, direction: FrameDirection

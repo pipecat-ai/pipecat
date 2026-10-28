@@ -32,6 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --group dev \
+            --extra aic \
             --extra anthropic \
             --extra aws \
             --extra aws-nova-sonic \
