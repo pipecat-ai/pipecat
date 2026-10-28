@@ -6404,7 +6404,7 @@ requires-dist = [
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0,<14" },
     { name = "rime-api", marker = "extra == 'rime'", specifier = "~=0.4.0" },
     { name = "rimelabs-sdk", marker = "extra == 'rime'", specifier = "==0.1.0a29" },
-    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a24,<0.2" },
+    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a25,<0.2" },
     { name = "ruff", marker = "extra == 'cli'", specifier = ">=0.12.1,<1" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.34" },
