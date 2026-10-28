@@ -675,7 +675,7 @@ class RTVIObserver(BaseObserver):
         if isinstance(frame, PerceptionMetadataFrame) and data.first_push:
             self._perceivers.add(src)
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            await self._handle_transcription_push(data)
+            await self._handle_transcription_push(frame, data)
             return
 
         # A frame is handled the first time it is pushed, except aggregated
@@ -1085,7 +1085,9 @@ class RTVIObserver(BaseObserver):
             )
             self._bot_transcription = ""
 
-    async def _handle_transcription_push(self, data: FramePushed):
+    async def _handle_transcription_push(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame, data: FramePushed
+    ):
         """Handle a transcription once every perceiver it's pushed to has read it.
 
         A processor after the STT, such as ``PipecatToneReader``, sets the
@@ -1094,7 +1096,6 @@ class RTVIObserver(BaseObserver):
         it, without its perception. So a transcription pushed to a perceiver
         waits until it's pushed on to a processor that isn't one.
         """
-        frame = data.frame
         if data.destination in self._perceivers:
             if data.first_push:
                 self._unread_transcription_ids.add(frame.id)
