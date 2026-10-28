@@ -527,10 +527,11 @@ class BotOutputMessageData(TextMessageData):
             with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
-        delivery: **(2.3.0+)** The delivery of the text just spoken, such as
-            ``["cheerful", "emphasis"]``, empty for the voice's baseline. They
-            change within a segment where its delivery does, so a segment's
-            ``"new"`` message has none. Present in expressive conversation (alpha).
+        delivery: **(2.3.0+)** The delivery of the text just spoken, by its
+            universal names, such as ``["warm", "emphasis"]``, empty for the
+            voice's baseline. They change within a segment where its delivery
+            does, so a segment's ``"new"`` message has none. Present in
+            expressive conversation (alpha).
     """
 
     output_type: TextType | str

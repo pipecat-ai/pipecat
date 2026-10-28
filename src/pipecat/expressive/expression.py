@@ -16,7 +16,7 @@ voice's baseline.
 
 For example::
 
-    <<cheerful>> It's [[laughs]] ^^back^^ up. [[pause 300]] Your code is <<slow: A B 7>>.
+    <<warm>> It's [[laugh]] ^^back^^ up. [[pause 300]] Your code is <<slow: A B 7>>.
 
 A TTS service declares which of these it can perform with
 :class:`ExpressionCapabilities`, and broadcasts them at start in a
@@ -261,7 +261,7 @@ class ExpressionTerm:
     """One sound or delivery a TTS service can perform.
 
     Parameters:
-        name: The word written inside the tag, such as ``"laugh"`` or
+        name: The name the service performs it by, such as ``"laughter"`` or
             ``"cheerful"``.
         description: A short line on when to use it, or empty.
     """
@@ -274,24 +274,25 @@ class ExpressionTerm:
 class ExpressionCapabilities:
     """The expression tags a TTS service can perform.
 
-    The LLM is taught these, and tags outside them are left out of the
-    service's speech. A service that can laugh, speak in two moods, pause and
-    stress words declares::
+    The LLM is taught these by their universal names, and tags outside them are
+    left out of the service's speech. A service that can laugh, speak in two
+    moods, pause and stress words declares::
 
         ExpressionCapabilities(
             sounds=[ExpressionTerm("laughs")],
             delivery=[
-                ExpressionTerm("cheerful"),
+                ExpressionTerm("warmly"),
                 ExpressionTerm("calm", "to reassure a worried caller"),
             ],
             pause_range_ms=(100, 3000),
             emphasis=True,
+            service_names={"laugh": ["laughs"], "warm": ["warmly"]},
         )
 
     Parameters:
-        sounds: Sounds the service can make at one point, written ``[[name]]``.
-        delivery: Deliveries the service can apply to the words that follow,
-            written ``<<name>>``.
+        sounds: Sounds the service can make at one point, by its own names.
+        delivery: Deliveries the service can apply to the words that follow, by
+            its own names.
         free_text_sounds: Whether the service also accepts sounds outside
             ``sounds``, described in a few words.
         free_text_delivery: Whether the service also accepts deliveries outside
@@ -305,9 +306,8 @@ class ExpressionCapabilities:
             best first, where they differ from the universal names, such as
             ``{ExpressionDelivery.WARM: ["content", "happy"]}``. A universal name
             written in a tag is sent by the first of these the service performs.
-            A later name stands in when an expression policy leaves out the ones
-            before it. A universal name left out is performed by its own, when the
-            service declares it or accepts free text.
+            A universal name left out is performed by its own, when the service
+            declares it or accepts free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
