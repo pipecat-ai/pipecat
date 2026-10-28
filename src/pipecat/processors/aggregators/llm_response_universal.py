@@ -1550,6 +1550,10 @@ class LLMUserAggregator(LLMContextAggregator):
         accumulating for whenever the turn does end. The response is held
         downstream until the turn is confirmed, and discarded if it isn't.
 
+        The turn is broadcast as a speculation first. Queued ahead of the
+        inference, it passes the LLM before the response is held, while the
+        turn written once it ends waits for the inference to finish.
+
         Args:
             speculation: The speculation to run, from the stop strategy that
                 started it.
@@ -1559,6 +1563,13 @@ class LLMUserAggregator(LLMContextAggregator):
             f"{format_perception(perception)} {speculation.text}"
             if perception
             else speculation.text
+        )
+        await self.broadcast_frame(
+            LLMContextUserTurnFrame,
+            text=speculation.text,
+            timestamp=self._user_turn_start_timestamp,
+            perception=perception,
+            speculation=True,
         )
         provisional = LLMContext(
             messages=[

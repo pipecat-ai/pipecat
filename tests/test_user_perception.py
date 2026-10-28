@@ -138,8 +138,10 @@ async def test_the_turns_latest_final_reading_is_written():
     assert messages == ["([tone frustrated=0.86, neutral=0.10]) Can you tell me where my order is?"]
 
 
-async def _early_message(perception: list[PerceptionSignal] | None, params=EXPRESSIVE) -> str:
-    """The user message an early reply is generated from."""
+async def _early_turn(
+    perception: list[PerceptionSignal] | None, params=EXPRESSIVE
+) -> tuple[str, LLMContextUserTurnFrame]:
+    """The user message an early reply is generated from, and the turn broadcast ahead of it."""
     aggregator = LLMUserAggregator(
         LLMContext(), params=LLMUserAggregatorParams(user_turn_strategies=EagerUserTurnStrategies())
     )
@@ -156,21 +158,25 @@ async def _early_message(perception: list[PerceptionSignal] | None, params=EXPRE
         pipeline_params=params,
     )
     provisional = next(f for f in down if isinstance(f, LLMContextFrame) and f.speculation)
-    return provisional.context.messages[-1]["content"]
+    return provisional.context.messages[-1]["content"], next(
+        f for f in down if isinstance(f, LLMContextUserTurnFrame) and f.speculation
+    )
 
 
 @pytest.mark.asyncio
 async def test_an_early_reply_reads_the_eager_reading():
-    message = await _early_message(FRUSTRATED)
+    message, turn = await _early_turn(FRUSTRATED)
 
     assert message == ("([tone frustrated=0.86, neutral=0.10]) Can you tell me where my order is?")
+    assert turn.perception == FRUSTRATED
 
 
 @pytest.mark.asyncio
 async def test_an_eager_reading_is_not_written_without_expressive_conversation():
-    message = await _early_message(FRUSTRATED, params=None)
+    message, turn = await _early_turn(FRUSTRATED, params=None)
 
     assert message == "Can you tell me where my order is?"
+    assert turn.perception is None
 
 
 @pytest.mark.asyncio
