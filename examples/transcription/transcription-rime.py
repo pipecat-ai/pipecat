@@ -7,7 +7,7 @@
 
 """Log Rime interim and final transcripts using one standalone VAD processor.
 
-Install ``pipecat-ai[rime]`` plus the selected transport extra and set
+Install ``pipecat-ai[rime-stt]`` plus the selected transport extra and set
 ``RIME_API_KEY``. Set ``RIME_STT_CONTRACT=append_fragments`` to accumulate
 append fragments, or ``RIME_STT_SEGMENTED=1`` for completed-segment recognition.
 ``RIME_STT_LANGUAGE`` defaults to ``en``. Input audio is mono.
@@ -20,11 +20,10 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.audio.vad_processor import VADProcessor
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.rime.stt import RimeSegmentedSTTService, RimeSTTService
@@ -35,19 +34,6 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
-
-
-class TranscriptionLogger(FrameProcessor):
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TranscriptionFrame):
-            print(f"Transcription: {frame.text}")
-        elif isinstance(frame, InterimTranscriptionFrame):
-            print(f"Interim transcription: {frame.text}")
-
-        # Push all frames through
-        await self.push_frame(frame, direction)
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -91,16 +77,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-    tl = TranscriptionLogger()
-
     vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
-    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, transport.output()])
 
     worker = PipelineWorker(
         pipeline,
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
+        observers=[TranscriptionLogObserver()],
     )
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

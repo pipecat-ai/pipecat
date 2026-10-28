@@ -72,14 +72,13 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        "Rime STT requires the optional dependency: pip install 'pipecat-ai[rime]'"
+        "Rime STT requires the optional dependency: pip install 'pipecat-ai[rime-stt]'"
     ) from e
 
 _MAX_REQUESTS = 4
 _MAX_AUDIO_SECONDS = 120
 _MAX_WAV_BYTES = 16 * 1024 * 1024
 _MAX_TEXT_BYTES = 1024 * 1024
-_SHUTDOWN_TIMEOUT = 5.0
 
 
 @dataclass
@@ -211,17 +210,28 @@ class _Utterance:
 class _Recognition:
     """SDK lifetime, ordered publication and per-request accounting."""
 
-    def __init__(self, service: STTService, api_key: str, request_timeout: float):
-        if (
-            isinstance(request_timeout, bool)
-            or not math.isfinite(request_timeout)
-            or request_timeout <= 0
+    def __init__(
+        self,
+        service: STTService,
+        api_key: str | None,
+        client: Rime | None,
+        request_timeout: float,
+        shutdown_timeout: float,
+    ):
+        if client is not None and api_key is not None:
+            raise ValueError("Pass either client or api_key, not both")
+        for name, value in (
+            ("request_timeout", request_timeout),
+            ("shutdown_timeout", shutdown_timeout),
         ):
-            raise ValueError("request_timeout must be positive finite seconds")
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be positive finite seconds")
         self.service = service
         self.api_key = api_key
         self.timeout = request_timeout
-        self.client: Rime | None = None
+        self.shutdown_timeout = shutdown_timeout
+        self.client = client
+        self._owns_client = client is None
         self.pending: deque[_Utterance] = deque()
         self.active: _Utterance | None = None
         self.sequence = 0
@@ -233,7 +243,8 @@ class _Recognition:
 
     async def start(self):
         try:
-            self.client = Rime(api_key=self.api_key)
+            if self.client is None:
+                self.client = Rime(api_key=self.api_key)
             self.closed = False
         except Exception as error:
             self.closed = True
@@ -241,7 +252,7 @@ class _Recognition:
 
     async def close(self):
         self.closed = True
-        if self.client is not None:
+        if self._owns_client and self.client is not None:
             client, self.client = self.client, None
             await client.close()
 
@@ -398,26 +409,32 @@ class RimeSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str | None = None,
+        client: Rime | None = None,
         settings: RimeStreamingSTTSettings | None = None,
         request_timeout: float = 120,
+        shutdown_timeout: float = 5.0,
         sample_rate: int | None = None,
         **kwargs,
     ):
         """Initialize streaming recognition without opening a connection.
 
         Args:
-            api_key: Rime API credential.
+            api_key: Rime API credential. Defaults to RIME_API_KEY when no client is supplied.
+            client: Caller-owned SDK client on the pipeline's event loop. Mutually
+                exclusive with api_key; the service never closes this client.
             settings: Recognition options for subsequent utterances.
             request_timeout: Overall request deadline, including speaking and
                 upload time. Server deadlines still apply.
+            shutdown_timeout: Positive finite time to drain speech on EndFrame,
+                in seconds, before cancelling unfinished requests.
             sample_rate: Expected input rate, if specified. Audio is never relabeled.
             **kwargs: Additional STTService options, including ttfs_p99_latency.
         """
         super().__init__(
             settings=_settings_store(settings, streaming=True), sample_rate=sample_rate, **kwargs
         )
-        self._recognition = _Recognition(self, api_key, request_timeout)
+        self._recognition = _Recognition(self, api_key, client, request_timeout, shutdown_timeout)
         self._prefix = bytearray()
         self._prefix_format: tuple[int, int] | None = None
         self._prefix_user = ""
@@ -645,11 +662,11 @@ class RimeSTTService(STTService):
             await self.cancel_task(task)
 
     async def stop(self, frame: EndFrame):
-        """Drain accepted speech for at most five seconds, then close the client."""
+        """Drain accepted speech within the shutdown deadline and release owned resources."""
         if self._recognition.speaking:
             await self._handle_vad_user_stopped_speaking(VADUserStoppedSpeakingFrame())
         try:
-            async with asyncio.timeout(_SHUTDOWN_TIMEOUT):
+            async with asyncio.timeout(self._recognition.shutdown_timeout):
                 if self._tasks:
                     await asyncio.gather(*list(self._tasks), return_exceptions=True)
         except TimeoutError:
@@ -660,7 +677,7 @@ class RimeSTTService(STTService):
         await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
-        """Discard in-progress recognition and close the SDK client."""
+        """Discard in-progress recognition and close an owned SDK client."""
         self._recognition.closed = True
         await self._discard()
         await self._recognition.close()
@@ -693,19 +710,25 @@ class RimeSegmentedSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str | None = None,
+        client: Rime | None = None,
         settings: RimeSTTSettings | None = None,
         request_timeout: float = 120,
+        shutdown_timeout: float = 5.0,
         sample_rate: int | None = None,
         **kwargs,
     ):
         """Initialize recognition without opening a connection.
 
         Args:
-            api_key: Rime API credential.
+            api_key: Rime API credential. Defaults to RIME_API_KEY when no client is supplied.
+            client: Caller-owned SDK client on the pipeline's event loop. Mutually
+                exclusive with api_key; the service never closes this client.
             settings: Recognition options for subsequent segments.
             request_timeout: Positive finite SDK request timeout in seconds.
                 Server deadlines still apply.
+            shutdown_timeout: Positive finite time to drain speech on EndFrame,
+                in seconds, before cancelling unfinished requests.
             sample_rate: Expected input rate; samples are resampled to 16 kHz.
             **kwargs: SegmentedSTTService options, including trailing_silence_secs.
         """
@@ -717,7 +740,7 @@ class RimeSegmentedSTTService(SegmentedSTTService):
             or not 0 <= self._trailing_silence_secs < _MAX_AUDIO_SECONDS
         ):
             raise ValueError("trailing_silence_secs must be finite and between 0 and 120")
-        self._recognition = _Recognition(self, api_key, request_timeout)
+        self._recognition = _Recognition(self, api_key, client, request_timeout, shutdown_timeout)
         self._input_format: tuple[int, int] | None = None
         self._input_user = ""
         self._transcribing: _Utterance | None = None
@@ -934,7 +957,7 @@ class RimeSegmentedSTTService(SegmentedSTTService):
         if self._recognition.speaking:
             await self._handle_user_stopped_speaking(VADUserStoppedSpeakingFrame())
         try:
-            async with asyncio.timeout(_SHUTDOWN_TIMEOUT):
+            async with asyncio.timeout(self._recognition.shutdown_timeout):
                 await super().stop(frame)
         except TimeoutError:
             await self._recognition.error(RimeTimeoutError("Shutdown deadline expired"))
@@ -943,7 +966,7 @@ class RimeSegmentedSTTService(SegmentedSTTService):
             await self._recognition.close()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel queued and active requests and close the SDK client."""
+        """Cancel queued and active requests and close an owned SDK client."""
         self._recognition.closed = True
         await self._discard()
         await self._recognition.close()

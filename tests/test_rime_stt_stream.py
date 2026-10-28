@@ -278,9 +278,8 @@ async def test_interruption_preserves_recognition_and_mute_restarts_fresh(client
 
 
 @pytest.mark.asyncio
-async def test_request_and_shutdown_deadlines(client, monkeypatch):
-    monkeypatch.setattr(rime, "_SHUTDOWN_TIMEOUT", 0.02)
-    service = RimeSTTService(api_key="test", request_timeout=0.02)
+async def test_request_and_shutdown_deadlines(client):
+    service = RimeSTTService(api_key="test", request_timeout=0.02, shutdown_timeout=0.02)
     async with harness(service) as (out, upstream):
         await send(service, VADUserStartedSpeakingFrame(), audio())
         stream = await next_stream(client)

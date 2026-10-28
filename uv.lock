@@ -6136,6 +6136,8 @@ redis = [
 ]
 rime = [
     { name = "rime-api" },
+]
+rime-stt = [
     { name = "rimelabs-sdk" },
 ]
 rnnoise = [
@@ -6313,7 +6315,7 @@ requires-dist = [
     { name = "resampy", specifier = "~=0.4.3" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0,<14" },
     { name = "rime-api", marker = "extra == 'rime'", specifier = "~=0.4.0" },
-    { name = "rimelabs-sdk", marker = "extra == 'rime'", specifier = ">=0.1.0a20,<0.2" },
+    { name = "rimelabs-sdk", marker = "extra == 'rime-stt'", specifier = ">=0.1.0a20,<0.2" },
     { name = "ruff", marker = "extra == 'cli'", specifier = ">=0.12.1,<1" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.32" },
@@ -6336,7 +6338,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resembleai", "rime", "rime-stt", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -8212,7 +8214,7 @@ wheels = [
 
 [[package]]
 name = "rimelabs-sdk"
-version = "0.1.0a20"
+version = "0.1.0a24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
@@ -8221,9 +8223,9 @@ dependencies = [
     { name = "rime-api" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/96/96/91c61cee6c4765a4f2bdf5567865686aa486b9d72238256ed8e27f163515/rimelabs_sdk-0.1.0a20.tar.gz", hash = "sha256:87186c793e926a990edff6e8c78f73bbc0c68ec9d0b7a7d88f8f6a01a60d27bd", size = 215519, upload-time = "2026-10-22T20:58:34.511Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/71/935ecb5bd5279c15186327912f6edc2225e5ffc67b93d6a10aa7d50c4a18/rimelabs_sdk-0.1.0a24.tar.gz", hash = "sha256:23d3bcb5e786e059ea9546bf01ba92d12f0622b45d7e76fc211b6a273234bfaf", size = 234961, upload-time = "2026-10-27T06:22:48.246Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/48/ed7a21f518d0ebe0424679fa8d54ae5a4313aacdac75b66a8306e569ec35/rimelabs_sdk-0.1.0a20-py3-none-any.whl", hash = "sha256:66408a9cd8ff8e2ee6f3e378b9c733ea77fc3852d7af663e0061a4e8340545d8", size = 68361, upload-time = "2026-10-22T20:58:33.092Z" },
+    { url = "https://files.pythonhosted.org/packages/55/3a/1a6a20f261d4345e518425cd00b89d9e0fb444e139ef2ef179dbb56efb63/rimelabs_sdk-0.1.0a24-py3-none-any.whl", hash = "sha256:9ad11c2472dfca8d589db5e6ac611e6bd26b95a18bb53e8abd883a90d56bf9b8", size = 75572, upload-time = "2026-10-27T06:22:47.255Z" },
 ]
 
 [[package]]

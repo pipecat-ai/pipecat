@@ -449,7 +449,7 @@ class ServiceRegistry:
         ServiceDefinition(
             value="rime_stt",
             label="Rime",
-            package="pipecat-ai[rime]",
+            package="pipecat-ai[rime-stt]",
             class_name=["RimeSTTService"],
             env_prefix="RIME",
             include_params=["api_key"],

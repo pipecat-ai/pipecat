@@ -6,7 +6,7 @@
 
 """Run a voice agent with Rime streaming STT and Rime v1 TTS.
 
-Install ``pipecat-ai[rime,openai]`` plus the selected transport extra. Set
+Install ``pipecat-ai[rime-stt,rime,openai]`` plus the selected transport extra. Set
 ``RIME_API_KEY`` and ``OPENAI_API_KEY``. The user aggregator supplies the single
 VAD source that opens and closes recognition requests. Input audio is mono.
 """

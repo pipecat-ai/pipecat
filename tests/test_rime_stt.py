@@ -62,9 +62,29 @@ def test_settings_are_complete_copied_and_construction_is_lazy(monkeypatch, serv
 
 @pytest.mark.parametrize("service_cls", [RimeSTTService, RimeSegmentedSTTService])
 @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan"), True])
-def test_invalid_timeout(service_cls, timeout):
-    with pytest.raises(ValueError, match="request_timeout"):
-        service_cls(api_key="test", request_timeout=timeout)
+@pytest.mark.parametrize("parameter", ["request_timeout", "shutdown_timeout"])
+def test_invalid_timeout(service_cls, timeout, parameter):
+    with pytest.raises(ValueError, match=parameter):
+        service_cls(api_key="test", **{parameter: timeout})
+
+
+@pytest.mark.parametrize("service_cls", [RimeSTTService, RimeSegmentedSTTService])
+def test_client_and_api_key_are_mutually_exclusive(service_cls):
+    with pytest.raises(ValueError, match="either client or api_key"):
+        service_cls(client=FakeRime(), api_key="test")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [RimeSTTService, RimeSegmentedSTTService])
+async def test_injected_client_survives_shutdown_and_repeated_cleanup(service_cls):
+    client = FakeRime(automatic=True)
+    service = service_cls(client=client)
+    await run_test(
+        service,
+        frames_to_send=[VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame()],
+    )
+    await service.cleanup()
+    assert not client.closed
 
 
 @pytest.mark.asyncio
@@ -110,7 +130,7 @@ import pipecat.services.rime
 try:
     import pipecat.services.rime.stt
 except ImportError as error:
-    assert 'pipecat-ai[rime]' in str(error)
+    assert 'pipecat-ai[rime-stt]' in str(error)
 else:
     raise AssertionError('missing SDK must fail with an installation hint')
 """
