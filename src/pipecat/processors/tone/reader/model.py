@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Tone's reader model, on the CPU, as its reference runtime runs it (Apache-2.0)."""
+"""Pipecat Tone's reader model, on the CPU."""
 
 import json
 import math
