@@ -50,6 +50,13 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
             + SPEED_DELIVERY,
             pause_range_ms=(10, 99990),
             delivery_scope=DeliveryScope.SENTENCE,
+            tagger_vocabulary={
+                "warm": ["happy"],
+                "excited": ["happy"],
+                "laugh": ["laughs"],
+                "sigh": ["sighs"],
+                "breath": ["breath", "inhale"],
+            },
         )
 
     def request_settings(self, delivery: list[str]) -> dict[str, Any]:
