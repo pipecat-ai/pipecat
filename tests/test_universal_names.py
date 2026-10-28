@@ -84,13 +84,13 @@ def test_a_service_names_universal_names_by_names_it_performs(adapter):
     assert set(capabilities.service_vocabulary) <= {*ExpressionDelivery, *ExpressionSound}
     for universal, names in capabilities.service_vocabulary.items():
         if universal in ExpressionDelivery:
-            declared = capabilities.delivery
+            free_text, declared = capabilities.allows_free_text_delivery, capabilities.delivery
             performed = capabilities.delivery_name(universal)
         else:
-            declared = capabilities.sounds
+            free_text, declared = capabilities.allows_free_text_sounds, capabilities.sounds
             performed = capabilities.sound_name(universal)
         assert performed in names
-        if not capabilities.allows_free_text:
+        if not free_text:
             assert set(names) & {term.name for term in declared}
 
 

@@ -321,8 +321,10 @@ class ExpressionCapabilities:
         sounds: Sounds the service can make at one point, by its own names.
         delivery: Deliveries the service can apply to the words that follow, by
             its own names.
-        allows_free_text: Whether the service also accepts sounds and deliveries
-            outside ``sounds`` and ``delivery``, described in a few words.
+        allows_free_text_sounds: Whether the service also accepts sounds outside
+            ``sounds``, described in a few words.
+        allows_free_text_delivery: Whether the service also accepts deliveries
+            outside ``delivery``, described in a few words.
         pause_range_ms: The shortest and longest pause the service can make,
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
@@ -338,7 +340,8 @@ class ExpressionCapabilities:
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
     delivery: list[ExpressionTerm] = field(default_factory=list)
-    allows_free_text: bool = False
+    allows_free_text_sounds: bool = False
+    allows_free_text_delivery: bool = False
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
@@ -359,7 +362,9 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.delivery, ExpressionDelivery)
+        return self._performed_name(
+            name, self.delivery, ExpressionDelivery, self.allows_free_text_delivery
+        )
 
     def sound_name(self, name: str) -> str | None:
         """The name the service performs a sound by, or None when it can't.
@@ -372,13 +377,16 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.sounds, ExpressionSound)
+        return self._performed_name(
+            name, self.sounds, ExpressionSound, self.allows_free_text_sounds
+        )
 
     def _performed_name(
         self,
         name: str,
         terms: list[ExpressionTerm],
         universal: type[ExpressionDelivery] | type[ExpressionSound],
+        free_text: bool,
     ):
         declared = {term.name for term in terms}
         try:
@@ -386,7 +394,7 @@ class ExpressionCapabilities:
         except ValueError:  # Not a universal name, such as an accent.
             names = []
         for candidate in [*names, name]:
-            if self.allows_free_text or candidate in declared:
+            if free_text or candidate in declared:
                 return candidate
         return None
 

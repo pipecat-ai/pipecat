@@ -47,10 +47,15 @@ class _RecordingSession:
 class TestInworldExpressionAdapter:
     def test_performs_every_universal_delivery(self):
         capabilities = InworldExpressionAdapter().capabilities()
-        assert {term.name for term in capabilities.delivery} == set(ExpressionDelivery)
+        assert capabilities.allows_free_text_delivery
+        assert not capabilities.allows_free_text_sounds
         assert capabilities.emphasis
         assert capabilities.delivery_name("warm") == "warm"
         assert capabilities.sound_name("breath") == "breathe"
+        # Delivery is free text, so a name that isn't universal is performed as written,
+        # while sounds are a fixed list.
+        assert capabilities.delivery_name("british accent") == "british accent"
+        assert capabilities.sound_name("beatbox") is None
 
     def test_instructions_where_delivery_changes(self):
         adapter = InworldExpressionAdapter()

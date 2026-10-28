@@ -70,14 +70,11 @@ class Gemini38ExpressionAdapter(BaseExpressionAdapter):
     """
 
     def capabilities(self) -> ExpressionCapabilities:
-        """Every universal delivery, Gemini's audio tags, emphasis and approximate pauses."""
-        speeds = {term.name for term in SPEED_DELIVERY}
+        """Free-text delivery, Gemini's audio tags, emphasis and approximate pauses."""
         return ExpressionCapabilities(
             sounds=list(_SOUNDS),
-            delivery=[
-                *(ExpressionTerm(name) for name in ExpressionDelivery if name not in speeds),
-                *SPEED_DELIVERY,
-            ],
+            delivery=list(SPEED_DELIVERY),
+            allows_free_text_delivery=True,
             pause_range_ms=(100, 2000),
             emphasis=True,
             delivery_scope=DeliveryScope.SENTENCE,

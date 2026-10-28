@@ -16,7 +16,8 @@ from pipecat.services.soniox.tts import SonioxTTSService
 class TestSonioxExpressionAdapter:
     def test_capabilities(self):
         capabilities = SonioxExpressionAdapter().capabilities()
-        assert not capabilities.allows_free_text
+        assert not capabilities.allows_free_text_sounds
+        assert not capabilities.allows_free_text_delivery
         assert capabilities.emphasis
         assert capabilities.delivery_name("sympathetic") == "warm"
         assert capabilities.delivery_name("soft") == "softly"

@@ -18,7 +18,8 @@ from pipecat.services.azure.tts import AzureHttpTTSService, AzureTTSService  # n
 class TestAzureHDExpressionAdapter:
     def test_capabilities(self):
         capabilities = AzureHDExpressionAdapter().capabilities()
-        assert not capabilities.allows_free_text
+        assert not capabilities.allows_free_text_sounds
+        assert not capabilities.allows_free_text_delivery
         assert not capabilities.emphasis
         assert capabilities.pause_range_ms is None
         assert capabilities.delivery_name("apologetic") == "remorseful"

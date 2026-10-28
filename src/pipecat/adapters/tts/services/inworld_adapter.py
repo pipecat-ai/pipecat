@@ -107,14 +107,11 @@ class InworldExpressionAdapter(InworldFlashExpressionAdapter):
     """
 
     def capabilities(self) -> ExpressionCapabilities:
-        """Every universal delivery, Inworld's non-verbal sounds, emphasis and pauses."""
-        speeds = {term.name for term in SPEED_DELIVERY}
+        """Free-text delivery, Inworld's non-verbal sounds, emphasis and pauses."""
         return ExpressionCapabilities(
             sounds=list(_SOUNDS),
-            delivery=[
-                *(ExpressionTerm(name) for name in ExpressionDelivery if name not in speeds),
-                *SPEED_DELIVERY,
-            ],
+            delivery=list(SPEED_DELIVERY),
+            allows_free_text_delivery=True,
             pause_range_ms=(100, 10000),
             emphasis=True,
             service_vocabulary=dict(_SOUND_VOCABULARY),

@@ -15,7 +15,8 @@ from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapt
 class TestMistralExpressionAdapter:
     def test_capabilities(self):
         capabilities = MistralExpressionAdapter().capabilities()
-        assert not capabilities.allows_free_text
+        assert not capabilities.allows_free_text_sounds
+        assert not capabilities.allows_free_text_delivery
         assert not capabilities.emphasis
         assert capabilities.pause_range_ms is None
         assert capabilities.delivery_name("sympathetic") == "warm"

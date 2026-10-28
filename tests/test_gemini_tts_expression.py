@@ -28,10 +28,15 @@ requires_speech_metadata = pytest.mark.skipif(
 class TestGemini38ExpressionAdapter:
     def test_performs_every_universal_delivery_between_sentences(self):
         capabilities = Gemini38ExpressionAdapter().capabilities()
-        assert {term.name for term in capabilities.delivery} == set(ExpressionDelivery)
+        assert capabilities.allows_free_text_delivery
+        assert not capabilities.allows_free_text_sounds
         assert capabilities.delivery_scope == DeliveryScope.SENTENCE
         assert capabilities.emphasis
         assert capabilities.sound_name("clear throat") == "throat-clearing"
+        # Delivery is free text, so a name that isn't universal is performed as written,
+        # while sounds are a fixed list.
+        assert capabilities.delivery_name("british accent") == "british accent"
+        assert capabilities.sound_name("beatbox") is None
 
     def test_delivery_is_a_request_style(self):
         adapter = Gemini38ExpressionAdapter()
