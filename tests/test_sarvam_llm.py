@@ -295,6 +295,35 @@ def test_sarvam_llm_build_params_forward_core_and_extra_fields():
     assert built_params["n"] == 2
 
 
+@pytest.mark.parametrize(
+    "settings_kwargs, expected_max_tokens",
+    [
+        ({"max_completion_tokens": 64}, 64),
+        ({"extra": {"max_completion_tokens": 48}}, 48),
+        ({"max_tokens": 32, "max_completion_tokens": 64}, 32),
+        ({"max_tokens": None, "max_completion_tokens": 64}, 64),
+        ({"max_completion_tokens": None}, OPENAI_NOT_GIVEN),
+        ({}, OPENAI_NOT_GIVEN),
+    ],
+)
+def test_sarvam_llm_max_completion_tokens_sent_as_max_tokens(settings_kwargs, expected_max_tokens):
+    with patch.object(SarvamLLMService, "create_client"):
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(model="sarvam-105b", **settings_kwargs),
+        )
+
+    invocation = OpenAILLMInvocationParams(
+        messages=[{"role": "user", "content": "Hello"}],
+        tools=OPENAI_NOT_GIVEN,
+        tool_choice=OPENAI_NOT_GIVEN,
+    )
+    built_params = service.build_chat_completion_params(invocation)
+
+    assert built_params["max_tokens"] == expected_max_tokens
+    assert "max_completion_tokens" not in built_params
+
+
 def test_sarvam_llm_extra_body_merges_with_user_extra():
     with patch.object(SarvamLLMService, "create_client"):
         settings = SarvamLLMService.Settings(
@@ -821,6 +850,37 @@ async def test_sarvam_llm_run_inference_max_tokens_override():
 
     call_kwargs = service._client.chat.completions.create.call_args.kwargs
     assert call_kwargs["max_tokens"] == 23
+    assert "max_completion_tokens" not in call_kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override, expected_max_tokens", [(None, 100), (23, 23)])
+async def test_sarvam_llm_run_inference_max_completion_tokens(override, expected_max_tokens):
+    with patch.object(SarvamLLMService, "create_client"):
+        service = SarvamLLMService(
+            api_key="test-key",
+            settings=SarvamLLMService.Settings(model="sarvam-105b", max_completion_tokens=100),
+        )
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = _mock_adapter()
+        mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
+            messages=[{"role": "user", "content": "Hello"}],
+            tools=OPENAI_NOT_GIVEN,
+            tool_choice=OPENAI_NOT_GIVEN,
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "token limit"
+        service._client.chat.completions.create.return_value = mock_response
+
+        await service.run_inference(mock_context, max_tokens=override)
+
+    call_kwargs = service._client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["max_tokens"] == expected_max_tokens
     assert "max_completion_tokens" not in call_kwargs
 
 
