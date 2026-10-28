@@ -1205,14 +1205,17 @@ class SarvamTTSService(InterruptibleTTSService):
                         await self.remove_audio_context(context_id)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
+                    await self.stop_all_metrics()
                     await self.push_error(error_msg=f"TTS Error: {error_msg}")
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-                    await self.append_to_audio_context(
-                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
-                    )
+
+                    # No more audio is coming for the active context, so end it now
+                    # rather than waiting on stop_frame_timeout_s.
+                    if context_id and self.audio_context_available(context_id):
+                        await self.remove_audio_context(context_id)
 
     async def _send_keepalive(self):
         """Send a ping to keep the connection open through silences."""
