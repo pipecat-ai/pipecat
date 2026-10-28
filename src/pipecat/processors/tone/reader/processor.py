@@ -40,8 +40,8 @@ class PipecatToneReader(FrameProcessor):
     """Reads how each user turn was meant with Pipecat Tone.
 
     Goes between the STT service and the user aggregator. Each final
-    transcription is read, with the bot's reply before it, and the reading is
-    set as its ``perception``: the turn's ``emotion``, its two likeliest labels
+    transcription is read, with the bot's reply before it unless
+    ``read_previous`` is off, and the reading is set as its ``perception``: the turn's ``emotion``, its two likeliest labels
     with their confidences, and its ``sarcasm``, the chance it's sarcastic.
     The read runs off the event loop, and the transcription waits for it, a
     few milliseconds.
@@ -68,6 +68,7 @@ class PipecatToneReader(FrameProcessor):
         model_dir: str | Path | None = None,
         precision: Literal["fp16", "fp32"] = "fp16",
         threads: int = 4,
+        read_previous: bool = True,
         **kwargs,
     ):
         """Initialize the processor.
@@ -78,6 +79,9 @@ class PipecatToneReader(FrameProcessor):
                 laid out as a release's ``reader``. ``revision`` is then unused.
             precision: The weights to load: ``"fp16"`` or ``"fp32"``.
             threads: The CPU threads for one read.
+            read_previous: Whether to read each turn with the bot's reply before
+                it. Off, each turn is read on its own words, as the first turn
+                always is.
             **kwargs: Additional arguments passed to the parent.
         """
         super().__init__(**kwargs)
@@ -86,6 +90,7 @@ class PipecatToneReader(FrameProcessor):
         self._model_dir = Path(model_dir) if model_dir else None
         self._precision: Literal["fp16", "fp32"] = precision
         self._threads = threads
+        self._read_previous = read_previous
         self._previous: str | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -128,7 +133,7 @@ class PipecatToneReader(FrameProcessor):
             return
         if isinstance(frame, TranscriptionFrame) and frame.text.strip() and self._model:
             frame.perception = await self._read(frame.text)
-        elif isinstance(frame, LLMContextAssistantTurnFrame):
+        elif isinstance(frame, LLMContextAssistantTurnFrame) and self._read_previous:
             self._previous = frame.text
         await self.push_frame(frame, direction)
 

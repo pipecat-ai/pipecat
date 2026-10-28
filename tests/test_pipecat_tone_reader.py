@@ -55,10 +55,10 @@ def _unshared_models(monkeypatch):
     monkeypatch.setattr(_models, "_models", {})
 
 
-def _reader(monkeypatch, model: FakeReaderModel) -> PipecatToneReader:
+def _reader(monkeypatch, model: FakeReaderModel, **kwargs) -> PipecatToneReader:
     """A reader whose model downloads as ``model``."""
     monkeypatch.setattr(PipecatToneReaderModel, "download", lambda **kwargs: model)
-    return PipecatToneReader()
+    return PipecatToneReader(**kwargs)
 
 
 def _transcription(text: str) -> TranscriptionFrame:
@@ -105,6 +105,23 @@ async def test_a_turn_is_read_against_the_bots_words_before_it(monkeypatch):
     )
 
     assert model.reads == [("Oh great.", "The next visit is in forty minutes. Sorry.")]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_is_read_on_its_own_words_without_read_previous(monkeypatch):
+    model = FakeReaderModel()
+
+    await run_test(
+        _reader(monkeypatch, model, read_previous=False),
+        frames_to_send=[
+            LLMContextAssistantTurnFrame(
+                text="The next visit is in forty minutes. Sorry.", timestamp="now"
+            ),
+            _transcription("Oh great."),
+        ],
+    )
+
+    assert model.reads == [("Oh great.", None)]
 
 
 @pytest.mark.asyncio
