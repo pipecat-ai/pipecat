@@ -344,6 +344,16 @@ async def test_a_policy_that_names_one_breath_draws_only_that_kind(monkeypatch):
     assert tagged == [f"[[quick breath]] Reply {n}." for n in range(6)]
 
 
+def test_a_models_breath_kinds_come_from_its_config():
+    model = object.__new__(PipecatToneTaggerModel)
+
+    model.config = {"breath_kinds": {"light breath": 0.6, "exhale": 0.4}}
+    assert model.breath_kinds == {"light breath": 0.6, "exhale": 0.4}
+    # A model without them writes a plain breath.
+    model.config = {}
+    assert model.breath_kinds == {}
+
+
 def _decoded(before: list[float], breath: float, sentence: str = "Hi.") -> SentenceLabels:
     """A sentence's labels from a model's six heads: the sound before's logits and the breath head's."""
     model = object.__new__(PipecatToneTaggerModel)

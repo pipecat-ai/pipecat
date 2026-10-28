@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.tone import _models
 from pipecat.processors.tone.reader import PipecatToneReader
+from pipecat.processors.tone.reader import model as reader_model
 from pipecat.processors.tone.reader.model import PipecatToneReaderModel
 from pipecat.tests.utils import run_test
 
@@ -179,6 +180,30 @@ async def test_the_model_downloads_at_the_release_asked_for(monkeypatch):
         await run_test(reader, frames_to_send=[])
 
     assert [a["revision"] for a in asked] == ["reader-rc1", "reader-rc9"]
+
+
+def test_the_model_downloads_its_files_from_the_reader_folder(monkeypatch, tmp_path):
+    seen = {}
+
+    def snapshot_download(repo, revision, allow_patterns):
+        seen.update(repo=repo, revision=revision, patterns=allow_patterns)
+        return str(tmp_path)
+
+    monkeypatch.setattr(reader_model, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(
+        PipecatToneReaderModel,
+        "__init__",
+        lambda self, model_dir, precision, threads: seen.update(dir=model_dir),
+    )
+
+    PipecatToneReaderModel.download()
+
+    assert seen == {
+        "repo": "pipecat-ai/tone-models",
+        "revision": "reader-rc1",
+        "patterns": ["reader/config.json", "reader/tokenizer.json", "reader/model_fp16.onnx"],
+        "dir": tmp_path / "reader",
+    }
 
 
 @pytest.mark.asyncio
