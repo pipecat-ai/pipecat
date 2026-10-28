@@ -9,7 +9,13 @@
 import pytest
 from pydantic import ValidationError
 
-from pipecat.expressive.expression import SPEED_DELIVERY, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import (
+    SPEED_DELIVERY,
+    ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
+    ExpressionTerm,
+)
 from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
@@ -18,7 +24,7 @@ FIXED = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughter")],
     delivery=[ExpressionTerm("calm"), ExpressionTerm("happy"), ExpressionTerm("sad")],
     pause_range_ms=(100, 5000),
-    service_names={"warm": ["happy"], "laugh": ["laughter"]},
+    service_vocabulary={ExpressionDelivery.WARM: ["happy"], ExpressionSound.LAUGH: ["laughter"]},
 )
 
 FREE_TEXT = ExpressionCapabilities(
@@ -26,7 +32,7 @@ FREE_TEXT = ExpressionCapabilities(
     delivery=[ExpressionTerm("excited"), ExpressionTerm("whispers", "speaking in a whisper")],
     free_text=True,
     emphasis=True,
-    service_names={"whispering": ["whispers"]},
+    service_vocabulary={ExpressionDelivery.WHISPERING: ["whispers"]},
 )
 
 
@@ -51,7 +57,8 @@ def test_a_service_that_performs_delivery_is_taught_spans():
     assert "- <<calm: A B 7>> speaks just the words after the colon, A B 7" in instructions
     assert "speaks just the words after the colon" not in expression_instructions(
         ExpressionCapabilities(
-            sounds=[ExpressionTerm("laughter")], service_names={"laugh": ["laughter"]}
+            sounds=[ExpressionTerm("laughter")],
+            service_vocabulary={ExpressionSound.LAUGH: ["laughter"]},
         )
     )
 

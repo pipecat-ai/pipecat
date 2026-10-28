@@ -286,7 +286,10 @@ class ExpressionCapabilities:
             ],
             pause_range_ms=(100, 3000),
             emphasis=True,
-            service_names={"laugh": ["laughs"], "warm": ["warmly"]},
+            service_vocabulary={
+                ExpressionSound.LAUGH: ["laughs"],
+                ExpressionDelivery.WARM: ["warmly"],
+            },
         )
 
     Parameters:

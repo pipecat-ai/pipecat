@@ -9,7 +9,7 @@
 import pytest
 from loguru import logger
 
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionSound, ExpressionTerm
 from pipecat.expressive.instructions import expression_instructions
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
@@ -31,7 +31,7 @@ CALM_HAPPY = ExpressionCapabilities(
     delivery=[ExpressionTerm("calm"), ExpressionTerm("happy")], pause_range_ms=(100, 3000)
 )
 LAUGHTER = ExpressionCapabilities(
-    sounds=[ExpressionTerm("laughter")], service_names={"laugh": ["laughter"]}
+    sounds=[ExpressionTerm("laughter")], service_vocabulary={ExpressionSound.LAUGH: ["laughter"]}
 )
 
 

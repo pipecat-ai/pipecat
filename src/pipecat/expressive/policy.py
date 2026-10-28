@@ -71,11 +71,11 @@ class ExpressionPolicy(BaseModel):
             to act on. The presets are about writing tags, so they go to
             whoever writes them: the LLM, or a tagger in its place.
         delivery: The deliveries to offer, by their universal names
-            (``UNIVERSAL_DELIVERY``), or None for the core ones. A name that
+            (:class:`~pipecat.expressive.expression.ExpressionDelivery`), or None for the core ones. A name that
             isn't universal, such as an accent, is offered as written. Those the
             TTS service can't perform are left out, with a warning.
         sounds: The sounds to offer, as ``delivery`` offers deliveries
-            (``UNIVERSAL_SOUNDS``). None offers the core ones, and a breath only
+            (:class:`~pipecat.expressive.expression.ExpressionSound`). None offers the core ones, and a breath only
             with ``ExpressionGuidance.BREATHE``.
     """
 
