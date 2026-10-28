@@ -115,7 +115,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            model="gpt-4o",
             system_instruction=(
                 "You are a helpful assistant in a real-time voice call. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
