@@ -22,14 +22,10 @@ from pipecat.expressive.expression import (
     TAGGER_SOUNDS,
     ExpressionCapabilities,
     ExpressionTerm,
-    TaggerBreathKind,
-    TaggerDelivery,
+    TaggerLabel,
     TaggerSound,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-
-# A label the tagger writes: a delivery, a sound or the kind a breath is drawn as.
-TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
 
 # The services the model was trained with, by the names it reads for them. It reads
 # "other" for any other.
@@ -68,13 +64,16 @@ class LabelSpace:
         """The labels the service performs and the policy offers.
 
         A breath, and its kinds, are offered only with ``ExpressionGuidance.BREATHE``
-        in the policy.
+        in the policy. A breath is offered where the service performs only some of its
+        kinds, written as the first of them for a model that draws no kinds.
 
         Args:
             capabilities: What the service performs.
             policy: The pipeline's expression policy.
             service_name: The service's name, such as ``"ElevenLabsTTSService#0"``,
                 which says which of the services the model was trained with it is.
+                A service given a name of its own, such as ``name="tts"``, is read
+                as one the model wasn't trained with.
             vocabulary: Names to try first for a label, before the service's own.
         """
         # A developer's own names for a label come before the service's.
@@ -85,6 +84,21 @@ class LabelSpace:
         resolved = _resolve(
             sounds, capabilities.sounds, capabilities.free_text_sounds, names, policy.sounds
         )
+        # Each kind of breath is a sound of its own.
+        breaths = (
+            _resolve(
+                TAGGER_BREATH_KINDS,
+                capabilities.sounds,
+                capabilities.free_text_sounds,
+                names,
+                policy.sounds,
+            )
+            if _breathes(policy)
+            else {}
+        )
+        # A breath is last in TAGGER_SOUNDS, so adding it keeps the order.
+        if breaths and "breath" not in resolved:
+            resolved["breath"] = next(iter(breaths.values()))
         return cls(
             deliveries=_resolve(
                 TAGGER_DELIVERY,
@@ -96,16 +110,7 @@ class LabelSpace:
             sounds=resolved,
             emphasis=capabilities.emphasis,
             tts=_trained_service(service_name),
-            # Each kind of breath is a sound of its own.
-            breaths=_resolve(
-                TAGGER_BREATH_KINDS,
-                capabilities.sounds,
-                capabilities.free_text_sounds,
-                names,
-                policy.sounds,
-            )
-            if "breath" in resolved
-            else {},
+            breaths=breaths,
         )
 
     def sound_name(self, label: str) -> str | None:

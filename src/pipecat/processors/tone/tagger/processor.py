@@ -15,7 +15,12 @@ from typing import Literal
 
 from loguru import logger
 
-from pipecat.expressive.expression import TAGGER_BREATH_KINDS, TAGGER_DELIVERY, TAGGER_SOUNDS
+from pipecat.expressive.expression import (
+    TAGGER_BREATH_KINDS,
+    TAGGER_DELIVERY,
+    TAGGER_SOUNDS,
+    TaggerLabel,
+)
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
@@ -39,7 +44,6 @@ from pipecat.processors.tone.tagger._labels import (
     LabelSpace,
     ReplyRenderer,
     SentenceLabels,
-    TaggerLabel,
 )
 from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -104,7 +108,8 @@ class PipecatToneTagger(LLMTextProcessor):
                 (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``, ``TAGGER_BREATH_KINDS``),
                 best first, such as ``{"warm": ["cheerful"]}``. A name is written only
                 where the TTS service performs it and the policy offers it; elsewhere
-                the service's own names stand.
+                the service's own names stand. A name written for ``"breath"`` is
+                written for every breath, rather than its kinds' names.
             **kwargs: Additional arguments passed to the parent.
 
         Raises:
@@ -260,9 +265,12 @@ class PipecatToneTagger(LLMTextProcessor):
     def _drawn(self, labels: SentenceLabels) -> SentenceLabels:
         """The labels with a breath drawn as a kind the service performs, at the model's shares.
 
-        A breath stays plain when the model or the service has no kinds.
+        A breath stays plain when the model or the service has no kinds, or when it's
+        written as a name the developer gave for every breath.
         """
         if labels.sound_before != "breath" or not self._model or not self._turn:
+            return labels
+        if self._turn.space.sounds.get("breath") in self._vocabulary.get("breath", []):
             return labels
         breaths = self._turn.space.breaths
         kinds = {k: share for k, share in self._model.breath_kinds.items() if k in breaths}

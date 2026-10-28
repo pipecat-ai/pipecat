@@ -344,6 +344,39 @@ async def test_a_policy_that_names_one_breath_draws_only_that_kind(monkeypatch):
     assert tagged == [f"[[quick breath]] Reply {n}." for n in range(6)]
 
 
+@pytest.mark.asyncio
+async def test_a_policy_that_names_only_a_kind_still_breathes(monkeypatch):
+    breath = SentenceLabels(sound_before="breath")
+    model = FakeTaggerModel(
+        {"One.": breath}, breath_kinds={"light breath": 0.5, "deep breath": 0.5}
+    )
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["inhales deeply"])
+
+    tagged = await _tagged(
+        monkeypatch, model, ELEVENLABS, *_reply("One."), params=_expressive(policy)
+    )
+
+    assert tagged == ["[[inhales deeply]] One."]
+
+
+@pytest.mark.asyncio
+async def test_a_name_for_breath_is_written_for_every_breath(monkeypatch):
+    model = FakeTaggerModel(
+        {"One.": SentenceLabels(sound_before="breath")}, breath_kinds={"exhale": 1.0}
+    )
+    monkeypatch.setattr(PipecatToneTaggerModel, "download", lambda **kwargs: model)
+
+    down, _ = await run_test(
+        PipecatToneTagger(vocabulary={"breath": ["inhales deeply"]}),
+        frames_to_send=[ELEVENLABS, *_reply("One.")],
+        pipeline_params=BREATHE,
+    )
+
+    assert [f.text for f in down if isinstance(f, AggregatedTextFrame)] == [
+        "[[inhales deeply]] One."
+    ]
+
+
 def test_a_models_breath_kinds_come_from_its_config():
     model = object.__new__(PipecatToneTaggerModel)
 

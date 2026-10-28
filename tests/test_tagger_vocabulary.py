@@ -48,10 +48,8 @@ def test_every_name_in_an_adapters_vocabulary_is_one_it_performs(adapter):
 
     assert set(vocabulary) <= {*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS}
     for label, names in vocabulary.items():
-        # A kind of breath is written only where a breath is.
-        breath = vocabulary.get("breath", []) if label in TAGGER_BREATH_KINDS else []
         for name in names:
-            assert tagger_name(capabilities, label, offered=[name, *breath]) == name
+            assert tagger_name(capabilities, label, offered=[name]) == name
 
 
 @pytest.mark.parametrize(
@@ -80,6 +78,23 @@ def test_each_kind_of_breath_has_a_name_where_the_service_breathes(adapter, name
     policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
 
     assert LabelSpace.resolve(adapter().capabilities(), policy).breaths == names
+
+
+@pytest.mark.parametrize(
+    "offered,breaths",
+    [
+        (["deep breath"], {"deep breath": "deep breath"}),
+        (["sighs", "inhales deeply"], {"deep breath": "inhales deeply"}),
+        (["short breath", "exhales"], {"light breath": "short breath", "exhale": "exhales"}),
+    ],
+)
+def test_a_policy_that_names_only_a_kind_still_breathes(offered, breaths):
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=offered)
+
+    space = LabelSpace.resolve(ElevenLabsAudioTagExpressionAdapter().capabilities(), policy)
+
+    assert space.breaths == breaths
+    assert space.sounds["breath"] == next(iter(breaths.values()))
 
 
 def test_the_best_name_the_policy_offers_is_chosen():
