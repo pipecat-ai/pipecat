@@ -82,7 +82,7 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
             free_text_delivery=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
-            service_names={
+            service_vocabulary={
                 ExpressionDelivery.CALM: ["calm", "relaxed"],
                 ExpressionDelivery.SYMPATHETIC: ["sympathetic", "empathetic", "compassionate"],
                 ExpressionDelivery.APOLOGETIC: ["regretful"],

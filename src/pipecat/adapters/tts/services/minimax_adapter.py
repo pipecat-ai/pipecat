@@ -52,7 +52,7 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
             + SPEED_DELIVERY,
             pause_range_ms=(10, 99990),
             delivery_scope=DeliveryScope.SENTENCE,
-            service_names={
+            service_vocabulary={
                 ExpressionDelivery.WARM: ["happy"],
                 ExpressionDelivery.EXCITED: ["happy"],
                 ExpressionSound.LAUGH: ["laughs"],

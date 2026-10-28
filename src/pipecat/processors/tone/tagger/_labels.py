@@ -83,7 +83,7 @@ class LabelSpace:
             vocabulary: Names to try first for a label, before the service's own.
         """
         # A developer's own names for a label come before the service's.
-        names = dict(capabilities.service_names)
+        names = dict(capabilities.service_vocabulary)
         for label, own in (vocabulary or {}).items():
             names[label] = [*own, *names.get(label, [label])]
         sounds = [s for s in CORE_SOUNDS if s != ExpressionSound.BREATH or _breathes(policy)]

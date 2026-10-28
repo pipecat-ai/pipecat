@@ -56,7 +56,7 @@ class ExpressionDelivery(StrEnum):
     With :class:`ExpressionSound`, these name everything the services with an
     expression adapter perform, each in one spelling, an adjective for a
     delivery. A tag that names one is sent by each service's own name for it
-    (``ExpressionCapabilities.service_names``), and reported as written. A
+    (``ExpressionCapabilities.service_vocabulary``), and reported as written. A
     member is a ``str``, so ``ExpressionDelivery.WARM`` is ``"warm"``.
     """
 
@@ -299,7 +299,7 @@ class ExpressionCapabilities:
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
         delivery_scope: Where in a response the service can change delivery.
-        service_names: The names the service performs universal deliveries and
+        service_vocabulary: The names the service performs universal deliveries and
             sounds by (:class:`ExpressionDelivery`, :class:`ExpressionSound`),
             best first, where they differ from the universal names, such as
             ``{ExpressionDelivery.WARM: ["content", "happy"]}``. A universal name
@@ -316,14 +316,14 @@ class ExpressionCapabilities:
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
-    service_names: dict[ExpressionDelivery | ExpressionSound, list[str]] = field(
+    service_vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]] = field(
         default_factory=dict
     )
 
     def delivery_name(self, name: str) -> str | None:
         """The name the service performs a delivery by, or None when it can't.
 
-        A universal name is performed by its first name in ``service_names`` the
+        A universal name is performed by its first name in ``service_vocabulary`` the
         service performs, else by its own; any other name by itself. The service
         performs a name it declares, or any name when it accepts free text.
 
@@ -350,7 +350,7 @@ class ExpressionCapabilities:
 
     def _performed_name(self, name: str, terms: list[ExpressionTerm], free_text: bool):
         declared = {term.name for term in terms}
-        vocabulary = cast(dict[str, list[str]], self.service_names)
+        vocabulary = cast(dict[str, list[str]], self.service_vocabulary)
         for candidate in [*vocabulary.get(name, []), name]:
             if free_text or candidate in declared:
                 return candidate

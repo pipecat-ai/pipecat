@@ -232,7 +232,10 @@ class VocabularyAdapter(BracketAdapter):
         return ExpressionCapabilities(
             sounds=[ExpressionTerm("laughs")],
             delivery=[ExpressionTerm("warmly")],
-            service_names={ExpressionDelivery.WARM: ["warmly"], ExpressionSound.LAUGH: ["laughs"]},
+            service_vocabulary={
+                ExpressionDelivery.WARM: ["warmly"],
+                ExpressionSound.LAUGH: ["laughs"],
+            },
         )
 
 

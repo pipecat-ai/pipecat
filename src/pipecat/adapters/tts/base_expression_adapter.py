@@ -28,7 +28,7 @@ class BaseExpressionAdapter:
     adapter only with what they say it supports: other delivery is taken off
     the words first, and other sounds are never formatted. Each name reaches the
     adapter as the service's own: a universal name is translated by the
-    capabilities' ``service_names`` first, so ``warm`` reaches ElevenLabs' adapter
+    capabilities' ``service_vocabulary`` first, so ``warm`` reaches ElevenLabs' adapter
     as ``warmly``.
 
     Markup is set apart from the words by spaces, so the words a service with

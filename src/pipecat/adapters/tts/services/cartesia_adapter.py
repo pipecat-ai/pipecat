@@ -118,7 +118,7 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
             ],
             pause_range_ms=(100, 5000),
             delivery_scope=DeliveryScope.SENTENCE,
-            service_names={
+            service_vocabulary={
                 ExpressionDelivery.CALM: ["calm", "peaceful", "serene"],
                 ExpressionDelivery.WARM: ["content", "happy"],
                 ExpressionDelivery.EXCITED: ["excited", "enthusiastic"],

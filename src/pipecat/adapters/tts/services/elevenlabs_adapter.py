@@ -113,7 +113,7 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
             free_text_delivery=True,
             pause_range_ms=(100, 3000),
             emphasis=True,
-            service_names={
+            service_vocabulary={
                 ExpressionDelivery.CALM: ["calm", "reassuring"],
                 ExpressionDelivery.APOLOGETIC: ["apologetic", "sheepishly"],
                 ExpressionDelivery.WARM: ["warmly"],
