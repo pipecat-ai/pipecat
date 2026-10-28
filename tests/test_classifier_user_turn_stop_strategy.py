@@ -184,19 +184,29 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.classifier.asked[1], {"user": "I'd like to book a table."})
         self.assertEqual(len(self.stopped), 1)
 
-    async def test_an_interim_transcription_holds_the_pause(self):
+    async def test_a_transcription_finalized_while_the_user_speaks_holds_the_pause(self):
         """The earlier words' transcription can land while the user speaks again."""
         await self._start("complete", stt_latency=1.0)
         await self.strategy.process_frame(VADUserStartedSpeakingFrame())
-        await self.strategy.process_frame(_said("book a table", finalized=True))
-        await self.strategy.process_frame(_heard("for two"))
+        await self.strategy.process_frame(_said("paris", finalized=True))
         await self.strategy.process_frame(VADUserStoppedSpeakingFrame())
         await asyncio.sleep(SETTLE)
         self.assertEqual(self.classifier.asked, [])
 
-        await self.strategy.process_frame(_said("for two", finalized=True))
+        await self.strategy.process_frame(_said("and then rome", finalized=True))
         await asyncio.sleep(SETTLE)
-        self.assertEqual(self.classifier.asked, [{"user": "book a table for two"}])
+        self.assertEqual(self.classifier.asked, [{"user": "paris and then rome"}])
+
+    async def test_an_interim_transcription_holds_the_pause(self):
+        """An interim transcription means more words are on their way."""
+        await self._start("short", "complete", stt_latency=1.0, short_timeout=5.0)
+        await self._say()
+        await self.strategy.process_frame(_said("book a", finalized=True))
+        await self.strategy.process_frame(_heard("table"))
+        await self.strategy.process_frame(_said("table"))
+        await asyncio.sleep(SETTLE)
+
+        self.assertEqual(self.classifier.asked, [{"user": "book a"}])
 
     async def test_a_proposed_stop_does_not_wait_for_the_stt_latency(self):
         """A service proposes the stop after pushing the transcription."""

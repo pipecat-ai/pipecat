@@ -239,7 +239,9 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         await self._maybe_classify()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
-        if frame.finalized:
+        # A transcript finalized while the user speaks again covers only the
+        # words before they resumed.
+        if frame.finalized and not self._user_speaking:
             self._transcript_finalized = True
         if frame.text.strip():
             self._text = f"{self._text} {frame.text.strip()}".strip()
