@@ -23,6 +23,13 @@ A TTS service declares which of these it can perform with
 :class:`~pipecat.frames.frames.TTSMetadataFrame`, so the LLM can be told which
 tags to write.
 
+Pipecat names every delivery and sound the services perform the same way on
+each, the universal names: :data:`UNIVERSAL_DELIVERY` and
+:data:`UNIVERSAL_SOUNDS`. A universal name in a tag, such as ``<<warm>>`` or
+``[[laugh]]``, is sent to each service by its own name for it, such as
+ElevenLabs' ``warmly`` or Cartesia's ``laughter``, while everything Pipecat
+reports keeps the name as written.
+
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
@@ -43,9 +50,9 @@ SLOW_DELIVERY = "slow"
 FAST_DELIVERY = "fast"
 
 # The deliveries and sounds Pipecat names the same on every TTS service, each in one
-# spelling: together, everything the services with an expression adapter perform. An
-# LLM writes them, frames and clients are told them, and each service's adapter
-# sends them by its own names (``ExpressionCapabilities.service_names``).
+# spelling: together, everything the services with an expression adapter perform. A
+# tag that names one is sent by each service's own name for it
+# (``ExpressionCapabilities.service_names``), and reported as written.
 UniversalDelivery = Literal[
     "affectionate",
     "agitated",
@@ -192,8 +199,7 @@ UniversalName = UniversalDelivery | UniversalSound
 UNIVERSAL_DELIVERY: tuple[UniversalDelivery, ...] = get_args(UniversalDelivery)
 UNIVERSAL_SOUNDS: tuple[UniversalSound, ...] = get_args(UniversalSound)
 
-# The universal deliveries and sounds an LLM is taught when nothing narrows them, and
-# that Pipecat Tone's tagger writes.
+# The universal deliveries and sounds Pipecat Tone's tagger writes.
 CORE_DELIVERY: tuple[UniversalDelivery, ...] = (
     "calm",
     "sympathetic",
