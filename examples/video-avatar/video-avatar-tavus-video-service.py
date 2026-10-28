@@ -141,6 +141,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 audio_out_sample_rate=24000,
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                # The LLM writes expression tags into its responses, the TTS
+                # performs them, and the replica's face follows their emotion.
+                enable_expressive_conversation=True,
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
             processor_unusable_policy=ProcessorUnusablePolicy.END,

@@ -17,7 +17,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 from daily.daily import AudioData
@@ -25,6 +25,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
+from pipecat.expressive.expression import NEUTRAL_DELIVERY
 from pipecat.frames.frames import (
     BotConnectedFrame,
     BotStoppedSpeakingFrame,
@@ -39,6 +40,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -140,6 +142,49 @@ class TavusApi:
             return response["persona_name"]
 
 
+TavusEmotion = Literal[
+    "neutral", "happiness", "sadness", "anger", "fear", "surprise", "disgust", "contempt"
+]
+"""A facial emotion the Tavus replica can express."""
+
+# The replica's emotion for each of Pipecat's standard delivery names. Names left
+# out, such as "slow", "fast" and "emphasis", keep the current emotion.
+TAVUS_DELIVERY_EMOTIONS: dict[str, TavusEmotion] = {
+    NEUTRAL_DELIVERY: "neutral",
+    "calm": "neutral",
+    "curious": "neutral",
+    "confident": "neutral",
+    "warm": "happiness",
+    "excited": "happiness",
+    "grateful": "happiness",
+    "sympathetic": "sadness",
+    "apologetic": "sadness",
+    "sad": "sadness",
+    "surprised": "surprise",
+}
+
+
+def tavus_emotion(delivery: list[str] | None) -> TavusEmotion | None:
+    """The replica's emotion for a delivery.
+
+    Args:
+        delivery: A ``TTSTextFrame``'s delivery: empty for the voice's baseline,
+            None when the text carries none.
+
+    Returns:
+        The emotion of the first name in the delivery that has one, "neutral"
+        for the baseline, or None when the emotion should stay as it is.
+    """
+    if delivery is None:
+        return None
+    if not delivery:
+        return "neutral"
+    return next(
+        (TAVUS_DELIVERY_EMOTIONS[name] for name in delivery if name in TAVUS_DELIVERY_EMOTIONS),
+        None,
+    )
+
+
 class TavusCallbacks(BaseModel):
     """Callback handlers for Tavus events.
 
@@ -227,6 +272,8 @@ class TavusTransportClient:
         # Utterance tracking for the realtime-paced send path (see
         # send_realtime_audio_frame/end_realtime_utterance/reset_realtime_utterance).
         self._realtime_inference_id: str | None = None
+        # The emotion last sent to the replica (see update_emotion).
+        self._emotion: TavusEmotion | None = None
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
@@ -456,6 +503,30 @@ class TavusTransportClient:
                 "message_type": "conversation",
                 "event_type": "conversation.interrupt",
                 "conversation_id": self._conversation_id,
+            }
+        )
+        await self.send_message(transport_frame)
+
+    async def update_emotion(self, delivery: list[str] | None) -> None:
+        """Set the replica's emotion to follow the delivery of the bot's speech.
+
+        Sends ``conversation.set_emotion`` when the delivery maps to an emotion
+        other than the one last sent. Tavus applies it on arrival, not in step
+        with the audio it has buffered.
+
+        Args:
+            delivery: The delivery of a ``TTSTextFrame``.
+        """
+        emotion = tavus_emotion(delivery)
+        if emotion is None or emotion == self._emotion:
+            return
+        self._emotion = emotion
+        transport_frame = OutputTransportMessageUrgentFrame(
+            message={
+                "message_type": "conversation",
+                "event_type": "conversation.set_emotion",
+                "conversation_id": self._conversation_id,
+                "properties": {"emotion": emotion},
             }
         )
         await self.send_message(transport_frame)
@@ -857,6 +928,8 @@ class TavusOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions()
+        elif isinstance(frame, TTSTextFrame) and direction == FrameDirection.DOWNSTREAM:
+            await self._client.update_emotion(frame.delivery)
 
     async def _handle_interruptions(self):
         """Handle interruption events by discarding buffered audio and sending interrupt message."""

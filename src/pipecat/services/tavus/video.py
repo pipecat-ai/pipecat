@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -264,6 +265,10 @@ class TavusVideoService(AIService):
                 await self._client.queue_tts_frame(frame)
         elif isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSTextFrame):
+            if self._client and direction == FrameDirection.DOWNSTREAM:
+                await self._client.update_emotion(frame.delivery)
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()

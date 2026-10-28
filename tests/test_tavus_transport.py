@@ -11,7 +11,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pipecat.frames.frames import OutputAudioRawFrame
+from pipecat.frames.frames import (
+    OutputAudioRawFrame,
+    OutputTransportMessageUrgentFrame,
+    TextType,
+    TTSTextFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.tavus.transport import (
     TavusOutputTransport,
     TavusParams,
@@ -190,3 +196,76 @@ async def test_the_bot_name_reaches_the_daily_client(monkeypatch):
     await transport._client.setup(frame_processor_setup(TaskManager()))
 
     assert captured["bot_name"] == "Ada"
+
+
+def _make_emotion_client() -> TavusTransportClient:
+    client = TavusTransportClient(
+        bot_name="Pipecat",
+        callbacks=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+        session=MagicMock(),
+    )
+    client._conversation_id = "conversation"
+    client._client = MagicMock()
+    client._client.send_message = AsyncMock()
+    return client
+
+
+def _sent_emotions(client: TavusTransportClient) -> list[str]:
+    return [
+        call.args[0].message["properties"]["emotion"]
+        for call in client._client.send_message.call_args_list
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_sends_a_set_emotion_app_message():
+    """The replica reads the emotion from a conversation.set_emotion app message."""
+    client = _make_emotion_client()
+
+    await client.update_emotion(["excited", "emphasis"])
+
+    client._client.send_message.assert_awaited_once()
+    frame = client._client.send_message.call_args.args[0]
+    assert isinstance(frame, OutputTransportMessageUrgentFrame)
+    assert frame.message == {
+        "message_type": "conversation",
+        "event_type": "conversation.set_emotion",
+        "conversation_id": "conversation",
+        "properties": {"emotion": "happiness"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_emotion_is_sent_only_when_it_changes():
+    """Words in the same emotion, and names with no emotion, send nothing new."""
+    client = _make_emotion_client()
+
+    for delivery in (
+        ["sad"],
+        ["sad"],
+        ["apologetic"],
+        ["slow"],
+        None,
+        ["surprised"],
+        [],
+        ["calm"],
+    ):
+        await client.update_emotion(delivery)
+
+    assert _sent_emotions(client) == ["sadness", "surprise", "neutral"]
+
+
+@pytest.mark.asyncio
+async def test_a_tts_text_frame_sets_the_emotion_from_its_delivery():
+    transport, client = _make_output_transport()
+    client.update_emotion = AsyncMock()
+    transport.push_frame = AsyncMock()
+
+    await transport.process_frame(
+        TTSTextFrame("Great", text_type=TextType.WORD, delivery=["excited"]),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    client.update_emotion.assert_awaited_once_with(["excited"])
