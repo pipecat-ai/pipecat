@@ -12,7 +12,8 @@ import re
 from collections import deque
 from collections.abc import AsyncGenerator
 from copy import deepcopy
-from typing import Any, Literal
+from dataclasses import dataclass, field, fields
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -41,6 +42,7 @@ from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUse
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 try:
     import ormsgpack
@@ -79,18 +81,55 @@ class FishAudioContextMessage(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+@dataclass
+class FishAudioSTTSettings(STTSettings):
+    """Settings for Fish realtime ASR.
+
+    Updates take effect when Fish acknowledges them with ``configured``.
+    Model and language are fixed for the session; language is detected automatically.
+
+    Parameters:
+        mode: Turn detection mode: ``auto``, ``vad``, or ``manual``. A session
+            must start in ``auto`` to classify non-user turns and backchannels.
+        silence_timeout_ms: Silence timeout in milliseconds. ``None`` selects
+            the mode's default: 5000 for auto, 700 for vad, 60000 for manual.
+        drafts: Request interim transcripts.
+        diarize: Include speaker tags in the raw transcription result. Speaker
+            tags are removed from the frame's plain text; user_id continues to
+            identify the transport participant.
+        ignore_timestamps: Omit word timings. When False, ``result["words"]``
+            contains text and session-relative start_ms/end_ms values.
+        vad_events: Request voice activity scores in ``on_server_event``.
+        eot_events: Request turn-end probabilities in ``on_server_event``.
+            These are diagnostic scores, not turn-boundary decisions.
+        terms: Recognition hints, up to 100 terms of at most 32 characters.
+    """
+
+    mode: Literal["auto", "vad", "manual"] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    silence_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    drafts: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    ignore_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eot_events: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    terms: list[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
-    """Fish Audio realtime ASR in automatic turn-detection mode.
+    """Fish Audio realtime ASR with server-side turn detection.
 
     Send continuous mono PCM, including silence. Fish decides when the user
     takes the turn. Omit local VAD for server-controlled turn boundaries;
     Pipecat holds turn-end decisions while local VAD still detects speech.
     Committed acknowledgments are emitted as :class:`UserBackchannelFrame`
-    rather than transcriptions. Only ``user_turn_taken`` starts a user turn.
+    rather than transcriptions. In auto mode, only ``user_turn_taken`` starts a
+    user turn. In vad/manual mode, ``speech_start`` starts it. Call
+    :meth:`finalize` to end a push-to-talk turn in manual mode.
 
     Bot speaking frames report playback to Fish. This covers actual playback,
     but not the preceding synthesis wait or gaps between playback runs.
-    Completed assistant replies are supplied as conversation context. A new
+    Place the assistant aggregator after the output transport so its completed
+    replies reflect playback. These replies are supplied as conversation context. A new
     connection restores the most recent 32 user and assistant context items;
     audio received while disconnected is dropped.
 
@@ -99,12 +138,14 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
     These notifications do not themselves modify the conversation.
     """
 
-    Settings = STTSettings
+    Settings = FishAudioSTTSettings
+    _settings: FishAudioSTTSettings
     _CONNECTION_TIMEOUT = 10.0
     _SEND_TIMEOUT = 5.0
     _DRAIN_TIMEOUT = 2.0
     _SEND_QUEUE_SIZE = 128
     _SAMPLE_RATES = {8000, 12000, 16000, 22050, 24000, 32000, 44100, 48000}
+    _MODE_TIMEOUTS = {"auto": 5000, "vad": 700, "manual": 60000}
 
     def __init__(
         self,
@@ -112,11 +153,8 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
         api_key: str,
         url: str = "wss://api.fish.audio/v1/asr/realtime",
         sample_rate: int | None = None,
-        settings: STTSettings | None = None,
-        terms: list[str] | None = None,
+        settings: FishAudioSTTSettings | None = None,
         context_history: list[FishAudioContextMessage] | None = None,
-        drafts: bool = False,
-        silence_timeout_ms: int | None = None,
         should_interrupt: bool = True,
         enable_eager_end_of_turn: bool = False,
         transport_destination: str | None = None,
@@ -128,13 +166,9 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
             api_key: Fish Audio API key.
             url: Realtime ASR WebSocket endpoint.
             sample_rate: PCM sample rate, or the pipeline input rate.
-            settings: Initial model settings. Language is detected automatically.
-                Runtime settings updates are not supported.
-            terms: Up to 100 recognition hints of at most 32 characters each.
+            settings: Recognition and turn-detection settings. Runtime updates
+                are acknowledged asynchronously through ``on_server_event``.
             context_history: Prior conversation, oldest first, up to 32 items.
-            drafts: Request interim transcripts. Only drafts from an accepted
-                user turn are forwarded to the pipeline.
-            silence_timeout_ms: Server silence safety timeout, 3,000–60,000 ms.
             should_interrupt: Let the recommended turn strategy interrupt on
                 ``user_turn_taken``.
             enable_eager_end_of_turn: Prepare replies to predicted turn ends
@@ -143,17 +177,24 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
                 describe the agent heard by this user.
             **kwargs: Additional arguments for :class:`WebsocketSTTService`.
         """
-        default_settings = self.Settings(model="transcribe-stream-1", language=None)
+        default_settings = self.Settings(
+            model="transcribe-stream-1",
+            language=None,
+            mode="auto",
+            silence_timeout_ms=None,
+            drafts=False,
+            diarize=False,
+            ignore_timestamps=True,
+            vad_events=False,
+            eot_events=False,
+            terms=[],
+        )
         if settings is not None:
             default_settings.apply_update(settings)
         if default_settings.language is not None:
             raise ValueError("Fish realtime ASR detects language automatically")
-        if terms and (len(terms) > 100 or any(not 1 <= len(term) <= 32 for term in terms)):
-            raise ValueError("Fish accepts up to 100 terms of 1–32 characters each")
         if context_history and len(context_history) > 32:
             raise ValueError("Fish accepts up to 32 context history items")
-        if silence_timeout_ms is not None and not 3000 <= silence_timeout_ms <= 60000:
-            raise ValueError("silence_timeout_ms must be between 3000 and 60000 in auto mode")
 
         super().__init__(
             sample_rate=sample_rate,
@@ -163,12 +204,9 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
         )
         self._api_key = api_key
         self._url = url
-        self._terms = list(terms or [])
         self._history: deque[dict[str, str]] = deque(
             (item.model_dump() for item in context_history or []), maxlen=32
         )
-        self._drafts = drafts
-        self._silence_timeout_ms = silence_timeout_ms
         self._should_interrupt = should_interrupt
         self._transport_destination = transport_destination
         self._agent_speaking = False
@@ -180,6 +218,10 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
         self._session_done = asyncio.Event()
         self._receive_task: asyncio.Task | None = None
         self._send_task: asyncio.Task | None = None
+        self._configure_task: asyncio.Task | None = None
+        self._configure_queue: deque[FishAudioSTTSettings] = deque()
+        self._configure_response: asyncio.Future[dict[str, Any]] | None = None
+        self._pending_settings: FishAudioSTTSettings | None = None
         self._send_queue: asyncio.Queue[tuple[Any, dict[str, Any]]] = asyncio.Queue(
             maxsize=self._SEND_QUEUE_SIZE
         )
@@ -225,10 +267,65 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
             self._graceful_close = False
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Report runtime changes as unsupported and retain session settings."""
-        changed = deepcopy(self._settings).apply_update(delta)
-        self._warn_unhandled_updated_settings(changed.keys())
+        """Queue a negotiated update while audio continues to flow."""
+        values = delta.given_fields()
+        runtime_fields = {
+            item.name
+            for item in fields(self.Settings)
+            if item.name not in ("model", "language", "extra")
+        }
+        unsupported = values.keys() - runtime_fields
+        self._warn_unhandled_updated_settings(unsupported)
+        values = {key: value for key, value in values.items() if key not in unsupported}
+        if not values:
+            return {}
+        self._configure_queue.append(self.Settings.from_mapping(deepcopy(values)))
+        if not self._configure_task or self._configure_task.done():
+            self._configure_task = self.create_task(
+                self._configure_settings(), name="fish-asr-configure"
+            )
         return {}
+
+    async def _configure_settings(self):
+        while self._configure_queue:
+            delta = self._configure_queue.popleft()
+            websocket = None
+            try:
+                await asyncio.wait_for(self._ready.wait(), self._CONNECTION_TIMEOUT)
+                candidate = deepcopy(self._settings)
+                changed = candidate.apply_update(delta)
+                if not changed:
+                    continue
+                if "mode" in changed and "silence_timeout_ms" not in delta.given_fields():
+                    candidate.silence_timeout_ms = None
+                websocket = self._websocket
+                self._pending_settings = candidate
+                self._configure_response = asyncio.get_running_loop().create_future()
+                if not await self._queue_message(
+                    {"type": "configure", **self._config_fields(candidate)}
+                ):
+                    raise ConnectionError("Fish session cannot accept a settings update")
+                await asyncio.wait_for(self._configure_response, self._CONNECTION_TIMEOUT)
+            except (TimeoutError, ConnectionError) as e:
+                await self.push_error(f"Fish settings update was not confirmed: {e}", exception=e)
+                # An unacknowledged change leaves the session's settings unknown.
+                if websocket is self._websocket and websocket is not None:
+                    self._ready.clear()
+                    await websocket.close()
+            finally:
+                self._configure_response = None
+                self._pending_settings = None
+
+    async def finalize(self) -> bool:
+        """Request a commit for the current turn, after queued audio.
+
+        In auto mode, Fish treats the remaining open turn as a user turn.
+        Use this for an explicit user action, such as releasing push-to-talk.
+
+        Returns:
+            Whether the command was queued in a confirmed session.
+        """
+        return await self._queue_message({"type": "finalize"})
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Observe playback notifications and forward frames normally."""
@@ -276,20 +373,36 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
         for offset in range(0, len(items), 32):
             await self._queue_message({"type": "context_add", "items": items[offset : offset + 32]})
 
-    def _session_config(self) -> dict[str, Any]:
+    def _config_fields(self, settings: FishAudioSTTSettings) -> dict[str, Any]:
         turn_detection: dict[str, Any] = {
-            "mode": "auto",
+            "mode": settings.mode,
             "eager": self.eager_end_of_turn_enabled,
+            "silence_timeout_ms": (
+                settings.silence_timeout_ms
+                if settings.silence_timeout_ms is not None
+                else self._MODE_TIMEOUTS.get(cast(str, settings.mode), 5000)
+            ),
         }
-        if self._silence_timeout_ms is not None:
-            turn_detection["silence_timeout_ms"] = self._silence_timeout_ms
         return {
+            "turn_detection": turn_detection,
+            "results": {
+                "drafts": settings.drafts,
+                "diarize": settings.diarize,
+                "ignore_timestamps": settings.ignore_timestamps,
+                "vad_events": settings.vad_events,
+                "eot_events": settings.eot_events,
+            },
+            "context": {"terms": settings.terms},
+        }
+
+    def _session_config(self) -> dict[str, Any]:
+        config = {
             "type": "config",
             "audio": {"format": "pcm_s16le", "sample_rate": self.sample_rate, "channels": 1},
-            "turn_detection": turn_detection,
-            "results": {"drafts": self._drafts, "diarize": False},
-            "context": {"history": list(self._history), "terms": self._terms},
+            **self._config_fields(self._settings),
         }
+        config["context"]["history"] = list(self._history)
+        return config
 
     async def _connect(self):
         await super()._connect()
@@ -332,6 +445,10 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
 
     async def _disconnect(self):
         await super()._disconnect()
+        if self._configure_task:
+            await self.cancel_task(self._configure_task)
+            self._configure_task = None
+        self._configure_queue.clear()
         if self._graceful_close and self._ready.is_set() and self._websocket:
             try:
                 async with asyncio.timeout(self._DRAIN_TIMEOUT):
@@ -354,23 +471,30 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
 
     async def _disconnect_websocket(self):
         self._ready.clear()
+        self._fail_pending_configuration()
         self._clear_send_queue()
         websocket, self._websocket = self._websocket, None
         if websocket:
             await websocket.close()
             await self._call_event_handler("on_disconnected")
 
-    async def _queue_message(self, message: dict[str, Any]) -> None:
+    def _fail_pending_configuration(self):
+        if self._configure_response and not self._configure_response.done():
+            self._configure_response.set_exception(ConnectionError("Fish session disconnected"))
+
+    async def _queue_message(self, message: dict[str, Any]) -> bool:
         if not self._ready.is_set() or self._disconnecting:
-            return
+            return False
         try:
             self._send_queue.put_nowait((self._websocket, message))
+            return True
         except asyncio.QueueFull:
             # A partial audio stream cannot be repaired by replaying old chunks.
             self._ready.clear()
             await self.push_error("Fish realtime ASR send queue filled; reconnecting")
             if self._websocket:
                 self.create_task(self._websocket.close(), name="fish-asr-close-backpressure")
+            return False
 
     async def _send_messages(self):
         while True:
@@ -410,6 +534,7 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
                 await self._process_message(message)
         finally:
             self._ready.clear()
+            self._fail_pending_configuration()
             if not self._disconnecting:
                 await self._cancel_eager_end_of_turn()
                 await self._end_user_turn()
@@ -421,7 +546,7 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
 
     @staticmethod
     def _spoken_text(text: str) -> str:
-        return " ".join(re.sub(r"\[[^\[\]]*\]", "", text).split())
+        return " ".join(re.sub(r"\[[^\[\]]*\]|<\|speaker:\d+\|>", "", text).split())
 
     def _message_language(self, data: dict[str, Any]) -> Language | None:
         code = data.get("language_code")
@@ -455,6 +580,30 @@ class FishAudioSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService):
             if self._user_turn_index != data["turn_index"]:
                 self._user_turn_index = data["turn_index"]
                 await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        elif kind == "speech_start" and self._settings.mode != "auto":
+            self._user_turn_index = data["turn_index"]
+            await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        elif kind == "configured":
+            if self._configure_response and not self._configure_response.done():
+                if data.get("ok") and self._pending_settings:
+                    config = data.get("config", {})
+                    turn_detection = config.get("turn_detection", {})
+                    results = config.get("results", {})
+                    context = config.get("context", {})
+                    accepted = deepcopy(self._pending_settings)
+                    accepted.apply_update(
+                        self.Settings.from_mapping(
+                            {
+                                key: value
+                                for key, value in {**turn_detection, **results, **context}.items()
+                                if key not in ("eager", "history")
+                            }
+                        )
+                    )
+                    await super()._update_settings(accepted)
+                else:
+                    await self.push_error(f"Fish settings update rejected: {data.get('message')}")
+                self._configure_response.set_result(data)
         elif kind == "draft":
             if self._user_turn_index == data["turn_index"]:
                 text = self._spoken_text(data.get("text", ""))

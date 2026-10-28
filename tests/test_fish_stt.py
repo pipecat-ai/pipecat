@@ -7,6 +7,7 @@
 """Fish realtime ASR protocol and conversation integration."""
 
 import asyncio
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -26,10 +27,13 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     LLMContextFrame,
+    LLMFullResponseStartFrame,
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    STTUpdateSettingsFrame,
     TranscriptionFrame,
+    TTSTextFrame,
     UserBackchannelFrame,
     UserStoppedSpeakingFrame,
     UserTurnResponseCancelFrame,
@@ -39,6 +43,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregator,
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
@@ -447,7 +452,11 @@ async def test_session_uses_auto_mode_and_sends_binary_pcm():
         )
     pcm = next(message for _, message in fake.messages if message["type"] == "audio")
     assert pcm["data"] == b"\x00\x00" * 320
-    assert fake.configs[0]["turn_detection"] == {"mode": "auto", "eager": False}
+    assert fake.configs[0]["turn_detection"] == {
+        "mode": "auto",
+        "eager": False,
+        "silence_timeout_ms": 5000,
+    }
     assert fake.configs[0]["results"]["diarize"] is False
     usage = [
         metric.value.audio_seconds
@@ -545,3 +554,253 @@ async def test_session_errors_do_not_disable_a_new_session(error_type):
     assert all(
         call.args[0] != "on_connection_error" for call in stt._call_event_handler.await_args_list
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["vad", "manual"])
+async def test_non_auto_modes_start_on_speech_start_and_commit_without_user_turn_taken(mode):
+    stt = service(settings=FishAudioSTTService.Settings(mode=mode))
+    await stt._handle_message({"type": "speech_start", "turn_index": 0})
+    await stt._handle_message(committed("Hello"))
+    types = [type(frame) for frame in pushed(stt)]
+    assert types.count(ProposedUserStartedSpeakingFrame) == 2
+    assert types.count(ProposedUserStoppedSpeakingFrame) == 2
+    assert types.count(TranscriptionFrame) == 1
+
+
+@pytest.mark.asyncio
+async def test_diarization_and_word_times_preserve_transport_identity_and_raw_result():
+    stt = service(settings=FishAudioSTTService.Settings(diarize=True, ignore_timestamps=False))
+    stt._user_id = "caller"
+    words = [{"text": "Hello", "start_ms": 120, "end_ms": 500}]
+    result = committed("<|speaker:0|>[laughs] Hello <|speaker:1|> there", words=words)
+    await stt._handle_message(result)
+    transcript = next(frame for frame in pushed(stt) if isinstance(frame, TranscriptionFrame))
+    assert transcript.text == "Hello there"
+    assert transcript.user_id == "caller"
+    assert transcript.result == result
+    config = stt._session_config()["results"]
+    assert config["diarize"] is True
+    assert config["ignore_timestamps"] is False
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_scores_do_not_start_or_end_turns():
+    stt = service(settings=FishAudioSTTService.Settings(vad_events=True, eot_events=True))
+    events = [
+        {"type": "vad", "audio_ms": 100, "score": 1.0},
+        {"type": "eot_prob", "audio_ms": 200, "prob": 1.0},
+    ]
+    for event in events:
+        await stt._handle_message(event)
+        stt._call_event_handler.assert_any_await("on_server_event", event)
+    assert pushed(stt) == []
+    assert stt._session_config()["results"]["vad_events"] is True
+    assert stt._session_config()["results"]["eot_events"] is True
+
+
+@pytest.mark.asyncio
+async def test_finalize_is_explicit_and_follows_queued_audio():
+    stt = service(settings=FishAudioSTTService.Settings(mode="manual"))
+    assert not await stt.finalize()
+    stt._websocket = object()
+    stt._ready.set()
+    await stt.process_audio_frame(audio(), FrameDirection.DOWNSTREAM)
+    assert await stt.finalize()
+    messages = [stt._send_queue.get_nowait()[1] for _ in range(stt._send_queue.qsize())]
+    assert [message["type"] for message in messages] == ["audio", "finalize"]
+
+
+class ConfigurableFish(FakeFish):
+    def __init__(self, *, reject_first=False, lose_first_ack=False):
+        super().__init__()
+        self.reject_first = reject_first
+        self.lose_first_ack = lose_first_ack
+        self.updates = 0
+        self.on_configure = None
+
+    async def handle(self, websocket):
+        config = ormsgpack.unpackb(await websocket.recv())
+        self.configs.append(deepcopy(config))
+        connection = len(self.configs)
+        await websocket.send(ormsgpack.packb({"type": "session_started", "config": config}))
+        async for raw in websocket:
+            message = ormsgpack.unpackb(raw)
+            self.messages.append((connection, message))
+            if message["type"] == "configure":
+                self.updates += 1
+                if self.on_configure:
+                    self.on_configure()
+                await asyncio.sleep(0.02)
+                accepted = not (self.reject_first and self.updates == 1)
+                if accepted:
+                    config.update({key: value for key, value in message.items() if key != "type"})
+                if self.lose_first_ack and self.updates == 1:
+                    continue
+                await websocket.send(
+                    ormsgpack.packb(
+                        {
+                            "type": "configured",
+                            "ok": accepted,
+                            "config": config,
+                            "message": "invalid settings" if not accepted else "",
+                        }
+                    )
+                )
+            elif message["type"] == "audio_done":
+                await websocket.send(ormsgpack.packb({"type": "session_done"}))
+                return
+
+
+@pytest.mark.asyncio
+async def test_runtime_updates_are_serialized_and_merge_after_acknowledgment():
+    fake = ConfigurableFish()
+    async with serve(fake.handle, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        stt = FishAudioSTTService(api_key="test", url=f"ws://127.0.0.1:{port}")
+        modes_before_ack = []
+        fake.on_configure = lambda: modes_before_ack.append(stt._settings.mode)
+        await run_test(
+            stt,
+            frames_to_send=[
+                SleepFrame(sleep=0.05),
+                STTUpdateSettingsFrame(delta=stt.Settings(mode="vad", silence_timeout_ms=900)),
+                SleepFrame(sleep=0.005),
+                audio(),
+                STTUpdateSettingsFrame(delta=stt.Settings(terms=["Ada"], ignore_timestamps=False)),
+                SleepFrame(sleep=0.15),
+            ],
+        )
+    updates = [message for _, message in fake.messages if message["type"] == "configure"]
+    assert len(updates) == 2
+    assert modes_before_ack == ["auto", "vad"]
+    assert updates[1]["turn_detection"]["mode"] == "vad"
+    assert updates[1]["turn_detection"]["silence_timeout_ms"] == 900
+    assert updates[1]["context"] == {"terms": ["Ada"]}
+    types = [message["type"] for _, message in fake.messages]
+    assert types.index("audio") < len(types) - 1 - types[::-1].index("configure")
+    assert stt._settings.mode == "vad"
+    assert stt._settings.terms == ["Ada"]
+    assert stt._settings.ignore_timestamps is False
+
+
+@pytest.mark.asyncio
+async def test_rejected_configuration_retains_previous_settings_for_the_next_update():
+    fake = ConfigurableFish(reject_first=True)
+    async with serve(fake.handle, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        stt = FishAudioSTTService(api_key="test", url=f"ws://127.0.0.1:{port}")
+        down, up = await run_test(
+            stt,
+            frames_to_send=[
+                SleepFrame(sleep=0.05),
+                STTUpdateSettingsFrame(delta=stt.Settings(mode="vad")),
+                STTUpdateSettingsFrame(delta=stt.Settings(terms=["Ada"])),
+                SleepFrame(sleep=0.15),
+            ],
+        )
+    updates = [message for _, message in fake.messages if message["type"] == "configure"]
+    assert updates[0]["turn_detection"]["silence_timeout_ms"] == 700
+    assert updates[1]["turn_detection"]["mode"] == "auto"
+    assert updates[1]["turn_detection"]["silence_timeout_ms"] == 5000
+    assert stt._settings.mode == "auto"
+    assert stt._settings.terms == ["Ada"]
+    assert stt.is_usable
+    assert any(isinstance(frame, ErrorFrame) and "rejected" in frame.error for frame in down + up)
+
+
+@pytest.mark.asyncio
+async def test_missing_configured_reconnects_with_last_acknowledged_settings():
+    fake = ConfigurableFish(lose_first_ack=True)
+    async with serve(fake.handle, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        stt = FishAudioSTTService(
+            api_key="test", url=f"ws://127.0.0.1:{port}", reconnect_backoff_min_wait=0.01
+        )
+        stt._CONNECTION_TIMEOUT = 0.08
+        await run_test(
+            stt,
+            frames_to_send=[
+                SleepFrame(sleep=0.05),
+                STTUpdateSettingsFrame(delta=stt.Settings(mode="manual")),
+                SleepFrame(sleep=0.3),
+            ],
+        )
+    assert len(fake.configs) == 2
+    assert fake.configs[1]["turn_detection"]["mode"] == "auto"
+    assert stt._settings.mode == "auto"
+
+
+@pytest.mark.asyncio
+async def test_context_uses_completed_playback_aggregation_including_an_interrupted_reply():
+    fake = FakeFish()
+    context = LLMContext(
+        [
+            {"role": "system", "content": "private instructions"},
+            {"role": "tool", "tool_call_id": "lookup", "content": "private result"},
+            {"role": "assistant", "content": "generated but unplayed reply"},
+        ]
+    )
+    async with serve(fake.handle, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        stt = FishAudioSTTService(api_key="test", url=f"ws://127.0.0.1:{port}")
+        await run_test(
+            Pipeline([stt, LLMAssistantAggregator(context)]),
+            frames_to_send=[
+                SleepFrame(sleep=0.05),
+                LLMContextFrame(context),
+                LLMFullResponseStartFrame(),
+                TTSTextFrame("Already played", text_type="sentence"),
+                SleepFrame(sleep=0.02),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+            ],
+        )
+    updates = [message for _, message in fake.messages if message["type"] == "context_add"]
+    assert updates == [
+        {"type": "context_add", "items": [{"role": "assistant", "text": "Already played"}]}
+    ]
+    assert stt._session_config()["context"]["history"] == [
+        {"role": "assistant", "text": "Already played"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_manual_finalize_completes_a_pipeline_turn_without_auto_classification():
+    messages = []
+
+    async def handle(websocket):
+        await websocket.recv()
+        await websocket.send(ormsgpack.packb({"type": "session_started"}))
+        async for raw in websocket:
+            message = ormsgpack.unpackb(raw)
+            messages.append(message)
+            if message["type"] == "audio":
+                await websocket.send(ormsgpack.packb({"type": "speech_start", "turn_index": 0}))
+            elif message["type"] == "finalize":
+                await websocket.send(ormsgpack.packb(committed("Hello", reason="finalize")))
+            elif message["type"] == "audio_done":
+                await websocket.send(ormsgpack.packb({"type": "session_done"}))
+                return
+
+    context = LLMContext()
+    async with serve(handle, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        stt = FishAudioSTTService(
+            api_key="test",
+            url=f"ws://127.0.0.1:{port}",
+            settings=FishAudioSTTService.Settings(mode="manual"),
+        )
+
+        @stt.event_handler("on_server_event")
+        async def finalize_after_speech_start(service, event):
+            if event["type"] == "speech_start":
+                assert await service.finalize()
+
+        down, _ = await run_test(
+            Pipeline([stt, LLMUserAggregator(context)]),
+            frames_to_send=[SleepFrame(sleep=0.05), audio(), SleepFrame(sleep=0.15)],
+        )
+    assert any(isinstance(frame, LLMContextFrame) for frame in down)
+    assert context.messages == [{"role": "user", "content": "Hello"}]
+    assert [message["type"] for message in messages] == ["audio", "finalize", "audio_done"]
