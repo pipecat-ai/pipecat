@@ -8,6 +8,7 @@
 
 import pytest
 
+from pipecat.adapters.tts.services.azure_adapter import AzureHDExpressionAdapter
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
@@ -31,6 +32,7 @@ from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.processors.tone.tagger._labels import LabelSpace
 
 ADAPTERS = [
+    AzureHDExpressionAdapter,
     CartesiaExpressionAdapter,
     ElevenLabsAudioTagExpressionAdapter,
     FishAudioS2ExpressionAdapter,
@@ -117,6 +119,7 @@ def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter
 @pytest.mark.parametrize(
     "adapter,kinds",
     [
+        (AzureHDExpressionAdapter, ["light breath"]),
         (CartesiaExpressionAdapter, []),
         (ElevenLabsAudioTagExpressionAdapter, ["light breath", "deep breath", "exhale"]),
         (FishAudioS2ExpressionAdapter, ["light breath", "deep breath", "exhale"]),

@@ -99,6 +99,7 @@ class ExpressionDelivery(StrEnum):
     ELATED = "elated"
     EMBARRASSED = "embarrassed"
     EMPATHETIC = "empathetic"
+    ENCOURAGING = "encouraging"
     ENTHUSIASTIC = "enthusiastic"
     ENVIOUS = "envious"
     EUPHORIC = "euphoric"
