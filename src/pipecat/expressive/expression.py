@@ -28,7 +28,7 @@ tags to write.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 
 # The delivery that returns to the voice's baseline. Part of the protocol, so it is
 # a delivery whatever a service declares.
@@ -140,10 +140,11 @@ class ExpressionCapabilities:
         tagger_vocabulary: The names the service performs each of a tagger's
             labels and kinds of breath by (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``,
             ``TAGGER_BREATH_KINDS``), best first, such as ``{"calm": ["calm",
-            "peaceful"], "laugh": ["laughter"]}``. A later name stands in when an
-            expression policy leaves out the ones before it. A label left out is
-            performed by its own name, when the service declares it or accepts
-            free text.
+            "peaceful"], "laugh": ["laughter"]}``. A label written in a tag is
+            sent by the first of these the service performs. A later name stands
+            in when an expression policy leaves out the ones before it. A label
+            left out is performed by its own name, when the service declares it
+            or accepts free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
@@ -154,6 +155,42 @@ class ExpressionCapabilities:
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
     tagger_vocabulary: dict[TaggerLabel, list[str]] = field(default_factory=dict)
+
+    def delivery_name(self, name: str) -> str | None:
+        """The name the service performs a delivery by, or None when it can't.
+
+        A label in ``tagger_vocabulary`` is performed by its first name there the
+        service performs, else by its own; any other name by itself. The service
+        performs a name it declares, or any name when it accepts free text.
+
+        Args:
+            name: The delivery, as written in its tag.
+
+        Returns:
+            The name to send the service.
+        """
+        return self._performed_name(name, self.delivery, self.free_text_delivery)
+
+    def sound_name(self, name: str) -> str | None:
+        """The name the service performs a sound by, or None when it can't.
+
+        Read as :meth:`delivery_name` reads a delivery.
+
+        Args:
+            name: The sound, as written in its tag.
+
+        Returns:
+            The name to send the service.
+        """
+        return self._performed_name(name, self.sounds, self.free_text_sounds)
+
+    def _performed_name(self, name: str, terms: list[ExpressionTerm], free_text: bool):
+        declared = {term.name for term in terms}
+        vocabulary = cast(dict[str, list[str]], self.tagger_vocabulary)
+        for candidate in [*vocabulary.get(name, []), name]:
+            if free_text or candidate in declared:
+                return candidate
+        return None
 
 
 # Slow and fast, as a service that performs them declares them.

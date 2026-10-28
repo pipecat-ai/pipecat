@@ -219,6 +219,38 @@ async def test_word_timestamps_report_each_words_delivery_and_the_sounds_between
     ]
 
 
+class VocabularyAdapter(BracketAdapter):
+    """Performs the universal warm and laugh by names of its own."""
+
+    def capabilities(self):
+        return ExpressionCapabilities(
+            sounds=[ExpressionTerm("laughs")],
+            delivery=[ExpressionTerm("warmly")],
+            tagger_vocabulary={"warm": ["warmly"], "laugh": ["laughs"]},
+        )
+
+
+class VocabularyTTSService(WordTimestampTTSService):
+    expression_adapter_class = VocabularyAdapter
+
+
+@pytest.mark.asyncio
+async def test_universal_names_are_sent_by_the_services_names_and_reported_as_written():
+    tts = VocabularyTTSService()
+    requests = record_requests(tts)
+    down, _ = await run_test(
+        tts, frames_to_send=response("<<warm>> Hi [[laugh]] there."), pipeline_params=EXPRESSIVE
+    )
+
+    assert requests == ["<warmly> Hi <laughs> there."]
+    words = [(f.text_type, f.text, f.delivery) for f in down if isinstance(f, TTSTextFrame)]
+    assert words == [
+        (TextType.WORD, "Hi", ["warm"]),
+        (TextType.EXPRESSION_SOUND, "laugh", None),
+        (TextType.WORD, "there.", ["warm"]),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a_sentence_is_one_segment_shown_without_its_tags():
     down, _ = await run_test(
