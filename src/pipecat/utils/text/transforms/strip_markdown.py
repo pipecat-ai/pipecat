@@ -14,6 +14,10 @@ from pipecat.frames.frames import TextType
 # emphasis rules run. A private-use character, so it cannot occur in the text.
 _STAR = ""
 
+# Wraps the index of an inline code span held out of the later rules, so its
+# content (``__init__``, ``*args``, ``# comment``) is spoken as written.
+_CODE = "\ue001"
+
 
 class StripMarkdown:
     r"""Transform that removes Markdown formatting symbols with no spoken equivalent.
@@ -67,8 +71,14 @@ class StripMarkdown:
         # Images and links, keeping the alt text or label
         if self._strip_urls:
             text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
-        # Inline code
-        text = re.sub(r"`([^`]+)`", r"\1", text)
+        # Inline code, held out of the rules below and put back at the end
+        code_spans: list[str] = []
+
+        def hold_code(match: re.Match[str]) -> str:
+            code_spans.append(match.group(1))
+            return f"{_CODE}{len(code_spans) - 1}{_CODE}"
+
+        text = re.sub(r"`([^`]+)`", hold_code, text)
         # Strikethrough, with the space before it so the words around it still join
         text = re.sub(r"[ \t]?~~(?=\S).+?(?<=\S)~~", "", text)
         # Horizontal rules (---, ***, * * *), before list bullets so a spaced one
@@ -92,6 +102,7 @@ class StripMarkdown:
         text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
         # Blockquotes
         text = re.sub(r"^>\s?", "", text, flags=re.MULTILINE)
+        text = re.sub(f"{_CODE}(\\d+){_CODE}", lambda m: code_spans[int(m.group(1))], text)
         return text.replace(_STAR, "*")
 
 
