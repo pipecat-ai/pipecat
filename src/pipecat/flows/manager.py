@@ -514,10 +514,19 @@ class FlowManager:
                     )
 
                 is_no_response = next_node is NO_RESPONSE
-                if is_no_response or not next_node:
-                    # Node function: stay on the current node.
+                if (is_no_response or not next_node) and self._pending_transition:
+                    # Node function called alongside an edge function whose
+                    # transition waits for this call: complete the transition and
+                    # let the next node respond, instead of answering here too.
                     properties = FunctionCallResultProperties(
-                        run_llm=not is_no_response,
+                        run_llm=False,
+                        on_context_updated=self._check_and_execute_transition,
+                    )
+                elif is_no_response or not next_node:
+                    # Node function: stay on the current node. Leave the LLM run to
+                    # Pipecat, which runs it once every parallel call has finished.
+                    properties = FunctionCallResultProperties(
+                        run_llm=False if is_no_response else None,
                         on_context_updated=None,
                     )
                 else:
