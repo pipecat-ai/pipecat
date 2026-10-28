@@ -13,6 +13,8 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.expression import CORE_DELIVERY, ExpressionDelivery
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -23,9 +25,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -92,16 +94,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async with aiohttp.ClientSession() as session:
         stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-        tts = CartesiaTTSService(
-            api_key=os.environ["CARTESIA_API_KEY"],
-            settings=CartesiaTTSService.Settings(
-                voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+        tts = ElevenLabsDialogueTTSService(
+            api_key=os.environ["ELEVENLABS_API_KEY"],
+            settings=ElevenLabsDialogueTTSService.Settings(
+                voice=os.environ["ELEVENLABS_VOICE_ID"],
+                model="eleven_v4_turbo",
             ),
         )
 
-        llm = GoogleLLMService(
-            api_key=os.environ["GOOGLE_API_KEY"],
-            settings=GoogleLLMService.Settings(
+        llm = OpenAIResponsesLLMService(
+            api_key=os.environ["OPENAI_API_KEY"],
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.6-luna",
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),
         )
@@ -143,7 +147,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 enable_usage_metrics=True,
                 # The LLM writes expression tags into its responses, the TTS
                 # performs them, and the replica's face follows their emotion.
+                # It's offered the core deliveries, plus one for each emotion the
+                # replica shows that the core has none for.
                 enable_expressive_conversation=True,
+                expression_policy=ExpressionPolicy(
+                    delivery=[
+                        *CORE_DELIVERY,
+                        ExpressionDelivery.ANGRY,
+                        ExpressionDelivery.SCARED,
+                        ExpressionDelivery.DISGUSTED,
+                        ExpressionDelivery.CONTEMPTUOUS,
+                    ]
+                ),
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
             processor_unusable_policy=ProcessorUnusablePolicy.END,
