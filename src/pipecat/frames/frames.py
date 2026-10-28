@@ -763,6 +763,12 @@ class LLMContextUserTurnFrame(DataFrame):
     to the context, so it holds what the bot heard: a transcription the
     aggregator leaves out, such as one while the user is muted, is not in it.
 
+    A turn answered from an eager end of turn is also broadcast as a
+    speculation, ahead of the inference that answers it, so processors after
+    the LLM learn the turn before its held response is released. A
+    :class:`UserTurnResponseCancelFrame` withdraws it, and the turn written to
+    the context once it ends can differ from it.
+
     Parameters:
         text: The user's aggregated transcript for this turn.
         timestamp: ISO-8601 timestamp of when the user turn started.
@@ -770,11 +776,15 @@ class LLMContextUserTurnFrame(DataFrame):
             head of the user message, with expressive conversation on and a
             perception producer in the pipeline, or None. Part of expressive
             conversation (alpha).
+        speculation: Whether this is the turn a speculative inference answers,
+            written only to a provisional context and not yet part of the
+            conversation.
     """
 
     text: str
     timestamp: str
     perception: list[PerceptionSignal] | None = None
+    speculation: bool = False
 
 
 @dataclass
@@ -2183,6 +2193,18 @@ class PerceptionMetadataFrame(ServiceMetadataFrame):
     """
 
     perception: PerceptionCapabilities
+
+
+@dataclass
+class ExpressionMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a processor that tags the LLM's replies, once it can.
+
+    A tagger sits between the LLM and the TTS service and writes the
+    expression tags itself. Upstream, the LLM is then taught no tags, so it
+    writes plain words; downstream, the assistant aggregator writes each reply
+    to the context as its words alone, keeping the tags out of what the LLM
+    reads. Part of expressive conversation (alpha).
+    """
 
 
 @dataclass

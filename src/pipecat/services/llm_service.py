@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
+    ExpressionMetadataFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -423,8 +424,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # downstream performs, from its latest TTSMetadataFrame, and the
         # signals perceived of how the user spoke, from the latest
         # PerceptionMetadataFrame, and the pipeline's policy on which tags to
-        # offer and when.
+        # offer and when. A tagger after the LLM, announced by an
+        # ExpressionMetadataFrame, writes the tags instead, so the LLM
+        # is taught none.
         self._expressive = False
+        self._tagged_after_llm = False
         self._tts_expression: ExpressionCapabilities | None = None
         self._perception: PerceptionCapabilities | None = None
         self._expression_policy: ExpressionPolicy | None = None
@@ -826,6 +830,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Each warning is given once, until what is left out changes, so a switch
         to a service with the same gap doesn't repeat it.
         """
+        if self._tagged_after_llm:
+            return
         warning = expression_policy_warning(self._tts_expression, self._expression_policy)
         if warning and warning != self._policy_warning:
             logger.warning(f"{self}: {warning}")
@@ -876,7 +882,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         parts = [base] if base else []
         parts.extend(self._appended_system_instructions)
         expression = expression_instructions(
-            self._tts_expression, self._expression_policy, perception=self._perception
+            None if self._tagged_after_llm else self._tts_expression,
+            self._expression_policy,
+            perception=self._perception,
         )
         if expression:
             parts.append(expression)
@@ -969,6 +977,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._handle_tts_metadata(frame)
         elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
             self._perception = frame.perception
+            self._compose_system_instruction()
+        elif isinstance(frame, ExpressionMetadataFrame) and self._expressive:
+            self._tagged_after_llm = True
             self._compose_system_instruction()
 
         if isinstance(frame, LLMContextFrame):

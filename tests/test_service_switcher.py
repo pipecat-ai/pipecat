@@ -653,19 +653,20 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
         """Metadata from a service outside the switcher reaches the inactive services too.
 
         A member that reads another service's metadata then has it when it
-        becomes active. It arrives once at each member, and goes no further than
-        the switcher.
+        becomes active. It arrives once at each member, and travels on once,
+        from the active member, as it would through that service alone.
         """
         for direction in (FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM):
             services = [MockFrameProcessor("service1"), MockFrameProcessor("service2")]
             switcher = ServiceSwitcher(services)
+            passed_on = [MockMetadataFrame]
 
             await run_test(
                 switcher,
                 frames_to_send=[MockMetadataFrame(service_name="tts")],
                 frames_to_send_direction=direction,
-                expected_down_frames=[],
-                expected_up_frames=[],
+                expected_down_frames=passed_on if direction == FrameDirection.DOWNSTREAM else [],
+                expected_up_frames=passed_on if direction == FrameDirection.UPSTREAM else [],
             )
 
             for service in services:

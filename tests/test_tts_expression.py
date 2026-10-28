@@ -18,6 +18,7 @@ from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities,
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    ExpressionMetadataFrame,
     Frame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
@@ -153,6 +155,26 @@ async def test_apps_get_the_words_while_the_context_keeps_the_tags():
     assert [f.text for f in down if isinstance(f, LLMContextAssistantTurnFrame)] == [
         "It's back up now. Bye!"
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("switched", [False, True], ids=["tts", "tts switcher"])
+async def test_the_context_keeps_only_the_words_when_a_tagger_wrote_the_tags(switched):
+    context = LLMContext()
+    tts = WordTimestampTTSService()
+    if switched:
+        tts = ServiceSwitcher([tts, WordTimestampTTSService()])
+
+    await run_test(
+        Pipeline([tts, LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            ExpressionMetadataFrame(service_name="tagger"),
+            *response(*REPLY),
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert context.messages[-1]["content"] == "It's back up now. Bye!"
 
 
 @pytest.mark.asyncio
