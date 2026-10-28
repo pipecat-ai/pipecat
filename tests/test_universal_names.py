@@ -16,6 +16,7 @@ from pipecat.adapters.tts.services.inworld_adapter import (
     InworldFlashExpressionAdapter,
 )
 from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
+from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapter
 from pipecat.adapters.tts.services.soniox_adapter import SonioxExpressionAdapter
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
@@ -35,6 +36,7 @@ ADAPTERS = [
     InworldExpressionAdapter,
     InworldFlashExpressionAdapter,
     MiniMaxExpressionAdapter,
+    MistralExpressionAdapter,
     SonioxExpressionAdapter,
 ]
 
@@ -119,6 +121,7 @@ def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter
         (InworldExpressionAdapter, ["light breath"]),
         (InworldFlashExpressionAdapter, ["light breath"]),
         (MiniMaxExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (MistralExpressionAdapter, ["light breath"]),
         (SonioxExpressionAdapter, ["exhale"]),
     ],
 )

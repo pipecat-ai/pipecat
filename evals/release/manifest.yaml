@@ -423,6 +423,8 @@ suite:
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-minimax.py
     scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-mistral.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-soniox.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-tone.py
