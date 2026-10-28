@@ -80,7 +80,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
 
     expression_policy = ExpressionPolicy(
-        guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS],
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            ExpressionGuidance.BREATHE,
+        ],
         delivery=[
             "slow",
             "happy",
@@ -104,7 +108,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "giggles",
             "sighs",
             "exhales",
-            "inhales deeply",
+            "short breath",
             "clears throat",
             "gulps",
         ],

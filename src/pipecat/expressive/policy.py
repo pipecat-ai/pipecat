@@ -34,6 +34,10 @@ class ExpressionGuidance(StrEnum):
         SLOW_FOR_DETAILS: Say just what the user may need to write down
             slowly, in a span. For a service that performs the ``slow``
             delivery.
+        BREATHE: Take an audible breath before a long or difficult sentence
+            now and then, at most once a reply. For a service that performs a
+            breath. A tagger reads it as a switch for breaths of its own
+            choosing.
     """
 
     MATCH_STYLE = (
@@ -45,6 +49,13 @@ class ExpressionGuidance(StrEnum):
     SLOW_FOR_DETAILS = (
         "When you give the user something to write down, such as a code, a phone number or an "
         "email address, say just that slowly: Your code is <<slow: A B 7 4 9>>. Anything else?"
+    )
+
+    BREATHE = (
+        "Now and then, take an audible breath before a sentence that is long, carries hard news "
+        "or starts a careful explanation, as a person on the phone does. At most one breath a "
+        "reply, and most replies need none: never before a short or routine sentence, never by "
+        "habit at the start of every reply, and never right after another sound."
     )
 
 
