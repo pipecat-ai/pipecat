@@ -419,6 +419,8 @@ suite:
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-fish.py
     scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-gemini.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-inworld.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-minimax.py

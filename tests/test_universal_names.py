@@ -11,6 +11,7 @@ import pytest
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
+from pipecat.adapters.tts.services.gemini_adapter import Gemini38ExpressionAdapter
 from pipecat.adapters.tts.services.inworld_adapter import (
     InworldExpressionAdapter,
     InworldFlashExpressionAdapter,
@@ -33,6 +34,7 @@ ADAPTERS = [
     CartesiaExpressionAdapter,
     ElevenLabsAudioTagExpressionAdapter,
     FishAudioS2ExpressionAdapter,
+    Gemini38ExpressionAdapter,
     InworldExpressionAdapter,
     InworldFlashExpressionAdapter,
     MiniMaxExpressionAdapter,
@@ -118,6 +120,7 @@ def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter
         (CartesiaExpressionAdapter, []),
         (ElevenLabsAudioTagExpressionAdapter, ["light breath", "deep breath", "exhale"]),
         (FishAudioS2ExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (Gemini38ExpressionAdapter, ["light breath", "deep breath", "exhale"]),
         (InworldExpressionAdapter, ["light breath"]),
         (InworldFlashExpressionAdapter, ["light breath"]),
         (MiniMaxExpressionAdapter, ["light breath", "deep breath", "exhale"]),
