@@ -18,6 +18,7 @@ from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities,
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    ExpressionMetadataFrame,
     Frame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
@@ -153,6 +154,22 @@ async def test_apps_get_the_words_while_the_context_keeps_the_tags():
     assert [f.text for f in down if isinstance(f, LLMContextAssistantTurnFrame)] == [
         "It's back up now. Bye!"
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_context_keeps_only_the_words_when_a_tagger_wrote_the_tags():
+    context = LLMContext()
+
+    await run_test(
+        Pipeline([WordTimestampTTSService(), LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            ExpressionMetadataFrame(service_name="tagger"),
+            *response(*REPLY),
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert context.messages[-1]["content"] == "It's back up now. Bye!"
 
 
 @pytest.mark.asyncio

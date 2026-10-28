@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
+    ExpressionMetadataFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -1844,6 +1845,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._summarizer.add_event_handler("on_summary_applied", self._on_summary_applied)
 
         self._expressive = False
+        # Whether a tagger after the LLM writes the replies' expression tags.
+        self._tagged_after_llm = False
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
@@ -1961,6 +1964,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self.set_tools(normalized_tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, ExpressionMetadataFrame):
+            self._tagged_after_llm = True
+            await self.push_frame(frame, direction)
         elif isinstance(frame, FunctionCallsStartedFrame):
             await self._handle_function_calls_started(frame)
         elif isinstance(frame, FunctionCallInProgressFrame):
@@ -2078,6 +2084,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         aggregation = self.aggregation_string()
         await self.reset()
 
+        # The LLM writes its own replies' tags, or a tagger writes them and
+        # the LLM, never taught them, reads its replies as plain words.
+        if self._expressive and self._tagged_after_llm:
+            aggregation = strip_expression_tags(aggregation)
+            if not aggregation:
+                return ""
         self._context.add_message({"role": "assistant", "content": aggregation})
 
         return aggregation

@@ -25,8 +25,8 @@ class ExpressionGuidance(StrEnum):
     combine with other presets and with the developer's own lines. A preset
     is a string, so it joins with them as written, but stays a member of this
     enum in a policy, apart from a line of the developer's with the same text.
-    An LLM taught no tags, such as one whose replies a tagger marks up, is
-    given the developer's lines without the presets.
+    Presets are about writing tags, so an LLM taught none, such as one whose
+    replies a tagger marks up, isn't given them.
 
     Parameters:
         MATCH_STYLE: Answer in the user's mood and energy, but stay calm with
@@ -54,7 +54,11 @@ class ExpressionPolicy(BaseModel):
     Parameters:
         guidance: Lines on when and how much to express, such as
             ``ExpressionGuidance.MATCH_STYLE`` or the developer's own. They are
-            joined in order, so a later line can refine an earlier one.
+            joined in order, so a later line can refine an earlier one. The
+            developer's lines reach the LLM whenever it has a part to play in
+            expressive conversation: tags to write, or a reading of the user
+            to act on. The presets are about writing tags, so they go to
+            whoever writes them: the LLM, or a tagger in its place.
         delivery: The deliveries to offer, or None for every delivery the TTS
             service declares. Deliveries a service with a fixed list lacks are
             left out; a service that accepts any delivery is offered these as

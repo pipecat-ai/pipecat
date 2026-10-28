@@ -2196,6 +2196,18 @@ class PerceptionMetadataFrame(ServiceMetadataFrame):
 
 
 @dataclass
+class ExpressionMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a processor that tags the LLM's replies, once it can.
+
+    A tagger sits between the LLM and the TTS service and writes the
+    expression tags itself. Upstream, the LLM is then taught no tags, so it
+    writes plain words; downstream, the assistant aggregator writes each reply
+    to the context as its words alone, keeping the tags out of what the LLM
+    reads. Part of expressive conversation (alpha).
+    """
+
+
+@dataclass
 class ServiceSwitcherRequestMetadataFrame(ControlFrame):
     """Request a service to re-emit its metadata frames.
 
