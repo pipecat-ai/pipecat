@@ -19,20 +19,27 @@ from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
+from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoResult
 from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     ExternalFunctionCallsStartedFrame,
     Frame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
+    LLMUpdateSettingsFrame,
+    MetricsFrame,
     StartFrame,
+    TextFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
     RELAY_NOTE,
@@ -41,6 +48,7 @@ from pipecat.pipeline.llm_with_backend import (
     ConnectorContext,
     ExplicitBackendRequestStrategy,
     LLMWithBackend,
+    PredictiveDelegation,
     TranscriptBackendRequestStrategy,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
@@ -201,17 +209,21 @@ def test_the_frontend_guidance_covers_delegation_and_the_backends_messages():
     assert "delegate tool" in guidance
     assert 'marked "Backend:"' in guidance
     assert '"Backend (working):"' in guidance
-    assert "calling it off, in any words" in guidance
+    assert "to start, change or stop its work" in guidance
 
 
 def test_the_strategys_guidance_sits_inside_the_delegating_paragraph():
     guidance = _bound().frontend_instruction or ""
-    assert guidance.startswith("DELEGATING:")
+    assert guidance.startswith("THE BACKEND:")
     delegating = guidance.split("\n\n")[0]
     assert delegating.endswith(" " + TRANSCRIPT_FRONTEND_INSTRUCTION)
     assert "{strategy}" not in guidance
     assert guidance.index("ONE ASSISTANT:") < guidance.index("AFTER DELEGATING:")
     assert guidance.index("AFTER DELEGATING:") < guidance.index("BACKEND MESSAGES:")
+    # The instruction ends by restating its rule for messages about delegated work.
+    assert guidance.split("\n\n")[-1].startswith(
+        "Whatever else a reply does, a user message about work"
+    )
 
 
 def test_an_app_can_replace_the_frontends_pairing_instruction():
@@ -236,7 +248,7 @@ async def test_a_strategy_takes_its_three_texts_as_arguments():
         request_instruction="Do it now.",
     )
     connector = _bound(BackendConnector(request_strategy=strategy))
-    assert "around it. Say it plainly." in (connector.frontend_instruction or "")
+    assert "waiting. Say it plainly." in (connector.frontend_instruction or "")
     assert connector.tool.description == "Hand it over."
     request = await strategy.compose_request(_params(arguments={"request": "Book a taxi"}))
     assert request == "Book a taxi\n\nDo it now."
@@ -623,3 +635,374 @@ async def test_a_local_backend_is_added_before_the_frontend_starts():
         await run_test(service, frames_to_send=[SleepFrame(sleep=0.5)])
 
     assert events[:2] == ["backend_added", "frontend_started"]
+
+
+# ---------------------------------------------------------------------------
+# Predictive delegation
+# ---------------------------------------------------------------------------
+
+
+class _StreamingFrontend(LLMService):
+    """A text frontend whose inference waits before its first output, then streams.
+
+    Its output is two text chunks ``streaming`` seconds apart, or a call to
+    ``call`` with no text. It records whether an inference was cancelled.
+    """
+
+    def __init__(
+        self,
+        *,
+        first_output_after: float,
+        streaming: float = 0.0,
+        call: str | None = None,
+        system_instruction: str = "You are a voice assistant.",
+    ):
+        super().__init__(settings=_settings(system_instruction))
+        self._first_output_after = first_output_after
+        self._streaming = streaming
+        self._call = call
+        self.cancelled = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+        try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await asyncio.sleep(self._first_output_after)
+            if self._call:
+                await self.run_function_calls(
+                    [
+                        FunctionCallFromLLM(
+                            context=frame.context,
+                            tool_call_id="model_call",
+                            function_name=self._call,
+                            arguments={},
+                        )
+                    ]
+                )
+            else:
+                await self.push_frame(LLMTextFrame("Hello"))
+                await asyncio.sleep(self._streaming)
+                await self.push_frame(LLMTextFrame(" there"))
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        finally:
+            await self.push_frame(LLMFullResponseEndFrame())
+
+
+class _ScriptedClassifier(BaseClassifier):
+    """Answers after ``after`` seconds, "yes" for the user messages in ``yes``.
+
+    Records each state it was asked about.
+    """
+
+    def __init__(self, *, after: float, yes: tuple[str, ...] = (), fail: bool = False):
+        super().__init__()
+        self._after = after
+        self._yes = yes
+        self._fail = fail
+        self.states: list = []
+
+    async def _ask(self, state, questions, images=()):
+        self.states.append(state)
+        await asyncio.sleep(self._after)
+        if self._fail:
+            raise ClassifierError("unavailable")
+        last = state["conversation"][-1]["text"]
+        probability = 0.95 if last in self._yes else 0.05
+        return {name: YesNoResult(probability=probability) for name in questions}, None
+
+
+class _RecordingConnector(BackendConnector):
+    """A connector whose ``delegate`` records each call instead of reaching a backend."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.delegated: list[str] = []
+
+    async def delegate(self, params: FunctionCallParams) -> None:
+        self.delegated.append(params.tool_call_id)
+        await params.result_callback(
+            {"status": "delegated"}, properties=FunctionCallResultProperties(run_llm=False)
+        )
+
+
+def _user_turn(text: str = "Fix the flaky test.") -> LLMContextFrame:
+    return LLMContextFrame(LLMContext([{"role": "user", "content": text}]))
+
+
+def _with_predictive_delegation(frontend: LLMService, classifier: BaseClassifier):
+    connector = _RecordingConnector()
+    service = LLMWithBackend(
+        frontend=frontend,
+        backend="backend",
+        connector=connector,
+        predictive_delegation=PredictiveDelegation(classifier),
+    )
+    return service, connector
+
+
+def _texts(frames) -> list[str]:
+    return [f.text for f in frames if isinstance(f, LLMTextFrame)]
+
+
+def _early_delegations(delegated: list[str]) -> list[str]:
+    return [d for d in delegated if d != "model_call"]
+
+
+@pytest.mark.asyncio
+async def test_a_yes_before_the_frontends_first_output_delegates_the_turn_early():
+    frontend = _StreamingFrontend(first_output_after=0.4)
+    classifier = _ScriptedClassifier(after=0.05, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            _user_turn(),
+            TextFrame(text="queued behind the inference"),
+            SleepFrame(sleep=0.6),
+        ],
+    )
+
+    assert len(_early_delegations(connector.delegated)) == 1
+    assert frontend.cancelled
+    assert _texts(down) == []
+    # What was queued behind the cancelled inference is still processed.
+    assert [f.text for f in down if type(f) is TextFrame] == ["queued behind the inference"]
+    # Downstream, the call sits inside the cancelled inference's response, as
+    # a model's own call would.
+    shape = [
+        type(f)
+        for f in down
+        if isinstance(
+            f, (LLMFullResponseStartFrame, FunctionCallInProgressFrame, LLMFullResponseEndFrame)
+        )
+    ]
+    assert shape == [
+        LLMFullResponseStartFrame,
+        FunctionCallInProgressFrame,
+        LLMFullResponseEndFrame,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_yes_after_the_frontends_first_text_leaves_the_turn_to_the_frontend():
+    frontend = _StreamingFrontend(first_output_after=0.05, streaming=0.3)
+    classifier = _ScriptedClassifier(after=0.15, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=0.5)])
+
+    assert connector.delegated == []
+    assert _texts(down) == ["Hello", " there"]
+
+
+@pytest.mark.asyncio
+async def test_a_yes_after_the_frontends_own_delegate_call_adds_nothing():
+    frontend = _StreamingFrontend(first_output_after=0.05, call="delegate")
+    classifier = _ScriptedClassifier(after=0.15, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=0.3)])
+
+    assert connector.delegated == ["model_call"]
+
+
+@pytest.mark.asyncio
+async def test_a_no_leaves_the_turn_to_the_frontend():
+    frontend = _StreamingFrontend(first_output_after=0.2)
+    classifier = _ScriptedClassifier(after=0.05)
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=0.3)])
+
+    assert connector.delegated == []
+    assert _texts(down) == ["Hello", " there"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_classifier_leaves_the_turn_to_the_frontend():
+    frontend = _StreamingFrontend(first_output_after=0.2)
+    classifier = _ScriptedClassifier(after=0.05, fail=True)
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=0.3)])
+
+    assert connector.delegated == []
+    assert _texts(down) == ["Hello", " there"]
+
+
+@pytest.mark.asyncio
+async def test_a_yes_for_a_turn_still_queued_is_carried_out_once_it_starts():
+    frontend = _StreamingFrontend(first_output_after=0.3)
+    classifier = _ScriptedClassifier(after=0.05, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            _user_turn("Tell me a joke."),
+            _user_turn("Fix the flaky test."),
+            SleepFrame(sleep=0.8),
+        ],
+    )
+
+    # The earlier response ran to the end; the queued turn was delegated
+    # early once its inference started.
+    assert _texts(down) == ["Hello", " there"]
+    assert len(_early_delegations(connector.delegated)) == 1
+    assert frontend.cancelled
+
+
+@pytest.mark.asyncio
+async def test_an_interruption_leaves_the_turn_to_the_frontend():
+    frontend = _StreamingFrontend(first_output_after=0.3)
+    classifier = _ScriptedClassifier(after=0.2, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    await run_test(
+        service,
+        frames_to_send=[_user_turn(), SleepFrame(sleep=0.1), InterruptionFrame(), SleepFrame(0.4)],
+    )
+
+    assert connector.delegated == []
+
+
+@pytest.mark.asyncio
+async def test_only_a_new_user_message_is_raced():
+    frontend = _StreamingFrontend(first_output_after=0.0)
+    classifier = _ScriptedClassifier(after=0.0)
+    service, _ = _with_predictive_delegation(frontend, classifier)
+    turn = _user_turn()
+    developer = LLMContextFrame(LLMContext([{"role": "developer", "content": "Greet the user."}]))
+    speculative = LLMContextFrame(
+        LLMContext([{"role": "user", "content": "Fix the"}]), speculation=True
+    )
+
+    await run_test(
+        service,
+        frames_to_send=[developer, speculative, turn, SleepFrame(0.1), turn, SleepFrame(0.1)],
+    )
+
+    # The developer message and the speculative turn aren't raced, and a turn
+    # raced once isn't raced again.
+    assert len(classifier.states) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_turn_is_raced_while_the_frontend_filters_incomplete_turns():
+    frontend = _StreamingFrontend(first_output_after=0.0)
+    classifier = _ScriptedClassifier(after=0.0)
+    service, _ = _with_predictive_delegation(frontend, classifier)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            SleepFrame(0.1),
+            _user_turn(),
+            SleepFrame(0.1),
+        ],
+    )
+
+    assert classifier.states == []
+
+
+@pytest.mark.asyncio
+async def test_the_classifier_sees_the_frontends_instruction_and_the_latest_conversation():
+    frontend = _StreamingFrontend(first_output_after=0.0, system_instruction="You are Pip.")
+    classifier = _ScriptedClassifier(after=0.0)
+    service, _ = _with_predictive_delegation(frontend, classifier)
+    turn = LLMContextFrame(
+        LLMContext(
+            [
+                {"role": "user", "content": "Fix the flaky test."},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "delegate", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "c1", "content": '{"status": "delegated"}'},
+                {"role": "developer", "content": f"Backend: Fixed it.\n\n{RELAY_NOTE}"},
+                {"role": "user", "content": "Thanks!"},
+            ]
+        )
+    )
+
+    await run_test(service, frames_to_send=[turn, SleepFrame(0.1)])
+
+    (state,) = classifier.states
+    # What the frontend's model reads: the app's instruction, then the pairing
+    # instruction appended to it.
+    assert state["assistant"].startswith("You are Pip.\n\nTHE BACKEND:")
+    assert state["conversation"] == [
+        {"speaker": "user", "text": "Fix the flaky test."},
+        {"speaker": "assistant", "action": "handed the request to the backend"},
+        {"speaker": "backend", "text": "Backend: Fixed it."},
+        {"speaker": "user", "text": "Thanks!"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_classifiers_metrics_reach_the_pipeline():
+    frontend = _StreamingFrontend(first_output_after=0.0)
+    classifier = _ScriptedClassifier(after=0.0)
+    service, _ = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(0.1)])
+
+    assert any(isinstance(f, MetricsFrame) for f in down)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("respond_on_delegate", [True, False])
+async def test_an_early_delegation_is_settled_like_the_models_own(respond_on_delegate):
+    backend = BackendLLMWorker(
+        name="backend",
+        llm=_ScriptedLLM([[("text", ">> On it.")]]),
+        context=LLMContext(),
+    )
+    frontend = _StreamingFrontend(first_output_after=1.0)
+    service = LLMWithBackend(
+        frontend=frontend,
+        backend=backend,
+        connector=BackendConnector(respond_on_delegate=respond_on_delegate),
+        predictive_delegation=PredictiveDelegation(
+            _ScriptedClassifier(after=0.05, yes=("Fix the flaky test.",))
+        ),
+    )
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=1.5)])
+
+    (result,) = [f for f in down if isinstance(f, FunctionCallResultFrame)]
+    assert result.result["status"] == "delegated"
+    assert result.properties == FunctionCallResultProperties(run_llm=respond_on_delegate)
+
+
+def test_predictive_delegation_needs_a_text_frontend():
+    with pytest.raises(ValueError, match="text frontend"):
+        LLMWithBackend(
+            frontend=_RealtimeFrontend(),
+            backend="backend",
+            connector=BackendConnector(request_strategy=ExplicitBackendRequestStrategy()),
+            predictive_delegation=PredictiveDelegation(_ScriptedClassifier(after=0.0)),
+        )
+
+
+def test_predictive_delegation_needs_a_delegate_call_with_no_arguments():
+    with pytest.raises(ValueError, match="ExplicitBackendRequestStrategy"):
+        LLMWithBackend(
+            frontend=_TextFrontend(),
+            backend="backend",
+            connector=BackendConnector(request_strategy=ExplicitBackendRequestStrategy()),
+            predictive_delegation=PredictiveDelegation(_ScriptedClassifier(after=0.0)),
+        )
