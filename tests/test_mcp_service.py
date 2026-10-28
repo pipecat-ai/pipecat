@@ -37,13 +37,12 @@ from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
 
-def _tool(name, properties=None, required=None, description="A tool."):
+def _tool(name, properties=None, required=None, description="A tool.", defs=None):
     """Build a fake MCP server tool as returned by ``session.list_tools()``."""
-    return SimpleNamespace(
-        name=name,
-        description=description,
-        input_schema={"properties": properties or {}, "required": required or []},
-    )
+    input_schema = {"properties": properties or {}, "required": required or []}
+    if defs:
+        input_schema["$defs"] = defs
+    return SimpleNamespace(name=name, description=description, input_schema=input_schema)
 
 
 class _FakeServer:
@@ -235,6 +234,82 @@ class TestTools(MCPClientTestBase):
         schema = tools_schema.standard_tools[0]
         self.assertEqual(schema.properties, {"x": {"type": "string"}})
         self.assertEqual(schema.required, ["x"])
+        await client.close()
+
+    async def test_tools_inlines_schema_references(self):
+        order = {
+            "description": "An order.",
+            "properties": {"item": {"type": "string"}},
+            "required": ["item"],
+            "type": "object",
+        }
+        color = {"enum": ["red", "green"], "type": "string"}
+        properties = {
+            "order": {"$ref": "#/$defs/Order", "description": "The order."},
+            "colors": {"type": "array", "items": {"$ref": "#/$defs/Color"}},
+        }
+        client, _ = self._make_client(
+            [_tool("tool_a", properties=properties, defs={"Order": order, "Color": color})]
+        )
+        tools_schema = await client.tools()
+        schema = tools_schema.standard_tools[0]
+        self.assertEqual(
+            schema.properties,
+            {
+                "order": {**order, "description": "The order."},
+                "colors": {"type": "array", "items": color},
+            },
+        )
+        await client.close()
+
+    async def test_tools_accepts_any_value_where_a_schema_recurses(self):
+        node = {
+            "properties": {"children": {"type": "array", "items": {"$ref": "#/$defs/Node"}}},
+            "type": "object",
+        }
+        client, _ = self._make_client(
+            [_tool("tool_a", properties={"root": {"$ref": "#/$defs/Node"}}, defs={"Node": node})]
+        )
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            tools_schema = await client.tools()
+        finally:
+            logger.remove(handler_id)
+        schema = tools_schema.standard_tools[0]
+        self.assertEqual(
+            schema.properties,
+            {
+                "root": {
+                    "properties": {"children": {"type": "array", "items": {}}},
+                    "type": "object",
+                }
+            },
+        )
+        self.assertIn("tool 'tool_a' has a recursive schema (#/$defs/Node)", sink.getvalue())
+        await client.close()
+
+    async def test_tools_skips_a_tool_whose_inlined_schema_is_too_large(self):
+        # Each definition refers to the next one twice, so inlining doubles at each level.
+        defs = {
+            f"D{i}": {
+                "properties": {
+                    "a": {"$ref": f"#/$defs/D{i + 1}"},
+                    "b": {"$ref": f"#/$defs/D{i + 1}"},
+                },
+                "type": "object",
+            }
+            for i in range(20)
+        }
+        defs["D20"] = {"type": "string"}
+        client, _ = self._make_client(
+            [
+                _tool("tool_a", properties={"x": {"$ref": "#/$defs/D0"}}, defs=defs),
+                _tool("tool_b", properties={"y": {"type": "string"}}),
+            ]
+        )
+        tools_schema = await client.tools()
+        self.assertEqual([t.name for t in tools_schema.standard_tools], ["tool_b"])
         await client.close()
 
     async def test_tools_is_idempotent_on_connection(self):
