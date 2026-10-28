@@ -550,6 +550,13 @@ async def test_wordless_alignment_still_advances_the_clock():
     assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)
 
 
+def test_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_service()._pause_frame_processing is True
+    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
 @pytest.mark.asyncio
 async def test_interleaved_contexts_align_words_independently():
     """Alignment for concurrent contexts arrives interleaved on one socket; a word

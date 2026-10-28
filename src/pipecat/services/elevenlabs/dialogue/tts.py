@@ -165,6 +165,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         seed: int | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
+        pause_frame_processing: bool = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs Text-to-Dialogue TTS service.
@@ -179,6 +180,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             text_aggregation_mode: How to aggregate incoming text before
                 synthesis. Only :attr:`TextAggregationMode.SENTENCE` is
                 supported; any other value is ignored with a warning.
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, contexts synthesize
+                concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
+                at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
@@ -196,7 +201,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             enable_logging=enable_logging,
             push_text_frames=False,
             push_stop_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             # Consecutive inputs are concatenated verbatim, so without a
             # trailing space one input's last word merges into the next's first.
             append_trailing_space=True,

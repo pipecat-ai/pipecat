@@ -494,6 +494,13 @@ def _ttd_message(context_id: str, text: str) -> dict:
     }
 
 
+def test_dialogue_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_dialogue_service()._pause_frame_processing is True
+    service = ElevenLabsDialogueTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
 @pytest.mark.asyncio
 async def test_dialogue_interleaved_contexts_align_words_independently():
     """The server generates concurrent contexts together and interleaves their
