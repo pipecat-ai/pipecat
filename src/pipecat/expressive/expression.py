@@ -35,7 +35,6 @@ reports keeps the name as written.
 
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
-from typing import cast
 
 # The delivery that returns to the voice's baseline. Part of the protocol, so it is
 # a delivery whatever a service declares.
@@ -324,8 +323,8 @@ class ExpressionCapabilities:
     def delivery_name(self, name: str) -> str | None:
         """The name the service performs a delivery by, or None when it can't.
 
-        A universal name is performed by its first name in ``service_vocabulary`` the
-        service performs, else by its own; any other name by itself. The service
+        A universal delivery is performed by its first name in ``service_vocabulary``
+        the service performs, else by its own; any other name by itself. The service
         performs a name it declares, or any name when it accepts free text.
 
         Args:
@@ -334,7 +333,7 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.delivery)
+        return self._performed_name(name, self.delivery, ExpressionDelivery)
 
     def sound_name(self, name: str) -> str | None:
         """The name the service performs a sound by, or None when it can't.
@@ -347,12 +346,20 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.sounds)
+        return self._performed_name(name, self.sounds, ExpressionSound)
 
-    def _performed_name(self, name: str, terms: list[ExpressionTerm]):
+    def _performed_name(
+        self,
+        name: str,
+        terms: list[ExpressionTerm],
+        universal: type[ExpressionDelivery] | type[ExpressionSound],
+    ):
         declared = {term.name for term in terms}
-        vocabulary = cast(dict[str, list[str]], self.service_vocabulary)
-        for candidate in [*vocabulary.get(name, []), name]:
+        try:
+            names = self.service_vocabulary.get(universal(name), [])
+        except ValueError:  # Not a universal name, such as an accent.
+            names = []
+        for candidate in [*names, name]:
             if self.allows_free_text or candidate in declared:
                 return candidate
         return None
