@@ -242,12 +242,17 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
+        accent: Accent a multilingual voice speaks the language with (e.g. ``british``).
+            The value must be one the voice itself supports, as listed in the ``accents``
+            field of Cartesia's Get Voice response. Unset lets Cartesia pick the closest
+            accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
     """
 
+    accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
@@ -366,6 +371,7 @@ class CartesiaTTSService(WebsocketTTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -587,6 +593,9 @@ class CartesiaTTSService(WebsocketTTSService):
 
         if self._settings.language:
             msg["language"] = self._settings.language
+
+        if assert_given(self._settings.accent):
+            msg["accent"] = self._settings.accent
 
         generation_config = _generation_config(
             assert_given(self._settings.generation_config), self.expression_settings
@@ -907,6 +916,7 @@ class CartesiaHttpTTSService(TTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -1044,6 +1054,9 @@ class CartesiaHttpTTSService(TTSService):
 
             if self._settings.language:
                 payload["language"] = self._settings.language
+
+            if assert_given(self._settings.accent):
+                payload["accent"] = self._settings.accent
 
             generation_config = _generation_config(
                 assert_given(self._settings.generation_config), self.expression_settings
