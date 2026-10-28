@@ -40,7 +40,7 @@ class InceptionLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Inception's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-    Supports Mercury-2, Inception's diffusion-based reasoning model.
+    Supports Mercury-3, Inception's diffusion-based reasoning model.
     """
 
     # Inception doesn't support the "developer" message role.
@@ -67,7 +67,7 @@ class InceptionLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         default_settings = self.Settings(
-            model="mercury-2",
+            model="mercury-3",
             reasoning_effort=None,
             realtime=True,
         )
