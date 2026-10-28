@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, OutputAudioRawFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
@@ -392,6 +392,73 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(written)
         output._write_audio_sleep.assert_not_awaited()
+
+
+class _ShutdownSerializer(FrameSerializer):
+    """Record shutdown frames and emit a final protocol message."""
+
+    def __init__(self):
+        super().__init__()
+        self.frames = []
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        self.frames.append(frame)
+        return "shutdown"
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        return None
+
+
+class TestDisconnectedSerializerShutdown(unittest.IsolatedAsyncioTestCase):
+    async def test_terminal_frames_reach_serializer_without_sending_after_disconnect(self):
+        for frame_type in (EndFrame, CancelFrame):
+            for state, closing in (
+                (WebSocketState.DISCONNECTED, False),
+                (WebSocketState.DISCONNECTED, True),
+                (WebSocketState.CONNECTED, True),
+            ):
+                with self.subTest(frame=frame_type.__name__, state=state, closing=closing):
+                    websocket = AsyncMock()
+                    websocket.client_state = state
+                    websocket.application_state = WebSocketState.DISCONNECTED
+                    serializer = _ShutdownSerializer()
+                    transport = FastAPIWebsocketTransport(
+                        websocket, FastAPIWebsocketParams(serializer=serializer)
+                    )
+                    transport._client._closing = closing
+                    frame = frame_type()
+
+                    self.assertFalse(await transport.output()._write_frame(frame))
+
+                    self.assertEqual(serializer.frames, [frame])
+                    websocket.send_text.assert_not_awaited()
+                    websocket.send_bytes.assert_not_awaited()
+
+    async def test_disconnected_nonterminal_frames_do_not_reach_serializer(self):
+        websocket = AsyncMock()
+        websocket.client_state = WebSocketState.DISCONNECTED
+        serializer = _ShutdownSerializer()
+        output = FastAPIWebsocketTransport(
+            websocket, FastAPIWebsocketParams(serializer=serializer)
+        ).output()
+
+        self.assertFalse(await output._write_frame(Frame()))
+        self.assertEqual(serializer.frames, [])
+
+    async def test_connected_terminal_frame_is_serialized_and_sent_once(self):
+        websocket = AsyncMock()
+        websocket.client_state = WebSocketState.CONNECTED
+        websocket.application_state = WebSocketState.CONNECTED
+        serializer = _ShutdownSerializer()
+        output = FastAPIWebsocketTransport(
+            websocket, FastAPIWebsocketParams(serializer=serializer)
+        ).output()
+        frame = EndFrame()
+
+        self.assertTrue(await output._write_frame(frame))
+
+        self.assertEqual(serializer.frames, [frame])
+        websocket.send_text.assert_awaited_once_with("shutdown")
 
 
 if __name__ == "__main__":
