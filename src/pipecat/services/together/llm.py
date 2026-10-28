@@ -26,14 +26,17 @@ class TogetherLLMSettings(BaseOpenAILLMService.Settings):
             e.g. ``{"enabled": False}``. A reasoning model such as GLM runs a
             reasoning pass before every answer, which delays the first spoken
             token. ``None`` leaves the choice to the model's own default.
-        reasoning_effort: How much the model reasons before answering, one of
-            "low", "medium" or "high". A model that ignores ``reasoning``, such
-            as ``zai-org/GLM-5.3``, still shortens its reasoning pass for "low".
-            When unset, Together's per-model default applies.
+        reasoning_effort: How much the model reasons before answering. Values
+            vary by model: "low", "medium" and "high" are common,
+            ``zai-org/GLM-5.3`` also takes "max", and some models map a value
+            they don't support onto one they do. Other strings are passed
+            through as-is. GLM-5.3 ignores ``reasoning``, but "low" still
+            shortens its reasoning pass. When unset, Together's per-model
+            default applies.
     """
 
     reasoning: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    reasoning_effort: Literal["low", "medium", "high"] | None | NotGiven = field(
+    reasoning_effort: Literal["low", "medium", "high", "max"] | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
