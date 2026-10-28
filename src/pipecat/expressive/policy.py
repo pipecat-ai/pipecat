@@ -54,7 +54,7 @@ class ExpressionGuidance(StrEnum):
     BREATHE = (
         "Now and then, take an audible breath before a sentence that is long, carries hard news "
         "or starts a careful explanation, as a person on the phone does. At most one breath a "
-        "reply, and most replies need none: never before a short or routine sentence, never by "
+        "reply, and most replies need none: rarely before a short or routine sentence, never by "
         "habit at the start of every reply, and never right after another sound."
     )
 

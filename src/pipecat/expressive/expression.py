@@ -61,8 +61,13 @@ TaggerDelivery = Literal[
     "fast",
 ]
 TaggerSound = Literal["laugh", "chuckle", "sigh", "breath"]
+# The kinds a tagger draws a breath as, each written as a sound of its own.
+TaggerBreathKind = Literal["light breath", "deep breath", "exhale"]
+# A label a tagger writes: a delivery, a sound or the kind a breath is drawn as.
+TaggerLabel = TaggerDelivery | TaggerSound | TaggerBreathKind
 TAGGER_DELIVERY: tuple[TaggerDelivery, ...] = get_args(TaggerDelivery)
 TAGGER_SOUNDS: tuple[TaggerSound, ...] = get_args(TaggerSound)
+TAGGER_BREATH_KINDS: tuple[TaggerBreathKind, ...] = get_args(TaggerBreathKind)
 
 
 class DeliveryScope(Enum):
@@ -133,11 +138,12 @@ class ExpressionCapabilities:
         emphasis: Whether the service can stress words marked ``^^word^^``.
         delivery_scope: Where in a response the service can change delivery.
         tagger_vocabulary: The names the service performs each of a tagger's
-            labels by (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``), best first, such
-            as ``{"calm": ["calm", "peaceful"], "laugh": ["laughter"]}``. A later
-            name stands in when an expression policy leaves out the ones before
-            it. A label left out is performed by its own name, when the service
-            declares it or accepts free text.
+            labels and kinds of breath by (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``,
+            ``TAGGER_BREATH_KINDS``), best first, such as ``{"calm": ["calm",
+            "peaceful"], "laugh": ["laughter"]}``. A later name stands in when an
+            expression policy leaves out the ones before it. A label left out is
+            performed by its own name, when the service declares it or accepts
+            free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
@@ -147,7 +153,7 @@ class ExpressionCapabilities:
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
-    tagger_vocabulary: dict[TaggerDelivery | TaggerSound, list[str]] = field(default_factory=dict)
+    tagger_vocabulary: dict[TaggerLabel, list[str]] = field(default_factory=dict)
 
 
 # Slow and fast, as a service that performs them declares them.

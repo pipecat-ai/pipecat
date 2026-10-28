@@ -7,10 +7,20 @@
 """The processor that tags an LLM's plain replies with Pipecat Tone's tagger."""
 
 import asyncio
+import random
+import time
 from dataclasses import replace
+from pathlib import Path
+from typing import Literal
 
 from loguru import logger
 
+from pipecat.expressive.expression import (
+    TAGGER_BREATH_KINDS,
+    TAGGER_DELIVERY,
+    TAGGER_SOUNDS,
+    TaggerLabel,
+)
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
@@ -30,8 +40,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
 from pipecat.processors.tone._models import load_model
 from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
-from pipecat.processors.tone.tagger._labels import LabelSpace, ReplyRenderer, SentenceLabels
-from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
+from pipecat.processors.tone.tagger._labels import (
+    LabelSpace,
+    ReplyRenderer,
+    SentenceLabels,
+)
+from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
@@ -72,19 +86,46 @@ class PipecatToneTagger(LLMTextProcessor):
     def __init__(
         self,
         *,
+        size: Literal["17m", "32m"] = "17m",
+        revision: str = TAGGER_REVISION,
+        model_dir: str | Path | None = None,
         threads: int = 1,
+        vocabulary: dict[TaggerLabel, list[str]] | None = None,
         **kwargs,
     ):
         """Initialize the processor.
 
         Args:
+            size: The model's size: ``"17m"``, or ``"32m"``, which agrees with its
+                teacher a little more often and takes nearly three times as long a
+                sentence.
+            revision: The model's release on Hugging Face, such as ``"tagger-rc1"``.
+            model_dir: A folder to load the model from instead of downloading one,
+                laid out as a release's ``tagger/17m``, such as for a model you
+                trained or keep yourself. ``size`` and ``revision`` are then unused.
             threads: The CPU threads for one sentence.
+            vocabulary: Names to write first for a delivery, sound or kind of breath
+                (``TAGGER_DELIVERY``, ``TAGGER_SOUNDS``, ``TAGGER_BREATH_KINDS``),
+                best first, such as ``{"warm": ["cheerful"]}``. A name is written only
+                where the TTS service performs it and the policy offers it; elsewhere
+                the service's own names stand. A name written for ``"breath"`` is
+                written for every breath, rather than its kinds' names.
             **kwargs: Additional arguments passed to the parent.
+
+        Raises:
+            ValueError: The vocabulary names a label the tagger doesn't write.
         """
+        labels = (*TAGGER_DELIVERY, *TAGGER_SOUNDS, *TAGGER_BREATH_KINDS)
+        if unknown := sorted(set(vocabulary or {}) - set(labels)):
+            raise ValueError(f"the tagger writes none of {unknown}; it writes {list(labels)}")
         super().__init__(text_aggregator=SkipTagsAggregator(EXPRESSION_TAGS), **kwargs)
         self.add_text_transformer(self._tag, TextType.SENTENCE)
         self._model: PipecatToneTaggerModel | None = None
+        self._size: Literal["17m", "32m"] = size
+        self._revision = revision
+        self._model_dir = Path(model_dir) if model_dir else None
         self._threads = threads
+        self._vocabulary = vocabulary or {}
         self._policy = ExpressionPolicy()
         self._space: LabelSpace | None = None
         self._messages: list[Message] = []
@@ -94,6 +135,8 @@ class PipecatToneTagger(LLMTextProcessor):
         # The labels of the reply being tagged, which the next reply's model
         # reads; None before the first reply.
         self._labels: list[SentenceLabels] | None = None
+        # Draws each breath's kind, seeded by the call so far, so a call replays alike.
+        self._draw = random.Random()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with the pipeline's expression policy, and load its model.
@@ -111,8 +154,15 @@ class PipecatToneTagger(LLMTextProcessor):
             return
         self._model = await load_model(
             self,
-            ("tagger", self._threads),
-            lambda: PipecatToneTaggerModel.download(threads=self._threads),
+            ("tagger", self._model_dir or (self._size, self._revision), self._threads),
+            self._open_model,
+        )
+
+    def _open_model(self) -> PipecatToneTaggerModel:
+        if self._model_dir:
+            return PipecatToneTaggerModel(self._model_dir, threads=self._threads)
+        return PipecatToneTaggerModel.download(
+            size=self._size, revision=self._revision, threads=self._threads
         )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -158,7 +208,9 @@ class PipecatToneTagger(LLMTextProcessor):
             )
             self._space = None
             return
-        self._space = LabelSpace.resolve(frame.expression, self._policy)
+        self._space = LabelSpace.resolve(
+            frame.expression, self._policy, frame.service_name, self._vocabulary
+        )
 
     def _on_user_turn(self, frame: LLMContextUserTurnFrame):
         message = Message("user", frame.text, fold(frame.perception), frame.speculation)
@@ -180,6 +232,7 @@ class PipecatToneTagger(LLMTextProcessor):
         self._turn = TurnContext(list(self._messages), self._space, self._policy, self._labels)
         self._renderer = ReplyRenderer(self._space)
         self._labels = []
+        self._draw = random.Random("\n".join(m.text for m in self._turn.messages))
 
     async def _tag(self, sentence: str, text_type: TextType | str) -> str:
         """Tag one sentence of the reply; text that isn't spoken stays as written."""
@@ -195,31 +248,44 @@ class PipecatToneTagger(LLMTextProcessor):
         plain = " ".join(sentence.split())
         earlier = list(self._sentences)
         self._sentences.append(plain)
+        started = time.perf_counter()
         try:
             labels = await asyncio.to_thread(self._model.tag, self._turn, earlier, plain)
             labels = self._capped_breaths(labels)
-            tagged = self._renderer.render(plain, labels)
+            tagged = self._renderer.render(plain, self._drawn(labels))
         except Exception as e:
             # A transform that raises drops the sentence, so it's spoken untagged.
             await self.push_error(f"{self}: couldn't tag a sentence, spoken untagged: {e}", e)
             return plain
+        logger.debug(f"{self}: tagged in {(time.perf_counter() - started) * 1000:.1f} ms: {tagged}")
+        # The next reply's model reads a breath as a breath, whatever kind it was drawn as.
         self._labels.append(labels)
         return tagged
 
-    def _capped_breaths(self, labels: SentenceLabels) -> SentenceLabels:
-        """The labels without a breath past the model's limit for a reply."""
-        cap = self._model.breaths_per_reply if self._model else None
-        if cap is None:
+    def _drawn(self, labels: SentenceLabels) -> SentenceLabels:
+        """The labels with a breath drawn as a kind the service performs, at the model's shares.
+
+        A breath stays plain when the model or the service has no kinds, or when it's
+        written as a name the developer gave for every breath.
+        """
+        if labels.sound_before != "breath" or not self._model or not self._turn:
             return labels
-        taken = sum(_breaths(sentence) for sentence in self._labels or [])
-        if labels.sound_before == "breath":
-            if taken >= cap:
-                labels = replace(labels, sound_before=None)
-            taken += 1
-        if labels.sound_after == "breath" and taken >= cap:
-            labels = replace(labels, sound_after=None)
-        return labels
+        if self._turn.space.sounds.get("breath") in self._vocabulary.get("breath", []):
+            return labels
+        breaths = self._turn.space.breaths
+        kinds = {k: share for k, share in self._model.breath_kinds.items() if k in breaths}
+        if not kinds:
+            return labels
+        kind = self._draw.choices(list(kinds), list(kinds.values()))[0]
+        return replace(labels, sound_before=kind)
 
+    def _capped_breaths(self, labels: SentenceLabels) -> SentenceLabels:
+        """The labels without a breath past the model's limit for a reply.
 
-def _breaths(labels: SentenceLabels) -> int:
-    return (labels.sound_before == "breath") + (labels.sound_after == "breath")
+        The model breathes only before a sentence.
+        """
+        cap = self._model.breaths_per_reply if self._model else None
+        if cap is None or labels.sound_before != "breath":
+            return labels
+        taken = sum(sentence.sound_before == "breath" for sentence in self._labels or [])
+        return replace(labels, sound_before=None) if taken >= cap else labels
