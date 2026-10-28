@@ -9,7 +9,13 @@
 import pytest
 from pydantic import ValidationError
 
-from pipecat.expressive.expression import SPEED_DELIVERY, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import (
+    SPEED_DELIVERY,
+    ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
+    ExpressionTerm,
+)
 from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
@@ -18,14 +24,15 @@ FIXED = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughter")],
     delivery=[ExpressionTerm("calm"), ExpressionTerm("happy"), ExpressionTerm("sad")],
     pause_range_ms=(100, 5000),
+    service_vocabulary={ExpressionDelivery.WARM: ["happy"], ExpressionSound.LAUGH: ["laughter"]},
 )
 
 FREE_TEXT = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughs"), ExpressionTerm("woo", "an excited whoop")],
     delivery=[ExpressionTerm("excited"), ExpressionTerm("whispers", "speaking in a whisper")],
-    free_text_sounds=True,
-    free_text_delivery=True,
+    allows_free_text=True,
     emphasis=True,
+    service_vocabulary={ExpressionDelivery.WHISPERING: ["whispers"]},
 )
 
 
@@ -34,14 +41,14 @@ def test_nothing_is_taught_for_a_service_that_performs_nothing():
     assert expression_instructions(ExpressionCapabilities()) is None
 
 
-def test_a_fixed_list_is_offered_as_the_only_choices():
+def test_a_service_is_offered_the_core_universal_names_it_performs():
     instructions = expression_instructions(FIXED)
 
     assert (
-        "Use only these deliveries, written exactly as listed: <<calm>>, <<happy>>, <<sad>>."
+        "Use only these deliveries, written exactly as listed: <<calm>>, <<warm>>, <<sad>>."
         in instructions
     )
-    assert "Use only these sounds, written exactly as listed: [[laughter]]." in instructions
+    assert "Use only these sounds, written exactly as listed: [[laugh]]." in instructions
 
 
 def test_a_service_that_performs_delivery_is_taught_spans():
@@ -49,16 +56,33 @@ def test_a_service_that_performs_delivery_is_taught_spans():
 
     assert "- <<calm: A B 7>> speaks just the words after the colon, A B 7" in instructions
     assert "speaks just the words after the colon" not in expression_instructions(
-        ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
+        ExpressionCapabilities(
+            sounds=[ExpressionTerm("laughter")],
+            service_vocabulary={ExpressionSound.LAUGH: ["laughter"]},
+        )
     )
 
 
-def test_a_free_text_list_is_offered_as_examples():
+def test_a_free_text_service_is_offered_universal_names_as_the_only_choices():
     instructions = expression_instructions(FREE_TEXT)
 
-    assert "For example: <<excited>>, <<whispers>> (speaking in a whisper). Others" in instructions
-    assert "For example: [[laughs]], [[woo]] (an excited whoop). Others" in instructions
-    assert "exactly as listed" not in instructions
+    assert (
+        "Use only these deliveries, written exactly as listed: <<calm>>, <<sympathetic>>, "
+        "<<apologetic>>, <<warm>>, <<excited>>, <<surprised>>, <<sad>>, <<grateful>>, "
+        "<<curious>>, <<confident>>, <<slow>>, <<fast>>."
+    ) in instructions
+    assert (
+        "Use only these sounds, written exactly as listed: [[laugh]], [[chuckle]], [[sigh]]."
+        in instructions
+    )
+    assert "Others work too" not in instructions
+
+
+def test_a_breath_is_offered_only_to_a_policy_that_asks_for_breaths():
+    breathes = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
+
+    assert "[[breath]]" not in expression_instructions(FREE_TEXT)
+    assert "[[sigh]], [[breath]]." in expression_instructions(FREE_TEXT, breathes)
 
 
 def test_only_the_controls_a_service_performs_are_taught():
@@ -81,11 +105,14 @@ def test_a_policy_narrows_a_fixed_list_in_its_own_order():
 
 
 def test_a_policy_names_any_delivery_for_a_free_text_service():
-    policy = ExpressionPolicy(delivery=["whispers", "relieved"])
+    policy = ExpressionPolicy(delivery=["whispering", "relieved"])
 
     instructions = expression_instructions(FREE_TEXT, policy)
 
-    assert "For example: <<whispers>> (speaking in a whisper), <<relieved>>." in instructions
+    # A universal name is described as the service describes its own name for it.
+    assert (
+        "exactly as listed: <<whispering>> (speaking in a whisper), <<relieved>>." in instructions
+    )
 
 
 def test_nothing_is_taught_when_a_policy_offers_nothing_performable():
@@ -131,20 +158,18 @@ def test_a_service_that_performs_speed_is_offered_slow_with_when_to_use_it():
     assert instructions.endswith(ExpressionGuidance.SLOW_FOR_DETAILS)
 
 
-def test_a_free_text_service_with_no_examples_is_taught_its_tags():
-    capabilities = ExpressionCapabilities(free_text_delivery=True, free_text_sounds=True)
+def test_a_free_text_service_with_no_examples_is_offered_the_core_names():
+    capabilities = ExpressionCapabilities(allows_free_text=True)
 
     instructions = expression_instructions(capabilities)
 
-    assert "A delivery is a word or short phrase. Write whatever fits." in instructions
+    assert "written exactly as listed: <<calm>>, <<sympathetic>>," in instructions
     assert "- <<slow: A B 7>> speaks just the words after the colon" in instructions
-    assert "[[sound]] makes a sound at that point. Write whatever fits." in instructions
+    assert "written exactly as listed: [[laugh]], [[chuckle]], [[sigh]]." in instructions
 
 
 def test_a_free_text_service_is_taught_none_of_a_kind_the_policy_names_none_of():
-    capabilities = ExpressionCapabilities(
-        free_text_delivery=True, free_text_sounds=True, emphasis=True
-    )
+    capabilities = ExpressionCapabilities(allows_free_text=True, emphasis=True)
 
     instructions = expression_instructions(capabilities, ExpressionPolicy(delivery=[], sounds=[]))
 

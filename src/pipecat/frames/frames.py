@@ -524,7 +524,7 @@ class TTSTextFrame(AggregatedTextFrame):
         segment_id: ID of the AggregatedTextFrame this text is part of, when the
             TTS service built it from one. A word reported by the TTS carries the
             ID of the sentence or other segment it was spoken in.
-        delivery: The delivery this text is spoken in, such as ``["cheerful"]``, and
+        delivery: The delivery this text is spoken in, such as ``["warm"]``, and
             ``"emphasis"`` for stressed words; empty for the voice's baseline.
             None when the text carries no delivery. Each name is as written in
             its tag, so a universal name such as ``warm`` stays universal

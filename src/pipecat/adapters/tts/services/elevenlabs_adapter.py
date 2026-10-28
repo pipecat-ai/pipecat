@@ -109,8 +109,7 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
         return ExpressionCapabilities(
             sounds=list(_AUDIO_TAG_SOUNDS),
             delivery=[*_AUDIO_TAG_DELIVERY, *SPEED_DELIVERY],
-            free_text_sounds=True,
-            free_text_delivery=True,
+            allows_free_text=True,
             pause_range_ms=(100, 3000),
             emphasis=True,
             service_vocabulary={

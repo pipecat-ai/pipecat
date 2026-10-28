@@ -78,8 +78,7 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
         return ExpressionCapabilities(
             sounds=list(_S2_SOUNDS),
             delivery=[*_S2_DELIVERY, *SPEED_DELIVERY],
-            free_text_sounds=True,
-            free_text_delivery=True,
+            allows_free_text=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
             service_vocabulary={

@@ -16,7 +16,7 @@ voice's baseline.
 
 For example::
 
-    <<cheerful>> It's [[laughs]] ^^back^^ up. [[pause 300]] Your code is <<slow: A B 7>>.
+    <<warm>> It's [[laugh]] ^^back^^ up. [[pause 300]] Your code is <<slow: A B 7>>.
 
 A TTS service declares which of these it can perform with
 :class:`ExpressionCapabilities`, and broadcasts them at start in a
@@ -35,7 +35,6 @@ reports keeps the name as written.
 
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
-from typing import cast
 
 # The delivery that returns to the voice's baseline. Part of the protocol, so it is
 # a delivery whatever a service declares.
@@ -209,7 +208,8 @@ class ExpressionSound(StrEnum):
     YAWN = "yawn"
 
 
-# The universal deliveries and sounds Pipecat Tone's tagger writes.
+# The universal deliveries and sounds an LLM is taught when its policy names none, and
+# that Pipecat Tone's tagger writes.
 CORE_DELIVERY: tuple[ExpressionDelivery, ...] = (
     ExpressionDelivery.CALM,
     ExpressionDelivery.SYMPATHETIC,
@@ -260,7 +260,7 @@ class ExpressionTerm:
     """One sound or delivery a TTS service can perform.
 
     Parameters:
-        name: The word written inside the tag, such as ``"laugh"`` or
+        name: The name the service performs it by, such as ``"laughter"`` or
             ``"cheerful"``.
         description: A short line on when to use it, or empty.
     """
@@ -273,28 +273,30 @@ class ExpressionTerm:
 class ExpressionCapabilities:
     """The expression tags a TTS service can perform.
 
-    The LLM is taught these, and tags outside them are left out of the
-    service's speech. A service that can laugh, speak in two moods, pause and
-    stress words declares::
+    The LLM is taught these by their universal names, and tags outside them are
+    left out of the service's speech. A service that can laugh, speak in two
+    moods, pause and stress words declares::
 
         ExpressionCapabilities(
             sounds=[ExpressionTerm("laughs")],
             delivery=[
-                ExpressionTerm("cheerful"),
+                ExpressionTerm("warmly"),
                 ExpressionTerm("calm", "to reassure a worried caller"),
             ],
             pause_range_ms=(100, 3000),
             emphasis=True,
+            service_vocabulary={
+                ExpressionSound.LAUGH: ["laughs"],
+                ExpressionDelivery.WARM: ["warmly"],
+            },
         )
 
     Parameters:
-        sounds: Sounds the service can make at one point, written ``[[name]]``.
-        delivery: Deliveries the service can apply to the words that follow,
-            written ``<<name>>``.
-        free_text_sounds: Whether the service also accepts sounds outside
-            ``sounds``, described in a few words.
-        free_text_delivery: Whether the service also accepts deliveries outside
-            ``delivery``, described in a few words.
+        sounds: Sounds the service can make at one point, by its own names.
+        delivery: Deliveries the service can apply to the words that follow, by
+            its own names.
+        allows_free_text: Whether the service also accepts sounds and deliveries
+            outside ``sounds`` and ``delivery``, described in a few words.
         pause_range_ms: The shortest and longest pause the service can make,
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
@@ -304,15 +306,13 @@ class ExpressionCapabilities:
             best first, where they differ from the universal names, such as
             ``{ExpressionDelivery.WARM: ["content", "happy"]}``. A universal name
             written in a tag is sent by the first of these the service performs.
-            A later name stands in when an expression policy leaves out the ones
-            before it. A universal name left out is performed by its own, when the
-            service declares it or accepts free text.
+            A universal name left out is performed by its own, when the service
+            declares it or accepts free text.
     """
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
     delivery: list[ExpressionTerm] = field(default_factory=list)
-    free_text_sounds: bool = False
-    free_text_delivery: bool = False
+    allows_free_text: bool = False
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
@@ -323,8 +323,8 @@ class ExpressionCapabilities:
     def delivery_name(self, name: str) -> str | None:
         """The name the service performs a delivery by, or None when it can't.
 
-        A universal name is performed by its first name in ``service_vocabulary`` the
-        service performs, else by its own; any other name by itself. The service
+        A universal delivery is performed by its first name in ``service_vocabulary``
+        the service performs, else by its own; any other name by itself. The service
         performs a name it declares, or any name when it accepts free text.
 
         Args:
@@ -333,7 +333,7 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.delivery, self.free_text_delivery)
+        return self._performed_name(name, self.delivery, ExpressionDelivery)
 
     def sound_name(self, name: str) -> str | None:
         """The name the service performs a sound by, or None when it can't.
@@ -346,13 +346,21 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.sounds, self.free_text_sounds)
+        return self._performed_name(name, self.sounds, ExpressionSound)
 
-    def _performed_name(self, name: str, terms: list[ExpressionTerm], free_text: bool):
+    def _performed_name(
+        self,
+        name: str,
+        terms: list[ExpressionTerm],
+        universal: type[ExpressionDelivery] | type[ExpressionSound],
+    ):
         declared = {term.name for term in terms}
-        vocabulary = cast(dict[str, list[str]], self.service_vocabulary)
-        for candidate in [*vocabulary.get(name, []), name]:
-            if free_text or candidate in declared:
+        try:
+            names = self.service_vocabulary.get(universal(name), [])
+        except ValueError:  # Not a universal name, such as an accent.
+            names = []
+        for candidate in [*names, name]:
+            if self.allows_free_text or candidate in declared:
                 return candidate
         return None
 

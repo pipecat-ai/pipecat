@@ -9,7 +9,7 @@
 Part of expressive conversation (alpha). The instruction has three parts: how
 to read what was perceived of how the user spoke, built from a perception
 producer's :class:`~pipecat.expressive.perception.PerceptionCapabilities`; the
-tags the active TTS service can perform, built from its
+tags the active TTS service can perform, by their universal names, built from its
 :class:`~pipecat.expressive.expression.ExpressionCapabilities`; and the
 developer's guidance on how to answer, from an
 :class:`~pipecat.expressive.policy.ExpressionPolicy`.
@@ -17,7 +17,11 @@ developer's guidance on how to answer, from an
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
 
+from collections.abc import Callable, Sequence
+
 from pipecat.expressive.expression import (
+    CORE_DELIVERY,
+    CORE_SOUNDS,
     NEUTRAL_DELIVERY,
     SLOW_DELIVERY,
     ExpressionCapabilities,
@@ -126,19 +130,16 @@ def _tags_section(
     delivery = [
         term
         for term in _offered(
-            capabilities.delivery, policy.delivery, capabilities.free_text_delivery
+            policy.delivery, CORE_DELIVERY, capabilities.delivery_name, capabilities.delivery
         )
         # Taught on its own, as the return to the voice's baseline.
         if term.name != NEUTRAL_DELIVERY
     ]
-    # A service that accepts any delivery is taught the tag even with no
-    # examples to list, unless the policy names none.
-    if delivery or (capabilities.free_text_delivery and policy.delivery is None):
+    if delivery:
         tags.append(
             "- <<delivery>> at the start of a sentence speaks it, and the sentences after it, "
             "with that delivery, until the next delivery tag. <<neutral>> returns to your "
-            "normal voice. A delivery is a word or short phrase. "
-            + _choices("deliveries", delivery, capabilities.free_text_delivery, "<<{}>>")
+            "normal voice. " + _choices("deliveries", delivery, "<<{}>>")
         )
         # A real span shows that its delivery comes before the colon and the
         # words to speak after it. Written with placeholders, a span reads as a
@@ -149,11 +150,14 @@ def _tags_section(
             f"delivery before it, {example}, on top of the delivery around them, and then goes "
             "back to it. Keep it to a few words."
         )
-    sounds = _offered(capabilities.sounds, policy.sounds, capabilities.free_text_sounds)
-    if sounds or (capabilities.free_text_sounds and policy.sounds is None):
+    # A breath is offered by default only to a policy that asks for breaths.
+    core_sounds = [
+        s for s in CORE_SOUNDS if s != "breath" or ExpressionGuidance.BREATHE in policy.guidance
+    ]
+    sounds = _offered(policy.sounds, core_sounds, capabilities.sound_name, capabilities.sounds)
+    if sounds:
         tags.append(
-            "- [[sound]] makes a sound at that point. "
-            + _choices("sounds", sounds, capabilities.free_text_sounds, "[[{}]]")
+            "- [[sound]] makes a sound at that point. " + _choices("sounds", sounds, "[[{}]]")
         )
     if capabilities.emphasis:
         tags.append("- ^^word^^ stresses a word.")
@@ -165,28 +169,34 @@ def _tags_section(
 
 
 def _left_out(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:
-    """The policy's tags the instruction leaves out, each as it would be written."""
-    tags = []
-    for names, declared, free_text, tag in (
-        (policy.delivery, capabilities.delivery, capabilities.free_text_delivery, "<<{}>>"),
-        (policy.sounds, capabilities.sounds, capabilities.free_text_sounds, "[[{}]]"),
-    ):
-        offered = {term.name for term in _offered(declared, names, free_text)}
-        tags += [tag.format(name) for name in names or [] if name not in offered]
-    # Every service returns to its baseline: neutral is taught on its own.
-    return [tag for tag in tags if tag != f"<<{NEUTRAL_DELIVERY}>>"]
+    """The policy's tags the service can't perform, each as it would be written."""
+    tags = [
+        f"<<{name}>>"
+        for name in policy.delivery or []
+        # Every service returns to its baseline: neutral is taught on its own.
+        if name != NEUTRAL_DELIVERY and capabilities.delivery_name(name) is None
+    ]
+    tags += [f"[[{name}]]" for name in policy.sounds or [] if capabilities.sound_name(name) is None]
+    return tags
 
 
 def _offered(
-    declared: list[ExpressionTerm], names: list[str] | None, free_text: bool
+    names: list[str] | None,
+    core: Sequence[str],
+    performed_name: Callable[[str], str | None],
+    declared: list[ExpressionTerm],
 ) -> list[ExpressionTerm]:
-    """The terms to offer: those declared, narrowed to the policy's names."""
-    if names is None:
-        return declared
-    by_name = {term.name: term for term in declared}
-    if free_text:
-        return [by_name.get(name, ExpressionTerm(name)) for name in names]
-    return [by_name[name] for name in names if name in by_name]
+    """The names to offer: the policy's, or the core ones, that the service performs.
+
+    Each is offered with the description the service gives the name it performs it by.
+    """
+    descriptions = {term.name: term.description for term in declared}
+    offered = []
+    for name in core if names is None else names:
+        performed = performed_name(name)
+        if performed is not None:
+            offered.append(ExpressionTerm(name, descriptions.get(performed, "")))
+    return offered
 
 
 def _span_example(delivery: list[ExpressionTerm]) -> str:
@@ -195,18 +205,14 @@ def _span_example(delivery: list[ExpressionTerm]) -> str:
     return names[0] if names and SLOW_DELIVERY not in names else SLOW_DELIVERY
 
 
-def _choices(kind: str, terms: list[ExpressionTerm], free_text: bool, tag: str) -> str:
-    """The terms offered, each written as its tag, as in ``<<calm>>`` or ``[[laughs]]``."""
+def _choices(kind: str, terms: list[ExpressionTerm], tag: str) -> str:
+    """The terms offered, each written as its tag, as in ``<<calm>>`` or ``[[laugh]]``."""
 
     def term_text(term: ExpressionTerm) -> str:
         name = tag.format(term.name)
         return f"{name} ({term.description})" if term.description else name
 
     listed = ", ".join(term_text(term) for term in terms)
-    if free_text and not listed:
-        return "Write whatever fits."
-    if free_text:
-        return f"For example: {listed}. Others work too."
     return (
         f"Use only these {kind}, written exactly as listed: {listed}. "
         "Any other word in a tag is ignored, so if none fits, write no tag."

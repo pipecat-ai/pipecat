@@ -8,12 +8,13 @@
 
 The tagger labels with ``CORE_DELIVERY`` and ``CORE_SOUNDS``, universal names, and draws
 a breath as one of :data:`BREATH_KINDS`. A call's label space holds those its TTS service
-performs and its policy offers, each with the name the service performs it by, and a
-sentence's labels are written as tags in those names.
+performs and its policy offers, each with the name to write: its universal name, or a
+developer's own, which the TTS service then performs by its own name.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import cast
 
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
@@ -22,7 +23,6 @@ from pipecat.expressive.expression import (
     ExpressionCapabilities,
     ExpressionDelivery,
     ExpressionSound,
-    ExpressionTerm,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
@@ -41,7 +41,7 @@ OTHER_SERVICE = "other"
 
 @dataclass(frozen=True)
 class LabelSpace:
-    """The labels a call can use, each with the name its TTS service performs it by.
+    """The labels a call can use, each with the name to write it as.
 
     Parameters:
         deliveries: Delivery label to the name to write, in ``CORE_DELIVERY`` order.
@@ -69,9 +69,11 @@ class LabelSpace:
     ):
         """The labels the service performs and the policy offers.
 
-        A breath, and its kinds, are offered only with ``ExpressionGuidance.BREATHE``
-        in the policy. A breath is offered where the service performs only some of its
-        kinds, written as the first of them for a model that draws no kinds.
+        A label is written as the first of the developer's names for it, then its
+        own, that the service performs and the policy offers. A breath, and its kinds,
+        are offered only with ``ExpressionGuidance.BREATHE`` in the policy. A breath is
+        offered where the service performs only some of its kinds, written as the first
+        of them for a model that draws no kinds.
 
         Args:
             capabilities: What the service performs.
@@ -80,25 +82,14 @@ class LabelSpace:
                 which says which of the services the model was trained with it is.
                 A service given a name of its own, such as ``name="tts"``, is read
                 as one the model wasn't trained with.
-            vocabulary: Names to try first for a label, before the service's own.
+            vocabulary: Names to try first for a label, before its own.
         """
-        # A developer's own names for a label come before the service's.
-        names = dict(capabilities.service_vocabulary)
-        for label, own in (vocabulary or {}).items():
-            names[label] = [*own, *names.get(label, [label])]
+        names = cast(dict[str, list[str]], vocabulary or {})
         sounds = [s for s in CORE_SOUNDS if s != ExpressionSound.BREATH or _breathes(policy)]
-        resolved = _resolve(
-            sounds, capabilities.sounds, capabilities.free_text_sounds, names, policy.sounds
-        )
+        resolved = _resolve(sounds, capabilities.sound_name, names, policy.sounds)
         # Each kind of breath is a sound of its own.
         breaths = (
-            _resolve(
-                BREATH_KINDS,
-                capabilities.sounds,
-                capabilities.free_text_sounds,
-                names,
-                policy.sounds,
-            )
+            _resolve(BREATH_KINDS, capabilities.sound_name, names, policy.sounds)
             if _breathes(policy)
             else {}
         )
@@ -106,13 +97,7 @@ class LabelSpace:
         if breaths and ExpressionSound.BREATH not in resolved:
             resolved[ExpressionSound.BREATH] = next(iter(breaths.values()))
         return cls(
-            deliveries=_resolve(
-                CORE_DELIVERY,
-                capabilities.delivery,
-                capabilities.free_text_delivery,
-                names,
-                policy.delivery,
-            ),
+            deliveries=_resolve(CORE_DELIVERY, capabilities.delivery_name, names, policy.delivery),
             sounds=resolved,
             emphasis=capabilities.emphasis,
             tts=_trained_service(service_name),
@@ -213,22 +198,19 @@ def _breathes(policy: ExpressionPolicy) -> bool:
 
 def _resolve(
     labels: Iterable[ExpressionDelivery | ExpressionSound],
-    terms: list[ExpressionTerm],
-    free_text: bool,
-    vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]],
+    performed_name: Callable[[str], str | None],
+    vocabulary: dict[str, list[str]],
     offered: list[str] | None,
 ) -> dict[str, str]:
     """Each label's first name the service performs and the policy offers.
 
-    The service's names for a label are tried best first, then, for a service that
-    accepts free text, the label itself. A label with no such name is left out.
+    The developer's names for a label are tried best first, then the label itself.
+    A label with no such name is left out.
     """
-    declared = {term.name for term in terms}
     resolved = {}
     for label in labels:
-        names = vocabulary.get(label, [label])
-        for name in [*names, label] if free_text else names:
-            if (free_text or name in declared) and (offered is None or name in offered):
+        for name in [*vocabulary.get(label, []), label]:
+            if performed_name(name) is not None and (offered is None or name in offered):
                 resolved[label] = name
                 break
     return resolved

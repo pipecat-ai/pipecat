@@ -22,14 +22,14 @@ it streams tokens. :class:`ExpressionFormatter` handles each unit in three steps
 
 With ElevenLabs' audio tags, one sentence goes::
 
-    "<<cheerful>> It's [[laughs]] ^^back^^ up."       the unit, as the LLM wrote it
+    "<<warm>> It's [[laugh]] ^^back^^ up."            the unit, as the LLM wrote it
     "It's back up."                                   shown to clients
-    "[cheerful] It's [laughs] BACK up."               sent to ElevenLabs
+    "[warmly] It's [laughs] BACK up."                 sent to ElevenLabs
 
 The tags are:
 
 - ``<<name>>`` sets the delivery the words after it are spoken in, until the
-  next delivery tag replaces it or the response ends: ``<<cheerful>>``. A name
+  next delivery tag replaces it or the response ends: ``<<warm>>``. A name
   may be several words, as in ``<<soft tone>>``. ``<<neutral>>`` returns to the
   voice's baseline. Delivery tags aren't segments of their own; the delivery
   travels with the :class:`Text` it applies to.
@@ -42,10 +42,9 @@ The tags are:
 - ``[[name]]`` is a :class:`Sound`, a sound at one point (``[[laugh]]``), or a
   :class:`Pause`, ``[[pause N]]`` for N milliseconds.
 
-The brackets decide a tag's kind, except that a name the TTS service declares
-keeps its declared kind in the other kind's brackets: ``[[cheerful]]`` still
-sets a delivery when ``cheerful`` is a declared delivery. LLMs make that slip,
-so it is logged as a warning.
+The brackets decide a tag's kind, except that a universal name, or one the TTS
+service declares, keeps its kind in the other kind's brackets: ``[[warm]]``
+still sets a delivery. LLMs make that slip, so it is logged as a warning.
 
 The formatter reads whole units: an aggregator such as
 :class:`~pipecat.utils.text.skip_tags_aggregator.SkipTagsAggregator`, given
@@ -111,7 +110,7 @@ _PAUSE = re.compile(r"pause (\d+)")
 # Spaces and tabs left side by side where a tag stood between two words.
 _SPACES = re.compile(r"[ \t]{2,}")
 # Punctuation that closes the words before a tag written ahead of it, as in
-# "Hi [[laughs]], there.": what ends a sentence, and what ends a clause.
+# "Hi [[laugh]], there.": what ends a sentence, and what ends a clause.
 _CLOSING_PUNCTUATION = re.compile(
     "["
     + re.escape(
@@ -150,7 +149,7 @@ class Text:
 class Sound:
     """A sound made at one point, such as a laugh.
 
-    In ``"Hi [[laughs]]"``, the sound is ``Sound("laughs", 3, 13)``.
+    In ``"Hi [[laugh]]"``, the sound is ``Sound("laugh", 3, 12)``.
 
     Parameters:
         name: The sound, as written between the brackets.
@@ -224,10 +223,10 @@ class ExpressionSpan:
     :class:`~pipecat.expressive.spoken.SpokenExpression` can find which spans
     the text of each word the service reports covers.
 
-    For ``"<<calm>> Hi [[laughs]]"`` on a service that performs both::
+    For ``"<<calm>> Hi [[laugh]]"`` on a service that performs both::
 
         ExpressionSpan(8, 12, delivery=["calm"])
-        ExpressionSpan(12, 22, sound=(TextType.EXPRESSION_SOUND, "laughs"))
+        ExpressionSpan(12, 21, sound=(TextType.EXPRESSION_SOUND, "laugh"))
 
     Parameters:
         start: Where the stretch starts in the unit.
@@ -276,21 +275,21 @@ class ExpressionFormatter:
 
         formatter = ExpressionFormatter(lambda: adapter, owner=tts)
 
-        segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
-        # [Text(" It's ", ("cheerful",), 12, 18),
-        #  Sound("laughs", 18, 28),
-        #  Text(" ", ("cheerful",), 28, 29),
-        #  Text("back", ("cheerful", "emphasis"), 31, 35),
-        #  Text(" up.", ("cheerful",), 37, 41)]
+        segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
+        # [Text(" It's ", ("warm",), 8, 14),
+        #  Sound("laugh", 14, 23),
+        #  Text(" ", ("warm",), 23, 24),
+        #  Text("back", ("warm", "emphasis"), 26, 30),
+        #  Text(" up.", ("warm",), 32, 36)]
 
         ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
         # "It's back up."
 
         request = await formatter.format(segments, TextType.SENTENCE, transform, trim)
-        # With ElevenLabs' audio tags, request.text is "[cheerful] It's [laughs] BACK up."
+        # With ElevenLabs' audio tags, request.text is "[warmly] It's [laughs] BACK up."
 
         formatter.parse("Bye.")
-        # [Text("Bye.", ("cheerful",), 0, 4)]: still cheerful
+        # [Text("Bye.", ("warm",), 0, 4)]: still warm
     """
 
     def __init__(self, adapter: Callable[[], BaseExpressionAdapter], owner: object):
@@ -400,12 +399,12 @@ class ExpressionFormatter:
 
         This is the unit's text as clients are shown it::
 
-            segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
+            segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
             ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
             # "It's back up."
 
         A tag is removed as a word, with the space before it when punctuation
-        follows it: ``"Hi [[laughs]], there."`` is shown as ``"Hi, there."``,
+        follows it: ``"Hi [[laugh]], there."`` is shown as ``"Hi, there."``,
         and so is ``"Hi <<calm>>, there."``.
 
         Args:
@@ -438,20 +437,21 @@ class ExpressionFormatter:
         formatted by the adapter in the delivery the service can perform. Sounds
         and pauses are formatted at their places, except that punctuation
         written after one stays with the words before it, where the service
-        reports it: ``"Hi [[laughs]], there."`` asks for ``"Hi, [laughs]
+        reports it: ``"Hi [[laugh]], there."`` asks ElevenLabs for ``"Hi, [laughs]
         there."``. A sentence's request is trimmed at both ends; a streamed
         token keeps its spacing.
 
-        Cartesia has no emphasis, and changes emotion only between sentences::
+        Cartesia names ``warm`` and ``laugh`` its own way, has no emphasis, and
+        changes emotion only between sentences::
 
-            segments = formatter.parse("<<happy>> It's [[laughter]] ^^back^^ up.")
+            segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
             request = await formatter.format(segments, TextType.SENTENCE, transform, trim)
-            # text:  '<emotion value="happy"/> It's [laughter] back up.'
-            # spans: [ExpressionSpan(9, 15, delivery=["happy"]),
-            #           ExpressionSpan(15, 27, sound=(EXPRESSION_SOUND, "laughter")),
-            #           ExpressionSpan(27, 28, delivery=["happy"]),
-            #           ExpressionSpan(30, 34, delivery=["happy"]),  # no emphasis
-            #           ExpressionSpan(36, 40, delivery=["happy"])]
+            # text:  '<emotion value="content"/> It's [laughter] back up.'
+            # spans: [ExpressionSpan(8, 14, delivery=["warm"]),
+            #           ExpressionSpan(14, 23, sound=(EXPRESSION_SOUND, "laugh")),
+            #           ExpressionSpan(23, 24, delivery=["warm"]),
+            #           ExpressionSpan(26, 30, delivery=["warm"]),  # no emphasis
+            #           ExpressionSpan(32, 36, delivery=["warm"])]
 
         Args:
             segments: The unit's segments.
@@ -668,7 +668,7 @@ def strip_expression_tags(text: str) -> str:
     The words are spaced as clients are shown them, as by
     :meth:`ExpressionFormatter.shown_text`::
 
-        strip_expression_tags("<<cheerful>> It's [[laughs]] ^^back^^ up.")
+        strip_expression_tags("<<warm>> It's [[laugh]] ^^back^^ up.")
         # "It's back up."
 
     Args:
@@ -701,7 +701,7 @@ def _service_delivery(
 def _move_closing_punctuation(segments: list[Segment]) -> list[Segment]:
     """Move punctuation written after a tag onto the words before it.
 
-    A tag is removed as a word, so in ``"Hi [[laughs]], there."`` the comma
+    A tag is removed as a word, so in ``"Hi [[laugh]], there."`` the comma
     closes ``"Hi"``: the words become ``"Hi,"`` and ``" there."``, with the
     sound between them, where a service reports the comma. Words follow a tag
     when a sound or pause stands between them, or the gap a delivery tag left.

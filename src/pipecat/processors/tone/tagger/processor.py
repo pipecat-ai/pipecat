@@ -109,7 +109,7 @@ class PipecatToneTagger(LLMTextProcessor):
                 (``CORE_DELIVERY``, ``CORE_SOUNDS``, ``BREATH_KINDS``), best first,
                 such as ``{ExpressionDelivery.WARM: ["cheerful"]}``. A name is written
                 only where the TTS service performs it and the policy offers it;
-                elsewhere the service's own names stand. A name written for
+                elsewhere the label's universal name stands. A name written for
                 ``ExpressionSound.BREATH`` is written for every breath, rather than its
                 kinds' names.
             **kwargs: Additional arguments passed to the parent.
