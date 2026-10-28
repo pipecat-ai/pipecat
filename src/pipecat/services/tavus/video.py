@@ -39,6 +39,7 @@ from pipecat.transports.tavus.transport import (
     TavusCallbacks,
     TavusParams,
     TavusTransportClient,
+    tavus_policy_warning,
 )
 from pipecat.utils.time import nanoseconds_to_seconds
 
@@ -121,6 +122,8 @@ class TavusVideoService(AIService):
             setup: Frame processor setup configuration.
         """
         await super().setup(setup)
+        if warning := tavus_policy_warning(setup.expression_policy):
+            logger.warning(f"{self}: {warning}")
         callbacks = TavusCallbacks(
             on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,

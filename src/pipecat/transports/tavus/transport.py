@@ -32,6 +32,7 @@ from pipecat.expressive.expression import (
     SLOW_DELIVERY,
     ExpressionDelivery,
 )
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     BotConnectedFrame,
     BotStoppedSpeakingFrame,
@@ -161,17 +162,52 @@ class TavusEmotion(StrEnum):
     CONTEMPT = "contempt"
 
 
-# The Tavus emotion each universal delivery converts to. Any other delivery, and the
-# voice's baseline, converts to neutral.
+# The Tavus emotion each universal delivery converts to: Pipecat's core deliveries
+# (``CORE_DELIVERY``), and the plainest deliveries of each emotion the core leaves
+# out. Any other delivery, and the voice's baseline, converts to neutral.
 TAVUS_DELIVERY_EMOTIONS: dict[str, TavusEmotion] = {
+    ExpressionDelivery.CALM: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.CURIOUS: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.CONFIDENT: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.WARM: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.EXCITED: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.GRATEFUL: TavusEmotion.HAPPINESS,
     ExpressionDelivery.HAPPY: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.SYMPATHETIC: TavusEmotion.SADNESS,
+    ExpressionDelivery.APOLOGETIC: TavusEmotion.SADNESS,
     ExpressionDelivery.SAD: TavusEmotion.SADNESS,
-    ExpressionDelivery.ANGRY: TavusEmotion.ANGER,
-    ExpressionDelivery.SCARED: TavusEmotion.FEAR,
     ExpressionDelivery.SURPRISED: TavusEmotion.SURPRISE,
+    ExpressionDelivery.ANGRY: TavusEmotion.ANGER,
+    ExpressionDelivery.FEARFUL: TavusEmotion.FEAR,
+    ExpressionDelivery.SCARED: TavusEmotion.FEAR,
     ExpressionDelivery.DISGUSTED: TavusEmotion.DISGUST,
     ExpressionDelivery.CONTEMPTUOUS: TavusEmotion.CONTEMPT,
 }
+
+
+def tavus_policy_warning(policy: ExpressionPolicy | None) -> str | None:
+    """Tell which of an expression policy's deliveries the replica has no emotion for.
+
+    The replica shows neutral when the bot speaks in one of them.
+
+    Args:
+        policy: The pipeline's expression policy, or None for the default.
+
+    Returns:
+        The warning, or None when the replica has an emotion for every delivery
+        the policy offers, as it has for the core ones offered without a list.
+        Slow and fast set the pace, not an emotion, so they're never named.
+    """
+    if policy is None or policy.delivery is None:
+        return None
+    handled = {*TAVUS_DELIVERY_EMOTIONS, SLOW_DELIVERY, FAST_DELIVERY}
+    unmapped = [name for name in policy.delivery if name not in handled]
+    if not unmapped:
+        return None
+    return (
+        f"the Tavus replica has no emotion for {', '.join(unmapped)} from the expression "
+        "policy, so it shows neutral when the bot speaks in them"
+    )
 
 
 class TavusCallbacks(BaseModel):
@@ -263,8 +299,6 @@ class TavusTransportClient:
         self._realtime_inference_id: str | None = None
         # The emotion last sent to the replica (see update_emotion).
         self._emotion: TavusEmotion | None = None
-        # Deliveries with no Tavus emotion, already warned about.
-        self._unconverted_deliveries: set[str] = set()
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
@@ -534,16 +568,9 @@ class TavusTransportClient:
             ),
             None,
         )
-        return self._tavus_emotion(mood) if mood else TavusEmotion.NEUTRAL
-
-    def _tavus_emotion(self, delivery: str) -> TavusEmotion:
-        """The Tavus emotion a delivery converts to, neutral with a warning once when there's none."""
-        if delivery not in TAVUS_DELIVERY_EMOTIONS and delivery not in self._unconverted_deliveries:
-            self._unconverted_deliveries.add(delivery)
-            logger.warning(
-                f"Tavus has no emotion for the delivery '{delivery}', so the replica shows neutral"
-            )
-        return TAVUS_DELIVERY_EMOTIONS.get(delivery, TavusEmotion.NEUTRAL)
+        if mood is None:
+            return TavusEmotion.NEUTRAL
+        return TAVUS_DELIVERY_EMOTIONS.get(mood, TavusEmotion.NEUTRAL)
 
     async def encode_audio_and_send(
         self, audio: bytes, done: bool, inference_id: str | None
@@ -863,6 +890,8 @@ class TavusOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+        if warning := tavus_policy_warning(setup.expression_policy):
+            logger.warning(f"{self}: {warning}")
 
         await self._client.setup(setup)
         await self._client.join()

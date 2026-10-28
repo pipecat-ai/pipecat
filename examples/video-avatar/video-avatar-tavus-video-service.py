@@ -13,7 +13,6 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -31,7 +30,6 @@ from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
-from pipecat.transports.tavus.transport import TAVUS_DELIVERY_EMOTIONS
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -145,9 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 enable_usage_metrics=True,
                 # The LLM writes expression tags into its responses, the TTS
                 # performs them, and the replica's face follows their emotion.
-                # It's offered the deliveries Tavus has an emotion for.
                 enable_expressive_conversation=True,
-                expression_policy=ExpressionPolicy(delivery=list(TAVUS_DELIVERY_EMOTIONS)),
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
             processor_unusable_policy=ProcessorUnusablePolicy.END,

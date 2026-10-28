@@ -13,7 +13,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from pipecat.expressive.expression import EMPHASIS_DELIVERY, ExpressionDelivery
+from pipecat.expressive.expression import (
+    CORE_DELIVERY,
+    EMPHASIS_DELIVERY,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    ExpressionDelivery,
+)
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
@@ -23,11 +30,13 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.tavus.transport import (
+    TAVUS_DELIVERY_EMOTIONS,
     TavusEmotion,
     TavusOutputTransport,
     TavusParams,
     TavusTransport,
     TavusTransportClient,
+    tavus_policy_warning,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -288,18 +297,34 @@ async def test_every_tavus_emotion_converts_from_a_delivery():
     assert sorted(_sent_emotions(client)) == sorted(TavusEmotion)
 
 
+def test_every_core_delivery_but_pace_has_an_emotion():
+    """The LLM is offered the core deliveries by default, and the tagger writes only them."""
+    assert set(CORE_DELIVERY) - {SLOW_DELIVERY, FAST_DELIVERY} <= set(TAVUS_DELIVERY_EMOTIONS)
+
+
 @pytest.mark.asyncio
-async def test_a_delivery_tavus_has_no_emotion_for_shows_neutral_and_warns_once():
+async def test_a_delivery_tavus_has_no_emotion_for_shows_neutral():
     client = _make_emotion_client()
 
-    with _captured_warnings() as warnings:
-        await client.update_emotion([ExpressionDelivery.HAPPY])
-        await client.update_emotion([ExpressionDelivery.WARM])
-        await client.update_emotion([ExpressionDelivery.WARM, EMPHASIS_DELIVERY])
+    await client.update_emotion([ExpressionDelivery.WARM])
+    await client.update_emotion([ExpressionDelivery.NERVOUS, EMPHASIS_DELIVERY])
 
     assert _sent_emotions(client) == [TavusEmotion.HAPPINESS, TavusEmotion.NEUTRAL]
-    assert len(warnings) == 1
-    assert "'warm'" in warnings[0]
+
+
+def test_the_default_deliveries_all_have_an_emotion():
+    """Without a delivery list, the LLM is offered the core deliveries, each mapped."""
+    assert tavus_policy_warning(None) is None
+    assert tavus_policy_warning(ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE])) is None
+
+
+def test_a_policy_delivery_with_no_emotion_is_warned_about():
+    warning = tavus_policy_warning(
+        ExpressionPolicy(delivery=["calm", "slow", "frustrated", "nervous"])
+    )
+
+    assert warning is not None
+    assert "no emotion for frustrated, nervous from the expression policy" in warning
 
 
 @pytest.mark.asyncio
