@@ -103,6 +103,11 @@ def format_inworld_pronunciation(word: str, ipa: str) -> str | None:
     return f"/{ipa}/" if ipa and " " not in ipa else None
 
 
+def _supports_sentence_boundary(model: str | NotGiven | None) -> bool:
+    # The SENTENCE_BOUNDARY auto-mode strategy is only served by inworld-tts-2 models.
+    return isinstance(model, str) and model.startswith("inworld-tts-2")
+
+
 @dataclass
 class InworldTTSSettings(TTSSettings):
     """Settings for InworldTTSService and InworldHttpTTSService.
@@ -686,7 +691,10 @@ class InworldTTSService(WebsocketTTSService):
                     Use ``text_aggregation_mode`` instead.
                     Will be removed in 2.0.0.
 
-            text_aggregation_mode: How to aggregate text before synthesis.
+            text_aggregation_mode: How to aggregate text before synthesis. With
+                ``TextAggregationMode.TOKEN``, auto mode and an ``inworld-tts-2``
+                model, tokens are streamed as they arrive and the server splits
+                them at sentence boundaries.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
@@ -1202,13 +1210,25 @@ class InworldTTSService(WebsocketTTSService):
             create_config["applyTextNormalization"] = self._apply_text_normalization
         if self._auto_mode is not None:
             create_config["autoMode"] = self._auto_mode
+        sentence_boundary = bool(
+            self._auto_mode
+            and self._is_streaming_tokens
+            and _supports_sentence_boundary(self._settings.model)
+        )
+        if sentence_boundary:
+            # Let the server find sentence boundaries in the raw token stream.
+            create_config["autoModeStrategy"] = "SENTENCE_BOUNDARY"
         if self._timestamp_transport_strategy is not None:
             create_config["timestampTransportStrategy"] = self._timestamp_transport_strategy
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
         create_config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"] or 3000
-        create_config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"] or 250
+        buffer_char_threshold = self._buffer_settings["bufferCharThreshold"]
+        # With SENTENCE_BOUNDARY the threshold also cuts long sentences, so only a set
+        # value is sent and the server default applies otherwise.
+        if buffer_char_threshold or not sentence_boundary:
+            create_config["bufferCharThreshold"] = buffer_char_threshold or 250
 
         create_config["timestampType"] = self._timestamp_type
 
