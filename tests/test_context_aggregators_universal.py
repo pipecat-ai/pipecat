@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import contextlib
 import io
 import json
 import unittest
@@ -16,6 +18,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -874,6 +877,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         should_stop = None
         stop_message = None
         timeout = None
+        turn_stopped = asyncio.Event()
 
         @user_aggregator.event_handler("on_user_turn_started")
         async def on_user_turn_started(aggregator, strategy):
@@ -885,21 +889,30 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             nonlocal should_stop, stop_message
             should_stop = True
             stop_message = message
+            turn_stopped.set()
 
         @user_aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
             nonlocal timeout
             timeout = True
 
-        pipeline = Pipeline([user_aggregator])
+        class EndAfterTurnStop(FrameProcessor):
+            """Holds EndFrame until the turn stops, so ending the session can't stop it first."""
 
-        # Transcript arrives before VAD stop, then we wait for user_speech_timeout
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, EndFrame):
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(turn_stopped.wait(), timeout=5.0)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([EndAfterTurnStop(), user_aggregator])
+
+        # Transcript arrives before VAD stop, then user_speech_timeout ends the turn.
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             VADUserStoppedSpeakingFrame(),
-            # Wait for user_speech_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
             pipeline,
