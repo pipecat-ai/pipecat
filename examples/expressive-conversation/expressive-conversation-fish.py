@@ -95,10 +95,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "whispering",
         ],
         sounds=[
-            "laughing",
-            "chuckling",
-            "sighing",
-            "gasping",
+            "laugh",
+            "chuckle",
+            "sigh",
+            "gasp",
             "clear throat",
         ],
     )
