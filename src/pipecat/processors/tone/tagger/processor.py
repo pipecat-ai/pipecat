@@ -18,7 +18,8 @@ from loguru import logger
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
     CORE_SOUNDS,
-    UniversalName,
+    ExpressionDelivery,
+    ExpressionSound,
 )
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
@@ -90,7 +91,7 @@ class PipecatToneTagger(LLMTextProcessor):
         revision: str = TAGGER_REVISION,
         model_dir: str | Path | None = None,
         threads: int = 1,
-        vocabulary: dict[UniversalName, list[str]] | None = None,
+        vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]] | None = None,
         **kwargs,
     ):
         """Initialize the processor.
@@ -105,11 +106,12 @@ class PipecatToneTagger(LLMTextProcessor):
                 trained or keep yourself. ``size`` and ``revision`` are then unused.
             threads: The CPU threads for one sentence.
             vocabulary: Names to write first for a delivery, sound or kind of breath
-                (``CORE_DELIVERY``, ``CORE_SOUNDS``, ``BREATH_KINDS``),
-                best first, such as ``{"warm": ["cheerful"]}``. A name is written only
-                where the TTS service performs it and the policy offers it; elsewhere
-                the service's own names stand. A name written for ``"breath"`` is
-                written for every breath, rather than its kinds' names.
+                (``CORE_DELIVERY``, ``CORE_SOUNDS``, ``BREATH_KINDS``), best first,
+                such as ``{ExpressionDelivery.WARM: ["cheerful"]}``. A name is written
+                only where the TTS service performs it and the policy offers it;
+                elsewhere the service's own names stand. A name written for
+                ``ExpressionSound.BREATH`` is written for every breath, rather than its
+                kinds' names.
             **kwargs: Additional arguments passed to the parent.
 
         Raises:
@@ -270,7 +272,9 @@ class PipecatToneTagger(LLMTextProcessor):
         """
         if labels.sound_before != "breath" or not self._model or not self._turn:
             return labels
-        if self._turn.space.sounds.get("breath") in self._vocabulary.get("breath", []):
+        if self._turn.space.sounds.get("breath") in self._vocabulary.get(
+            ExpressionSound.BREATH, []
+        ):
             return labels
         breaths = self._turn.space.breaths
         kinds = {k: share for k, share in self._model.breath_kinds.items() if k in breaths}

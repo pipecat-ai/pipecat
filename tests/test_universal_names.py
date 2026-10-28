@@ -15,9 +15,9 @@ from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapt
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
     CORE_SOUNDS,
-    UNIVERSAL_DELIVERY,
-    UNIVERSAL_SOUNDS,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
@@ -55,21 +55,21 @@ def tagger_name(
 
 
 def test_a_name_is_either_a_delivery_or_a_sound():
-    assert not set(UNIVERSAL_DELIVERY) & set(UNIVERSAL_SOUNDS)
+    assert not set(ExpressionDelivery) & set(ExpressionSound)
 
 
 def test_the_core_names_are_universal():
-    assert set(CORE_DELIVERY) <= set(UNIVERSAL_DELIVERY)
-    assert set(CORE_SOUNDS) <= set(UNIVERSAL_SOUNDS)
+    assert set(CORE_DELIVERY) <= set(ExpressionDelivery)
+    assert set(CORE_SOUNDS) <= set(ExpressionSound)
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
 def test_a_service_names_universal_names_by_names_it_performs(adapter):
     capabilities = adapter().capabilities()
 
-    assert set(capabilities.service_names) <= {*UNIVERSAL_DELIVERY, *UNIVERSAL_SOUNDS}
+    assert set(capabilities.service_names) <= {*ExpressionDelivery, *ExpressionSound}
     for universal, names in capabilities.service_names.items():
-        if universal in UNIVERSAL_DELIVERY:
+        if universal in ExpressionDelivery:
             free_text, declared = capabilities.free_text_delivery, capabilities.delivery
             performed = capabilities.delivery_name(universal)
         else:
@@ -84,7 +84,7 @@ def test_a_service_names_universal_names_by_names_it_performs(adapter):
 def test_every_voice_a_service_declares_is_reached_by_a_universal_name(adapter):
     capabilities = adapter().capabilities()
     reached = {name for names in capabilities.service_names.values() for name in names}
-    universal = {*UNIVERSAL_DELIVERY, *UNIVERSAL_SOUNDS}
+    universal = {*ExpressionDelivery, *ExpressionSound}
 
     for term in [*capabilities.delivery, *capabilities.sounds]:
         assert term.name in universal | reached | NOT_A_VOICE, term.name
@@ -148,7 +148,7 @@ def test_a_policy_that_names_only_a_kind_still_breathes(offered, breaths):
 def test_the_best_name_the_policy_offers_is_chosen():
     capabilities = ExpressionCapabilities(
         delivery=[ExpressionTerm("calm"), ExpressionTerm("reassuring")],
-        service_names={"calm": ["calm", "reassuring"]},
+        service_names={ExpressionDelivery.CALM: ["calm", "reassuring"]},
     )
 
     assert tagger_name(capabilities, "calm") == "calm"
@@ -160,7 +160,7 @@ def test_a_label_left_out_is_performed_by_its_own_name_when_the_service_declares
     capabilities = ExpressionCapabilities(
         sounds=[ExpressionTerm("laughter")],
         delivery=[ExpressionTerm("calm")],
-        service_names={"laugh": ["laughter"]},
+        service_names={ExpressionSound.LAUGH: ["laughter"]},
     )
 
     assert tagger_name(capabilities, "calm") == "calm"
@@ -171,7 +171,9 @@ def test_a_label_left_out_is_performed_by_its_own_name_when_the_service_declares
 
 def test_a_service_that_takes_free_text_also_takes_the_label_last():
     capabilities = ExpressionCapabilities(
-        free_text_sounds=True, free_text_delivery=True, service_names={"warm": ["warmly"]}
+        free_text_sounds=True,
+        free_text_delivery=True,
+        service_names={ExpressionDelivery.WARM: ["warmly"]},
     )
 
     assert tagger_name(capabilities, "grateful") == "grateful"
@@ -181,7 +183,8 @@ def test_a_service_that_takes_free_text_also_takes_the_label_last():
 
 def test_a_name_the_service_doesnt_perform_is_passed_over():
     capabilities = ExpressionCapabilities(
-        delivery=[ExpressionTerm("happy")], service_names={"warm": ["content", "happy"]}
+        delivery=[ExpressionTerm("happy")],
+        service_names={ExpressionDelivery.WARM: ["content", "happy"]},
     )
 
     assert tagger_name(capabilities, "warm") == "happy"

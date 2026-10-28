@@ -14,7 +14,13 @@ import pytest
 from loguru import logger
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import (
+    DeliveryScope,
+    ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
+    ExpressionTerm,
+)
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -226,7 +232,7 @@ class VocabularyAdapter(BracketAdapter):
         return ExpressionCapabilities(
             sounds=[ExpressionTerm("laughs")],
             delivery=[ExpressionTerm("warmly")],
-            service_names={"warm": ["warmly"], "laugh": ["laughs"]},
+            service_names={ExpressionDelivery.WARM: ["warmly"], ExpressionSound.LAUGH: ["laughs"]},
         )
 
 

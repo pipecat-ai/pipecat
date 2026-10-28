@@ -20,14 +20,18 @@ from pipecat.expressive.expression import (
     CORE_SOUNDS,
     NEUTRAL_DELIVERY,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
-    UniversalName,
-    UniversalSound,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
 # The kinds the tagger draws a breath as, each a universal sound.
-BREATH_KINDS: tuple[UniversalSound, ...] = ("light breath", "deep breath", "exhale")
+BREATH_KINDS: tuple[ExpressionSound, ...] = (
+    ExpressionSound.LIGHT_BREATH,
+    ExpressionSound.DEEP_BREATH,
+    ExpressionSound.EXHALE,
+)
 
 # The services the model was trained with, by the names it reads for them. It reads
 # "other" for any other.
@@ -61,7 +65,7 @@ class LabelSpace:
         capabilities: ExpressionCapabilities,
         policy: ExpressionPolicy,
         service_name: str = "",
-        vocabulary: dict[UniversalName, list[str]] | None = None,
+        vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]] | None = None,
     ):
         """The labels the service performs and the policy offers.
 
@@ -82,9 +86,7 @@ class LabelSpace:
         names = dict(capabilities.service_names)
         for label, own in (vocabulary or {}).items():
             names[label] = [*own, *names.get(label, [label])]
-        sounds: list[UniversalSound] = [
-            s for s in CORE_SOUNDS if s != "breath" or _breathes(policy)
-        ]
+        sounds = [s for s in CORE_SOUNDS if s != ExpressionSound.BREATH or _breathes(policy)]
         resolved = _resolve(
             sounds, capabilities.sounds, capabilities.free_text_sounds, names, policy.sounds
         )
@@ -101,8 +103,8 @@ class LabelSpace:
             else {}
         )
         # A breath is last in CORE_SOUNDS, so adding it keeps the order.
-        if breaths and "breath" not in resolved:
-            resolved["breath"] = next(iter(breaths.values()))
+        if breaths and ExpressionSound.BREATH not in resolved:
+            resolved[ExpressionSound.BREATH] = next(iter(breaths.values()))
         return cls(
             deliveries=_resolve(
                 CORE_DELIVERY,
@@ -210,10 +212,10 @@ def _breathes(policy: ExpressionPolicy) -> bool:
 
 
 def _resolve(
-    labels: Iterable[UniversalName],
+    labels: Iterable[ExpressionDelivery | ExpressionSound],
     terms: list[ExpressionTerm],
     free_text: bool,
-    vocabulary: dict[UniversalName, list[str]],
+    vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]],
     offered: list[str] | None,
 ) -> dict[str, str]:
     """Each label's first name the service performs and the policy offers.

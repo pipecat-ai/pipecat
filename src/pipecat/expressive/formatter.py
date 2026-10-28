@@ -75,10 +75,10 @@ from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.expressive.expression import (
     EMPHASIS_DELIVERY,
     NEUTRAL_DELIVERY,
-    UNIVERSAL_DELIVERY,
-    UNIVERSAL_SOUNDS,
     DeliveryScope,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
 )
 from pipecat.frames.frames import TextType
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
@@ -354,10 +354,10 @@ class ExpressionFormatter:
         capabilities = self.capabilities()
         declared = capabilities or ExpressionCapabilities()
         sounds = {term.name for term in declared.sounds} | {
-            name for name in UNIVERSAL_SOUNDS if declared.sound_name(name)
+            name for name in ExpressionSound if declared.sound_name(name)
         }
         delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)} | {
-            name for name in UNIVERSAL_DELIVERY if declared.delivery_name(name)
+            name for name in ExpressionDelivery if declared.delivery_name(name)
         }
         segments: list[Segment] = []
         position = 0
