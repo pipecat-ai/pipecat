@@ -118,7 +118,7 @@ async def test_the_tagger_announces_itself_both_ways_at_start(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_labels_are_written_in_the_names_the_tts_performs(monkeypatch):
+async def test_labels_are_written_by_their_universal_names(monkeypatch):
     model = FakeTaggerModel(
         {
             "Congratulations!": SentenceLabels(delivery="warm", sound_after="laugh"),
@@ -131,7 +131,7 @@ async def test_labels_are_written_in_the_names_the_tts_performs(monkeypatch):
     )
 
     assert tagged == [
-        "<<content>> Congratulations! [[laughter]]",
+        "<<warm>> Congratulations! [[laugh]]",
         "<<neutral>> Your code is <<slow: A B 7>>.",
     ]
 
@@ -172,18 +172,6 @@ async def test_the_policy_narrows_the_names_written(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_policy_that_leaves_out_a_name_gets_the_next_best(monkeypatch):
-    model = FakeTaggerModel({"Don't worry.": SentenceLabels(delivery="calm")})
-    policy = ExpressionPolicy(delivery=["reassuring", "warmly"])
-
-    tagged = await _tagged(
-        monkeypatch, model, ELEVENLABS, *_reply("Don't worry."), params=_expressive(policy)
-    )
-
-    assert tagged == ["<<reassuring>> Don't worry."]
-
-
-@pytest.mark.asyncio
 async def test_a_sentence_that_cant_be_tagged_is_spoken_untagged_with_an_error(monkeypatch):
     model = FakeTaggerModel(error=RuntimeError("boom"))
 
@@ -213,11 +201,11 @@ async def test_a_breath_is_offered_only_with_the_breathe_preset(monkeypatch):
 
     without, with_breathe = (turn.space for turn, _, _ in model.calls)
     assert "breath" not in without.sounds and without.breaths == {}
-    assert with_breathe.sounds["breath"] == "quick breath"
+    assert with_breathe.sounds["breath"] == "breath"
     assert with_breathe.breaths == {
-        "light breath": "quick breath",
+        "light breath": "light breath",
         "deep breath": "deep breath",
-        "exhale": "exhales softly",
+        "exhale": "exhale",
     }
 
 
@@ -268,29 +256,22 @@ async def test_breaths_past_the_models_limit_for_a_reply_are_dropped(monkeypatch
         monkeypatch, model, ELEVENLABS, *_reply("One. Two."), params=_expressive(policy)
     )
 
-    assert tagged == ["[[quick breath]] One.", "Two."]
+    assert tagged == ["[[breath]] One.", "Two."]
 
 
 BREATHE = _expressive(ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE]))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kind,written",
-    [
-        ("light breath", "quick breath"),
-        ("deep breath", "deep breath"),
-        ("exhale", "exhales softly"),
-    ],
-)
-async def test_each_breath_is_drawn_as_a_kind_at_the_models_shares(monkeypatch, kind, written):
+@pytest.mark.parametrize("kind", ["light breath", "deep breath", "exhale"])
+async def test_each_breath_is_drawn_as_a_kind_at_the_models_shares(monkeypatch, kind):
     model = FakeTaggerModel(
         {"One.": SentenceLabels(sound_before="breath")}, breath_kinds={kind: 1.0}
     )
 
     tagged = await _tagged(monkeypatch, model, ELEVENLABS, *_reply("One."), params=BREATHE)
 
-    assert tagged == [f"[[{written}]] One."]
+    assert tagged == [f"[[{kind}]] One."]
 
 
 @pytest.mark.asyncio
@@ -313,9 +294,9 @@ async def test_a_call_draws_its_breaths_alike_each_time(monkeypatch):
 
     assert first == second
     assert {tagged.split("]]")[0] for tagged in first} <= {
-        "[[quick breath",
+        "[[light breath",
         "[[deep breath",
-        "[[exhales softly",
+        "[[exhale",
     }
 
 
@@ -336,12 +317,12 @@ async def test_a_policy_that_names_one_breath_draws_only_that_kind(monkeypatch):
     model = FakeTaggerModel(
         {f"Reply {n}.": breath for n in range(6)}, breath_kinds={"light breath": 0.5, "exhale": 0.5}
     )
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["quick breath"])
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["light breath"])
     replies = [frame for n in range(6) for frame in _reply(f"Reply {n}.")]
 
     tagged = await _tagged(monkeypatch, model, ELEVENLABS, *replies, params=_expressive(policy))
 
-    assert tagged == [f"[[quick breath]] Reply {n}." for n in range(6)]
+    assert tagged == [f"[[light breath]] Reply {n}." for n in range(6)]
 
 
 @pytest.mark.asyncio
@@ -350,13 +331,13 @@ async def test_a_policy_that_names_only_a_kind_still_breathes(monkeypatch):
     model = FakeTaggerModel(
         {"One.": breath}, breath_kinds={"light breath": 0.5, "deep breath": 0.5}
     )
-    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["inhales deeply"])
+    policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=["deep breath"])
 
     tagged = await _tagged(
         monkeypatch, model, ELEVENLABS, *_reply("One."), params=_expressive(policy)
     )
 
-    assert tagged == ["[[inhales deeply]] One."]
+    assert tagged == ["[[deep breath]] One."]
 
 
 @pytest.mark.asyncio
@@ -737,9 +718,9 @@ async def test_a_vocabulary_names_a_label_first_where_the_service_performs_it(mo
     # ElevenLabs takes free text, so it performs both names.
     assert elevenlabs.deliveries["warm"] == "cheerful"
     assert elevenlabs.sounds["laugh"] == "giggles"
-    # Cartesia performs neither, so its own names stand.
-    assert cartesia.deliveries["warm"] == "content"
-    assert cartesia.sounds["laugh"] == "laughter"
+    # Cartesia performs neither, so the universal names stand.
+    assert cartesia.deliveries["warm"] == "warm"
+    assert cartesia.sounds["laugh"] == "laugh"
 
 
 def test_a_vocabulary_for_a_label_the_tagger_doesnt_write_is_refused():

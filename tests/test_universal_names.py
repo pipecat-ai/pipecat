@@ -91,100 +91,79 @@ def test_every_voice_a_service_declares_is_reached_by_a_universal_name(adapter):
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
-def test_every_core_name_the_tagger_writes_is_one_the_service_performs(adapter):
+def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter):
     capabilities = adapter().capabilities()
 
     for name in CORE_DELIVERY:
-        assert tagger_name(capabilities, name) in (capabilities.delivery_name(name), None)
+        assert tagger_name(capabilities, name) == (
+            name if capabilities.delivery_name(name) else None
+        )
     for name in CORE_SOUNDS:
-        assert tagger_name(capabilities, name) in (capabilities.sound_name(name), None)
+        assert tagger_name(capabilities, name) == (name if capabilities.sound_name(name) else None)
 
 
 @pytest.mark.parametrize(
-    "adapter,names",
+    "adapter,kinds",
     [
-        (CartesiaExpressionAdapter, {}),
-        (
-            ElevenLabsAudioTagExpressionAdapter,
-            {
-                "light breath": "quick breath",
-                "deep breath": "deep breath",
-                "exhale": "exhales softly",
-            },
-        ),
-        (
-            FishAudioS2ExpressionAdapter,
-            {"light breath": "inhaling", "deep breath": "deep breath", "exhale": "exhaling"},
-        ),
-        (
-            MiniMaxExpressionAdapter,
-            {"light breath": "breath", "deep breath": "inhale", "exhale": "exhale"},
-        ),
+        (CartesiaExpressionAdapter, []),
+        (ElevenLabsAudioTagExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (FishAudioS2ExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (MiniMaxExpressionAdapter, ["light breath", "deep breath", "exhale"]),
     ],
 )
-def test_each_kind_of_breath_has_a_name_where_the_service_breathes(adapter, names):
+def test_each_kind_of_breath_the_service_performs_is_offered(adapter, kinds):
     policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE])
 
-    assert LabelSpace.resolve(adapter().capabilities(), policy).breaths == names
+    space = LabelSpace.resolve(adapter().capabilities(), policy)
+
+    assert space.breaths == {kind: kind for kind in kinds}
 
 
 @pytest.mark.parametrize(
-    "offered,breaths",
+    "offered,kinds",
     [
-        (["deep breath"], {"deep breath": "deep breath"}),
-        (["sighs", "inhales deeply"], {"deep breath": "inhales deeply"}),
-        (["short breath", "exhales"], {"light breath": "short breath", "exhale": "exhales"}),
+        (["deep breath"], ["deep breath"]),
+        (["sigh", "deep breath"], ["deep breath"]),
+        (["light breath", "exhale"], ["light breath", "exhale"]),
     ],
 )
-def test_a_policy_that_names_only_a_kind_still_breathes(offered, breaths):
+def test_a_policy_that_names_only_a_kind_still_breathes(offered, kinds):
     policy = ExpressionPolicy(guidance=[ExpressionGuidance.BREATHE], sounds=offered)
 
     space = LabelSpace.resolve(ElevenLabsAudioTagExpressionAdapter().capabilities(), policy)
 
-    assert space.breaths == breaths
-    assert space.sounds["breath"] == next(iter(breaths.values()))
+    assert space.breaths == {kind: kind for kind in kinds}
+    assert space.sounds["breath"] == kinds[0]
 
 
-def test_the_best_name_the_policy_offers_is_chosen():
-    capabilities = ExpressionCapabilities(
-        delivery=[ExpressionTerm("calm"), ExpressionTerm("reassuring")],
-        service_vocabulary={ExpressionDelivery.CALM: ["calm", "reassuring"]},
-    )
-
-    assert tagger_name(capabilities, "calm") == "calm"
-    assert tagger_name(capabilities, "calm", offered=["reassuring", "happy"]) == "reassuring"
-    assert tagger_name(capabilities, "calm", offered=["happy"]) is None
-
-
-def test_a_label_left_out_is_performed_by_its_own_name_when_the_service_declares_it():
+def test_a_label_is_written_as_itself_where_the_service_performs_it():
     capabilities = ExpressionCapabilities(
         sounds=[ExpressionTerm("laughter")],
-        delivery=[ExpressionTerm("calm")],
-        service_vocabulary={ExpressionSound.LAUGH: ["laughter"]},
+        delivery=[ExpressionTerm("happy")],
+        service_vocabulary={
+            ExpressionDelivery.WARM: ["content", "happy"],
+            ExpressionSound.LAUGH: ["laughter"],
+        },
     )
 
-    assert tagger_name(capabilities, "calm") == "calm"
-    assert tagger_name(capabilities, "laugh") == "laughter"
+    assert tagger_name(capabilities, "warm") == "warm"
+    assert tagger_name(capabilities, "laugh") == "laugh"
     assert tagger_name(capabilities, "sad") is None
     assert tagger_name(capabilities, "sigh") is None
 
 
-def test_a_service_that_takes_free_text_also_takes_the_label_last():
+def test_a_developers_name_for_a_label_is_written_where_the_policy_offers_it():
     capabilities = ExpressionCapabilities(
-        free_text_sounds=True,
-        free_text_delivery=True,
-        service_vocabulary={ExpressionDelivery.WARM: ["warmly"]},
+        delivery=[ExpressionTerm("calm"), ExpressionTerm("reassuring")]
     )
+    vocabulary = {"calm": ["reassuring"]}
 
-    assert tagger_name(capabilities, "grateful") == "grateful"
-    assert tagger_name(capabilities, "warm") == "warmly"
-    assert tagger_name(capabilities, "warm", offered=["warm"]) == "warm"
+    def written(offered):
+        policy = ExpressionPolicy(delivery=offered)
+        return LabelSpace.resolve(capabilities, policy, vocabulary=vocabulary).deliveries.get(
+            "calm"
+        )
 
-
-def test_a_name_the_service_doesnt_perform_is_passed_over():
-    capabilities = ExpressionCapabilities(
-        delivery=[ExpressionTerm("happy")],
-        service_vocabulary={ExpressionDelivery.WARM: ["content", "happy"]},
-    )
-
-    assert tagger_name(capabilities, "warm") == "happy"
+    assert written(None) == "reassuring"
+    assert written(["calm"]) == "calm"
+    assert written(["happy"]) is None
