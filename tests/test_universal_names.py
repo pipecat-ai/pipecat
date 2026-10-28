@@ -16,6 +16,7 @@ from pipecat.adapters.tts.services.inworld_adapter import (
     InworldFlashExpressionAdapter,
 )
 from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
+from pipecat.adapters.tts.services.soniox_adapter import SonioxExpressionAdapter
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
     CORE_SOUNDS,
@@ -34,6 +35,7 @@ ADAPTERS = [
     InworldExpressionAdapter,
     InworldFlashExpressionAdapter,
     MiniMaxExpressionAdapter,
+    SonioxExpressionAdapter,
 ]
 
 # Sounds services declare that aren't a voice, so they have no universal name.
@@ -117,6 +119,7 @@ def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter
         (InworldExpressionAdapter, ["light breath"]),
         (InworldFlashExpressionAdapter, ["light breath"]),
         (MiniMaxExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (SonioxExpressionAdapter, ["exhale"]),
     ],
 )
 def test_each_kind_of_breath_the_service_performs_is_offered(adapter, kinds):

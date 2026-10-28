@@ -50,6 +50,27 @@ def test_soniox_english_characters_assemble_into_words():
     ]
 
 
+def test_soniox_audio_tag_is_one_word_with_its_spaces():
+    service = _service("en")
+
+    assert [
+        w for w, _ in service._to_word_times("s1", _timestamps("7. [neutral][long pause] Hi "))
+    ] == [
+        "7.",
+        "[neutral][long pause]",
+        "Hi",
+    ]
+
+
+def test_soniox_stressed_word_is_reported_without_its_asterisks():
+    service = _service("en")
+
+    assert [w for w, _ in service._to_word_times("s1", _timestamps("*Really* good "))] == [
+        "Really",
+        "good",
+    ]
+
+
 def test_soniox_english_partial_word_carries_across_messages():
     service = _service("en")
 
