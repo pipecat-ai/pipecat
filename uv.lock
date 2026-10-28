@@ -6336,7 +6336,7 @@ requires-dist = [
     { name = "resampy", specifier = "~=0.4.3" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0,<14" },
     { name = "rime-api", marker = "extra == 'rime'", specifier = "~=0.4.0" },
-    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a24,<0.2" },
+    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a25,<0.2" },
     { name = "ruff", marker = "extra == 'cli'", specifier = ">=0.12.1,<1" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.32" },
@@ -8236,7 +8236,7 @@ wheels = [
 
 [[package]]
 name = "rimelabs-sdk"
-version = "0.1.0a24"
+version = "0.1.0a25"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
@@ -8245,9 +8245,9 @@ dependencies = [
     { name = "rime-api" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/71/935ecb5bd5279c15186327912f6edc2225e5ffc67b93d6a10aa7d50c4a18/rimelabs_sdk-0.1.0a24.tar.gz", hash = "sha256:23d3bcb5e786e059ea9546bf01ba92d12f0622b45d7e76fc211b6a273234bfaf", size = 234961, upload-time = "2026-10-27T06:22:48.246Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/19/38e530e7ffea3992325329c89ead4ea135b0ef5ee7f468c69ce1df030ef4/rimelabs_sdk-0.1.0a25.tar.gz", hash = "sha256:1ace79277a29a2a02954ef2e124f919f7cd9b56d745d384bf5edf7e10f982ef4", size = 236735, upload-time = "2026-10-28T06:58:37.726Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/3a/1a6a20f261d4345e518425cd00b89d9e0fb444e139ef2ef179dbb56efb63/rimelabs_sdk-0.1.0a24-py3-none-any.whl", hash = "sha256:9ad11c2472dfca8d589db5e6ac611e6bd26b95a18bb53e8abd883a90d56bf9b8", size = 75572, upload-time = "2026-10-27T06:22:47.255Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/47/ffe45a2d0341e387a42b7586fc1c0123f2d6ce19ccee975169b1f93c84fb/rimelabs_sdk-0.1.0a25-py3-none-any.whl", hash = "sha256:004a0760d24c070f6f74c5a415d63f6778e12a6df647b463dcba6a68a1f9999f", size = 76187, upload-time = "2026-10-28T06:58:36.742Z" },
 ]
 
 [[package]]

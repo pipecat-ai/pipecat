@@ -6,7 +6,7 @@
 uv pip install 'pipecat-ai[rime-realtime]'
 ```
 
-The extra requires `rimelabs-sdk>=0.1.0a24,<0.2`.
+The extra requires `rimelabs-sdk>=0.1.0a25,<0.2`.
 
 Set `RIME_API_KEY`. The default endpoint is `wss://prism.api.rime.ai/v1/realtime`. Use `endpoint=` for a custom deployment. An injected `client=Rime(...)` remains caller-owned. Use one service instance per conversation.
 
@@ -38,6 +38,12 @@ The Rime pair reuses Pipecat's turn handling. It records speech transcripts with
 
 Queue `LLMRunFrame()` to send initial context and request a reply. An opening reply with no useful history can fail on some deployments. The example includes system history that asks for a greeting.
 
+Queue `RimeReplyFrame(instruction="Check in", response_metadata={"step": "3"})`
+to request one reply with an optional instruction and labels. Import it from
+`pipecat.services.rime.realtime.llm`. These labels replace matching session
+labels for this reply only. Prism starts replies to caller speech without this
+frame, so those replies use session labels.
+
 Typed input uses the existing `LLMMessagesAppendFrame(messages=[...], run_llm=True)` path, including RTVI text input. Rime imports the new history before requesting a reply. This does not use Prism's dedicated typed-turn operation, so the response does not identify that text as its current input item.
 
 ## Settings, tools, and fillers
@@ -65,6 +71,12 @@ History imports support user, assistant, and system text plus completed tool cal
 Replacing or reordering history can require multiple provider requests. A rebuild requires no active reply or pending tool call. Rejected edits can leave local and provider history different. Partial application or an unknown request outcome makes the service unusable. There is no automatic reconnect or replay. Start a new instance with known valid, completed history for recovery.
 
 `await llm.get_history()` reads completed server history. Active items can be absent from that snapshot.
+For a `RimeReplyFrame` with an instruction, the `LLMFullResponseStartFrame` has
+`frame.metadata["rime"]["instruction_item_id"]` when Prism saved it. After
+that reply ends, call `await llm.delete_instruction_item(item_id)` to remove
+the instruction from later Prism history. The method accepts only IDs seen in
+this conversation while they remain among the last 128 saved instruction IDs
+that the adapter observed. It does not change Pipecat's local context.
 
 Set `truncation="auto"`, `"disabled"`, or SDK `RetentionRatio(...)` at construction or through a settings frame. This controls future model context capacity and requires deployment support. It does not erase Pipecat's conversation record.
 
@@ -83,6 +95,9 @@ Early speech hints remain available through `on_rime_event` but do not change ou
 SDK `ItemTruncated` events report the item ID, audio position, and retained server text when available. `kept_text=None` means unavailable; an empty string means no words remain. Retained text can differ from audible words. The event does not change Pipecat's local context.
 
 `ResponseEnded.truncation` reports conversation items excluded from that reply's prompt, with an optional first retained item ID. Those items remain in provider history. The summary is `None` when no exclusions are reported or the information is unavailable.
+`ResponseEnded.usage` reports token counts when Prism provides them. Read it in
+`on_rime_event`. An idle close raises SDK `RealtimeIdleTimeout`; Pipecat puts
+that exception in its normal error frame.
 
 Microphone input accepts PCM16 at 8–192 kHz with 1–32 channels. Unsupported SDK formats are converted before submission. Queue and input-byte limits bound pending work. Shutdown has a configurable deadline and does not wait for playback receipts.
 

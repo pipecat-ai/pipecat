@@ -13,12 +13,14 @@ import pytest
 
 pytest.importorskip("rimelabs_sdk")
 
+from rimelabs_sdk import RimeInputError
 from rimelabs_sdk import realtime as r
 
 from pipecat.frames.frames import (
     ErrorFrame,
     InputAudioRawFrame,
     InterruptionFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -30,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService
+from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService, RimeReplyFrame
 from tests.rime_realtime_peer import conversation, until
 
 
@@ -82,6 +84,50 @@ async def test_initial_history_import_and_explicit_run():
         await worker.queue_frame(LLMRunFrame())
         await answer(peer)
         assert len(sent(peer, "conversation.item.create")) == 1
+
+
+@pytest.mark.asyncio
+async def test_labeled_reply_and_saved_instruction_deletion():
+    async with conversation() as (peer, service, worker, _, _, _, downstream):
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "Still there?"}], run_llm=False
+            )
+        )
+        labels = {"call": "this-reply", "step": "2"}
+        await worker.queue_frame(RimeReplyFrame(instruction="Check in", response_metadata=labels))
+        labels["step"] = "changed"
+        request = await peer.next()
+        assert peer.history[-1]["text"] == "Still there?"
+        assert request["response"]["prism_instruction"] == "Check in"
+        assert request["response"]["metadata"] == {
+            "prism_cause": "proactive",
+            "call": "this-reply",
+            "step": "2",
+        }
+        request["response"]["metadata"]["prism_instruction_item_id"] = "saved-instruction"
+        peer.history.append(
+            {"id": "saved-instruction", "type": "message", "role": "user", "text": "Check in"}
+        )
+        response = await peer.start(request)
+        await until(
+            lambda: any(
+                isinstance(frame, LLMFullResponseStartFrame)
+                and frame.metadata.get("rime", {}).get("instruction_item_id") == "saved-instruction"
+                for frame in downstream
+            )
+        )
+        with pytest.raises(RimeInputError, match="before its reply ends"):
+            await service.delete_instruction_item("saved-instruction")
+        await peer.message(response)
+        await peer.end(response)
+        await until(lambda: service._responses[response].ended)
+        service._responses.pop(response)
+        await service.delete_instruction_item("saved-instruction")
+        assert sent(peer, "conversation.item.delete")[-1]["item_id"] == "saved-instruction"
+        assert all(item["id"] != "saved-instruction" for item in peer.history)
+        with pytest.raises(RimeInputError, match="Unknown saved"):
+            await service.delete_instruction_item("saved-instruction")
 
 
 @pytest.mark.asyncio
