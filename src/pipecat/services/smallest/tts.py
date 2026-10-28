@@ -111,8 +111,10 @@ class SmallestTTSSettings(TTSSettings):
         content_filter: Check the text against Smallest's profanity word list
             before synthesis, taking this action on a match: ``"reject"`` fails
             the request with a ``CONTENT_FILTER_BLOCKED`` error and synthesizes
-            nothing; ``"flag"`` synthesizes normally and records the match. The
-            text is never rewritten. If None, the API default (off) applies.
+            nothing; ``"flag"`` synthesizes normally and records the match;
+            ``"redact"`` drops the matched term and speaks the rest, failing
+            like ``"reject"`` when nothing is left to speak. If None, the API
+            default (off) applies.
         date_format: Order to read all-numeric dates in, independent of the
             synthesis voice: ``"EU"`` reads ``05/03/2024`` day-first ("fifth
             March, twenty twenty four"), ``"US"`` month-first ("May third,
@@ -121,7 +123,7 @@ class SmallestTTSSettings(TTSSettings):
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    content_filter: Literal["reject", "flag"] | str | None | NotGiven = field(
+    content_filter: Literal["reject", "flag", "redact"] | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     date_format: Literal["EU", "US"] | str | None | NotGiven = field(
