@@ -7,15 +7,18 @@
 """User turn stop strategy that asks a classifier whether the turn is complete."""
 
 import asyncio
+import time
 
 from loguru import logger
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceQuestion, ClassifierError
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -56,8 +59,8 @@ _SPEECH_STARTED = (
     UserStartedSpeakingFrame,
     ProposedUserStartedSpeakingFrame,
 )
+# These stops come after the transcript of the user's words. VAD's comes before it.
 _SPEECH_STOPPED = (
-    VADUserStoppedSpeakingFrame,
     UserStoppedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
 )
@@ -74,6 +77,10 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
       ``short_timeout`` seconds unless they continue.
     - ``long``: the user asked for time or only acknowledged the question. It
       reports after ``long_timeout`` seconds unless they continue.
+
+    It asks once the pause's words are in: when the STT finalizes their
+    transcript, or when the STT's p99 latency has passed since the user
+    stopped. Asking sooner could judge the turn without its last words.
 
     If the classifier fails or takes longer than ``classification_timeout``, it
     reports right away, so a turn never waits on a classifier that can't
@@ -142,8 +149,11 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # The turn text last given to the classifier, so a pause without new
         # words doesn't ask again.
         self._classified_text: str | None = None
+        self._stt_timeout = 0.0
+        self._transcript_finalized = False
         self._classify_task: asyncio.Task | None = None
         self._wait_task: asyncio.Task | None = None
+        self._stt_wait_task: asyncio.Task | None = None
 
         self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
 
@@ -166,32 +176,42 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Clean up the strategy and its classifier."""
         await super().cleanup()
         await self._cancel_pending()
+        await self._cancel_stt_wait()
         await self._classifier.cleanup()
 
     async def handle_user_turn_started(self):
         """Start a fresh turn with no text."""
         await self._cancel_pending()
+        await self._cancel_stt_wait()
         self._turn_open = True
         self._text = ""
         self._classified_text = None
+        self._transcript_finalized = False
 
     async def handle_user_turn_stopped(self):
         """Forget the turn and any pending decision."""
         await self._cancel_pending()
+        await self._cancel_stt_wait()
         self._turn_open = False
         self._text = ""
         self._classified_text = None
+        self._transcript_finalized = False
 
     async def process_frame(self, frame: Frame):
-        """Collect the turn's text and classify it when the user pauses."""
-        if isinstance(frame, _SPEECH_STARTED):
+        """Collect the turn's text and classify it once the user pauses and the words are in."""
+        if isinstance(frame, STTMetadataFrame):
+            self._stt_timeout = frame.ttfs_p99_latency
+        elif isinstance(frame, _SPEECH_STARTED):
             await self._handle_speech_started()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_speech_stopped(frame)
         elif isinstance(frame, _SPEECH_STOPPED):
-            self._user_speaking = False
-            await self._maybe_classify()
-        elif isinstance(frame, TranscriptionFrame) and frame.text.strip():
-            self._text = f"{self._text} {frame.text.strip()}".strip()
-            await self._maybe_classify()
+            await self._handle_speech_stopped()
+        elif isinstance(frame, InterimTranscriptionFrame):
+            # More of the user's words are on their way.
+            self._transcript_finalized = False
+        elif isinstance(frame, TranscriptionFrame):
+            await self._handle_transcription(frame)
 
     async def _handle_speech_started(self):
         # The controller clears the stop decisions on speech, so the turn is
@@ -199,10 +219,38 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # still on its way is about words the user has gone past.
         self._user_speaking = True
         self._classified_text = None
+        self._transcript_finalized = False
         await self._cancel_pending()
+        await self._cancel_stt_wait()
+
+    async def _handle_vad_speech_stopped(self, frame: VADUserStoppedSpeakingFrame):
+        # The STT's p99 latency counts from when the user stopped speaking,
+        # which VAD reports stop_secs later.
+        deadline = frame.timestamp - frame.stop_secs + self._stt_timeout
+        await self._handle_speech_stopped(deadline - time.time())
+
+    async def _handle_speech_stopped(self, stt_wait: float = 0.0):
+        self._user_speaking = False
+        await self._cancel_stt_wait()
+        if stt_wait > 0:
+            self._stt_wait_task = self.create_task(
+                self._wait_for_stt(stt_wait), f"{self}::_wait_for_stt"
+            )
+        await self._maybe_classify()
+
+    async def _handle_transcription(self, frame: TranscriptionFrame):
+        if frame.finalized:
+            self._transcript_finalized = True
+        if frame.text.strip():
+            self._text = f"{self._text} {frame.text.strip()}".strip()
+        await self._maybe_classify()
 
     async def _maybe_classify(self):
         if not self._turn_open or self._user_speaking or not self._text:
+            return
+        # Until the STT finalizes the pause's words or its p99 latency passes,
+        # more of them may be on their way.
+        if self._stt_wait_task and not self._transcript_finalized:
             return
         if self._text == self._classified_text:
             return
@@ -243,6 +291,11 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._wait_task = None
         await self.report_user_turn_stopped()
 
+    async def _wait_for_stt(self, seconds: float):
+        await asyncio.sleep(seconds)
+        self._stt_wait_task = None
+        await self._maybe_classify()
+
     async def _cancel_pending(self):
         if self._classify_task:
             await self.cancel_task(self._classify_task)
@@ -250,6 +303,11 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if self._wait_task:
             await self.cancel_task(self._wait_task)
             self._wait_task = None
+
+    async def _cancel_stt_wait(self):
+        if self._stt_wait_task:
+            await self.cancel_task(self._stt_wait_task)
+            self._stt_wait_task = None
 
     async def _on_classifier_metrics(self, classifier: BaseClassifier, data: list[MetricsData]):
         await self.push_frame(MetricsFrame(data=data))

@@ -10,7 +10,11 @@ import unittest
 from pipecat.classifiers.base_classifier import BaseClassifier, ChoiceResult, ClassifierError
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -74,8 +78,12 @@ class _VADStopStrategy(BaseUserTurnStopStrategy):
             await self.report_user_turn_stopped()
 
 
-def _said(text: str) -> TranscriptionFrame:
-    return TranscriptionFrame(text=text, user_id="", timestamp="")
+def _said(text: str, finalized: bool = False) -> TranscriptionFrame:
+    return TranscriptionFrame(text=text, user_id="", timestamp="", finalized=finalized)
+
+
+def _heard(text: str) -> InterimTranscriptionFrame:
+    return InterimTranscriptionFrame(text=text, user_id="", timestamp="")
 
 
 class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
@@ -86,7 +94,7 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.strategy.cleanup()
 
-    async def _start(self, *answers, context=None, delay=0.0, **kwargs):
+    async def _start(self, *answers, context=None, delay=0.0, stt_latency=0.0, **kwargs):
         self.classifier = _FakeClassifier(*answers, delay=delay)
         self.strategy = ClassifierUserTurnStopStrategy(
             classifier=self.classifier, context=context, **kwargs
@@ -97,6 +105,9 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
             self.stopped.append(params)
 
         await self.strategy.setup(frame_processor_setup(self.task_manager))
+        await self.strategy.process_frame(
+            STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_latency)
+        )
         await self.strategy.handle_user_turn_started()
 
     async def _say(self, *texts):
@@ -132,6 +143,69 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await self.strategy.process_frame(_said("book a table."))
         await asyncio.sleep(SETTLE)
         self.assertEqual(self.classifier.asked, [{"user": "book a table."}])
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_a_pause_waits_for_the_stt_latency(self):
+        await self._start("complete", stt_latency=0.3)
+        await self._say("book a table.")
+        self.assertEqual(self.classifier.asked, [])
+
+        await asyncio.sleep(0.3)
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_the_stt_latency_counts_from_when_the_user_stopped(self):
+        await self._start("complete", stt_latency=0.3)
+        await self.strategy.process_frame(VADUserStartedSpeakingFrame())
+        await self.strategy.process_frame(_said("book a table."))
+        await self.strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.3))
+        await asyncio.sleep(SETTLE)
+
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_a_finalized_transcription_does_not_wait_for_the_stt_latency(self):
+        await self._start("complete", stt_latency=1.0)
+        await self._say()
+        await self.strategy.process_frame(_said("book a table.", finalized=True))
+        await asyncio.sleep(SETTLE)
+
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_speaking_again_waits_for_the_new_words(self):
+        """The new words' transcription usually lands after the next pause."""
+        await self._start("short", "complete", stt_latency=1.0, short_timeout=5.0)
+        await self._say()
+        await self.strategy.process_frame(_said("I'd like to", finalized=True))
+        await asyncio.sleep(SETTLE)
+        await self._say()
+        self.assertEqual(len(self.classifier.asked), 1)
+
+        await self.strategy.process_frame(_said("book a table.", finalized=True))
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(self.classifier.asked[1], {"user": "I'd like to book a table."})
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_an_interim_transcription_holds_the_pause(self):
+        """The earlier words' transcription can land while the user speaks again."""
+        await self._start("complete", stt_latency=1.0)
+        await self.strategy.process_frame(VADUserStartedSpeakingFrame())
+        await self.strategy.process_frame(_said("book a table", finalized=True))
+        await self.strategy.process_frame(_heard("for two"))
+        await self.strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(self.classifier.asked, [])
+
+        await self.strategy.process_frame(_said("for two", finalized=True))
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(self.classifier.asked, [{"user": "book a table for two"}])
+
+    async def test_a_proposed_stop_does_not_wait_for_the_stt_latency(self):
+        """A service proposes the stop after pushing the transcription."""
+        await self._start("complete", stt_latency=1.0)
+        await self.strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await self.strategy.process_frame(_said("book a table."))
+        await self.strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        await asyncio.sleep(SETTLE)
+
         self.assertEqual(len(self.stopped), 1)
 
     async def test_the_same_words_are_asked_about_once(self):
