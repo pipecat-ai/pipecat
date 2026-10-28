@@ -21,12 +21,12 @@ from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import FunctionCallResultProperties, LLMMessagesAppendFrame
 from pipecat.pipeline.llm_with_backend.prompts import (
     BACKEND_MESSAGE_PREFIX,
+    BACKEND_MESSAGE_RELAY_INSTRUCTION,
     BACKEND_NOTE_PREFIX,
     BACKEND_THOUGHT_PREFIX,
     BACKEND_WORKING_PREFIX,
     FRONTEND_PAIRING_INSTRUCTION,
-    RELAY_NOTE,
-    STRATEGY_PLACEHOLDER,
+    PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER,
 )
 from pipecat.pipeline.llm_with_backend.request_strategies import (
     BackendRequestStrategy,
@@ -109,8 +109,8 @@ class BackendConnector:
                 that to the user there is one assistant, what to do after
                 delegating, and what to do with the backend's messages. The
                 request strategy's guidance goes where
-                :data:`STRATEGY_PLACEHOLDER` stands, or after the text when
-                it has none.
+                :data:`PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER` stands, or
+                after the text when it has none.
             respond_on_delegate: Whether the frontend runs again as soon as a
                 delegation is sent, which is where its acknowledgement comes
                 from: a text model's tool-call turn carries no prose. Off for
@@ -155,8 +155,12 @@ class BackendConnector:
         """What is appended to the frontend's system instruction: the pairing instruction with the strategy's guidance in place. Available once bound."""
         pairing = self._frontend_pairing_instruction
         guidance = self.request_strategy.frontend_instruction or ""
-        if STRATEGY_PLACEHOLDER in pairing:
-            return pairing.replace(STRATEGY_PLACEHOLDER, guidance).replace(" \n", "\n").strip()
+        if PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER in pairing:
+            return (
+                pairing.replace(PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER, guidance)
+                .replace(" \n", "\n")
+                .strip()
+            )
         return "\n\n".join(p for p in (pairing, guidance) if p) or None
 
     @property
@@ -336,7 +340,7 @@ class BackendConnector:
                             "role": "developer",
                             "content": (
                                 f"{BACKEND_MESSAGE_PREFIX}The work could not be completed."
-                                f"\n\n{RELAY_NOTE}"
+                                f"\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}"
                             ),
                         }
                     ],
@@ -366,8 +370,9 @@ class BackendConnector:
         returning ``None``. The default marks the message so the frontend can
         tell it from the user's and its own, and so the transcript request
         strategy can leave it out of what it sends the backend: a spoken
-        output as ``Backend:`` with :data:`RELAY_NOTE` after it, a silent one
-        as ``Backend (note):``, a reasoning summary as ``Backend (thinking):``.
+        output as ``Backend:`` with :data:`BACKEND_MESSAGE_RELAY_INSTRUCTION`
+        after it, a silent one as ``Backend (note):``, a reasoning summary as
+        ``Backend (thinking):``.
 
         Args:
             output: The output.
@@ -383,7 +388,9 @@ class BackendConnector:
             return {"role": "developer", "content": f"{BACKEND_NOTE_PREFIX}{output.text}"}
         return {
             "role": "developer",
-            "content": f"{BACKEND_MESSAGE_PREFIX}{output.text}\n\n{RELAY_NOTE}",
+            "content": (
+                f"{BACKEND_MESSAGE_PREFIX}{output.text}\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}"
+            ),
         }
 
     def render_tool_call(self, call: BackendToolCall) -> LLMContextMessage | None:

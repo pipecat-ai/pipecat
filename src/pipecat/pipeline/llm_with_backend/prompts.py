@@ -57,23 +57,23 @@ def _is_backend_message(message: LLMContextMessage) -> bool:
 #: Carried on each spoken backend message, so the frontend relays it on whatever
 #: turn it lands on, a user's turn included, where the standing instruction
 #: alone leaves it unsaid.
-RELAY_NOTE = (
+BACKEND_MESSAGE_RELAY_INSTRUCTION = (
     "(Relay this to the user now, in your own words, once, even if the conversation has "
     "moved on. If the user has just said something you have not answered yet, answer that "
     "first and relay this at the end of the same reply.)"
 )
 
 #: Where the request strategy's own guidance goes in :data:`FRONTEND_PAIRING_INSTRUCTION`.
-STRATEGY_PLACEHOLDER = "{strategy}"
+PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER = "{strategy}"
 
 #: How the frontend's model works with a backend, appended to its system
 #: instruction: what the backend is and when to delegate, that to the user
 #: there is one assistant, what to do after delegating, and what to do with
 #: the backend's messages. The request strategy's guidance (how the request
-#: is worded) goes where :data:`STRATEGY_PLACEHOLDER` stands, at the end of
-#: the first paragraph. The frontend's own system instruction says what the
-#: backend is for. ``BackendConnector(frontend_pairing_instruction=...)``
-#: replaces it.
+#: is worded) goes where :data:`PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER`
+#: stands, at the end of the first paragraph. The frontend's own system
+#: instruction says what the backend is for.
+#: ``BackendConnector(frontend_pairing_instruction=...)`` replaces it.
 #:
 #: The instruction ends by restating its one rule, that a message about
 #: delegated work, a stop included, gets a delegate call. A stop is where a
@@ -93,7 +93,7 @@ FRONTEND_PAIRING_INSTRUCTION = (
     "yourself: small talk, a question that a result you already have answers, or a question "
     "about how the work is going, which you answer from the backend's latest notes or, with "
     "none yet, by saying there is no update yet. Never guess a result while waiting. "
-    f"{STRATEGY_PLACEHOLDER}\n\n"
+    f"{PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER}\n\n"
     "ONE ASSISTANT: To the user there is one assistant, you: never mention the backend, "
     "delegation, a handoff or tools. Say what is being done as your own doing, such as \"I'm "
     'checking", never "the backend is checking", and never that you passed anything along.\n\n'

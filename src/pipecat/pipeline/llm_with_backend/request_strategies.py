@@ -50,7 +50,7 @@ class BackendRequestStrategy:
     tool_required: list[str] = []
     #: The strategy's guidance to the frontend model, if any: how the request
     #: is worded. It goes where the pairing instruction's
-    #: :data:`STRATEGY_PLACEHOLDER` stands.
+    #: :data:`PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER` stands.
     frontend_instruction: str | None = None
     #: How the ``delegate`` tool is described to the frontend model.
     tool_description: str = ""

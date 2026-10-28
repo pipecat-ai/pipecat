@@ -46,6 +46,7 @@ from pipecat.pipeline.llm_with_backend.llm_with_backend import LLMWithBackend
 from pipecat.pipeline.llm_with_backend.predictive_delegation import PredictiveDelegation
 from pipecat.pipeline.llm_with_backend.prompts import (
     BACKEND_MESSAGE_PREFIX,
+    BACKEND_MESSAGE_RELAY_INSTRUCTION,
     BACKEND_NOTE_PREFIX,
     BACKEND_PREFIXES,
     BACKEND_THOUGHT_PREFIX,
@@ -53,8 +54,7 @@ from pipecat.pipeline.llm_with_backend.prompts import (
     EXPLICIT_FRONTEND_INSTRUCTION,
     EXPLICIT_TOOL_DESCRIPTION,
     FRONTEND_PAIRING_INSTRUCTION,
-    RELAY_NOTE,
-    STRATEGY_PLACEHOLDER,
+    PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER,
     TRANSCRIPT_FRONTEND_INSTRUCTION,
     TRANSCRIPT_TOOL_DESCRIPTION,
 )
@@ -66,6 +66,7 @@ from pipecat.pipeline.llm_with_backend.request_strategies import (
 
 __all__ = [
     "BACKEND_MESSAGE_PREFIX",
+    "BACKEND_MESSAGE_RELAY_INSTRUCTION",
     "BACKEND_NOTE_PREFIX",
     "BACKEND_PREFIXES",
     "BACKEND_THOUGHT_PREFIX",
@@ -79,9 +80,8 @@ __all__ = [
     "ExplicitBackendRequestStrategy",
     "FRONTEND_PAIRING_INSTRUCTION",
     "LLMWithBackend",
+    "PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER",
     "PredictiveDelegation",
-    "RELAY_NOTE",
-    "STRATEGY_PLACEHOLDER",
     "TRANSCRIPT_FRONTEND_INSTRUCTION",
     "TRANSCRIPT_TOOL_DESCRIPTION",
     "TranscriptBackendRequestStrategy",

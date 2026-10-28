@@ -48,7 +48,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.pipeline.llm_with_backend.connector import DELEGATE_TOOL_NAME, BackendConnector
-from pipecat.pipeline.llm_with_backend.prompts import RELAY_NOTE, _is_backend_message
+from pipecat.pipeline.llm_with_backend.prompts import (
+    BACKEND_MESSAGE_RELAY_INSTRUCTION,
+    _is_backend_message,
+)
 from pipecat.processors.aggregators.llm_context import LLMContextMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService, _OutputGate
@@ -474,6 +477,9 @@ def _render_for_classifier(messages: list[LLMContextMessage]) -> list[dict[str, 
                     )
         elif _is_backend_message(message) and isinstance(content, str):
             rendered.append(
-                {"speaker": "backend", "text": content.removesuffix(f"\n\n{RELAY_NOTE}")}
+                {
+                    "speaker": "backend",
+                    "text": content.removesuffix(f"\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}"),
+                }
             )
     return rendered[-_DELEGATION_PREDICTION_HISTORY_LENGTH:]

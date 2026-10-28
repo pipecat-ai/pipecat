@@ -42,7 +42,7 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
-    RELAY_NOTE,
+    BACKEND_MESSAGE_RELAY_INSTRUCTION,
     TRANSCRIPT_FRONTEND_INSTRUCTION,
     BackendConnector,
     ConnectorContext,
@@ -405,7 +405,14 @@ async def test_outputs_are_appended_to_the_frontend_and_run_it_as_flagged():
         ([{"role": "developer", "content": "Backend (note): Let me check."}], False),
         ([{"role": "developer", "content": "Backend (thinking): Weather first."}], False),
         (
-            [{"role": "developer", "content": f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}"}],
+            [
+                {
+                    "role": "developer",
+                    "content": (
+                        f"Backend: It's 62 and raining.\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}"
+                    ),
+                }
+            ],
             True,
         ),
     ]
@@ -588,7 +595,7 @@ async def test_a_local_backend_is_heard_through_the_frontends_conversation():
     assert [(f.messages[0]["content"], f.run_llm) for f in appended] == [
         ("Backend (note): Let me check.", False),
         ("Backend (working): get_weather(location='Seattle')", False),
-        (f"Backend: It's 62 and raining.\n\n{RELAY_NOTE}", True),
+        (f"Backend: It's 62 and raining.\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}", True),
     ]
     # A message queued while the bot speaks waits behind the speech; an
     # interruption must not drop it on the way to the aggregator.
@@ -932,7 +939,10 @@ async def test_the_classifier_sees_the_frontends_instruction_and_the_latest_conv
                     ],
                 },
                 {"role": "tool", "tool_call_id": "c1", "content": '{"status": "delegated"}'},
-                {"role": "developer", "content": f"Backend: Fixed it.\n\n{RELAY_NOTE}"},
+                {
+                    "role": "developer",
+                    "content": f"Backend: Fixed it.\n\n{BACKEND_MESSAGE_RELAY_INSTRUCTION}",
+                },
                 {"role": "user", "content": "Thanks!"},
             ]
         )
