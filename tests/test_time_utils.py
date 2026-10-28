@@ -14,7 +14,7 @@ class TestNanosecondsToStr(unittest.TestCase):
         self.assertEqual(nanoseconds_to_str(0), "0:00:00.000000")
 
     def test_keeps_exact_microseconds(self):
-        # These all lost a microsecond when converted through float seconds.
+        # Values that float seconds can't represent exactly.
         self.assertEqual(nanoseconds_to_str(2_300_000_000), "0:00:02.300000")
         self.assertEqual(nanoseconds_to_str(1_000_001_000), "0:00:01.000001")
         self.assertEqual(nanoseconds_to_str(3_600_000_001_000), "1:00:00.000001")

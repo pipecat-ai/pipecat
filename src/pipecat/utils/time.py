@@ -56,8 +56,7 @@ def nanoseconds_to_str(nanoseconds: int) -> str:
     Returns:
         A formatted time string in "H:MM:SS.microseconds" format.
     """
-    # Split with integer arithmetic: going through float seconds loses the
-    # microsecond digits (e.g. 2.3 s would print as ``0:00:02.299999``).
+    # Integer arithmetic: float seconds can't represent most microsecond values exactly.
     total_microseconds = int(nanoseconds) // 1_000
     hours, remainder = divmod(total_microseconds, 3_600_000_000)
     minutes, remainder = divmod(remainder, 60_000_000)
