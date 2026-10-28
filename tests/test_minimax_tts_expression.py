@@ -56,7 +56,7 @@ class TestMiniMaxExpressionAdapter:
     def test_vocabulary_is_fixed(self):
         # MiniMax reads an interjection outside its list aloud.
         capabilities = MiniMaxExpressionAdapter().capabilities()
-        assert not capabilities.free_text_sounds and not capabilities.free_text_delivery
+        assert not capabilities.free_text
 
 
 @pytest.mark.parametrize(

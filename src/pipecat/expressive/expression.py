@@ -293,10 +293,8 @@ class ExpressionCapabilities:
         sounds: Sounds the service can make at one point, by its own names.
         delivery: Deliveries the service can apply to the words that follow, by
             its own names.
-        free_text_sounds: Whether the service also accepts sounds outside
-            ``sounds``, described in a few words.
-        free_text_delivery: Whether the service also accepts deliveries outside
-            ``delivery``, described in a few words.
+        free_text: Whether the service also accepts sounds and deliveries
+            outside ``sounds`` and ``delivery``, described in a few words.
         pause_range_ms: The shortest and longest pause the service can make,
             in milliseconds, or None when it can't pause.
         emphasis: Whether the service can stress words marked ``^^word^^``.
@@ -312,8 +310,7 @@ class ExpressionCapabilities:
 
     sounds: list[ExpressionTerm] = field(default_factory=list)
     delivery: list[ExpressionTerm] = field(default_factory=list)
-    free_text_sounds: bool = False
-    free_text_delivery: bool = False
+    free_text: bool = False
     pause_range_ms: tuple[int, int] | None = None
     emphasis: bool = False
     delivery_scope: DeliveryScope = DeliveryScope.ANYWHERE
@@ -334,7 +331,7 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.delivery, self.free_text_delivery)
+        return self._performed_name(name, self.delivery)
 
     def sound_name(self, name: str) -> str | None:
         """The name the service performs a sound by, or None when it can't.
@@ -347,13 +344,13 @@ class ExpressionCapabilities:
         Returns:
             The name to send the service.
         """
-        return self._performed_name(name, self.sounds, self.free_text_sounds)
+        return self._performed_name(name, self.sounds)
 
-    def _performed_name(self, name: str, terms: list[ExpressionTerm], free_text: bool):
+    def _performed_name(self, name: str, terms: list[ExpressionTerm]):
         declared = {term.name for term in terms}
         vocabulary = cast(dict[str, list[str]], self.service_vocabulary)
         for candidate in [*vocabulary.get(name, []), name]:
-            if free_text or candidate in declared:
+            if self.free_text or candidate in declared:
                 return candidate
         return None
 
