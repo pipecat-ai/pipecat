@@ -14,10 +14,10 @@ frontend as the example does, with the example's instruction and the pairing
 instruction and tool description as they are in the code, runs the model on
 the context several times, and reports the turns where the model's decision
 differs from the expected one. A turn the model delegates runs on, as in the
-bot: the ``delegate`` call settles and the model replies, so the acknowledgement
-the user would hear, what the model said with the call and in that reply, is
-reported too, with the words it took and how often it was said twice (with
-the call and again after it).
+bot: the ``delegate`` call settles and the model replies, so what the user
+would hear is reported too: the text the model wrote in the same response as
+the call, if any, and its reply after the call, each with the words it took,
+the words heard in all, and how many delegations were acknowledged in both.
 
 One of the tuning checks: see ``scripts/llm-with-backend/tuning/README.md``.
 Needs the frontend's key in ``.env``::
@@ -86,13 +86,14 @@ def _frontend(name: str) -> LLMService[Any]:
     raise ValueError(f"unknown frontend {name!r}: expected openai, google or anthropic")
 
 
-async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str]]:
+async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, str, str]:
     """Run the frontend on a context once: whether it called delegate, and what it said.
 
     The frontend runs ahead of an assistant aggregator, as in the bot, so a
     delegate call settles and the model replies to its result. What it said is
-    read back from the context: the text it wrote with the call, if any, then
-    the reply.
+    read back from the context in two parts: the text in the same response as
+    the call, if any, which the aggregator records ahead of the call, and the
+    reply after the call. Without a call, the whole answer is the second part.
     """
     llm = _frontend(frontend)
     connector = BackendConnector()
@@ -121,18 +122,23 @@ async def _run_once(frontend: str, messages: list[dict]) -> tuple[bool, list[str
         start_timeout=5.0,
     )
     added = [m for m in context.get_messages()[recorded:] if isinstance(m, dict)]
-    called = any(
-        call.get("function", {}).get("name") == DELEGATE_TOOL_NAME
-        for m in added
-        if m.get("role") == "assistant"
-        for call in m.get("tool_calls") or []
-    )
-    said = [
-        content
-        for m in added
-        if m.get("role") == "assistant" and isinstance(content := m.get("content"), str) and content
-    ]
-    return called, said
+    called = False
+    with_call = ""
+    after = ""
+    for m in added:
+        if m.get("role") != "assistant":
+            continue
+        if any(
+            call.get("function", {}).get("name") == DELEGATE_TOOL_NAME
+            for call in m.get("tool_calls") or []
+        ):
+            called = True
+            with_call, after = after, ""
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            after += content
+    return called, with_call, after
 
 
 async def _replay(turns: list[dict], frontend: str, samples: int, concurrency: int) -> list[dict]:
@@ -159,19 +165,25 @@ async def _replay(turns: list[dict], frontend: str, samples: int, concurrency: i
     return [{**turn, "runs": runs[i]} for i, turn in enumerate(turns)]
 
 
-def _words(said: list[str]) -> int:
-    return sum(len(text.split()) for text in said)
+def _words(texts: list[str]) -> str:
+    """Median and maximum word count of the texts, for the report."""
+    counts = sorted(len(text.split()) for text in texts)
+    return f"words median {counts[len(counts) // 2]}, max {counts[-1]}"
 
 
 def _report(results: list[dict], show: bool):
     wrong_total = 0
-    acks: list[list[str]] = []
+    with_call: list[str] = []
+    after: list[str] = []
     for result in results:
         runs = result["runs"]
-        delegated = sum(1 for called, _ in runs if called)
+        delegated = sum(1 for called, _, _ in runs if called)
         wrong = len(runs) - delegated if result["needs_delegate"] else delegated
         wrong_total += wrong
-        acks.extend(said for called, said in runs if called)
+        for called, said_with_call, said_after in runs:
+            if called:
+                with_call.append(said_with_call)
+                after.append(said_after)
         user = [m for m in result["messages"] if m.get("role") == "user"][-1]["content"]
         expected = "delegate" if result["needs_delegate"] else "answer"
         mark = "!!" if wrong else "  "
@@ -180,16 +192,23 @@ def _report(results: list[dict], show: bool):
             f"{result['frontend']}/{result['kind']}: {user[:60]}"
         )
         if show:
-            for called, said in runs:
-                print(f"       [{'D' if called else '-'}] {' | '.join(said)[:150]!r}")
+            for called, said_with_call, said_after in runs:
+                mark = "D" if called else "-"
+                print(f"       [{mark}] with the call: {said_with_call[:80]!r}")
+                print(f"           after the call: {said_after[:150]!r}")
     print(f"\nwrong decisions: {wrong_total} over {len(results)} turns")
-    if acks:
-        words = sorted(_words(said) for said in acks)
-        twice = sum(1 for said in acks if len(said) > 1)
-        print(
-            f"acknowledgements: {len(acks)}, words median {words[len(words) // 2]}, "
-            f"max {words[-1]}, said twice {twice}"
-        )
+    if after:
+        heard = [f"{text} {reply}" for text, reply in zip(with_call, after)]
+        spoke = [text for text in with_call if text]
+        twice = sum(1 for text, reply in zip(with_call, after) if text and reply)
+        print(f"delegations: {len(after)}, heard {_words(heard)}")
+        if spoke:
+            print(f"text with the call: {len(spoke)}, {_words(spoke)}")
+        else:
+            print("text with the call: none")
+        empty = sum(1 for text in after if not text)
+        print(f"reply after the call: {_words(after)}, empty {empty}")
+        print(f"acknowledged with the call and again after it: {twice}")
 
 
 def main():
