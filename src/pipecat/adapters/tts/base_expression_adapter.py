@@ -26,7 +26,10 @@ class BaseExpressionAdapter:
     Its capabilities are what the service can perform: the service broadcasts
     them at start, and reads and formats tags by them. The service calls the
     adapter only with what they say it supports: other delivery is taken off
-    the words first, and other sounds are never formatted.
+    the words first, and other sounds are never formatted. Each name reaches the
+    adapter as the service's own: a universal name is translated by the
+    capabilities' ``service_vocabulary`` first, so ``warm`` reaches ElevenLabs' adapter
+    as ``warmly``.
 
     Markup is set apart from the words by spaces, so the words a service with
     word timestamps reports line up with the text it was sent.
@@ -47,8 +50,8 @@ class BaseExpressionAdapter:
 
         Args:
             text: The words, as prepared for the service.
-            delivery: The supported delivery to speak them in, empty for the voice's
-                baseline.
+            delivery: The supported delivery to speak them in, by the service's
+                names, empty for the voice's baseline.
             previous_delivery: The delivery of the words before them in the response,
                 or None for its first words, so markup can be emitted only
                 where the delivery changes.
@@ -67,7 +70,7 @@ class BaseExpressionAdapter:
 
         Args:
             delivery: The supported delivery the request's first words are
-                spoken in, empty for the voice's baseline.
+                spoken in, by the service's names, empty for the voice's baseline.
 
         Returns:
             The settings, empty for none.
@@ -81,7 +84,8 @@ class BaseExpressionAdapter:
         the request can set the delivery back for the text after it.
 
         Args:
-            delivery: The delivery of the request's last words.
+            delivery: The delivery of the request's last words, by the service's
+                names.
 
         Returns:
             The text to end the request with, or an empty string.
@@ -92,7 +96,7 @@ class BaseExpressionAdapter:
         """Format a supported sound, such as a laugh, at its place in the text.
 
         Args:
-            name: The sound, as written between the brackets.
+            name: The sound, by the service's name for it.
 
         Returns:
             The text to send to the service.

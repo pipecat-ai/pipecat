@@ -54,9 +54,12 @@ left unfinished at the end of a unit is removed, never spoken.
 
 The service's
 :class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`
-says what it can perform and formats each piece in its provider's markup.
-What the service can't perform is left out of the request, and kept in the
-unit's text for the context.
+says what it can perform and formats each piece in its provider's markup. A
+universal name, such as ``warm`` or ``laugh``, is sent as the name the service
+performs it by (:meth:`~pipecat.expressive.expression.ExpressionCapabilities.delivery_name`),
+such as ElevenLabs' ``warmly``; everything else about the unit keeps the names as
+written. What the service can't perform is left out of the request, and kept in
+the unit's text for the context.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
@@ -74,6 +77,8 @@ from pipecat.expressive.expression import (
     NEUTRAL_DELIVERY,
     DeliveryScope,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
 )
 from pipecat.frames.frames import TextType
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
@@ -164,10 +169,7 @@ class Sound:
 
     def performed_by(self, capabilities: ExpressionCapabilities | None) -> bool:
         """Whether a service with these capabilities makes the sound."""
-        return capabilities is not None and (
-            capabilities.free_text_sounds
-            or any(term.name == self.name for term in capabilities.sounds)
-        )
+        return capabilities is not None and capabilities.sound_name(self.name) is not None
 
     def reported(self, capabilities: ExpressionCapabilities) -> tuple[TextType, str]:
         """The sound as reported to clients: its text type and its text."""
@@ -347,11 +349,16 @@ class ExpressionFormatter:
         response_delivery = self._active_delivery
         if whole:
             self._active_delivery = ()
-        # The names the service declares keep their kind in either brackets.
+        # The names the service declares, and the universal names it performs,
+        # keep their kind in either brackets.
         capabilities = self.capabilities()
         declared = capabilities or ExpressionCapabilities()
-        sounds = {term.name for term in declared.sounds}
-        delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)}
+        sounds = {term.name for term in declared.sounds} | {
+            name for name in ExpressionSound if declared.sound_name(name)
+        }
+        delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)} | {
+            name for name in ExpressionDelivery if declared.delivery_name(name)
+        }
         segments: list[Segment] = []
         position = 0
         for match in _TAG.finditer(text):
@@ -500,14 +507,18 @@ class ExpressionFormatter:
                 trimmed = True
             words = await transform(words, text_type) if words is not None else None
             if words is not None:
-                parts.append(self._format(words, delivery))
+                parts.append(self._format(words, _service_delivery(delivery, capabilities)))
                 last_delivery = delivery
         if last_delivery is not None and text_type != TextType.TOKEN:
-            parts.append(self._adapter().format_end(last_delivery))
+            parts.append(self._adapter().format_end(_service_delivery(last_delivery, capabilities)))
         request = _SPACES.sub(" ", "".join(parts))
         # A streamed token with no words of its own goes on in the delivery
         # before it.
-        delivery = first_delivery if first_delivery is not None else self._formatted_delivery
+        delivery = (
+            _service_delivery(first_delivery, capabilities)
+            if first_delivery is not None
+            else self._formatted_delivery
+        )
         return FormattedRequest(
             text=request if text_type == TextType.TOKEN else request.strip(),
             spans=spans,
@@ -614,7 +625,7 @@ class ExpressionFormatter:
         self._active_delivery = () if name in ("", NEUTRAL_DELIVERY) else (name,)
 
     def _format(self, text: str, delivery: list[str]) -> str:
-        """Format words to send to the TTS in their delivery."""
+        """Format words to send to the TTS in their delivery, by the service's names."""
         # Leading spacing stays outside the markup, between the words.
         words = text.lstrip()
         formatted = self._adapter().format_text(words, delivery, self._formatted_delivery)
@@ -630,13 +641,7 @@ class ExpressionFormatter:
             if name == EMPHASIS_DELIVERY:
                 supported = bool(capabilities and capabilities.emphasis)
             else:
-                supported = bool(
-                    capabilities
-                    and (
-                        capabilities.free_text_delivery
-                        or any(term.name == name for term in capabilities.delivery)
-                    )
-                )
+                supported = bool(capabilities and capabilities.delivery_name(name))
             if supported:
                 performed.append(name)
             else:
@@ -649,7 +654,7 @@ class ExpressionFormatter:
         """Format a sound or pause the service can perform."""
         if isinstance(segment, Pause):
             return self._adapter().format_pause(segment.duration_within(capabilities))
-        return self._adapter().format_sound(segment.name)
+        return self._adapter().format_sound(capabilities.sound_name(segment.name) or segment.name)
 
     def _warn_unperformed(self, tag: str):
         if tag not in self._unperformed:
@@ -679,6 +684,18 @@ def strip_expression_tags(text: str) -> str:
 def _delivery_name(text: str) -> str:
     """The delivery a tag names, its words single-spaced."""
     return " ".join(text.split())
+
+
+def _service_delivery(
+    delivery: list[str], capabilities: ExpressionCapabilities | None
+) -> list[str]:
+    """A performed delivery by the names the service performs it by."""
+    if capabilities is None:
+        return delivery
+    return [
+        name if name == EMPHASIS_DELIVERY else capabilities.delivery_name(name) or name
+        for name in delivery
+    ]
 
 
 def _move_closing_punctuation(segments: list[Segment]) -> list[Segment]:

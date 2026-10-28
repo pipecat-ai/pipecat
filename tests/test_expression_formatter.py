@@ -9,6 +9,9 @@
 import pytest
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
 from pipecat.expressive.formatter import (
     EXPRESSION_TAG_PATTERN,
@@ -422,3 +425,69 @@ async def test_emphasis_stays_on_its_words_on_a_sentence_service():
 def test_tags_are_stripped_to_the_words_clients_are_shown():
     assert strip_expression_tags("<<cheerful>> It's [[laughs]] ^^back^^ up.") == "It's back up."
     assert strip_expression_tags("Hi [[laughs]], <<calm: there>>.") == "Hi, there."
+
+
+async def formatted_with(adapter: BaseExpressionAdapter, text: str):
+    expression = ExpressionFormatter(lambda: adapter, owner="tts")
+    return await expression.format(expression.parse(text), TextType.SENTENCE, same, lambda w: w)
+
+
+@pytest.mark.asyncio
+async def test_a_universal_delivery_is_sent_by_the_services_name():
+    formatted = await formatted_with(ElevenLabsAudioTagExpressionAdapter(), "<<warm>> Hi there.")
+
+    assert formatted.text == "[warmly] Hi there."
+    assert formatted.spans == [ExpressionSpan(8, 18, delivery=["warm"])]
+
+
+@pytest.mark.asyncio
+async def test_a_universal_sound_is_sent_by_the_services_name():
+    formatted = await formatted_with(CartesiaExpressionAdapter(), "Ha [[laugh]] okay.")
+
+    assert "[laughter]" in formatted.text
+    assert ExpressionSpan(3, 12, sound=(TextType.EXPRESSION_SOUND, "laugh")) in formatted.spans
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_sent_as_a_setting_is_named_as_the_service_names_it():
+    formatted = await formatted_with(MiniMaxExpressionAdapter(), "<<warm>> Hi there.")
+
+    assert formatted.settings["emotion"] == "happy"
+    assert formatted.spans[0].delivery == ["warm"]
+
+
+@pytest.mark.asyncio
+async def test_a_name_of_the_services_own_is_sent_as_written():
+    formatted = await formatted_with(
+        ElevenLabsAudioTagExpressionAdapter(), "<<mischievously>> Hi there."
+    )
+
+    assert formatted.text == "[mischievously] Hi there."
+    assert formatted.spans[0].delivery == ["mischievously"]
+
+
+@pytest.mark.asyncio
+async def test_a_universal_delivery_a_fixed_list_lacks_is_left_out():
+    formatted = await formatted_with(MiniMaxExpressionAdapter(), "<<grateful>> Thanks so much.")
+
+    assert "emotion" not in formatted.settings
+    assert formatted.spans[0].delivery == []
+
+
+def test_a_universal_name_is_performed_by_the_first_name_the_service_performs():
+    capabilities = CartesiaExpressionAdapter().capabilities()
+
+    assert capabilities.delivery_name("warm") == "content"
+    assert capabilities.delivery_name("calm") == "calm"
+    assert capabilities.delivery_name("grateful") == "grateful"
+    assert capabilities.sound_name("chuckle") == "laughter"
+    assert capabilities.delivery_name("mischievously") is None
+
+
+def test_a_universal_name_keeps_its_kind_in_the_other_brackets():
+    expression = ExpressionFormatter(ElevenLabsAudioTagExpressionAdapter, owner="tts")
+
+    assert [shape(s) for s in expression.parse("[[warm]] Hi. <<laugh>>")] == [
+        words(" Hi. ", ("warm",)),
+        ("sound", "laugh"),
+    ]

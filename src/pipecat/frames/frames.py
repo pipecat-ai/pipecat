@@ -526,8 +526,10 @@ class TTSTextFrame(AggregatedTextFrame):
             ID of the sentence or other segment it was spoken in.
         delivery: The delivery this text is spoken in, such as ``["cheerful"]``, and
             ``"emphasis"`` for stressed words; empty for the voice's baseline.
-            None when the text carries no delivery. Part of expressive
-            conversation (alpha).
+            None when the text carries no delivery. Each name is as written in
+            its tag, so a universal name such as ``warm`` stays universal
+            whatever the service calls it. Part of expressive conversation
+            (alpha).
     """
 
     segment_id: int | None = None
