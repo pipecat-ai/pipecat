@@ -435,16 +435,27 @@ def test_flux_keeps_a_configured_eager_threshold():
     assert service._settings.eager_eot_threshold == 0.8
 
 
-@pytest.mark.asyncio
-async def test_update_pushes_interim_transcription():
+def _flux_service_pushing_to(pushed: list):
+    """A Flux service whose pushed frames land in ``pushed``, and whose broadcast ones go nowhere."""
     service = DeepgramFluxSTTService(api_key="test-key")
-    pushed = []
 
     async def push_frame(frame, direction=None):
         pushed.append(frame)
 
-    service.push_frame = push_frame
+    async def broadcast_frame(frame_cls, **kwargs):
+        pass
 
+    service.push_frame = push_frame
+    service.broadcast_frame = broadcast_frame
+    return service
+
+
+@pytest.mark.asyncio
+async def test_update_pushes_interim_transcription():
+    pushed = []
+    service = _flux_service_pushing_to(pushed)
+
+    await service._handle_turn_info({"event": "StartOfTurn", "transcript": ""})
     data = {"event": "Update", "transcript": "so I was thinking"}
     await service._handle_turn_info(data)
 
@@ -469,6 +480,20 @@ async def test_empty_update_pushes_nothing():
     await service._handle_turn_info({"event": "Update", "transcript": ""})
 
     assert pushed == []
+
+
+@pytest.mark.asyncio
+async def test_update_outside_a_turn_pushes_nothing():
+    pushed = []
+    service = _flux_service_pushing_to(pushed)
+
+    # Before any turn, as for a noise as the stream starts, and after one ends.
+    await service._handle_turn_info({"event": "Update", "transcript": "two"})
+    await service._handle_turn_info({"event": "StartOfTurn", "transcript": ""})
+    await service._handle_turn_info({"event": "EndOfTurn", "transcript": "Hi."})
+    await service._handle_turn_info({"event": "Update", "transcript": "two"})
+
+    assert not any(isinstance(frame, InterimTranscriptionFrame) for frame in pushed)
 
 
 @pytest.mark.asyncio

@@ -983,12 +983,19 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
 
         Update events provide incremental transcript updates during an ongoing
         turn. Each one is pushed as an InterimTranscriptionFrame holding the
-        transcript of the turn so far.
+        transcript of the turn so far. An Update while no turn is open is
+        dropped.
 
         Args:
             transcript: The current partial transcript text for the ongoing turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
+        # Flux can send an Update while no turn is open, such as for a noise as
+        # the stream starts. No EndOfTurn follows it, so pushed, it would stand
+        # as a partial transcript that nothing finalizes.
+        if transcript and not self._user_is_speaking:
+            logger.trace(f"Update event outside a turn, dropped: {transcript}")
+            return
         if transcript:
             logger.trace(f"Update event: {transcript}")
             self._turn_transcript = transcript
