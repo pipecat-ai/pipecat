@@ -126,6 +126,21 @@ class CompletionStopStrategy(BaseUserTurnStopStrategy):
             await self.report_user_turn_stopped()
 
 
+class EndAfterTurnStop(FrameProcessor):
+    """Holds ``EndFrame`` until the turn stops, so ending the session can't stop it first."""
+
+    def __init__(self, turn_stopped: asyncio.Event):
+        super().__init__()
+        self._turn_stopped = turn_stopped
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, EndFrame):
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._turn_stopped.wait(), timeout=5.0)
+        await self.push_frame(frame, direction)
+
+
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_llm_run(self):
         context = LLMContext()
@@ -896,17 +911,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             nonlocal timeout
             timeout = True
 
-        class EndAfterTurnStop(FrameProcessor):
-            """Holds EndFrame until the turn stops, so ending the session can't stop it first."""
-
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                await super().process_frame(frame, direction)
-                if isinstance(frame, EndFrame):
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(turn_stopped.wait(), timeout=5.0)
-                await self.push_frame(frame, direction)
-
-        pipeline = Pipeline([EndAfterTurnStop(), user_aggregator])
+        pipeline = Pipeline([EndAfterTurnStop(turn_stopped), user_aggregator])
 
         # Transcript arrives before VAD stop, then user_speech_timeout ends the turn.
         frames_to_send = [
@@ -3342,19 +3347,20 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         user, assistant = pair
 
         stop_messages: list[UserTurnStoppedMessage] = []
+        turn_stopped = asyncio.Event()
 
         @user.event_handler("on_user_turn_stopped")
         async def _on_stop(_a, _s, msg):
             stop_messages.append(msg)
+            turn_stopped.set()
 
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="hey", user_id="", timestamp="now"),
             VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
-            Pipeline([user, assistant]),
+            Pipeline([EndAfterTurnStop(turn_stopped), user, assistant]),
             frames_to_send=frames_to_send,
         )
         self.assertEqual(len(stop_messages), 1)
