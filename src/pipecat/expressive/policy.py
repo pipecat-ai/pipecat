@@ -6,9 +6,9 @@
 
 """The developer's policy for expressive conversation.
 
-Part of expressive conversation (alpha). An LLM is taught the expression tags
-the active TTS service can perform. The policy narrows which of them it is
-offered and says when to use them.
+Part of expressive conversation (alpha). An LLM is taught expression tags by
+their universal names, those the active TTS service can perform. The policy says
+which it is offered and when to use them.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
@@ -70,12 +70,13 @@ class ExpressionPolicy(BaseModel):
             expressive conversation: tags to write, or a reading of the user
             to act on. The presets are about writing tags, so they go to
             whoever writes them: the LLM, or a tagger in its place.
-        delivery: The deliveries to offer, or None for every delivery the TTS
-            service declares. Deliveries a service with a fixed list lacks are
-            left out; a service that accepts any delivery is offered these as
-            written.
-        sounds: The sounds to offer, or None for every sound the TTS service
-            declares, narrowed the same way as ``delivery``.
+        delivery: The deliveries to offer, by their universal names
+            (``UNIVERSAL_DELIVERY``), or None for the core ones. A name that
+            isn't universal, such as an accent, is offered as written. Those the
+            TTS service can't perform are left out, with a warning.
+        sounds: The sounds to offer, as ``delivery`` offers deliveries
+            (``UNIVERSAL_SOUNDS``). None offers the core ones, and a breath only
+            with ``ExpressionGuidance.BREATHE``.
     """
 
     guidance: list[ExpressionGuidance | str] = Field(default_factory=list)

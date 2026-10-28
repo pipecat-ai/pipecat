@@ -30,7 +30,9 @@ EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 CALM_HAPPY = ExpressionCapabilities(
     delivery=[ExpressionTerm("calm"), ExpressionTerm("happy")], pause_range_ms=(100, 3000)
 )
-LAUGHTER = ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
+LAUGHTER = ExpressionCapabilities(
+    sounds=[ExpressionTerm("laughter")], service_names={"laugh": ["laughter"]}
+)
 
 
 def _llm(name: str | None = None) -> OpenAILLMService:

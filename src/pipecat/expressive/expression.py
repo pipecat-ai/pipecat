@@ -209,7 +209,8 @@ class ExpressionSound(StrEnum):
     YAWN = "yawn"
 
 
-# The universal deliveries and sounds Pipecat Tone's tagger writes.
+# The universal deliveries and sounds an LLM is taught when its policy names none, and
+# that Pipecat Tone's tagger writes.
 CORE_DELIVERY: tuple[ExpressionDelivery, ...] = (
     ExpressionDelivery.CALM,
     ExpressionDelivery.SYMPATHETIC,
