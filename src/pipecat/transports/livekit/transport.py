@@ -1507,13 +1507,20 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """Use LiveKit's native publish_dtmf method for telephone events.
 
         LiveKit's DTMF API sends a single tone per call. Publish every
-        button in order, stopping if the gateway rejects a tone.
+        button in order, stopping at the first tone that cannot be sent and
+        reporting it as an error.
 
         Args:
             frame: The DTMF frame to write.
         """
+        if not frame.buttons:
+            return
         for button in frame.buttons:
-            await self._client.send_dtmf(button.value)
+            try:
+                await self._client.send_dtmf(button.value)
+            except Exception as e:
+                await self.push_error(f"Unable to send DTMF: {e}")
+                return
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
