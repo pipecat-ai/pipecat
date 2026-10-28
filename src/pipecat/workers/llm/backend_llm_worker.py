@@ -28,8 +28,9 @@ A request is text, so how a frontend words one is its own business.
 transcript, which is what a frontend hands over when its model signals a
 handoff without wording a request; a frontend whose model does word one sends
 that instead. :class:`~pipecat.services.openai.live.llm.OpenAILiveLLMService`'s
-client delegation and :class:`~pipecat.pipeline.llm_with_backend.LLMWithBackend`
-both drive the worker this way.
+client delegation and
+:class:`~pipecat.pipeline.llm_with_backend.llm_with_backend.LLMWithBackend` both
+drive the worker this way.
 """
 
 import asyncio

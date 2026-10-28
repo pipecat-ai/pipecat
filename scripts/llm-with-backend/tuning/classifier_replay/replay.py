@@ -40,10 +40,9 @@ from backend import FRONTEND_INSTRUCTIONS  # noqa: E402
 from pipecat.classifiers.base_classifier import YesNoQuestion  # noqa: E402
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier  # noqa: E402
 from pipecat.frames.frames import LLMContextFrame  # noqa: E402
-from pipecat.pipeline.llm_with_backend import (  # noqa: E402
+from pipecat.pipeline.llm_with_backend import LLMWithBackend, PredictiveDelegation  # noqa: E402
+from pipecat.pipeline.llm_with_backend.predictive_delegation import (  # noqa: E402
     _DELEGATION_PREDICTION_THRESHOLD,
-    LLMWithBackend,
-    PredictiveDelegation,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService  # noqa: E402

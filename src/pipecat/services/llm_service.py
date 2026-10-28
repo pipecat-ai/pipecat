@@ -110,9 +110,9 @@ class _OutputGate(Protocol):
 
     It lets output through or drops it; it never changes it. It sees each
     frame the service processes, to keep track of what the service is doing.
-    Used by predictive delegation (see "Predictive delegation" in
-    `pipecat.pipeline.llm_with_backend`) to drop what a frontend's inference
-    outputs once its turn is delegated early.
+    Used by predictive delegation (see
+    `pipecat.pipeline.llm_with_backend.predictive_delegation`) to drop what a
+    frontend's inference outputs once its turn is delegated early.
     """
 
     async def process_frame(self, service: LLMService[Any], frame: Frame) -> None:
