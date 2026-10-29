@@ -189,7 +189,7 @@ class ActionManager:
 
                 # Invoke handler appropriately, with async and flow_manager arg as needed
                 if can_handle_flow_manager_arg:
-                    if asyncio.iscoroutinefunction(handler):
+                    if inspect.iscoroutinefunction(handler):
                         await handler(action, self._flow_manager)
                     else:
                         handler(action, self._flow_manager)
@@ -202,7 +202,7 @@ class ActionManager:
                             "dict, flow_manager: FlowManager)` instead.",
                             stacklevel=2,
                         )
-                    if asyncio.iscoroutinefunction(handler):
+                    if inspect.iscoroutinefunction(handler):
                         await handler(action)
                     else:
                         handler(action)
