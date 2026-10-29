@@ -8,10 +8,18 @@
 
 import pytest
 
+from pipecat.adapters.tts.services.azure_adapter import AzureHDExpressionAdapter
 from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAdapter
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
+from pipecat.adapters.tts.services.gemini_adapter import Gemini38ExpressionAdapter
+from pipecat.adapters.tts.services.inworld_adapter import (
+    InworldExpressionAdapter,
+    InworldFlashExpressionAdapter,
+)
 from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
+from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapter
+from pipecat.adapters.tts.services.soniox_adapter import SonioxExpressionAdapter
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
     CORE_SOUNDS,
@@ -24,10 +32,16 @@ from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.processors.tone.tagger._labels import LabelSpace
 
 ADAPTERS = [
+    AzureHDExpressionAdapter,
     CartesiaExpressionAdapter,
     ElevenLabsAudioTagExpressionAdapter,
     FishAudioS2ExpressionAdapter,
+    Gemini38ExpressionAdapter,
+    InworldExpressionAdapter,
+    InworldFlashExpressionAdapter,
     MiniMaxExpressionAdapter,
+    MistralExpressionAdapter,
+    SonioxExpressionAdapter,
 ]
 
 # Sounds services declare that aren't a voice, so they have no universal name.
@@ -70,13 +84,13 @@ def test_a_service_names_universal_names_by_names_it_performs(adapter):
     assert set(capabilities.service_vocabulary) <= {*ExpressionDelivery, *ExpressionSound}
     for universal, names in capabilities.service_vocabulary.items():
         if universal in ExpressionDelivery:
-            declared = capabilities.delivery
+            free_text, declared = capabilities.allows_free_text_delivery, capabilities.delivery
             performed = capabilities.delivery_name(universal)
         else:
-            declared = capabilities.sounds
+            free_text, declared = capabilities.allows_free_text_sounds, capabilities.sounds
             performed = capabilities.sound_name(universal)
         assert performed in names
-        if not capabilities.allows_free_text:
+        if not free_text:
             assert set(names) & {term.name for term in declared}
 
 
@@ -105,10 +119,16 @@ def test_the_tagger_writes_each_core_name_the_service_performs_as_itself(adapter
 @pytest.mark.parametrize(
     "adapter,kinds",
     [
+        (AzureHDExpressionAdapter, ["light breath"]),
         (CartesiaExpressionAdapter, []),
         (ElevenLabsAudioTagExpressionAdapter, ["light breath", "deep breath", "exhale"]),
         (FishAudioS2ExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (Gemini38ExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (InworldExpressionAdapter, ["light breath"]),
+        (InworldFlashExpressionAdapter, ["light breath"]),
         (MiniMaxExpressionAdapter, ["light breath", "deep breath", "exhale"]),
+        (MistralExpressionAdapter, ["light breath"]),
+        (SonioxExpressionAdapter, ["exhale"]),
     ],
 )
 def test_each_kind_of_breath_the_service_performs_is_offered(adapter, kinds):

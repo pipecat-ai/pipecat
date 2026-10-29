@@ -420,13 +420,23 @@ suite:
   # the tags expressive_conversation asks for, so it runs perception alone.
   # The Tone tagger bot's LLM writes plain words and a tagger writes the tags.
   #
+  - bot: expressive-conversation/expressive-conversation-azure.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-cartesia.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-elevenlabs.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-fish.py
     scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-gemini.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-inworld.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-minimax.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-mistral.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-soniox.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-tone.py
     scenarios: [scripted/perception]
