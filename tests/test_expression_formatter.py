@@ -418,8 +418,23 @@ async def test_emphasis_stays_on_its_words_on_a_sentence_service():
     formatted = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
     request, spans = formatted.text, formatted.spans
 
-    assert request == "<calm> It's back now."
-    assert {tuple(span.delivery) for span in spans} == {("calm",)}
+    assert request == "<calm> It's <calm,emphasis> back <calm> now."
+    assert [span.delivery for span in spans] == [["calm"], ["calm", "emphasis"], ["calm"]]
+
+
+@pytest.mark.asyncio
+async def test_stressed_first_words_dont_stress_a_whole_sentence_on_a_sentence_service():
+    expression = formatter(delivery=["excited"], delivery_scope=DeliveryScope.SENTENCE)
+    segments = expression.parse("<<excited>> ^^Really^^ good news!")
+
+    formatted = await expression.format(segments, TextType.SENTENCE, same, lambda w: w)
+
+    assert formatted.text == "<excited,emphasis> Really <excited> good news!"
+    assert [span.delivery for span in formatted.spans] == [
+        ["excited"],
+        ["excited", "emphasis"],
+        ["excited"],
+    ]
 
 
 def test_tags_are_stripped_to_the_words_clients_are_shown():

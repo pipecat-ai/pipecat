@@ -557,7 +557,8 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
 class TestAudioTagExpressionAdapter:
     def test_capabilities(self):
         capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
-        assert capabilities.allows_free_text
+        assert capabilities.allows_free_text_sounds
+        assert capabilities.allows_free_text_delivery
         assert capabilities.emphasis
         assert capabilities.pause_range_ms == (100, 3000)
 

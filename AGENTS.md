@@ -220,6 +220,17 @@ When adding a new service:
 6. Add metrics tracking via `MetricsData` if relevant
 7. Follow the pattern of existing services in `src/pipecat/services/`
 
+### Expression adapters
+
+A TTS service performs expressive conversation's tags through an expression adapter, a `BaseExpressionAdapter` (`src/pipecat/adapters/tts/base_expression_adapter.py`); provider adapters live in `src/pipecat/adapters/tts/services/`. When adding one:
+
+- Add an adapter only for a model that performs sounds, deliveries or emphasis; pauses alone don't qualify. Choose it by model or voice in `get_expression_adapter()`, returning `BaseExpressionAdapter()` for a model that performs none.
+- Declare what the service performs in `ExpressionCapabilities`, by the provider's own names. Where the provider takes free text, set `allows_free_text_delivery` or `allows_free_text_sounds` for that kind instead of listing names.
+- Map each universal name (`ExpressionDelivery`, `ExpressionSound`) the provider names differently in `service_vocabulary`, keyed by members.
+- A name the provider performs that has no universal name gets one in the enums: one spelling per word, an adjective for a delivery and a base word for a sound. Synonyms stay distinct, and sounds that aren't a voice get none. Add the adapter to `ADAPTERS` in `tests/test_universal_names.py`, which checks that every declared voice is reached.
+- Set markup apart from the words with spaces, and have the service report provider markup in its word timestamps as one bracketed word, so word tracking lines up.
+- Add an example in `examples/expressive-conversation/` and an entry in `evals/release/manifest.yaml`.
+
 ## Testing
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.

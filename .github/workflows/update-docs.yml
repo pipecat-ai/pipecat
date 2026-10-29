@@ -97,7 +97,7 @@ jobs:
           fi
 
       - name: Update documentation
-        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
+        uses: anthropics/claude-code-action@aa8a7738e48bf30a40ee499ce818bef081c5ab5e # v1.0.257
         env:
           DOCS_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
@@ -265,7 +265,7 @@ jobs:
         id: review
         if: steps.draft.outputs.changed == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
+        uses: anthropics/claude-code-action@aa8a7738e48bf30a40ee499ce818bef081c5ab5e # v1.0.257
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

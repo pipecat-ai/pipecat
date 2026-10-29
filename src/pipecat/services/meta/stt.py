@@ -21,6 +21,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat import version as pipecat_version
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
@@ -350,7 +351,10 @@ class MetaSTTService(WebsocketSTTService):
                 )
 
             websocket = await self._websocket_connect(
-                f"{self._url}?sessionId=stream-{uuid.uuid4()}"
+                f"{self._url}?sessionId=stream-{uuid.uuid4()}",
+                additional_headers={
+                    "User-Agent": f"Meta/1.0 (integration=Pipecat/{pipecat_version()})"
+                },
             )
             self._websocket = websocket
 

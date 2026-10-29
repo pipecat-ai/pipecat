@@ -106,7 +106,9 @@ class NvidiaTTSSettings(TTSSettings):
 
     quality: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     synthesis_mode: NvidiaTTSSynthesisMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    custom_configuration: dict[str, str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    custom_configuration: dict[str, str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass
@@ -225,6 +227,7 @@ class NvidiaTTSService(TTSService):
             language=Language.EN_US,
             quality=20,
             synthesis_mode=NvidiaTTSSynthesisMode.PER_SENTENCE,
+            custom_configuration=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -333,14 +336,15 @@ class NvidiaTTSService(TTSService):
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
-    def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
+    async def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
         """Fetch and validate synthesis configuration from the server."""
         if not self._service:
             raise RuntimeError("TTS service not initialized")
 
         try:
-            config = self._service.stub.GetRivaSynthesisConfig(
-                rtts.RivaSynthesisConfigRequest()  # pyright: ignore[reportAttributeAccessIssue]
+            config = await asyncio.to_thread(
+                self._service.stub.GetRivaSynthesisConfig,
+                rtts.RivaSynthesisConfigRequest(),  # pyright: ignore[reportAttributeAccessIssue]
             )
             return config
         except grpc.RpcError as e:
@@ -378,7 +382,7 @@ class NvidiaTTSService(TTSService):
         """
         await super().setup(setup)
         self._initialize_client()
-        self._config = self._create_synthesis_config()
+        self._config = await self._create_synthesis_config()
         self._load_zero_shot_audio_prompt()
         logger.debug(f"Initialized NvidiaTTSService with model: {self._settings.model}")
 
@@ -450,7 +454,7 @@ class NvidiaTTSService(TTSService):
             req.voice_name = voice
         if self._custom_dictionary:
             req.custom_dictionary = self._custom_dictionary
-        if is_given(self._settings.custom_configuration):
+        if self._settings.custom_configuration:
             for key, value in self._settings.custom_configuration.items():
                 req.custom_configuration[key] = str(value)
         if self._zero_shot_audio_prompt_data is not None:

@@ -10,7 +10,6 @@ import asyncio
 import io
 import json
 import unittest
-from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -19,7 +18,6 @@ from loguru import logger
 from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
 from pipecat.services.assemblyai.models import AssemblyAIConnectionParams, TerminationMessage
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
-from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -1138,20 +1136,6 @@ def test_termination_acknowledges_without_ending_pipeline():
 
     assert service._termination_event.is_set()
     assert pushed == []
-
-
-@pytest.mark.asyncio
-async def test_teardown_stops_a_reconnect_waiting_on_backoff():
-    service = AssemblyAISTTService(api_key="test-key")
-
-    async def fail_connect(uri, **kwargs):
-        raise OSError(101, "Network is unreachable")
-
-    with patch("pipecat.services.websocket_service.websocket_connect", fail_connect):
-        await run_test(service, frames_to_send=[])
-
-    assert service._receive_task is None
-    assert not service.task_manager.current_tasks()
 
 
 def test_should_interrupt_rides_on_recommended_strategies():

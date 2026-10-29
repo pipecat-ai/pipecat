@@ -34,6 +34,8 @@ python openai-responses-frontend.py
 
 Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
 
+[`openai-responses-frontend-predictive-delegation.py`](openai-responses-frontend-predictive-delegation.py) is `openai-responses-frontend.py` with predictive delegation turned on (`predictive_delegation=PredictiveDelegation(...)`), an optimization that can speed up responses that need backend involvement. It uses a fast yes/no classifier to determine, after each user request, whether it needs to wait for the frontend's inference or can go ahead and trigger an early backend delegation. The cost is money, not time: the classifier runs in parallel with the frontend, but on every turn, and an early delegation abandons a frontend request already under way. It needs `TYPESAFE_API_KEY`.
+
 The behavioral evals for these bots are in [`evals/llm-with-backend/`](../../../evals/llm-with-backend/).
 
 ### A conversation to try

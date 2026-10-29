@@ -489,7 +489,9 @@ class ExpressionFormatter:
                 continue
             delivery = self._performed_delivery(list(segment.delivery), capabilities)
             if sentence_delivery is not None:
-                delivery = sentence_delivery
+                # Stress stays on its own words, which a service stresses in its text.
+                stressed = [EMPHASIS_DELIVERY] if EMPHASIS_DELIVERY in delivery else []
+                delivery = sentence_delivery + stressed
             spans.append(ExpressionSpan(segment.start, segment.end, delivery=delivery))
             if not segment.text.strip():
                 # Spacing before the unit's first words is trimmed as they are.
@@ -546,13 +548,13 @@ class ExpressionFormatter:
         It is the delivery its words start in, and any span's, which such a
         service can perform only over the whole request: ``"Your code is
         <<slow: A B 7>>."`` is spoken slowly. Emphasis is the exception, as
-        stress over a whole sentence stresses nothing. Clients are told the
-        delivery that was requested.
+        stress over a whole sentence stresses nothing: it stays on its own
+        words. Clients are told the delivery that was requested.
         """
         words = [s for s in segments if isinstance(s, Text) and s.text.strip()]
         if not words:
             return None
-        delivery = list(words[0].delivery)
+        delivery = [t for t in words[0].delivery if t != EMPHASIS_DELIVERY]
         for segment in words:
             spread = (t for t in segment.span if t != EMPHASIS_DELIVERY and t not in delivery)
             delivery += spread

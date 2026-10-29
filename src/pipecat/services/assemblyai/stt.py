@@ -996,7 +996,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         await super()._disconnect()
 
         if not self._connected or not self._websocket:
-            # With no connection, the receive loop may still be waiting to reconnect.
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
                 self._receive_task = None
