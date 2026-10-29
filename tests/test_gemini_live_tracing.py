@@ -17,6 +17,7 @@ except ImportError:
     HAS_OPENTELEMETRY = False
 
 from pipecat.utils.tracing.service_decorators import traced_gemini_live
+from pipecat.utils.tracing.tracing_context import TracingContext
 
 
 class _StubGeminiLiveService:
@@ -98,6 +99,20 @@ class TestGeminiLiveToolResultTracing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attrs["tool.function_name"], "get_weather")
         self.assertIn('"temperature": 72', attrs["tool.result"])
         self.assertEqual(attrs["tool.result_status"], "completed")
+
+    async def test_additional_span_attributes(self):
+        """The pipeline's additional span attributes land on the service span."""
+        service = _StubGeminiLiveService()
+        service._tracing_context = TracingContext(
+            additional_span_attributes={"session.id": "call-42", "user.id": "u-7"}
+        )
+
+        await service._tool_result("call-attrs", "lookup", {"value": 1})
+
+        attrs = self._tool_result_span().attributes
+        self.assertEqual(attrs["session.id"], "call-42")
+        self.assertEqual(attrs["user.id"], "u-7")
+        self.assertEqual(attrs["tool.call_id"], "call-attrs")
 
     async def test_result_status_error(self):
         """An ``error`` key in the result dict marks the span as errored."""

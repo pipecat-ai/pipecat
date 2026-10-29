@@ -30,16 +30,23 @@ if is_tracing_available():
 class TracingContext:
     """Pipeline-scoped tracing context.
 
-    Holds the current conversation and turn span contexts for a single pipeline.
-    Created by PipelineWorker, passed to TurnTraceObserver (writer) and services
+    Holds the current conversation and turn span contexts for a single pipeline,
+    plus the extra attributes every span in that pipeline should carry. Created
+    by PipelineWorker, passed to TurnTraceObserver (writer) and services
     (readers) via StartFrame.
     """
 
-    def __init__(self):
-        """Initialize the tracing context with empty state."""
+    def __init__(self, additional_span_attributes: dict | None = None):
+        """Initialize the tracing context with empty state.
+
+        Args:
+            additional_span_attributes: Optional attributes to add to every span
+                created in this pipeline (conversation, turn and service spans).
+        """
         self._conversation_context: Context | None = None
         self._turn_context: Context | None = None
         self._conversation_id: str | None = None
+        self._additional_span_attributes = dict(additional_span_attributes or {})
 
     def set_conversation_context(
         self, span_context: SpanContext | None, conversation_id: str | None = None
@@ -100,6 +107,15 @@ class TracingContext:
             The current conversation ID or None if not available.
         """
         return self._conversation_id
+
+    @property
+    def additional_span_attributes(self) -> dict:
+        """Get the extra attributes added to every span in this pipeline.
+
+        Returns:
+            The additional span attributes, empty if none were given.
+        """
+        return self._additional_span_attributes
 
     @staticmethod
     def generate_conversation_id() -> str:
