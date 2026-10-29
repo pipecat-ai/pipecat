@@ -20,9 +20,12 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import STTUsageMetricsData
-from pipecat.pipeline.worker import PipelineParams
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
+from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 SAMPLE_RATE = 16000
 # Distinct, non-zero 16-bit samples so a misread WAV header would be obvious.
@@ -137,6 +140,26 @@ async def test_segments_are_transcribed_in_order_and_flushed_on_stop():
 
     transcripts = [f.text for f in received_down if isinstance(f, TranscriptionFrame)]
     assert transcripts == ["segment 1", "segment 2", "segment 3"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stops_the_transcription_task():
+    # A processor after the service times out setting up, so the pipeline that
+    # the service already started in is only cleaned up: no EndFrame or
+    # CancelFrame ever reaches it.
+    class _BlockedSetup(FrameProcessor):
+        async def setup(self, setup: FrameProcessorSetup):
+            await super().setup(setup)
+            await asyncio.sleep(30)
+
+    task_manager = TaskManager()
+    worker = PipelineWorker(
+        Pipeline([_make_capturing_service(), _BlockedSetup()]), setup_timeout_secs=0.2
+    )
+
+    await asyncio.wait_for(worker.run(WorkerParams(task_manager=task_manager)), timeout=5.0)
+
+    assert not task_manager.current_tasks()
 
 
 @pytest.mark.asyncio
