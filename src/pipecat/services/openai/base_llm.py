@@ -89,6 +89,54 @@ OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA = re.compile(
 )
 
 
+@dataclass
+class _StreamedToolCall:
+    """A tool call being assembled from streamed deltas."""
+
+    id: str = ""
+    name: str = ""
+    arguments: str = ""
+
+
+class _ToolCallAccumulator:
+    """Assembles the tool calls of one streamed completion.
+
+    A delta can carry several tool calls, and each streamed fragment names its call
+    by `index`. Some OpenAI-compatible servers do not keep indexes unique (parallel
+    calls that all use index 0, or a first call at index 1), so a fragment that
+    arrives with an `id` that differs from the one already assigned to its index
+    starts a new call. Fragments without an `id` continue the call at their index.
+    """
+
+    def __init__(self):
+        self._calls: list[_StreamedToolCall] = []
+        self._by_index: dict[int, _StreamedToolCall] = {}
+        self._last: _StreamedToolCall | None = None
+
+    def add(self, tool_call: Any):
+        """Add one streamed tool call fragment (a `ChoiceDeltaToolCall`)."""
+        index = tool_call.index
+        call = self._by_index.get(index) if index is not None else self._last
+        if call is None or (tool_call.id and call.id and tool_call.id != call.id):
+            call = _StreamedToolCall()
+            self._calls.append(call)
+            if index is not None:
+                self._by_index[index] = call
+        self._last = call
+        if tool_call.id:
+            call.id = tool_call.id
+        function = tool_call.function
+        if function and function.name:
+            call.name += function.name
+        if function and function.arguments:
+            call.arguments += function.arguments
+
+    @property
+    def calls(self) -> list[_StreamedToolCall]:
+        """The assembled tool calls that have a function name, in arrival order."""
+        return [call for call in self._calls if call.name]
+
+
 class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
@@ -547,13 +595,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
-        functions_list = []
-        arguments_list = []
-        tool_id_list = []
-        func_idx = 0
-        function_name = ""
-        arguments = ""
-        tool_call_id = ""
+        tool_calls = _ToolCallAccumulator()
 
         await self.start_ttfb_metrics()
 
@@ -620,21 +662,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         # the response is done, we package up all the arguments and the function name and
                         # yield a frame containing the function name and the arguments.
 
-                        tool_call = chunk.choices[0].delta.tool_calls[0]
-                        if tool_call.index != func_idx:
-                            functions_list.append(function_name)
-                            arguments_list.append(arguments or "{}")
-                            tool_id_list.append(tool_call_id)
-                            function_name = ""
-                            arguments = ""
-                            tool_call_id = ""
-                            func_idx += 1
-                        if tool_call.function and tool_call.function.name:
-                            function_name += tool_call.function.name
-                            tool_call_id = tool_call.id
-                        if tool_call.function and tool_call.function.arguments:
-                            # Keep iterating through the response to collect all the argument fragments
-                            arguments += tool_call.function.arguments
+                        for tool_call in chunk.choices[0].delta.tool_calls:
+                            tool_calls.add(tool_call)
                     elif chunk.choices[0].delta.content:
                         await self._push_llm_text(chunk.choices[0].delta.content)
 
@@ -657,27 +686,22 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name:
-            # added to the list as last function name and arguments not added to the list
-            functions_list.append(function_name)
-            arguments_list.append(arguments or "{}")
-            tool_id_list.append(tool_call_id)
-
+        if tool_calls.calls:
             function_calls = []
 
-            for function_name, arguments, tool_id in zip(
-                functions_list, arguments_list, tool_id_list
-            ):
+            for call in tool_calls.calls:
                 try:
-                    arguments = json.loads(arguments)
+                    arguments = json.loads(call.arguments or "{}")
                 except json.JSONDecodeError:
-                    logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
+                    logger.warning(
+                        f"{self}: Failed to parse function call arguments: {call.arguments}"
+                    )
                     continue
                 function_calls.append(
                     FunctionCallFromLLM(
                         context=context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
+                        tool_call_id=call.id,
+                        function_name=call.name,
                         arguments=arguments,
                     )
                 )
