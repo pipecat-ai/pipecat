@@ -37,8 +37,9 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.anthropic.thinking_binding import ThinkingBinding, is_binding_error
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
@@ -367,6 +368,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
+        self._thinking_binding = ThinkingBinding()
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
@@ -491,13 +493,18 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = await adapter.get_llm_invocation_params(
-            context,
-            enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
-            system_instruction=effective_instruction,
-            ensure_last_message_is_user=self._should_inject_trailing_user_message(),
-            system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
-        )
+
+        async def build_params(ctx: LLMContext) -> AnthropicLLMInvocationParams:
+            return await adapter.get_llm_invocation_params(
+                ctx,
+                enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
+                system_instruction=effective_instruction,
+                ensure_last_message_is_user=self._should_inject_trailing_user_message(),
+                system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
+            )
+
+        sent = list(context.messages)
+        invocation_params = await build_params(context)
         messages = invocation_params["messages"]
         system = invocation_params["system"]
         tools = invocation_params["tools"]
@@ -527,7 +534,15 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         self._maybe_apply_thinking_default(params)
 
         # LLM completion
-        response = await self._client.beta.messages.create(**params)
+        try:
+            response = await self._client.beta.messages.create(**params)
+        except BadRequestError as e:
+            if not self._note_rejected_thinking(e, sent):
+                raise
+            # A one-off request: the context keeps its thinking.
+            retry = await build_params(self._without_thoughts(sent))
+            params["messages"] = retry["messages"]
+            response = await self._client.beta.messages.create(**params)
         self._handle_stop_reason(response)
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
@@ -570,6 +585,48 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         )
         return params
 
+    def _without_thoughts(self, messages: list[LLMContextMessage]) -> LLMContext:
+        """Build a context from the given messages, leaving out thoughts."""
+        adapter = self.get_llm_adapter()
+        return LLMContext(messages=[m for m in messages if not adapter.is_thought(m)])
+
+    def _note_rejected_thinking(
+        self, error: BadRequestError, sent: list[LLMContextMessage]
+    ) -> bool:
+        """Record whether Anthropic rejected thinking that a request sent."""
+        adapter = self.get_llm_adapter()
+        rejected = is_binding_error(error) and any(adapter.is_thought(m) for m in sent)
+        if rejected:
+            self._thinking_binding.enforced = True
+        return rejected
+
+    async def _remove_stale_thinking(
+        self, context: LLMContext, params: AnthropicLLMInvocationParams
+    ) -> AnthropicLLMInvocationParams:
+        """Remove thinking made before the system prompt or tools changed."""
+        binding = self._thinking_binding
+        if binding.changed(context, params) and self.get_llm_adapter().remove_thoughts(context):
+            logger.debug(f"{self}: System prompt or tools changed, removing earlier thinking")
+            params = await self._get_llm_invocation_params(context)
+        binding.record(context, params)
+        return params
+
+    async def _create_message_stream_with_valid_thinking(
+        self, context: LLMContext, params: dict[str, Any], sent: list[LLMContextMessage]
+    ):
+        """Create the message stream, retrying once without the thinking Anthropic rejects."""
+        try:
+            return await self._create_message_stream(self._client.beta.messages.create, params)
+        except BadRequestError as e:
+            if not self._note_rejected_thinking(e, sent):
+                raise
+            logger.warning(f"{self}: Retrying without thinking blocks: {e}")
+            self.get_llm_adapter().remove_thoughts(context)
+            # Rebuilt from what was sent, so nothing added since gets answered twice.
+            retry = await self._get_llm_invocation_params(self._without_thoughts(sent))
+            params["messages"] = retry["messages"]
+            return await self._create_message_stream(self._client.beta.messages.create, params)
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
@@ -588,7 +645,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            sent = list(context.messages)
             params_from_context = await self._get_llm_invocation_params(context)
+            params_from_context = await self._remove_stale_thinking(context, params_from_context)
 
             self._log_llm_response(context)
 
@@ -624,7 +683,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             # Note that this requires us to use `client.beta`, below.
             params.update({"betas": ["interleaved-thinking-2025-05-14"]})
 
-            response = await self._create_message_stream(self._client.beta.messages.create, params)
+            response = await self._create_message_stream_with_valid_thinking(context, params, sent)
 
             # Function calling
             tool_use_block = None
