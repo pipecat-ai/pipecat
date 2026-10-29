@@ -1667,6 +1667,9 @@ class LLMUserAggregator(LLMContextAggregator):
                 (avoids duplicate events when session ends).
             run_llm: Whether the context write should run inference.
         """
+        # Like an empty turn, a voided answer isn't recovered when the session ends.
+        if on_session_end:
+            self._user_turn_answer_voided = False
         segment = await self._push_aggregation(run_llm=run_llm)
         full_aggregation = self._full_user_turn_aggregation
         self._full_user_turn_aggregation = None

@@ -542,6 +542,20 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)
 
+    async def test_session_end_does_not_recover_the_voided_answer(self):
+        """The session ending in the turn that voided the answer doesn't recover it."""
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            )
+        )
+
+        context = next(f.context for f in down if isinstance(f, LLMContextFrame))
+        self.assertNotIn(
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+            context.messages,
+        )
+
     async def test_speech_without_words_does_not_run_an_answer_it_did_not_interrupt(self):
         down = await self._resume_after_the_answer_started(
             FilterIncompleteUserTurnStrategies(
