@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    StopFrame,
     TextFrame,
 )
 from pipecat.processors.aggregators.gated import GatedAggregator
@@ -89,6 +90,21 @@ class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=[TextFrame, TextFrame],
         )
         assert [f.text for f in received_down] == ["Hello, ", "world."]
+
+    async def test_closed_gate_releases_frames_on_stop(self):
+        gated_aggregator = GatedAggregator(
+            gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
+            start_open=False,
+        )
+
+        (received_down, _) = await run_test(
+            gated_aggregator,
+            frames_to_send=[TextFrame("Hello, "), TextFrame("world."), StopFrame()],
+            expected_down_frames=[TextFrame, TextFrame, StopFrame],
+            send_end_frame=False,
+        )
+        assert [f.text for f in received_down[:2]] == ["Hello, ", "world."]
 
 
 if __name__ == "__main__":

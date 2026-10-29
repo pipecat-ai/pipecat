@@ -23,7 +23,8 @@ class GatedAggregator(FrameProcessor):
     Yields gate-opening frame before any accumulated frames, then ensuing frames
     until and not including the gate-closed frame. The aggregator maintains an
     internal gate state that controls whether frames are passed through immediately
-    or accumulated for later release.
+    or accumulated for later release. ``EndFrame`` and ``StopFrame`` are never
+    accumulated: they release any accumulated frames and then pass through.
     """
 
     def __init__(
