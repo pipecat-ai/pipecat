@@ -18,6 +18,9 @@ from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
         ("Dr. 田中が来ます。次の文です。", "ja", "Dr. 田中が来ます。"),
         ("U.S.のAWSです。次の文です。", "ja", "U.S.のAWSです。"),
         ("你好。下一句", "zh", "你好。"),
+        ("他说：“你好。”", "zh", "他说：“你好。”"),
+        ("（注意。）", "zh", "（注意。）"),
+        ("「こんにちは。」", "ja", "「こんにちは。」"),
         ("नमस्ते। यह", "hi", "नमस्ते।"),
         ("هل أنت بخير؟ نعم", "ar", "هل أنت بخير؟"),
         ("Hello. Next", "unrecognized", "Hello."),
@@ -36,6 +39,7 @@ def test_source_character_offsets(text, language, prefix):
     [
         ("en", ["Dr. Smith is here.", "It costs $29.95."]),
         ("de-DE", ["Das ist z.B. wichtig.", "Weiter geht es."]),
+        ("de-DE", ["Er sagte.", "»Hallo« Dann ging er."]),
         ("pt-BR", ["O Sr. Silva chegou.", "Depois saiu."]),
         ("fr", ["Voir p. 12 pour les détails.", "Ensuite continuez."]),
         ("pl", ["Prof. Kowalski przyszedł.", "Potem wyszedł."]),
@@ -44,6 +48,11 @@ def test_source_character_offsets(text, language, prefix):
         ("ja", ["こんにちは。", "次の文です。"]),
         ("ja", ["Dr. 田中が来ます。", "次の文です。"]),
         ("ja", ["U.S.のAWSです。", "次の文です。"]),
+        ("ja", ["「こんにちは。」", "次の文です。"]),
+        ("zh", ["他说：“你好。”", "然后走了。"]),
+        ("zh", ["（注意。）", "下一步。"]),
+        ("zh", ["（「你好。」）", "下一句。"]),
+        ("hi", ["उसने कहा, “नमस्ते।”", "फिर गया।"]),
     ],
 )
 async def test_chunk_boundaries_do_not_change_sentences(chunk_size, language, sentences):
