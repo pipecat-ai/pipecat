@@ -7,16 +7,36 @@
 """Tests for the Tavus transport."""
 
 import asyncio
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 
-from pipecat.frames.frames import OutputAudioRawFrame
+from pipecat.expressive.expression import (
+    CORE_DELIVERY,
+    EMPHASIS_DELIVERY,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    ExpressionDelivery,
+)
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+from pipecat.frames.frames import (
+    OutputAudioRawFrame,
+    OutputTransportMessageUrgentFrame,
+    TextType,
+    TTSTextFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.tavus.transport import (
+    TAVUS_DELIVERY_EMOTIONS,
+    TavusEmotion,
     TavusOutputTransport,
     TavusParams,
     TavusTransport,
     TavusTransportClient,
+    tavus_policy_warning,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -190,3 +210,170 @@ async def test_the_bot_name_reaches_the_daily_client(monkeypatch):
     await transport._client.setup(frame_processor_setup(TaskManager()))
 
     assert captured["bot_name"] == "Ada"
+
+
+def _make_emotion_client() -> TavusTransportClient:
+    client = TavusTransportClient(
+        bot_name="Pipecat",
+        callbacks=MagicMock(),
+        api_key="test-key",
+        replica_id="replica",
+        session=MagicMock(),
+    )
+    client._conversation_id = "conversation"
+    client._client = MagicMock()
+    client._client.send_message = AsyncMock()
+    return client
+
+
+def _sent_emotions(client: TavusTransportClient) -> list[str]:
+    return [
+        call.args[0].message["properties"]["emotion"]
+        for call in client._client.send_message.call_args_list
+    ]
+
+
+@contextmanager
+def _captured_warnings():
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        yield warnings
+    finally:
+        logger.remove(handler_id)
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_sends_a_set_emotion_app_message():
+    """The replica reads the emotion from a conversation.set_emotion app message."""
+    client = _make_emotion_client()
+
+    await client.update_emotion([ExpressionDelivery.HAPPY, EMPHASIS_DELIVERY])
+
+    client._client.send_message.assert_awaited_once()
+    frame = client._client.send_message.call_args.args[0]
+    assert isinstance(frame, OutputTransportMessageUrgentFrame)
+    assert frame.message == {
+        "message_type": "conversation",
+        "event_type": "conversation.set_emotion",
+        "conversation_id": "conversation",
+        "properties": {"emotion": "happiness"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_emotion_is_sent_only_when_it_changes():
+    """Words in the same emotion send nothing new, slow or stressed ones included."""
+    client = _make_emotion_client()
+
+    for delivery in (
+        [ExpressionDelivery.SAD],
+        [ExpressionDelivery.SAD],
+        [ExpressionDelivery.SAD, ExpressionDelivery.SLOW],
+        [ExpressionDelivery.SURPRISED],
+        [ExpressionDelivery.SURPRISED, EMPHASIS_DELIVERY],
+    ):
+        await client.update_emotion(delivery)
+
+    assert _sent_emotions(client) == [TavusEmotion.SADNESS, TavusEmotion.SURPRISE]
+
+
+@pytest.mark.asyncio
+async def test_every_tavus_emotion_converts_from_a_delivery():
+    client = _make_emotion_client()
+
+    for delivery in (
+        [ExpressionDelivery.HAPPY],
+        [ExpressionDelivery.SAD],
+        [ExpressionDelivery.ANGRY],
+        [ExpressionDelivery.SCARED],
+        [ExpressionDelivery.SURPRISED],
+        [ExpressionDelivery.DISGUSTED],
+        [ExpressionDelivery.CONTEMPTUOUS],
+        [],
+    ):
+        await client.update_emotion(delivery)
+
+    assert sorted(_sent_emotions(client)) == sorted(TavusEmotion)
+
+
+def test_every_core_delivery_but_pace_has_an_emotion():
+    """The LLM is offered the core deliveries by default, and the tagger writes only them."""
+    assert set(CORE_DELIVERY) - {SLOW_DELIVERY, FAST_DELIVERY} <= set(TAVUS_DELIVERY_EMOTIONS)
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_tavus_has_no_emotion_for_shows_neutral():
+    client = _make_emotion_client()
+
+    await client.update_emotion([ExpressionDelivery.WARM])
+    await client.update_emotion([ExpressionDelivery.NERVOUS, EMPHASIS_DELIVERY])
+
+    assert _sent_emotions(client) == [TavusEmotion.HAPPINESS, TavusEmotion.NEUTRAL]
+
+
+def test_the_default_deliveries_all_have_an_emotion():
+    """Without a delivery list, the LLM is offered the core deliveries, each mapped."""
+    assert tavus_policy_warning(None) is None
+    assert tavus_policy_warning(ExpressionPolicy(guidance=[ExpressionGuidance.MATCH_STYLE])) is None
+
+
+def test_a_policy_delivery_with_no_emotion_is_warned_about():
+    warning = tavus_policy_warning(
+        ExpressionPolicy(delivery=["calm", "slow", "frustrated", "nervous"])
+    )
+
+    assert warning is not None
+    assert "no emotion for frustrated, nervous from the expression policy" in warning
+
+
+@pytest.mark.asyncio
+async def test_emphasis_and_speed_alone_are_neutral_without_a_warning():
+    """They are how words in the voice's baseline are spoken, not a mood."""
+    client = _make_emotion_client()
+
+    with _captured_warnings() as warnings:
+        await client.update_emotion([ExpressionDelivery.SAD])
+        await client.update_emotion([EMPHASIS_DELIVERY])
+        await client.update_emotion([ExpressionDelivery.SLOW])
+        await client.update_emotion([ExpressionDelivery.FAST])
+
+    assert _sent_emotions(client) == [TavusEmotion.SADNESS, TavusEmotion.NEUTRAL]
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_words_without_a_delivery_tag_return_the_replica_to_neutral():
+    """Words the LLM wrote no tag for are in the voice's baseline, an empty delivery."""
+    client = _make_emotion_client()
+
+    await client.update_emotion([ExpressionDelivery.HAPPY])
+    await client.update_emotion([])
+
+    assert _sent_emotions(client) == [TavusEmotion.HAPPINESS, TavusEmotion.NEUTRAL]
+
+
+@pytest.mark.asyncio
+async def test_words_without_any_delivery_keep_the_emotion():
+    """With expressive conversation off, words carry no delivery at all."""
+    client = _make_emotion_client()
+
+    await client.update_emotion([ExpressionDelivery.HAPPY])
+    await client.update_emotion(None)
+
+    assert _sent_emotions(client) == [TavusEmotion.HAPPINESS]
+
+
+@pytest.mark.asyncio
+async def test_a_tts_text_frame_sets_the_emotion_when_the_clock_releases_it(monkeypatch):
+    """The output transport pushes a timed frame on when its words are heard."""
+    monkeypatch.setattr(BaseOutputTransport, "push_frame", AsyncMock())
+    transport, client = _make_output_transport()
+    client.update_emotion = AsyncMock()
+
+    await transport.push_frame(
+        TTSTextFrame("Great", text_type=TextType.WORD, delivery=[ExpressionDelivery.EXCITED]),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    client.update_emotion.assert_awaited_once_with([ExpressionDelivery.EXCITED])

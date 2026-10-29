@@ -1,0 +1,1 @@
+- The MoQ transport example now uses `OpenAILLMService`'s default model instead of pinning `gpt-4o`, which OpenAI shuts down on 2027-01-14.

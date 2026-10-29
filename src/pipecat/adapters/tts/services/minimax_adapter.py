@@ -15,6 +15,8 @@ from pipecat.expressive.expression import (
     SPEED_DELIVERY,
     DeliveryScope,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
 )
 
@@ -50,12 +52,26 @@ class MiniMaxExpressionAdapter(BaseExpressionAdapter):
             + SPEED_DELIVERY,
             pause_range_ms=(10, 99990),
             delivery_scope=DeliveryScope.SENTENCE,
-            tagger_vocabulary={
-                "warm": ["happy"],
-                "excited": ["happy"],
-                "laugh": ["laughs"],
-                "sigh": ["sighs"],
-                "breath": ["breath", "inhale"],
+            service_vocabulary={
+                ExpressionDelivery.WARM: ["happy"],
+                ExpressionDelivery.EXCITED: ["happy"],
+                ExpressionSound.LAUGH: ["laughs"],
+                ExpressionSound.SIGH: ["sighs"],
+                ExpressionSound.BREATH: ["breath", "inhale"],
+                ExpressionSound.LIGHT_BREATH: ["breath"],
+                ExpressionSound.DEEP_BREATH: ["inhale"],
+                ExpressionSound.COUGH: ["coughs"],
+                ExpressionSound.CLEAR_THROAT: ["clear-throat"],
+                ExpressionSound.GROAN: ["groans"],
+                ExpressionSound.GASP: ["gasps"],
+                ExpressionSound.SNIFF: ["sniffs"],
+                ExpressionSound.SNORT: ["snorts"],
+                ExpressionSound.BURP: ["burps"],
+                ExpressionSound.LIP_SMACK: ["lip-smacking"],
+                ExpressionSound.HUM: ["humming"],
+                ExpressionSound.HISS: ["hissing"],
+                ExpressionSound.UM: ["emm"],
+                ExpressionSound.SNEEZE: ["sneezes"],
             },
         )
 

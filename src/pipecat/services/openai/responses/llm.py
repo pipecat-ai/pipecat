@@ -38,7 +38,6 @@ from openai.types.responses import (
     ResponseUsage,
 )
 from pydantic import BaseModel
-from websockets.exceptions import ConnectionClosed
 
 from pipecat.adapters.llm.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMAdapter,
@@ -204,6 +203,7 @@ _THINKING_DEFAULTS: dict[str, str] = {
     "gpt-6-luna": "none",
     "gpt-6-sol": "none",
     "gpt-6.1-sol": "low",
+    "gpt-6.1-terra": "none",
     "o1": "low",
     "o1-pro": "low",
     "o3": "low",
@@ -674,6 +674,19 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 # WebSocket variant (default / recommended)
 # ---------------------------------------------------------------------------
 
+# Lanes the WebSocket service's responses go on. A connection runs at most 16
+# responses at once, abandoned ones included.
+_LANE_COUNT = 16
+
+# The events that end a response on its lane: it completed, failed or was cut
+# short, or its request got an error.
+_RESPONSE_END_EVENT_TYPES = (
+    "response.completed",
+    "response.failed",
+    "response.incomplete",
+    "error",
+)
+
 
 class OpenAIResponsesLLMService(
     _BaseOpenAIResponsesLLMService, WebsocketLLMService[OpenAIResponsesLLMAdapter]
@@ -728,11 +741,13 @@ class OpenAIResponsesLLMService(
         self._previous_input_hash: str | None = None
         self._previous_input_length: int | None = None
         self._previous_response_output: list | None = None
+        self._previous_response_lane: str | None = None
 
-        # Response cancellation state
-        self._current_response_id: str | None = None  # ID of current non-cancelled response
-        self._cancel_pending_response: bool = False
-        self._needs_drain: bool = False
+        # Response lanes (see _choose_next_response_lane): the lane of the
+        # response in flight, from its response.create until its last event,
+        # and the lanes still draining an abandoned response.
+        self._current_response_lane: str | None = None
+        self._draining_lanes: set[str] = set()
 
     # -- WebsocketLLMService interface ----------------------------------------
 
@@ -762,7 +777,7 @@ class OpenAIResponsesLLMService(
         finally:
             self._websocket = None
             self._clear_previous_response_state()
-            self._clear_cancellation_state()
+            self._clear_lane_state()
 
     async def cleanup(self):
         """Release resources at teardown."""
@@ -943,73 +958,49 @@ class OpenAIResponsesLLMService(
         self._previous_input_length = None
         self._previous_input_hash = None
         self._previous_response_output = None
+        self._previous_response_lane = None
 
-    # -- response cancellation ------------------------------------------------
+    # -- response lanes -------------------------------------------------------
 
-    def _clear_cancellation_state(self):
-        """Clear response cancellation tracking state."""
-        self._current_response_id = None
-        self._cancel_pending_response = False
-        self._needs_drain = False
+    def _clear_lane_state(self):
+        """Clear response lane tracking state."""
+        self._current_response_lane = None
+        self._draining_lanes.clear()
 
-    async def _drain_cancelled_response(self):
-        """Drain events from a cancelled response before starting a new one.
+    async def _choose_next_response_lane(self) -> str:
+        """Choose the lane for the next response.
 
-        After a cancellation, the WebSocket may still have in-flight events
-        from the cancelled response.  We must drain them before sending a
-        new ``response.create`` — we can't simply filter them inline because
-        the API doesn't provide a reliable way to correlate events to a
-        specific response (e.g. delta events carry neither a
-        ``response_id`` nor any intermediary identifier that could be
-        traced back to one).
+        Every response goes on a named lane of the connection (the API's
+        ``stream_id``), so each of its events says which lane it came from.
+        That lets a cancelled response be abandoned rather than waited for:
+        WebSocket mode can't stop a response (it ignores ``response.cancel``),
+        so an abandoned response drains from its lane while the next one runs
+        on another, and its events are discarded as they arrive. The lane is
+        free again once the response ends.
 
-        This method reads and discards events until a terminal event
-        (``response.completed``, ``response.failed``, or
-        ``response.incomplete``) arrives, ensuring the connection is clean.
-        If draining times out or the connection drops, clears cancellation
-        state and returns — ``_ensure_connected`` will handle reconnection
-        before the next inference.
+        The lane chosen isn't draining, since a lane runs its responses one at
+        a time, and isn't the previous response's lane. Each lane caches only
+        its latest response, so an abandoned response on the previous
+        response's lane would evict the previous response when it ended, and
+        the next request couldn't continue from it. Continuing from another
+        lane's response (a fork) costs no more than continuing on the same
+        lane.
+
+        If every lane is taken, the connection is closed, which ends the
+        abandoned responses; the next send opens a new one.
+
+        Returns:
+            The lane, as its ``stream_id``.
         """
-        if not self._websocket:
-            self._clear_cancellation_state()
-            return
-
-        logger.debug(f"{self}: Draining cancelled response events")
-        try:
-            while True:
-                raw = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
-                event = json.loads(raw)
-                event_type = event.get("type")
-
-                # If we were cancelled before response.created, the first
-                # event here will be response.created for the cancelled
-                # request — send cancel now that we have the id.
-                if event_type == "response.created" and self._cancel_pending_response:
-                    response_id = event.get("response", {}).get("id")
-                    logger.debug(
-                        f"{self}: Received response.created for pending-cancel "
-                        f"response {response_id} — sending response.cancel"
-                    )
-                    self._cancel_pending_response = False
-                    if response_id:
-                        try:
-                            await self._ws_send(
-                                {"type": "response.cancel", "response_id": response_id}
-                            )
-                        except Exception:
-                            pass
-                    continue
-
-                if event_type in ("response.completed", "response.failed", "response.incomplete"):
-                    logger.debug(
-                        f"{self}: Cancelled response terminated with {event_type} — "
-                        f"connection is clean"
-                    )
-                    self._clear_cancellation_state()
-                    return
-        except (TimeoutError, WebsocketReconnectedError, ConnectionClosed) as e:
-            logger.warning(f"{self}: Error draining cancelled response: {e}")
-            self._clear_cancellation_state()
+        for i in range(_LANE_COUNT):
+            lane = f"lane-{i}"
+            if lane != self._previous_response_lane and lane not in self._draining_lanes:
+                return lane
+        logger.debug(
+            f"{self}: Every lane is draining or holds the previous response — reconnecting"
+        )
+        await self._disconnect_websocket()
+        return "lane-0"
 
     # -- frame processing -----------------------------------------------------
 
@@ -1029,30 +1020,14 @@ class OpenAIResponsesLLMService(
                 await self._process_context(frame.context)
             except asyncio.CancelledError:
                 # The pipeline cancelled us (e.g. due to an interruption).
-                # Ask the server to stop generating and flag that we need
-                # to drain stale events before the next inference.  We
-                # can't just send a new response.create and filter stale
-                # events inline — the API doesn't provide a reliable way
-                # to correlate events to a specific response.
-                if self._current_response_id:
+                # The response drains from its lane, and the next one goes on
+                # another (see _choose_next_response_lane).
+                if self._current_response_lane:
                     logger.debug(
-                        f"{self}: Cancelled during response {self._current_response_id} "
-                        f"— sending response.cancel"
+                        f"{self}: Abandoning the response on {self._current_response_lane}"
                     )
-                    try:
-                        await self._ws_send(
-                            {"type": "response.cancel", "response_id": self._current_response_id}
-                        )
-                    except Exception:
-                        pass
-                else:
-                    logger.debug(
-                        f"{self}: Cancelled before response.created "
-                        f"— will cancel on next response.created"
-                    )
-                    self._cancel_pending_response = True
-                self._current_response_id = None
-                self._needs_drain = True
+                    self._draining_lanes.add(self._current_response_lane)
+                    self._current_response_lane = None
                 raise
             except Exception as e:
                 await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
@@ -1079,10 +1054,7 @@ class OpenAIResponsesLLMService(
         Args:
             context: The LLM context containing conversation history.
         """
-        # If a previous response was cancelled, drain its remaining events
-        # before starting a new one.
-        if self._needs_drain:
-            await self._drain_cancelled_response()
+        lane = await self._choose_next_response_lane()
 
         adapter = self.get_llm_adapter()
         self._log_llm_response(context)
@@ -1105,7 +1077,10 @@ class OpenAIResponsesLLMService(
         async def send_and_receive(params: dict, output_timeout_secs: float | None = None):
             await self._ensure_connected()
             await self.start_ttfb_metrics()
-            await self._ws_send({"type": "response.create", **params})
+            # Set before sending: a cancellation during the send may still let
+            # the response go out, and its lane must then count as draining.
+            self._current_response_lane = lane
+            await self._ws_send({"type": "response.create", "stream_id": lane, **params})
             await self._receive_response_events(
                 context,
                 full_input,
@@ -1126,8 +1101,8 @@ class OpenAIResponsesLLMService(
             )
             return  # Success
         except _ResponseTimeoutError:
-            # Dropping the connection discards the abandoned response's events,
-            # so the retry starts on a clean socket with no draining needed.
+            # Dropping the connection also ends the response that produced
+            # nothing, so the retry starts on a clean socket.
             logger.warning(
                 f"{self}: No output within {self._retry_timeout_secs}s — reconnecting "
                 f"and retrying with full context ({len(full_input)} items)"
@@ -1215,6 +1190,7 @@ class OpenAIResponsesLLMService(
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
         has_text = False
+        lane = self._current_response_lane
 
         deadline = time.monotonic() + output_timeout_secs if output_timeout_secs else None
 
@@ -1233,9 +1209,22 @@ class OpenAIResponsesLLMService(
 
             event_type = event.get("type")
 
+            # An event on another lane is a draining lane's, from an abandoned
+            # response; the lane is free again once that response ends. Events
+            # with no stream_id concern the connection, and so the response in
+            # flight.
+            event_lane = event.get("stream_id")
+            if event_lane is not None and event_lane != lane:
+                if event_type in _RESPONSE_END_EVENT_TYPES:
+                    self._draining_lanes.discard(event_lane)
+                continue
+
+            if event_type in _RESPONSE_END_EVENT_TYPES:
+                self._current_response_lane = None
+
             if event_type == "response.created":
-                self._current_response_id = event.get("response", {}).get("id")
-                logger.debug(f"{self}: Response started: {self._current_response_id}")
+                response_id = event.get("response", {}).get("id")
+                logger.debug(f"{self}: Response started: {response_id}")
                 continue
 
             # Anything past response.created means the response is under way, so
@@ -1315,6 +1304,7 @@ class OpenAIResponsesLLMService(
                 response_output = response.get("output") or []
                 if response_id:
                     self._store_previous_response_state(response_id, full_input, response_output)
+                    self._previous_response_lane = lane
 
                 if not has_text and not function_calls:
                     await self._report_empty_response(

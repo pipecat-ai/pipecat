@@ -36,8 +36,8 @@ class TextType(StrEnum):
 
     ``EXPRESSION_SOUND`` and ``EXPRESSION_PAUSE`` are part of expressive
     conversation (alpha): a sound or a silence an LLM writes into its reply,
-    which isn't spoken as words. The text is the sound's name, or the pause's
-    duration in milliseconds.
+    which isn't spoken as words. The text is the sound's name, as written in
+    its tag, or the pause's duration in milliseconds.
     """
 
     BACKCHANNEL = "backchannel"

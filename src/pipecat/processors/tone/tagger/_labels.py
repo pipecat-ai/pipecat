@@ -6,65 +6,107 @@
 
 """The labels Pipecat Tone's tagger chooses, and the expression tags they're written as.
 
-The tagger labels with ``TAGGER_DELIVERY`` and ``TAGGER_SOUNDS``. A call's label space holds
-those its TTS service performs and its policy offers, each with the name the service
-performs it by, and a sentence's labels are written as tags in those names.
+The tagger labels with ``CORE_DELIVERY`` and ``CORE_SOUNDS``, universal names, and draws
+a breath as one of :data:`BREATH_KINDS`. A call's label space holds those its TTS service
+performs and its policy offers, each with the name to write: its universal name, or a
+developer's own, which the TTS service then performs by its own name.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import cast
 
 from pipecat.expressive.expression import (
+    CORE_DELIVERY,
+    CORE_SOUNDS,
     NEUTRAL_DELIVERY,
-    TAGGER_DELIVERY,
-    TAGGER_SOUNDS,
     ExpressionCapabilities,
-    ExpressionTerm,
-    TaggerDelivery,
-    TaggerSound,
+    ExpressionDelivery,
+    ExpressionSound,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+
+# The kinds the tagger draws a breath as, each a universal sound.
+BREATH_KINDS: tuple[ExpressionSound, ...] = (
+    ExpressionSound.LIGHT_BREATH,
+    ExpressionSound.DEEP_BREATH,
+    ExpressionSound.EXHALE,
+)
+
+# The services the model was trained with, by the names it reads for them. It reads
+# "other" for any other.
+TRAINED_SERVICES = ("cartesia", "elevenlabs", "fish", "minimax")
+OTHER_SERVICE = "other"
 
 
 @dataclass(frozen=True)
 class LabelSpace:
-    """The labels a call can use, each with the name its TTS service performs it by.
+    """The labels a call can use, each with the name to write it as.
 
     Parameters:
-        deliveries: Delivery label to the name to write, in ``TAGGER_DELIVERY`` order.
-        sounds: Sound label to the name to write, in ``TAGGER_SOUNDS`` order.
+        deliveries: Delivery label to the name to write, in ``CORE_DELIVERY`` order.
+        sounds: Sound label to the name to write, in ``CORE_SOUNDS`` order.
         emphasis: Whether the service stresses ``^^words^^``.
+        tts: The service, by the name the model was trained to read for it.
+        breaths: Kind of breath to the name to write, in ``BREATH_KINDS``
+            order, where a breath is offered. The model chooses only a breath,
+            and the tagger draws its kind.
     """
 
     deliveries: dict[str, str]
     sounds: dict[str, str]
     emphasis: bool
+    tts: str = OTHER_SERVICE
+    breaths: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def resolve(cls, capabilities: ExpressionCapabilities, policy: ExpressionPolicy):
+    def resolve(
+        cls,
+        capabilities: ExpressionCapabilities,
+        policy: ExpressionPolicy,
+        service_name: str = "",
+        vocabulary: dict[ExpressionDelivery | ExpressionSound, list[str]] | None = None,
+    ):
         """The labels the service performs and the policy offers.
 
-        A breath is offered only with ``ExpressionGuidance.BREATHE`` in the policy.
+        A label is written as the first of the developer's names for it, then its
+        own, that the service performs and the policy offers. A breath, and its kinds,
+        are offered only with ``ExpressionGuidance.BREATHE`` in the policy. A breath is
+        offered where the service performs only some of its kinds, written as the first
+        of them for a model that draws no kinds.
+
+        Args:
+            capabilities: What the service performs.
+            policy: The pipeline's expression policy.
+            service_name: The service's name, such as ``"ElevenLabsTTSService#0"``,
+                which says which of the services the model was trained with it is.
+                A service given a name of its own, such as ``name="tts"``, is read
+                as one the model wasn't trained with.
+            vocabulary: Names to try first for a label, before its own.
         """
-        sounds: list[TaggerSound] = [s for s in TAGGER_SOUNDS if s != "breath" or _breathes(policy)]
-        vocabulary = capabilities.tagger_vocabulary
-        return cls(
-            deliveries=_resolve(
-                TAGGER_DELIVERY,
-                capabilities.delivery,
-                capabilities.free_text_delivery,
-                vocabulary,
-                policy.delivery,
-            ),
-            sounds=_resolve(
-                sounds,
-                capabilities.sounds,
-                capabilities.free_text_sounds,
-                vocabulary,
-                policy.sounds,
-            ),
-            emphasis=capabilities.emphasis,
+        names = cast(dict[str, list[str]], vocabulary or {})
+        sounds = [s for s in CORE_SOUNDS if s != ExpressionSound.BREATH or _breathes(policy)]
+        resolved = _resolve(sounds, capabilities.sound_name, names, policy.sounds)
+        # Each kind of breath is a sound of its own.
+        breaths = (
+            _resolve(BREATH_KINDS, capabilities.sound_name, names, policy.sounds)
+            if _breathes(policy)
+            else {}
         )
+        # A breath is last in CORE_SOUNDS, so adding it keeps the order.
+        if breaths and ExpressionSound.BREATH not in resolved:
+            resolved[ExpressionSound.BREATH] = next(iter(breaths.values()))
+        return cls(
+            deliveries=_resolve(CORE_DELIVERY, capabilities.delivery_name, names, policy.delivery),
+            sounds=resolved,
+            emphasis=capabilities.emphasis,
+            tts=_trained_service(service_name),
+            breaths=breaths,
+        )
+
+    def sound_name(self, label: str) -> str | None:
+        """The name to write for a sound or a kind of breath, if the space holds it."""
+        return self.sounds.get(label) or self.breaths.get(label)
 
 
 @dataclass(frozen=True)
@@ -74,7 +116,7 @@ class Span:
     Parameters:
         start: The offset of the first word's first character.
         end: The offset just past the last word.
-        delivery: The words' delivery, a label from ``TAGGER_DELIVERY``.
+        delivery: The words' delivery, a label from ``CORE_DELIVERY``.
     """
 
     start: int
@@ -135,9 +177,9 @@ class ReplyRenderer:
             text = text[:at] + tag + text[at:]
 
         if kept.sound_before:
-            text = f"[[{self._space.sounds[kept.sound_before]}]] {text}"
+            text = f"[[{self._space.sound_name(kept.sound_before)}]] {text}"
         if kept.sound_after:
-            text = f"{text} [[{self._space.sounds[kept.sound_after]}]]"
+            text = f"{text} [[{self._space.sound_name(kept.sound_after)}]]"
         delivery = names[kept.delivery] if kept.delivery else None
         if delivery != self._delivery:
             text = f"<<{delivery or NEUTRAL_DELIVERY}>> {text}"
@@ -145,28 +187,30 @@ class ReplyRenderer:
         return text
 
 
+def _trained_service(service_name: str) -> str:
+    name = service_name.lower()
+    return next((service for service in TRAINED_SERVICES if service in name), OTHER_SERVICE)
+
+
 def _breathes(policy: ExpressionPolicy) -> bool:
     return ExpressionGuidance.BREATHE in policy.guidance
 
 
 def _resolve(
-    labels: Iterable[TaggerDelivery | TaggerSound],
-    terms: list[ExpressionTerm],
-    free_text: bool,
-    vocabulary: dict[TaggerDelivery | TaggerSound, list[str]],
+    labels: Iterable[ExpressionDelivery | ExpressionSound],
+    performed_name: Callable[[str], str | None],
+    vocabulary: dict[str, list[str]],
     offered: list[str] | None,
 ) -> dict[str, str]:
     """Each label's first name the service performs and the policy offers.
 
-    The service's names for a label are tried best first, then, for a service that
-    accepts free text, the label itself. A label with no such name is left out.
+    The developer's names for a label are tried best first, then the label itself.
+    A label with no such name is left out.
     """
-    declared = {term.name for term in terms}
     resolved = {}
     for label in labels:
-        names = vocabulary.get(label, [label])
-        for name in [*names, label] if free_text else names:
-            if (free_text or name in declared) and (offered is None or name in offered):
+        for name in [*vocabulary.get(label, []), label]:
+            if performed_name(name) is not None and (offered is None or name in offered):
                 resolved[label] = name
                 break
     return resolved
@@ -194,8 +238,8 @@ def _keep(sentence: str, labels: SentenceLabels, space: LabelSpace) -> SentenceL
         delivery=labels.delivery if labels.delivery in space.deliveries else None,
         spans=spans,
         emphasis=emphasis,
-        sound_before=labels.sound_before if labels.sound_before in space.sounds else None,
-        sound_after=labels.sound_after if labels.sound_after in space.sounds else None,
+        sound_before=labels.sound_before if space.sound_name(labels.sound_before or "") else None,
+        sound_after=labels.sound_after if space.sound_name(labels.sound_after or "") else None,
     )
 
 

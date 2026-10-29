@@ -13,6 +13,8 @@ from pipecat.expressive.expression import (
     SLOW_DELIVERY,
     SPEED_DELIVERY,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
 )
 
@@ -20,8 +22,8 @@ from pipecat.expressive.expression import (
 _SPEED_TAGS = {SLOW_DELIVERY: "slowly", FAST_DELIVERY: "quickly"}
 
 # The audio tags in ElevenLabs' prompting guide for Eleven v3 and v4, and a
-# short breath, gentler than the guide's deep one, sorted into sounds made at
-# one point and deliveries that last. Their guide doesn't draw that line.
+# short breath, a light one beside the guide's deep one, sorted into sounds made
+# at one point and deliveries that last. Their guide doesn't draw that line.
 # Multi-word deliveries, such as accents, aren't listed; written in a tag,
 # they're passed on as free text.
 _AUDIO_TAG_SOUNDS = [
@@ -107,21 +109,42 @@ class ElevenLabsAudioTagExpressionAdapter(BaseExpressionAdapter):
         return ExpressionCapabilities(
             sounds=list(_AUDIO_TAG_SOUNDS),
             delivery=[*_AUDIO_TAG_DELIVERY, *SPEED_DELIVERY],
-            free_text_sounds=True,
-            free_text_delivery=True,
+            allows_free_text_sounds=True,
+            allows_free_text_delivery=True,
             pause_range_ms=(100, 3000),
             emphasis=True,
-            tagger_vocabulary={
-                "calm": ["calm", "reassuring"],
-                "apologetic": ["apologetic", "sheepishly"],
-                "warm": ["warmly"],
-                "excited": ["excited", "delighted"],
-                "grateful": ["grateful", "warmly"],
-                "confident": ["confident", "professional"],
-                "laugh": ["laughs"],
-                "chuckle": ["chuckles"],
-                "sigh": ["sighs"],
-                "breath": ["short breath", "inhales deeply"],
+            service_vocabulary={
+                ExpressionDelivery.CALM: ["calm", "reassuring"],
+                ExpressionDelivery.APOLOGETIC: ["apologetic", "sheepishly"],
+                ExpressionDelivery.WARM: ["warmly"],
+                ExpressionDelivery.EXCITED: ["excited", "delighted"],
+                ExpressionDelivery.GRATEFUL: ["grateful", "warmly"],
+                ExpressionDelivery.CONFIDENT: ["confident", "professional"],
+                ExpressionSound.LAUGH: ["laughs", "laughing"],
+                ExpressionSound.CHUCKLE: ["chuckles"],
+                ExpressionSound.SIGH: ["sighs", "sighing"],
+                ExpressionSound.BREATH: ["quick breath"],
+                # A policy that leaves out a kind's own name gets its next best.
+                ExpressionSound.LIGHT_BREATH: ["quick breath", "short breath"],
+                ExpressionSound.DEEP_BREATH: ["deep breath", "inhales deeply"],
+                ExpressionSound.EXHALE: ["exhales softly", "exhales"],
+                ExpressionDelivery.CAUTIOUS: ["cautiously"],
+                ExpressionDelivery.NERVOUS: ["nervously"],
+                ExpressionDelivery.SHEEPISH: ["sheepishly"],
+                ExpressionDelivery.DESPERATE: ["desperately"],
+                ExpressionDelivery.PANICKED: ["panicking"],
+                ExpressionDelivery.MISCHIEVOUS: ["mischievously"],
+                ExpressionDelivery.DRAMATIC: ["dramatically"],
+                ExpressionDelivery.WHISPERING: ["whispers"],
+                ExpressionSound.LAUGH_HARDER: ["laughs harder"],
+                ExpressionSound.START_LAUGHING: ["starts laughing"],
+                ExpressionSound.WHEEZE: ["wheezing"],
+                ExpressionSound.GIGGLE: ["giggles", "giggling"],
+                ExpressionSound.SNORT: ["snorts"],
+                ExpressionSound.SHARP_EXHALE: ["exhales sharply"],
+                ExpressionSound.CLEAR_THROAT: ["clears throat"],
+                ExpressionSound.GULP: ["gulps"],
+                ExpressionSound.SWALLOW: ["swallows"],
             },
         )
 
