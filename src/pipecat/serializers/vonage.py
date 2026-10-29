@@ -150,6 +150,11 @@ class VonageFrameSerializer(FrameSerializer):
             # Text message = JSON event
             try:
                 message = json.loads(data)
+                if not isinstance(message, dict):
+                    logger.warning(
+                        f"Ignoring JSON message that is not an object from Vonage: {data}"
+                    )
+                    return None
                 event = message.get("event")
 
                 # Handle different event types
@@ -167,7 +172,10 @@ class VonageFrameSerializer(FrameSerializer):
                 elif event == "websocket:dtmf":
                     # Handle DTMF input
                     # Vonage may send digit in different formats, try both
-                    digit = message.get("digit") or message.get("dtmf", {}).get("digit")
+                    dtmf = message.get("dtmf")
+                    digit = message.get("digit") or (
+                        dtmf.get("digit") if isinstance(dtmf, dict) else None
+                    )
                     if digit is None:
                         logger.warning(f"DTMF event received but no digit found: {message}")
                         return None
