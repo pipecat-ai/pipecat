@@ -83,3 +83,35 @@ def test_emotion_and_gender_detection_default_on():
     service = SmallestSTTService(api_key="test-key")
     assert service._settings.emotion_detection is True
     assert service._settings.gender_detection is True
+
+
+def test_eou_timeout_ms_defaults_unset():
+    service = SmallestSTTService(api_key="test-key")
+    assert service._settings.eou_timeout_ms is None
+
+
+@pytest.mark.asyncio
+async def test_eou_timeout_ms_omitted_from_url_by_default():
+    service = SmallestSTTService(api_key="test-key")
+    service._websocket_connect = AsyncMock()
+    service._call_event_handler = AsyncMock()
+
+    await service._connect_websocket()
+
+    url = service._websocket_connect.call_args.args[0]
+    assert "eou_timeout_ms" not in url
+
+
+@pytest.mark.asyncio
+async def test_eou_timeout_ms_included_in_url_when_set():
+    service = SmallestSTTService(
+        api_key="test-key",
+        settings=SmallestSTTService.Settings(eou_timeout_ms=300),
+    )
+    service._websocket_connect = AsyncMock()
+    service._call_event_handler = AsyncMock()
+
+    await service._connect_websocket()
+
+    url = service._websocket_connect.call_args.args[0]
+    assert "eou_timeout_ms=300" in url
