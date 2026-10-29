@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import STTUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 
 SAMPLE_RATE = 16000
 # Distinct, non-zero 16-bit samples so a misread WAV header would be obvious.
@@ -137,6 +137,46 @@ async def test_segments_are_transcribed_in_order_and_flushed_on_stop():
 
     transcripts = [f.text for f in received_down if isinstance(f, TranscriptionFrame)]
     assert transcripts == ["segment 1", "segment 2", "segment 3"]
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_is_finalized_when_its_segment_is_the_latest():
+    service = _make_capturing_service(transcribe_secs=0.05, trailing_silence_secs=0)
+
+    received_down, _ = await run_test(service, frames_to_send=_segment_frames())
+
+    (transcript,) = [f for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert transcript.finalized
+
+
+@pytest.mark.asyncio
+async def test_transcripts_of_segments_spoken_past_are_not_finalized():
+    # Segments are transcribed in order, so an earlier one can finish after
+    # the user's next stop.
+    service = _make_capturing_service(transcribe_secs=0.2, trailing_silence_secs=0)
+
+    received_down, _ = await run_test(
+        service, frames_to_send=_segment_frames() + _segment_frames() + _segment_frames()
+    )
+
+    finalized = [f.finalized for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert finalized == [False, False, True]
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_landing_while_the_user_speaks_again_is_not_finalized():
+    service = _make_capturing_service(transcribe_secs=0.1, trailing_silence_secs=0)
+    resumed = [
+        VADUserStartedSpeakingFrame(),
+        InputAudioRawFrame(audio=PCM, sample_rate=SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.3),
+        VADUserStoppedSpeakingFrame(),
+    ]
+
+    received_down, _ = await run_test(service, frames_to_send=_segment_frames() + resumed)
+
+    finalized = [f.finalized for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert finalized == [False, True]
 
 
 @pytest.mark.asyncio

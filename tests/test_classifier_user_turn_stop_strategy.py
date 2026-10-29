@@ -184,18 +184,15 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.classifier.asked[1], {"user": "I'd like to book a table."})
         self.assertEqual(len(self.stopped), 1)
 
-    async def test_a_transcription_finalized_while_the_user_speaks_holds_the_pause(self):
-        """The earlier words' transcription can land while the user speaks again."""
+    async def test_a_transcription_finalized_before_the_stop_does_not_wait(self):
+        """An STT can finalize the user's words before VAD reports the stop."""
         await self._start("complete", stt_latency=1.0)
         await self.strategy.process_frame(VADUserStartedSpeakingFrame())
-        await self.strategy.process_frame(_said("paris", finalized=True))
+        await self.strategy.process_frame(_said("book a table.", finalized=True))
         await self.strategy.process_frame(VADUserStoppedSpeakingFrame())
         await asyncio.sleep(SETTLE)
-        self.assertEqual(self.classifier.asked, [])
 
-        await self.strategy.process_frame(_said("and then rome", finalized=True))
-        await asyncio.sleep(SETTLE)
-        self.assertEqual(self.classifier.asked, [{"user": "paris and then rome"}])
+        self.assertEqual(len(self.stopped), 1)
 
     async def test_an_interim_transcription_holds_the_pause(self):
         """An interim transcription means more words are on their way."""
