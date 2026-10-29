@@ -449,10 +449,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """Whether the model takes a call's intermediate results.
 
         They ride the tool-response channel as a generator (``will_continue``),
-        which only a NON_BLOCKING call allows, so this follows the same model
-        gating as the rest of the async-tool support.
+        which only a NON_BLOCKING call on a model with response scheduling allows.
         """
-        return self._supports_non_blocking_tools
+        return self._supports_response_scheduling
 
     def service_metadata_frame(self) -> LLMServiceMetadataFrame:
         """Realtime service; emits no server-side turn frames, so recommends no external strategies."""
@@ -551,7 +550,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     @property
     def _supports_non_blocking_tools(self) -> bool:
-        """Whether the current model supports the NON_BLOCKING tool behavior + scheduling hints.
+        """Whether the current model supports the NON_BLOCKING tool behavior.
 
         Before 3.8, Gemini 3.x models did not support NON_BLOCKING function declarations.
         Thinking models (the first of which is gemini-3.8-live-extended-thinking) require
@@ -578,6 +577,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         accept a BLOCKING declaration.
         """
         return not self._expects_interaction_status
+
+    @property
+    def _supports_response_scheduling(self) -> bool:
+        """Whether NON_BLOCKING responses can take a scheduling hint and stay open."""
+        return self._supports_non_blocking_tools and not self._expects_interaction_status
 
     def _tag_tool_behaviors(self, tools: list) -> None:
         """Set each function declaration's ``behavior`` for the current model.
@@ -2103,9 +2107,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             is_final: Whether this result completes the call. An intermediate
                 one keeps it open (``will_continue``), which only a NON_BLOCKING
                 call allows.
-            spoken: Whether the model should address the result. It is told to
-                stay silent otherwise, so the result is context it can draw on
-                if the conversation turns that way.
+            spoken: Whether the model should address the result. A model that
+                takes a scheduling hint is told to stay silent otherwise, so the
+                result is context it can draw on if the conversation turns that way.
         """
         if self._disconnecting or not self._session:
             return
@@ -2123,7 +2127,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # mid-turn — so we mirror the gating used at tool-declaration time.
         # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
         non_blocking = self._supports_non_blocking_tools and self._function_is_async(tool_name)
-        scheduling = ("WHEN_IDLE" if spoken else "SILENT") if non_blocking else None
+        scheduling = None
+        if non_blocking and self._supports_response_scheduling:
+            scheduling = "WHEN_IDLE" if spoken else "SILENT"
         response_payload = (
             {**tool_result_message, "scheduling": scheduling} if scheduling else tool_result_message
         )
@@ -2136,8 +2142,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # there. will_continue only exists as a field: True keeps the call open
         # for more responses, and False closes it, which the last response has
         # to say or the call stays open for good.
-        if non_blocking:
+        if scheduling:
             response.scheduling = FunctionResponseScheduling(scheduling)
+        if non_blocking:
             response.will_continue = not is_final
 
         try:

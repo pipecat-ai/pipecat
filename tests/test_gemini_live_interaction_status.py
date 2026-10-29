@@ -143,6 +143,21 @@ def test_non_blocking_tool_support_by_model(model, expected):
 
 
 @pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("models/gemini-2.5-flash-native-audio-preview-12-2025", True),
+        ("models/gemini-3-pro-preview", False),
+        ("models/gemini-3.8-live", True),
+        ("models/gemini-3.8-live-extended-thinking", False),
+    ],
+)
+def test_response_scheduling_support_by_model(model, expected):
+    """Live thinking models run NON_BLOCKING calls but take no scheduling hint."""
+    service = _make_service(model=model)
+    assert service._supports_response_scheduling is expected
+
+
+@pytest.mark.parametrize(
     "model",
     [
         "models/gemini-3-pro-preview",
