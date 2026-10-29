@@ -197,6 +197,20 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_parallel_forgets_frames_once_they_are_gone(self):
+        pipeline = ParallelPipeline([IdentityFilter()], [IdentityFilter()])
+
+        frames_to_send = [
+            InputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+            for _ in range(10)
+        ]
+        sent_ids = [frame.id for frame in frames_to_send]
+        kept = frames_to_send[-1]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+        del frames_to_send
+
+        self.assertEqual([i for i in sent_ids if i in pipeline._seen_ids], [kept.id])
+
     async def test_parallel_internal_frames_buffered_during_start(self):
         """Frames pushed by internal processors during StartFrame processing
         should be buffered and only released after StartFrame synchronization
