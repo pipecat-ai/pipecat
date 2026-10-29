@@ -317,8 +317,8 @@ class _Recognition:
                 self.pending.popleft()
                 if not record.discarded and record.final is not None:
                     record.final.finalized = record.sequence == self.sequence and not self.speaking
-                    # Bypass STTService's single shared latency timer and the
-                    # segmented base's unconditional finalized flag.
+                    # Bypass STTService's single shared latency timer and use
+                    # Rime's per-utterance finalization state.
                     await AIService.push_frame(self.service, record.final)
 
     async def metrics(self, record: _Utterance):

@@ -859,9 +859,13 @@ class SegmentedSTTService(STTService):
         self._audio_buffer = bytearray()
         self._audio_buffer_size_1s = 0
         self._user_speaking = False
-        # Segments awaiting transcription, drained in order by _segment_task;
-        # None tells the task to finish.
-        self._segment_queue: asyncio.Queue[STTSegment | None] = asyncio.Queue()
+        # Numbers the user's speech segments, so a transcript can tell whether
+        # its segment is still the latest.
+        self._segment_count = 0
+        self._transcribing_segment = 0
+        # Segments awaiting transcription, with their numbers, drained in order
+        # by _segment_task; None tells the task to finish.
+        self._segment_queue: asyncio.Queue[tuple[STTSegment, int] | None] = asyncio.Queue()
         self._segment_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -915,17 +919,19 @@ class SegmentedSTTService(STTService):
         return True
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame, marking TranscriptionFrames as finalized.
+        """Push a frame, marking a TranscriptionFrame finalized when its segment is the latest.
 
-        Segmented STT services process complete speech segments and return a single
-        TranscriptionFrame per segment, so every transcription is inherently finalized.
+        Once the user speaks again, the transcript of an earlier segment covers
+        only the words before they resumed, so it isn't finalized, the same way
+        :class:`STTService` drops a pending finalize when the user starts
+        speaking.
 
         Args:
             frame: The frame to push.
             direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, TranscriptionFrame):
-            frame.finalized = True
+            frame.finalized = self._transcribing_segment == self._segment_count
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -939,6 +945,7 @@ class SegmentedSTTService(STTService):
 
     async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
+        self._segment_count += 1
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
@@ -964,7 +971,7 @@ class SegmentedSTTService(STTService):
             # WAV container would make them misread the 44-byte header as audio.
             audio = pcm
 
-        await self._segment_queue.put(self._create_segment(audio))
+        await self._segment_queue.put((self._create_segment(audio), self._segment_count))
 
     def _create_segment(self, audio: bytes) -> STTSegment:
         """Capture metadata before a segment enters the transcription queue.
@@ -992,9 +999,10 @@ class SegmentedSTTService(STTService):
         """Transcribe queued segments one at a time, in order, until told to finish."""
         running = True
         while running:
-            segment = await self._segment_queue.get()
-            running = segment is not None
-            if segment is not None:
+            queued = await self._segment_queue.get()
+            running = queued is not None
+            if queued is not None:
+                segment, self._transcribing_segment = queued
                 try:
                     await self._process_segment(segment)
                 except Exception as e:

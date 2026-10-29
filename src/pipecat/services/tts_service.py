@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import (
     Any,
@@ -19,9 +19,18 @@ from typing import (
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
 from pipecat.audio.utils import create_stream_resampler
+from pipecat.expressive.formatter import (
+    EXPRESSION_TAG_PATTERN,
+    EXPRESSION_TAGS,
+    ExpressionFormatter,
+    Segment,
+)
+from pipecat.expressive.spoken import SpokenExpression
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    AggregatedTextProgressFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -41,6 +50,7 @@ from pipecat.frames.frames import (
     TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSMetadataFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -62,6 +72,7 @@ from pipecat.utils.text.base_text_aggregator import Aggregation
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.text.transforms.pronunciations import (
     PronunciationTransform,
     pronunciation_transform,
@@ -100,11 +111,15 @@ class TTSContext:
             speaking, forcing the assistant aggregator to commit its current
             text buffer to the conversation context.
         interruptible: Whether an interruption may discard this synthesis.
+        spoken_expression: The delivery and sounds of the words the service
+            reports speaking in this context. Part of expressive conversation
+            (alpha).
     """
 
     append_to_context: bool = True
     push_assistant_aggregation: bool = False
     interruptible: bool = True
+    spoken_expression: SpokenExpression = field(default_factory=SpokenExpression)
 
 
 @dataclass
@@ -113,6 +128,11 @@ class _AudioContextPlayback:
 
     received_audio: bool = False
     stop_frame_due: bool = False
+
+
+# The text types an LLM writes its replies in, where expressive conversation
+# reads expression tags. Other text, such as a pattern's match, is spoken as is.
+_EXPRESSIVE_TEXT_TYPES = (TextType.SENTENCE, TextType.TOKEN)
 
 
 class TTSService(AIService):
@@ -148,6 +168,10 @@ class TTSService(AIService):
     """
 
     _settings: TTSSettings
+
+    # Formats expressive conversation's tags for this service (alpha). The base
+    # adapter performs nothing.
+    expression_adapter_class: type[BaseExpressionAdapter] = BaseExpressionAdapter
 
     def __init__(
         self,
@@ -406,6 +430,13 @@ class TTSService(AIService):
         # Whether the TTS process is currently yielding audio frames synchronously.
         self._is_yielding_frames_synchronously = False
 
+        self._expression_adapter = self.expression_adapter_class()
+        # Formats the expression tags an LLM writes, when the pipeline has
+        # expressive conversation on.
+        self._expression_formatter: ExpressionFormatter | None = None
+        # What the adapter asked to send beside the latest request's text.
+        self._expression_settings: dict[str, Any] = {}
+
     @property
     def sample_rate(self) -> int:
         """Get the current sample rate for audio output.
@@ -449,6 +480,51 @@ class TTSService(AIService):
         carry the latency for those.
         """
         return True
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter that formats this service's expression tags.
+
+        Part of expressive conversation (alpha). Its capabilities are what the
+        service can perform: what it broadcasts at start, and what it reads
+        and formats. A service whose expression depends on its settings, such
+        as its model, overrides this to choose an adapter for them.
+
+        Returns:
+            An instance of :attr:`expression_adapter_class`.
+        """
+        return self._expression_adapter
+
+    @property
+    def expression_settings(self) -> dict[str, Any]:
+        """Settings to send with the request being synthesized.
+
+        Part of expressive conversation (alpha). Set before each request from
+        the service's expression adapter
+        (:meth:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter.request_settings`),
+        for a service that takes some of its expression as request settings
+        rather than as markup in its text.
+
+        Returns:
+            The settings, empty for none.
+        """
+        return self._expression_settings
+
+    def service_metadata_frame(self) -> TTSMetadataFrame | None:
+        """Build the TTS metadata frame broadcast at start.
+
+        Overrides :meth:`AIService.service_metadata_frame`. With expressive
+        conversation on, a :class:`~pipecat.frames.frames.TTSMetadataFrame`
+        carries its expression adapter's capabilities; otherwise nothing is
+        broadcast.
+
+        Returns:
+            The metadata frame, or None when expressive conversation is off.
+        """
+        if not self._expression_formatter:
+            return None
+        return TTSMetadataFrame(
+            service_name=self.name, expression=self.get_expression_adapter().capabilities()
+        )
 
     async def start_tts_usage_metrics(self, text: str):
         """Record TTS usage metrics.
@@ -523,6 +599,21 @@ class TTSService(AIService):
         """
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        if setup.enable_expressive_conversation:
+            self._expression_formatter = ExpressionFormatter(self.get_expression_adapter, self)
+            self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
+            # Each tag reaches the parser whole, however the text streams in, and
+            # so do the tags the service keeps whole itself, such as <spell>.
+            own_tags = (
+                self._text_aggregator.tags
+                if isinstance(self._text_aggregator, SkipTagsAggregator)
+                else []
+            )
+            self._text_aggregator = SkipTagsAggregator(
+                [*EXPRESSION_TAGS, *own_tags],
+                aggregation_type=self._text_aggregation_mode,
+                language=self._text_aggregator.language,
+            )
 
     async def start(self, frame: StartFrame):
         """Start the TTS service.
@@ -1116,13 +1207,118 @@ class TTSService(AIService):
         """
         self._apply_context_interruptible(frame)
         if isinstance(frame, TTSStoppedFrame):
+            await self._report_unreported_expression(frame, direction)
             await self._finish_tts_context(frame)
             await self._push_stop_silence(frame)
         if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
         if isinstance(frame, AggregatedTextFrame):
             self._stamp_segment_announcement(frame)
+        if self._expression_formatter:
+            sounds, keep = self._report_expression(frame)
+            for sound in sounds:
+                await self.push_frame(sound, direction)
+            if not keep:
+                return
         await super().push_frame(frame, direction)
+
+    async def _report_unreported_expression(
+        self, frame: TTSStoppedFrame, direction: FrameDirection
+    ):
+        """Report the sounds and pauses no text reported, once a context's audio has ended."""
+        context = self._tts_contexts.get(frame.context_id) if frame.context_id else None
+        if not self._expression_formatter or not context:
+            return
+        for sound in self._expression_sound_frames(frame, context.spoken_expression.unreported()):
+            # Ordered after the context's last words, as the stop frame is.
+            if self._word_timestamp_tracker.last_pts:
+                sound.pts = self._word_timestamp_tracker.last_pts + 1
+            await self.push_frame(sound, direction)
+
+    def _report_expression(self, frame: Frame) -> tuple[list[TTSTextFrame], bool]:
+        """Give spoken text the delivery it is spoken in, and report the sounds before it.
+
+        The text the service reports speaking covers part of the text the LLM
+        wrote, tags included, which tells its delivery and the sounds performed
+        since the text before it. Markup the service reports as a word stands
+        for the sound it performs, or isn't spoken.
+
+        Returns:
+            A frame for each sound or pause performed before the text, and
+            whether the frame itself is pushed.
+        """
+        if not isinstance(frame, (TTSTextFrame, AggregatedTextProgressFrame)) or (
+            frame.text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE)
+        ):
+            return [], True
+        context = self._tts_contexts.get(frame.context_id) if frame.context_id else None
+        spoken = context.spoken_expression if context else None
+        if isinstance(frame, AggregatedTextProgressFrame):
+            frame.delivery = spoken.delivery if spoken else None
+            return [], True
+        if _is_markup(frame.text):
+            return self._report_markup(frame, spoken)
+        return self._report_words(frame, spoken), True
+
+    def _report_markup(
+        self, frame: TTSTextFrame, spoken: SpokenExpression | None
+    ) -> tuple[list[TTSTextFrame], bool]:
+        """Report markup the service reported as a word: the sound it stands for, or nothing.
+
+        Returns:
+            A frame for each sound or pause performed before it, and whether
+            the frame itself is pushed.
+        """
+        sound = spoken.spoken_markup() if spoken else None
+        if sound is None:
+            # Markup that stands for no sound isn't spoken, unless it covers
+            # some of the LLM's text.
+            if frame.raw_text is None:
+                return [], False
+            return self._report_words(frame, spoken), True
+        frame.text_type, frame.text = sound
+        # A sound the bot performed, in a segment of its own, as the sounds
+        # found between words are reported; as a word it was neither.
+        frame.will_be_spoken = True
+        frame.segment_id = None
+        if frame.raw_text is None or spoken is None:
+            frame.append_to_context = False
+            return [], True
+        # Markup can cover the LLM's text, as "[laughs]" covers "[[laugh]]!"
+        # when the punctuation was written after the tag. The context records
+        # that text with the sound.
+        _, sounds = spoken.spoken(frame.raw_text)
+        return self._expression_sound_frames(frame, sounds), True
+
+    def _report_words(
+        self, frame: TTSTextFrame, spoken: SpokenExpression | None
+    ) -> list[TTSTextFrame]:
+        """Give words the delivery they are spoken in, and report the sounds before them.
+
+        Returns:
+            A frame for each sound or pause performed before the words.
+        """
+        if spoken is None:
+            return []
+        delivery, sounds = spoken.spoken(frame.raw_text)
+        if delivery is not None:
+            frame.delivery = delivery
+        return self._expression_sound_frames(frame, sounds)
+
+    def _expression_sound_frames(
+        self, frame: TTSTextFrame | TTSStoppedFrame, sounds: list[tuple[TextType, str]]
+    ) -> list[TTSTextFrame]:
+        """Frames for sounds and pauses performed at a frame's time."""
+        frames = []
+        for text_type, text in sounds:
+            sound = TTSTextFrame(text, text_type=text_type)
+            sound.pts = frame.pts
+            sound.context_id = frame.context_id
+            sound.will_be_spoken = True
+            # The context records the sound's tag with the text around it.
+            sound.append_to_context = False
+            frames.append(sound)
+        return frames
 
     #
     # Settings
@@ -1131,7 +1327,9 @@ class TTSService(AIService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings delta.
 
-        Translates language to service-specific value before applying.
+        Translates language to service-specific value before applying. With
+        expressive conversation on, broadcasts the service's metadata again
+        when the change alters what it can perform.
 
         Args:
             delta: A TTS settings delta.
@@ -1144,11 +1342,18 @@ class TTSService(AIService):
         if is_given(delta.language) and isinstance(delta.language, str):
             delta.language = self._service_language(delta.language)
 
+        capabilities = (
+            self._expression_formatter.capabilities() if self._expression_formatter else None
+        )
         changed = await super()._update_settings(delta)
 
         if is_given(language):
             self._text_aggregator.set_language(language)
             self._skipped_text_aggregator.set_language(language)
+
+        # A setting such as the model can change what the service performs.
+        if self._expression_formatter and self._expression_formatter.capabilities() != capabilities:
+            await self.broadcast_service_metadata()
 
         return changed
 
@@ -1195,6 +1400,8 @@ class TTSService(AIService):
         await self.stop_text_aggregation_metrics()
         if remaining:
             await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
+        if self._expression_formatter:
+            self._expression_formatter.reset()
 
         # Force-promote any sentence still pending in the sequencer (streaming
         # mode only; a no-op otherwise) — handles a response that ends with no
@@ -1203,6 +1410,12 @@ class TTSService(AIService):
             await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
             self._turn_context_id,
         )
+        # A reply that is only tags speaks nothing, so no audio context ends it
+        # to complete its text.
+        context_id = self._turn_context_id
+        if context_id in self._tts_contexts and not self.audio_context_available(context_id):
+            await self._apply_force_complete(context_id)
+            del self._tts_contexts[context_id]
 
         await self._hold_frames_while_audio_contexts_open()
 
@@ -1269,7 +1482,13 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
-        await self._handle_aggregated_text(text_frame, speak_context_id)
+        if self._expression_formatter and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+            # Text of its own, apart from any response it is spoken in the middle of.
+            self._expression_formatter.restate_delivery()
+            await self._speak_expression(text_frame, speak_context_id, whole=True)
+            self._expression_formatter.restate_delivery()
+        else:
+            await self._handle_aggregated_text(text_frame, speak_context_id)
         # Force-promote the utterance's pending sentence into a real slot (streaming
         # mode only; a no-op otherwise). A TTSSpeakFrame is a self-contained sentence
         # with no following token to confirm its boundary, so without this it would
@@ -1314,6 +1533,8 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
+        if self._expression_formatter:
+            self._expression_formatter.reset()
         for filter in self._text_filters:
             await filter.handle_interruption()
 
@@ -1457,11 +1678,41 @@ class TTSService(AIService):
     ):
         """Speak aggregated text in ``context_id`` or a new context, or push it on if skipped."""
         context_id = context_id or self.create_context_id()
-        text = self._trim_text(src_frame.text)
         if src_frame.text_type in self._skip_text_types:
             await self._push_skipped_text(src_frame, context_id)
-        elif text is not None:
+        elif self._expression_formatter and src_frame.text_type in _EXPRESSIVE_TEXT_TYPES:
+            await self._speak_expression(src_frame, context_id)
+        elif (text := self._trim_text(src_frame.text)) is not None:
             await self._speak_text(src_frame, text, context_id)
+
+    async def _speak_expression(
+        self, src_frame: AggregatedTextFrame, context_id: str, *, whole: bool = False
+    ):
+        """Speak a unit of text with expression tags in it.
+
+        The unit stays one frame: its words without the tags, for clients, and
+        its text as the LLM wrote it, for the context. The request is built
+        from its segments.
+
+        Args:
+            src_frame: The unit.
+            context_id: The context to speak it in.
+            whole: Whether the text stands on its own, apart from the response,
+                such as a ``TTSSpeakFrame``'s.
+        """
+        if not self._expression_formatter:
+            return
+        text = src_frame.text
+        if src_frame.text_type != TextType.TOKEN:
+            text = text.strip()
+        segments = self._expression_formatter.parse(text, whole=whole)
+        frame = AggregatedTextFrame(
+            ExpressionFormatter.shown_text(segments, src_frame.text_type),
+            src_frame.text_type,
+            raw_text=text,
+        )
+        frame.interruptible = src_frame.interruptible
+        await self._speak_text(frame, self._trim_text(frame.text) or "", context_id, segments)
 
     async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
         """Push text that isn't spoken, in order with the spoken text around it."""
@@ -1476,8 +1727,19 @@ class TTSService(AIService):
             context_id,
         )
 
-    async def _speak_text(self, src_frame: AggregatedTextFrame, text: str, context_id: str):
-        """Filter, transform and synthesize text, timing it as processing."""
+    async def _speak_text(
+        self,
+        src_frame: AggregatedTextFrame,
+        text: str,
+        context_id: str,
+        segments: list[Segment] | None = None,
+    ):
+        """Filter, transform and synthesize text, timing it as processing.
+
+        With expressive conversation on, ``segments`` are the unit's words and
+        tags, and the request is built from them: the words transformed, and
+        the tags formatted in the service's markup.
+        """
         # Accumulate text for a single debug log at flush time when streaming tokens.
         if self._is_streaming_tokens:
             self._streamed_text += text
@@ -1490,18 +1752,40 @@ class TTSService(AIService):
         if self.supports_processing_metrics and not self._is_streaming_tokens:
             await self.start_processing_metrics()
 
-        prepared_text = await self._transform_text(text, src_frame.text_type)
-        if prepared_text is not None:
+        spans = None
+        if segments is not None and self._expression_formatter:
+            request = await self._expression_formatter.format(
+                segments, src_frame.text_type, self._transform_text, self._trim_text
+            )
+            prepared_text, spans = request.text, request.spans
+            self._expression_settings = request.settings
+            # The formatter trims a sentence's request, so a service that needs
+            # its inputs to end in a space gets it back here.
+            if prepared_text:
+                prepared_text = self._prepare_text_for_tts(prepared_text)
+        else:
+            prepared_text = await self._transform_text(text, src_frame.text_type)
+        if prepared_text:
             # A TTSSpeakFrame sets up its context before its text gets here.
             context = self._tts_contexts.setdefault(
                 context_id, TTSContext(interruptible=src_frame.interruptible)
             )
+            if spans is not None:
+                context.spoken_expression.add(src_frame.raw_text or "", spans)
             await self._announce_text(src_frame, context_id)
             await self._call_event_handler("on_tts_request", context_id, prepared_text)
             await self._start_audio_context(context_id)
             await self._register_spoken_text(src_frame, prepared_text, context_id)
             await self._synthesize_text(prepared_text, context_id)
             await self._push_spoken_text(src_frame, text, context_id, context.append_to_context)
+        elif spans is not None and src_frame.raw_text and src_frame.raw_text.strip():
+            # A unit with nothing to say, such as a tag alone, still reaches the
+            # context as the LLM wrote it, in order with the text around it.
+            context = self._tts_contexts.setdefault(
+                context_id, TTSContext(interruptible=src_frame.interruptible)
+            )
+            await self._register_spoken_text(src_frame, "", context_id)
+            await self._push_spoken_text(src_frame, "", context_id, context.append_to_context)
 
         await self.stop_processing_metrics()
 
@@ -1659,23 +1943,20 @@ class TTSService(AIService):
     async def _push_sequencer_frames(self, frames: list[Frame], context_id: str | None):
         """Emit frames returned by the aggregated-frame sequencer in audio order.
 
-        In streaming (TOKEN) mode these frames — a promoted sentence anchor and any
-        replayed word/progress frames — describe an audio context whose audio and
-        word frames are emitted by the dedicated audio-context task. Routing them
-        through that context's queue keeps a single consumer emitting everything in
-        order; pushing directly here would let them race the audio-context task.
-        When the context is gone (or the sequencer is non-streaming), push directly.
+        These frames — skipped text the spoken text before it has released, and in
+        streaming (TOKEN) mode a promoted sentence anchor and any replayed
+        word/progress frames — follow text queued in an audio context, whose audio
+        and text frames are emitted by the dedicated audio-context task. Routing
+        them through that context's queue keeps a single consumer emitting
+        everything in order; pushing directly here would let them overtake it.
+        When the context is gone, push directly.
 
         Args:
             frames: Frames returned by register_spoken/register_skipped/finalize.
             context_id: The context these frames belong to.
         """
         for f in frames:
-            if (
-                self._is_streaming_tokens
-                and context_id
-                and self.audio_context_available(context_id)
-            ):
+            if context_id and self.audio_context_available(context_id):
                 await self.append_to_audio_context(context_id, f)
             else:
                 await self.push_frame(f)
@@ -1709,7 +1990,9 @@ class TTSService(AIService):
         # get the original (non-transformed) text after the TTS generation has
         # completed. This way, if we are interrupted, the text is not added to the
         # assistant context and the context that IS added does not include
-        # TTS-specific tags or transformations.
+        # TTS-specific tags or transformations. The frame carries the text as the
+        # LLM wrote it, which the context records, as it does for services with
+        # word timestamps.
         #
         # In streaming (TOKEN) mode this is handled instead by the sequencer's
         # per-sentence promotion (see AggregatedFrameSequencer._promote): a call
@@ -1717,16 +2000,26 @@ class TTSService(AIService):
         # should carry.
         if not self._push_text_frames or self._is_streaming_tokens:
             return
-        frame = TTSTextFrame(text, text_type=src_frame.text_type, segment_id=src_frame.id)
+        frame = TTSTextFrame(
+            text,
+            text_type=src_frame.text_type,
+            raw_text=src_frame.raw_text,
+            segment_id=src_frame.id,
+        )
         frame.will_be_spoken = True
         frame.context_id = context_id
         frame.append_to_context = append_to_context
-        # Appending to the context, so it preserves the ordering.
-        await self.append_to_audio_context(context_id, frame)
+        # Appending to the audio context, so it preserves the ordering. A unit that
+        # is only tags may come before anything is spoken, with no audio context.
+        if self.audio_context_available(context_id):
+            await self.append_to_audio_context(context_id, frame)
+        else:
+            await self.push_frame(frame)
         # TTSTextFrame is queued; mark the spoken slot complete so any skipped
         # frames (e.g. code blocks) waiting behind it can be flushed in order.
-        for f in self._aggregated_frame_sequencer.complete_spoken_slot():
-            await self.push_frame(f)
+        await self._push_sequencer_frames(
+            self._aggregated_frame_sequencer.complete_spoken_slot(), context_id
+        )
 
     async def _stream_audio_frames_from_iterator(
         self,
@@ -2383,3 +2676,17 @@ class AudioContextWordTTSService(AudioContextTTSService):
             **kwargs: Additional arguments passed to parent classes.
         """
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
+
+
+def _is_markup(text: str) -> bool:
+    """Whether a word a service reports is its markup, rather than speech.
+
+    The shape alone decides, and that is safe: a bracketed word that covers some
+    of the LLM's text, such as a literal "[note]" it wrote, is still reported
+    as that text. Only a word that covers none of it, which can only be the
+    adapter's markup, is read as a sound or left out.
+    """
+    text = text.strip()
+    return (text.startswith("[") and text.endswith("]")) or (
+        text.startswith("<") and text.endswith(">")
+    )
