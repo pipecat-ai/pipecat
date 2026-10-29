@@ -306,19 +306,13 @@ class SyncParallelPipeline(BasePipeline):
 
             if isinstance(frame, EndFrame):
                 new_frame = await queue.get()
-                if isinstance(new_frame, EndFrame):
+                while not isinstance(new_frame, EndFrame):
                     if use_pipeline_order:
                         output_frames.append(new_frame)
                     else:
                         await main_queue.put(new_frame)
-                else:
-                    while not isinstance(new_frame, EndFrame):
-                        if use_pipeline_order:
-                            output_frames.append(new_frame)
-                        else:
-                            await main_queue.put(new_frame)
-                        queue.task_done()
-                        new_frame = await queue.get()
+                    queue.task_done()
+                    new_frame = await queue.get()
             else:
                 await processor.process_frame(SyncFrame(), direction)
                 new_frame = await queue.get()
@@ -342,6 +336,9 @@ class SyncParallelPipeline(BasePipeline):
             frames_per_pipeline = await asyncio.gather(
                 *[wait_for_sync(s, self._down_queue, frame, direction) for s in self._sources]
             )
+
+        # The drain loops below reuse `frame`.
+        end_frame = frame if isinstance(frame, EndFrame) else None
 
         if use_pipeline_order:
             # Push frames in pipeline definition order, deduplicating by id.
@@ -368,6 +365,9 @@ class SyncParallelPipeline(BasePipeline):
                     await self.push_frame(frame, FrameDirection.DOWNSTREAM)
                     seen_ids.add(frame.id)
                 self._down_queue.task_done()
+
+        if end_frame:
+            await self.push_frame(end_frame, direction)
 
     async def _start_pipelines(self, frame: StartFrame):
         """Start every pipeline, then pass the StartFrame on once it is through all of them."""

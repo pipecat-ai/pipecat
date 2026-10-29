@@ -8,8 +8,9 @@ import asyncio
 import unittest
 from dataclasses import dataclass
 
-from pipecat.frames.frames import Frame, TextFrame
+from pipecat.frames.frames import EndFrame, Frame, InputAudioRawFrame, TextFrame
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
+from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
@@ -111,6 +112,39 @@ class TestSyncParallelPipeline(unittest.IsolatedAsyncioTestCase):
         """The default frame_order should be ARRIVAL."""
         pipeline = SyncParallelPipeline([IdentityFilter()])
         assert pipeline._frame_order == FrameOrder.ARRIVAL
+
+    async def test_end_frame_after_system_frame(self):
+        """The EndFrame should come out even with system frames queued in every pipeline."""
+        pipeline = SyncParallelPipeline([IdentityFilter()], [IdentityFilter()])
+
+        frames_to_send = [
+            InputAudioRawFrame(audio=b"\x00\x00", sample_rate=16000, num_channels=1),
+            EndFrame(),
+        ]
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            send_end_frame=False,
+        )
+
+        assert isinstance(down_frames[-1], EndFrame)
+
+    async def test_end_frame_after_pipeline_output(self):
+        """The EndFrame should come out after what a pipeline pushes while handling it."""
+        pipeline = SyncParallelPipeline(
+            [IdentityFilter()],
+            [SentenceAggregator()],
+            frame_order=FrameOrder.PIPELINE,
+        )
+
+        frames_to_send = [TextFrame(text="Hello there"), EndFrame()]
+        expected_down_frames = [TextFrame, TextFrame, EndFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            send_end_frame=False,
+        )
 
 
 if __name__ == "__main__":
