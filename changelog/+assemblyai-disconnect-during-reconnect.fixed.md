@@ -1,0 +1,1 @@
+- Fixed `AssemblyAISTTService` reconnecting after the pipeline ended when its connection was down, for example when a call hung up while the service was retrying a dropped connection. The leftover background task could open an AssemblyAI session that was never closed.
