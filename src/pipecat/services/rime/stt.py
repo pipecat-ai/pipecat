@@ -786,7 +786,11 @@ class RimeSegmentedSTTService(SegmentedSTTService):
         state.speaking = self._user_speaking = False
         state.suppressed = False
         record = state.active
-        if record is not None and not record.discarded and self._audio_buffer:
+        if record is not None and not self.is_usable:
+            # The base handler skips enqueueing audio while the service is unusable.
+            record.done = record.discarded = True
+            await state.publish()
+        elif record is not None and not record.discarded and self._audio_buffer:
             record.speech_end = frame.timestamp - frame.stop_secs
             if len(self._audio_buffer) % (cast(tuple[int, int], record.audio_format)[1] * 2):
                 await state.error(RimeAudioFormatError("Incomplete PCM sample frame"), record)

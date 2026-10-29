@@ -18,7 +18,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from rimelabs_sdk import RimeAuthenticationError, Transcription
+from rimelabs_sdk import RimeAuthenticationError, RimeInputError, Transcription
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -200,6 +200,35 @@ async def test_segment_snapshots_settings_and_speaker(monkeypatch):
         assert [f.user_id for f in frames] == ["first", ""]
         assert [f.finalized for f in frames] == [False, True]
         assert [f.result["request_id"] for f in frames] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_segment_failure_during_capture_allows_settings_recovery():
+    client = FakeRime()
+    service = RimeSegmentedSTTService(client=client, trailing_silence_secs=0)
+    async with harness(service) as (out, upstream):
+        await send(service, VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame())
+        async with asyncio.timeout(2):
+            failed = await client.new_call.get()
+
+        await send(service, VADUserStartedSpeakingFrame(), audio())
+        failed[2].set_exception(RimeInputError("Invalid recognition setting"))
+        await upstream.wait_for(ErrorFrame)
+        assert not service.is_usable
+        await send(service, VADUserStoppedSpeakingFrame())
+
+        await send(service, STTUpdateSettingsFrame(delta=service.Settings(language="es")))
+        assert service.is_usable
+        await send(service, VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame())
+        async with asyncio.timeout(2):
+            recovered = await client.new_call.get()
+        assert recovered[1]["language"] == "es"
+        recovered[2].set_result(Transcription(text="recovered", language="es"))
+
+        frames = await out.wait_for(rime.TranscriptionFrame)
+        assert [frame.text for frame in frames] == ["recovered"]
+        assert frames[0].finalized
+        assert len(client.calls) == 2
 
 
 @pytest.mark.asyncio
