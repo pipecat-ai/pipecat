@@ -126,10 +126,14 @@ class SmallestSTTSettings(STTSettings):
         diarize: Enable speaker diarization.
         endpointing: Finalize promptly on trailing silence.
         eou_timeout_ms: Trailing-silence duration, in milliseconds, before
-            Pulse finalizes the transcript. Ranges 100-10000; defaults to
-            600 when ``endpointing`` is ``True`` and 800 when ``False``. No
-            effect on ``model="pulse-2"``, which uses its own built-in
-            end-of-turn detection.
+            Pulse finalizes the transcript on its own. Ranges 100-10000;
+            defaults to 600 when ``endpointing`` is ``True`` and 800 when
+            ``False``. Governs mid-utterance segmentation (e.g. a natural
+            pause) since the VAD-triggered ``finalize`` this service sends on
+            ``VADUserStoppedSpeakingFrame`` already finalizes the turn's last
+            segment immediately, ahead of this timer. No effect on
+            ``model="pulse-2"``, which uses its own built-in end-of-turn
+            detection.
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
         format: Apply punctuation and capitalization to transcripts.
