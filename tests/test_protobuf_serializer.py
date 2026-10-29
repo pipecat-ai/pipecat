@@ -47,6 +47,15 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(frame, InterruptionFrame)
 
+    async def test_malformed_input_is_ignored_not_raised(self):
+        for name, data in (
+            ("garbage_bytes", b"\xff\xff\xff\xff\xff"),
+            ("truncated_message", (await self.serializer.serialize(TextFrame(text="hello")))[:-2]),
+            ("str", "not protobuf"),
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(await self.serializer.deserialize(data))
+
 
 if __name__ == "__main__":
     unittest.main()
