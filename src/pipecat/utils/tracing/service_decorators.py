@@ -323,8 +323,10 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
             - ``append_to_audio_context``: ends the span on
               ``TTSStoppedFrame``.
             - ``push_frame``: records ``metrics.ttfb`` from the
-              canonical ``TTFBMetricsData`` payload of any
-              ``MetricsFrame`` pushed by ``stop_ttfb_metrics``. Reading
+              canonical ``TTFBMetricsData`` payload of the
+              ``MetricsFrame`` pushed by this service's
+              ``stop_ttfb_metrics``; other services' metrics frames
+              passing through are ignored. Reading
               the value from the metrics event (instead of polling
               ``_metrics.ttfb`` when the first audio is queued) avoids
               the ``ttfb`` property's in-progress fallback, which would
@@ -416,7 +418,9 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                     if not entry or entry["ttfb_recorded"]:
                         return
                     for data in frame.data:
-                        if isinstance(data, TTFBMetricsData):
+                        # Metrics frames of upstream services (e.g. the LLM's TTFB) pass
+                        # through this service's push_frame too, so match the processor.
+                        if isinstance(data, TTFBMetricsData) and data.processor == service.name:
                             entry["span"].set_attribute("metrics.ttfb", data.value)
                             entry["ttfb_recorded"] = True
                             break
@@ -684,8 +688,9 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 """Attach per-frame attrs; close on finalized; record TTFB from MetricsFrame.
 
                 ``metrics.ttfb`` is read off the ``TTFBMetricsData``
-                payload of any ``MetricsFrame`` pushed by
-                ``stop_ttfb_metrics`` — the canonical value the rest
+                payload of the ``MetricsFrame`` pushed by this
+                service's ``stop_ttfb_metrics`` (other services'
+                metrics frames are ignored) — the canonical value the rest
                 of the system uses — rather than from
                 ``_metrics.ttfb``, which has an in-progress fallback
                 branch (``frame_processor_metrics.py:48-62``) that
@@ -737,7 +742,8 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if span is None:
                         return
                     for data in frame.data:
-                        if isinstance(data, TTFBMetricsData):
+                        # Only this service's own TTFB, not metrics frames passing through.
+                        if isinstance(data, TTFBMetricsData) and data.processor == service.name:
                             span.set_attribute("metrics.ttfb", data.value)
                             break
                 elif isinstance(frame, TranscriptionFrame):
