@@ -1646,6 +1646,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 await self._handle_msg_usage_metadata(message)
         if message.tool_call:
             await self._handle_msg_tool_call(message)
+            # The server withholds turn_complete until a tool result is in, and
+            # omits it when that result draws no further speech, so the tool
+            # call is the end of this output. A turn held open while the server
+            # is still reasoning stays open across the call.
+            if (
+                self._bot_is_responding
+                and self._turn_complete_pending_idle is None
+                and interaction_idle is not False
+            ):
+                await self._finish_output_turn()
         if message.session_resumption_update:
             self._handle_msg_resumption_update(message)
         # Close a held turn only after any bundled tool call has been
@@ -2284,10 +2294,19 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
-        text = self._bot_text_buffer
+        # The decorator reads the response text and usage metadata before this
+        # runs, so the buffers are cleared in ``_finish_output_turn``.
+        await self._finish_output_turn()
 
-        # Trace the complete LLM response (this will be handled by the decorator)
-        # The decorator will extract the output text and usage metadata from the message
+    async def _finish_output_turn(self):
+        """Close the current bot output turn.
+
+        Clears the response buffers and, when the bot was producing output,
+        pushes ``TTSStoppedFrame`` (audio) and ``LLMFullResponseEndFrame``.
+        Marking the bot as no longer responding releases a deferred
+        ``EndFrame``.
+        """
+        text = self._bot_text_buffer
 
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
