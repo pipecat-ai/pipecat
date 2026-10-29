@@ -893,6 +893,11 @@ class SegmentedSTTService(STTService):
         await self._cancel_segment_task()
         await super().cancel(frame)
 
+    async def cleanup(self):
+        """Stop the transcription task at teardown."""
+        await super().cleanup()
+        await self._cancel_segment_task()
+
     @property
     def wants_wav_segments(self) -> bool:
         """Whether segments are passed to :meth:`run_stt` as a WAV container.
