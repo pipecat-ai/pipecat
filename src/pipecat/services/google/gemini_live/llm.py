@@ -1646,6 +1646,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 await self._handle_msg_usage_metadata(message)
         if message.tool_call:
             await self._handle_msg_tool_call(message)
+        if getattr(message, "tool_call_cancellation", None):
+            await self._handle_msg_tool_call_cancellation(message)
+        if getattr(message, "go_away", None):
+            await self._handle_msg_go_away(message)
         if message.session_resumption_update:
             self._handle_msg_resumption_update(message)
         # Close a held turn only after any bundled tool call has been
@@ -1798,8 +1802,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             if self._session:
                 await self._session.close()
                 self._session = None
-            self._completed_tool_calls = set()
-            self._tool_call_id_to_name = {}
             self._async_tool_warning_logged = False
             self._ready_for_realtime_input = False
             self._disconnecting = False
@@ -2280,6 +2282,20 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             self._tool_call_id_to_name[fc.tool_call_id] = fc.function_name
 
         await self.run_function_calls(function_calls_llm)
+
+    async def _handle_msg_tool_call_cancellation(self, message: LiveServerMessage):
+        """Handle tool call cancellation messages."""
+        cancellation = getattr(message, "tool_call_cancellation", None)
+        if not cancellation or not getattr(cancellation, "ids", None):
+            return
+        for tool_call_id in cancellation.ids:
+            logger.debug(f"Gemini Live server cancelled tool call: {tool_call_id}")
+            await self._cancel_function_calls_by_tool_call_id(tool_call_id)
+
+    async def _handle_msg_go_away(self, message: LiveServerMessage):
+        """Handle go away messages from the server."""
+        logger.info("Gemini Live server sent goAway, reconnecting...")
+        await self._reconnect()
 
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
