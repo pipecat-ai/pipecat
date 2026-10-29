@@ -14,6 +14,7 @@ Sentence boundaries use sentencex's embedded language rules without external dat
 """
 
 import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cache
@@ -121,6 +122,11 @@ UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = (
 StartEndTags = tuple[str, str]
 
 
+def is_closing_punctuation(char: str) -> bool:
+    """Return whether a character is a closing quote or bracket, such as ``”`` or ``」``."""
+    return unicodedata.category(char) in ("Pe", "Pf")
+
+
 def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
     """Replace occurrences of a substring within a matched section of text.
 
@@ -186,7 +192,10 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         # Additional punctuation can delimit sentences outside the selected rules.
         for i, ch in enumerate(text):
             if ch in UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION:
-                return i + 1
+                end = i + 1
+                while end < len(text) and is_closing_punctuation(text[end]):
+                    end += 1
+                return end
         return 0
 
     if len(sentences) > 1:
