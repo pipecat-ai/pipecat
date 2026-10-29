@@ -134,6 +134,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-rime-v1.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-rime-stt.py
+    scenarios: [scripted/capital_question, scripted/rime_stt_audio]
   - bot: voice/voice-sarvam.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-sarvam-vad-http.py

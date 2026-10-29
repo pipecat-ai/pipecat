@@ -447,6 +447,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="rime_stt",
+            label="Rime",
+            package="pipecat-ai[rime-stt]",
+            class_name=["RimeSTTService"],
+            env_prefix="RIME",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="sarvam_stt",
             label="Sarvam",
             package="pipecat-ai[sarvam]",

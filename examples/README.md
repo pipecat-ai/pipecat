@@ -25,6 +25,10 @@ This directory contains examples showing how to build voice and multimodal agent
 
 4. Open the web interface at http://localhost:7860/client/ and click "Connect"
 
+## Rime speech recognition
+
+The [Rime STT guide](../docs/services/rime-stt.md#run-the-examples) includes commands for streaming and completed-segment transcription and a Rime STT → OpenAI → Rime TTS voice agent.
+
 ## Running examples with other transports
 
 Most examples support running with other transports, like Twilio or Daily.
