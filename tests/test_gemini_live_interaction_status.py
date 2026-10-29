@@ -20,6 +20,9 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     InterruptionFrame,
@@ -534,6 +537,53 @@ def test_no_warning_when_sync_tools_can_block(monkeypatch):
         logger.remove(handler_id)
 
     assert sink.getvalue() == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model",
+    [
+        "models/gemini-2.0-flash-live-001",
+        "models/gemini-3.8-live",
+        "models/gemini-3.8-live-extended-thinking",
+    ],
+)
+async def test_constructor_tool_with_an_async_handler_is_non_blocking_on_first_connect(
+    model, monkeypatch
+):
+    """A tool passed at construction carries its handler; the first connect already sees it."""
+
+    @tool_options(cancel_on_interruption=False)
+    async def slow_lookup(params):
+        pass
+
+    service = GeminiLiveLLMService(
+        api_key="test-key",
+        settings=GeminiLiveLLMService.Settings(model=model),
+        tools=ToolsSchema(
+            standard_tools=[
+                FunctionSchema(
+                    name="slow_lookup",
+                    description="Look up the weather.",
+                    properties={},
+                    required=[],
+                    handler=slow_lookup,
+                )
+            ]
+        ),
+    )
+    configs = []
+
+    async def _capture(config):
+        configs.append(config)
+
+    monkeypatch.setattr(service, "_connection_task_handler", _capture)
+    await _setup_service(service)
+    await asyncio.sleep(0)
+
+    declarations = [d for tool in configs[0].tools for d in tool.get("function_declarations", [])]
+    (declaration,) = [d for d in declarations if d["name"] == "slow_lookup"]
+    assert declaration["behavior"] == "NON_BLOCKING"
 
 
 # ---------------------------------------------------------------------------
