@@ -1,0 +1,1 @@
+- Fixed malformed Protobuf messages stopping WebSocket input processing. Invalid binary messages are skipped so subsequent frames can still be received.
