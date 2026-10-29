@@ -32,7 +32,8 @@ def seconds_to_nanoseconds(seconds: float) -> int:
     Returns:
         The equivalent number of nanoseconds as an integer.
     """
-    return int(seconds * 1_000_000_000)
+    # Round: the float product can land just below the exact count (1.001 * 1e9).
+    return round(seconds * 1_000_000_000)
 
 
 def nanoseconds_to_seconds(nanoseconds: int) -> float:
