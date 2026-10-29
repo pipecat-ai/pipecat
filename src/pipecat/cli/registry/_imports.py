@@ -174,6 +174,9 @@ IMPORTS = {
         "from pipecat.services.azure.voice_live.llm import AzureVoiceLiveLLMService",
         "from pipecat.services.azure.voice_live.events import AzureStandardVoice, InputAudioTranscription, SessionProperties, TurnDetection",
     ],
+    "elevenlabs_realtime": [
+        "from pipecat.services.elevenlabs.realtime.llm import ElevenLabsRealtimeLLMService"
+    ],
     "gemini_live_realtime": [
         "from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService"
     ],
