@@ -336,14 +336,15 @@ class NvidiaTTSService(TTSService):
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
-    def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
+    async def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
         """Fetch and validate synthesis configuration from the server."""
         if not self._service:
             raise RuntimeError("TTS service not initialized")
 
         try:
-            config = self._service.stub.GetRivaSynthesisConfig(
-                rtts.RivaSynthesisConfigRequest()  # pyright: ignore[reportAttributeAccessIssue]
+            config = await asyncio.to_thread(
+                self._service.stub.GetRivaSynthesisConfig,
+                rtts.RivaSynthesisConfigRequest(),  # pyright: ignore[reportAttributeAccessIssue]
             )
             return config
         except grpc.RpcError as e:
@@ -381,7 +382,7 @@ class NvidiaTTSService(TTSService):
         """
         await super().setup(setup)
         self._initialize_client()
-        self._config = self._create_synthesis_config()
+        self._config = await self._create_synthesis_config()
         self._load_zero_shot_audio_prompt()
         logger.debug(f"Initialized NvidiaTTSService with model: {self._settings.model}")
 
