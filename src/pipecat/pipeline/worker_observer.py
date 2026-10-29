@@ -31,6 +31,14 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.deprecation import deprecated
 
 
+def _handles_processing(observer: BaseObserver) -> bool:
+    """Whether the observer overrides ``on_process_frame``, on its class or on the instance."""
+    return (
+        "on_process_frame" in getattr(observer, "__dict__", ())
+        or getattr(type(observer), "on_process_frame", None) is not BaseObserver.on_process_frame
+    )
+
+
 @dataclass
 class Proxy:
     """Proxy data for managing observer tasks and queues.
@@ -70,6 +78,10 @@ class WorkerObserver(BaseObserver):
 
     It also tells a frame's first push from the ones that follow, and only
     passes the first one to observers that want a frame once.
+
+    A frame being processed is only passed to the observers that override
+    :meth:`~pipecat.observers.base_observer.BaseObserver.on_process_frame`,
+    on their class or on the instance.
     """
 
     def __init__(
@@ -171,12 +183,17 @@ class WorkerObserver(BaseObserver):
         await self._send_to_proxy(_PipelineStartedSignal())
 
     async def on_process_frame(self, data: FrameProcessed):
-        """Queue frame data for all managed observers.
+        """Queue frame data for the managed observers that handle it.
 
         Args:
-            data: The frame push event data to distribute to observers.
+            data: The frame processing event data to distribute to observers.
         """
-        await self._send_to_proxy(data)
+        if not self._proxies:
+            return
+
+        for proxy in self._proxies.values():
+            if _handles_processing(proxy.observer):
+                await proxy.queue.put(data)
 
     async def on_push_frame(self, data: FramePushed):
         """Queue frame data for the managed observers.
