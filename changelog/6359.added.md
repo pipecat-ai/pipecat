@@ -1,0 +1,1 @@
+- `GeminiLiveLLMService` now applies tool and system instruction changes mid-session on Gemini 3.8 Live and later: an `LLMSetToolsFrame` (e.g. Pipecat Flows switching nodes) and a `system_instruction` settings update are sent as a context update instead of being ignored. Requires `google-genai>=2.33`; with older models or SDKs the previous behavior is kept.
