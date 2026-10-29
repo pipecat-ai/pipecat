@@ -1,0 +1,1 @@
+- Preserve buffered audio for the next utterance when playback of an earlier utterance stops.
