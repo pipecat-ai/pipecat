@@ -38,7 +38,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.2.0"
+PROTOCOL_VERSION = "2.3.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -505,25 +505,37 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
-        text_type: What form the text is in (e.g., sentence, code, etc.).
-        aggregated_by: What form the text is in, always the same as ``text_type``.
+        output_type: What form the text is in (e.g., sentence, code, etc.).
+        text_type: What form the text is in, always the same as ``output_type``.
+
+            .. deprecated:: 1.14.0
+                Use ``output_type`` instead.
+                Will be removed in 2.0.0.
+
+        aggregated_by: What form the text is in, always the same as ``output_type``.
 
             .. deprecated:: 1.13.0
-                Use ``text_type`` instead.
+                Use ``output_type`` instead.
                 Will be removed in 2.0.0.
 
         segment_id: ID of the source AggregatedTextFrame.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
-        spoken_status: **(v2+)** Lifecycle status of the segment:
-            ``"new"`` on first emit, ``"in-progress"`` during word playback,
-            ``"completed"`` when the last word is spoken (or immediately for
-            non-spoken segments).
+        spoken_status: **(v2+)** Lifecycle status of the segment: ``"new"`` on
+            its first message, the only one for text that isn't spoken;
+            ``"in-progress"`` as each of its words is spoken, for TTS services
+            with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
+        delivery: **(2.3.0+)** The delivery of the text just spoken, by its
+            universal names, such as ``["warm", "emphasis"]``, empty for the
+            voice's baseline. They change within a segment where its delivery
+            does, so a segment's ``"new"`` message has none. Present in
+            expressive conversation (alpha).
     """
 
-    text_type: TextType | str
+    output_type: TextType | str
+    text_type: TextType | str | None = None
     aggregated_by: TextType | str | None = None
     segment_id: int | None = None
     # v1 field (protocol 1.4.x)
@@ -532,16 +544,17 @@ class BotOutputMessageData(TextMessageData):
     will_be_spoken: bool | None = None
     spoken_status: SpokenStatus | None = None
     spoken_progress: SpokenProgressData | None = None
+    delivery: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
-    def _sync_text_type(cls, data: Any) -> Any:
-        """Fill whichever of ``text_type`` and ``aggregated_by`` is missing from the other."""
+    def _sync_output_type(cls, data: Any) -> Any:
+        """Fill whichever of ``output_type`` and its deprecated names are missing."""
         if isinstance(data, dict):
-            if "text_type" not in data and "aggregated_by" in data:
-                data = {**data, "text_type": data["aggregated_by"]}
-            elif "aggregated_by" not in data and "text_type" in data:
-                data = {**data, "aggregated_by": data["text_type"]}
+            names = ("output_type", "text_type", "aggregated_by")
+            given = [data[name] for name in names if name in data]
+            if given:
+                data = {**dict.fromkeys(names, given[0]), **data}
         return data
 
 
@@ -684,6 +697,32 @@ class UserTranscriptionMessage(BaseModel):
 UserInputType = Literal["transcription", "chat", "backchannel"]
 
 
+class UserPerceptionLabel(BaseModel):
+    """A label of a perception signal, with how sure the reading is.
+
+    Parameters:
+        label: The label, such as ``"frustrated"``.
+        confidence: How sure the reading is, from 0 to 1.
+    """
+
+    label: str
+    confidence: float
+
+
+class UserPerceptionSignal(BaseModel):
+    """One signal of a reading of how the user spoke.
+
+    Parameters:
+        name: What is read, such as ``"tone"``.
+        labels: The likeliest labels, likeliest first, for a signal read as labels.
+        value: The measure, for a signal read as a value.
+    """
+
+    name: str
+    labels: list[UserPerceptionLabel] = []
+    value: float | None = None
+
+
 class UserInputMessageData(BaseModel):
     """Data for user input messages.
 
@@ -698,6 +737,9 @@ class UserInputMessageData(BaseModel):
         user_id: Identifier for the user who spoke or typed. For chat, set only
             when the transport knows the sender, such as Daily and LiveKit.
         msg_id: For chat, the id of the client's ``send-text`` message.
+        perception: For a transcription, how the user said it, when the STT
+            service reports a reading with it. Part of expressive conversation
+            (alpha).
     """
 
     text: str
@@ -706,6 +748,7 @@ class UserInputMessageData(BaseModel):
     final: bool
     user_id: str | None = None
     msg_id: str | None = None
+    perception: list[UserPerceptionSignal] | None = None
 
 
 class UserInputMessage(BaseModel):

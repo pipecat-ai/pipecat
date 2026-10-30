@@ -95,8 +95,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
 
         Args:
             simulation: The simulation being run.
-            persona: The simulated caller: its instruction, its LLM in the
-                pipeline, and its context.
+            persona: The simulated caller: its LLM in the pipeline, and its
+                context.
             client: The connection to the bot.
             stream: The bot's output as events.
             judge: The judge for the goal and the quality criteria.
@@ -125,7 +125,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     async def run(self) -> list[EvalAssertionFailure]:
         """Watch the conversation until it ends, then judge it."""
         self._persona.on_end_call(self._on_end_call)
-        await self._client.configure_persona(self._persona.instruction)
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription
         # of what it said, in text mode its LLM text.

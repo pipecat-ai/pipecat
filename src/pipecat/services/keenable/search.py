@@ -31,7 +31,7 @@ from typing import Literal
 from loguru import logger
 
 from pipecat import version as pipecat_version
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 
 try:
     from mcp.client.session_group import StreamableHttpParameters

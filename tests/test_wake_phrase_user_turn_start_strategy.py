@@ -9,15 +9,30 @@ import unittest
 
 from pipecat.frames.frames import (
     BotSpeakingFrame,
+    BotStartedSpeakingFrame,
+    Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.user_start import (
+    BaseUserTurnStartStrategy,
+    MinWordsUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
+)
 from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import (
     WakePhraseUserTurnStartStrategy,
     _WakeState,
+)
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+from pipecat.turns.user_turn_controller import UserTurnController
+from pipecat.turns.user_turn_strategies import (
+    StrategyMode,
+    UserTurnStrategies,
+    UserTurnStrategiesParams,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -114,12 +129,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Subsequent frames should return CONTINUE.
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         await strategy.cleanup()
 
@@ -284,12 +299,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Subsequent frames should pass through (CONTINUE).
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+        self.assertIsNone(result)
 
         await strategy.cleanup()
 
@@ -341,6 +356,169 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
+
+
+class EndOnDemandStopStrategy(BaseUserTurnStopStrategy):
+    """A stop strategy that ends the turn when a test says so."""
+
+    async def end(self):
+        await self.report_user_turn_stopped()
+
+
+class TestWakePhraseWithAllStartMode(unittest.IsolatedAsyncioTestCase):
+    """With StrategyMode.ALL, a turn needs the user speaking and the wake phrase."""
+
+    async def _start(self, *, wake_first: bool = False, timeout: float = 10.0):
+        self.wake = WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"], timeout=timeout)
+        vad = VADUserTurnStartStrategy()
+        start: list[BaseUserTurnStartStrategy] = (
+            [self.wake, vad] if wake_first else [vad, self.wake]
+        )
+        self.stop = EndOnDemandStopStrategy()
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=start, stop=[self.stop]),
+            user_turn_strategies_params=UserTurnStrategiesParams(start_mode=StrategyMode.ALL),
+        )
+        await self.controller.setup(frame_processor_setup(TaskManager()))
+        self.starts = 0
+
+        @self.controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            self.starts += 1
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _say(self, text: str):
+        frames: list[Frame] = [
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            TranscriptionFrame(text=text, user_id="user1", timestamp=""),
+        ]
+        for frame in frames:
+            await self.controller.process_frame(frame)
+
+    async def test_speech_without_the_wake_phrase_starts_no_turn(self):
+        await self._start()
+
+        await self._say("what is the weather")
+
+        self.assertEqual(self.starts, 0)
+
+    async def test_the_wake_phrase_starts_a_turn_in_either_order(self):
+        for wake_first in (False, True):
+            with self.subTest(wake_first=wake_first):
+                await self._start(wake_first=wake_first)
+
+                await self._say("hey pipecat what is the weather")
+
+                self.assertEqual(self.starts, 1)
+                await self.controller.cleanup()
+
+    async def test_speech_starts_a_turn_while_awake(self):
+        await self._start()
+        await self._say("hey pipecat")
+        await self.stop.end()
+
+        await self._say("what is the weather")
+
+        self.assertEqual(self.starts, 2)
+
+    async def test_speech_starts_no_turn_once_the_wake_phrase_times_out(self):
+        await self._start(timeout=0.05)
+        await self._say("hey pipecat")
+        await self.stop.end()
+        await asyncio.sleep(0.15)
+
+        await self._say("what is the weather")
+
+        self.assertEqual(self.wake.state, _WakeState.IDLE)
+        self.assertEqual(self.starts, 1)
+
+
+class TestWakePhraseAlone(unittest.IsolatedAsyncioTestCase):
+    """On its own, the wake phrase strategy starts turns, even on speech VAD missed."""
+
+    async def asyncSetUp(self):
+        self.wake = WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])
+        self.stop = EndOnDemandStopStrategy()
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=[self.wake], stop=[self.stop]),
+        )
+        await self.controller.setup(frame_processor_setup(TaskManager()))
+        self.starts = 0
+
+        @self.controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            self.starts += 1
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _transcribe(self, text: str):
+        await self.controller.process_frame(
+            TranscriptionFrame(text=text, user_id="user1", timestamp="")
+        )
+
+    async def test_speech_without_the_wake_phrase_starts_no_turn(self):
+        await self._transcribe("what is the weather")
+
+        self.assertEqual(self.starts, 0)
+
+    async def test_the_wake_phrase_starts_a_turn_without_vad(self):
+        await self._transcribe("hey pipecat what is the weather")
+
+        self.assertEqual(self.starts, 1)
+
+    async def test_a_transcription_starts_a_turn_while_awake_without_vad(self):
+        await self._transcribe("hey pipecat")
+        await self.stop.end()
+
+        await self._transcribe("what is the weather")
+
+        self.assertEqual(self.starts, 2)
+
+
+class TestWakePhraseWithConditions(unittest.IsolatedAsyncioTestCase):
+    """In an ALL list, the wake phrase combines with other start conditions."""
+
+    async def asyncSetUp(self):
+        self.stop = EndOnDemandStopStrategy()
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[
+                    WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"]),
+                    MinWordsUserTurnStartStrategy(min_words=3),
+                ],
+                stop=[self.stop],
+            ),
+            user_turn_strategies_params=UserTurnStrategiesParams(start_mode=StrategyMode.ALL),
+        )
+        await self.controller.setup(frame_processor_setup(TaskManager()))
+        self.starts = 0
+
+        @self.controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            self.starts += 1
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _transcribe(self, text: str):
+        await self.controller.process_frame(
+            TranscriptionFrame(text=text, user_id="user1", timestamp="")
+        )
+
+    async def test_only_enough_words_interrupt_the_bot_once_awake(self):
+        await self._transcribe("hey pipecat")
+        await self.stop.end()
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+
+        await self._transcribe("uh huh")
+        self.assertEqual(self.starts, 1)
+
+        await self._transcribe("wait a second please")
+        self.assertEqual(self.starts, 2)
 
 
 if __name__ == "__main__":

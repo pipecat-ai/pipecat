@@ -166,8 +166,9 @@ aggregator and one by the TTS service's transformers:
  ┌───────────────────────────────────────────────┐
  │  LLMTextProcessor  (or TTSService itself)     │   SPLIT 1 — the aggregator
  │  BaseTextAggregator, e.g.                     │   decides where segments end
- │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter
- └───────────────────────────────────────────────┘
+ │  PatternPairAggregator / SimpleTextAggregator │   and what counts as a delimiter;
+ │  text transformers (LLMTextProcessor only)    │   transformers here rewrite
+ └───────────────────────────────────────────────┘   every text below
         │
         ├──────── raw_text ─────────▶  ① LLM TEXT        → conversation context
         │
@@ -175,9 +176,9 @@ aggregator and one by the TTS service's transformers:
                                             │                (the AggregatedTextFrame)
                                             ▼
                                   ┌──────────────────────┐
-                                  │  TTSService          │   SPLIT 2 — filters and
-                                  │  text filters        │   per-type transformers
-                                  │  text transformers   │   rewrite for speech only
+                                  │  TTSService          │   SPLIT 2 — per-type
+                                  │  text transformers   │   transformers rewrite
+                                  │                      │   for speech only
                                   └──────────────────────┘
                                             │
                                             ▼
@@ -187,14 +188,18 @@ aggregator and one by the TTS service's transformers:
 Both `text` and `raw_text` come off the same aggregation: `raw_text` is its `full_match`
 when the aggregator produced a `PatternMatch`, and identical to `text` otherwise. SPLIT 2
 is where the transforms listed in [§2.6](#26-and-a-feature-text-transformations) run.
+The same transforms registered on `LLMTextProcessor` run before SPLIT 1 hands the
+aggregation on, so they rewrite the LLM text and the segment text too (a `PatternMatch`
+keeps its delimiters around the rewritten content). That is the place for a rewrite the
+context should record as well, such as a habit the LLM keeps repeating.
 
 Three properties fall out of this shape:
 
 - **The middle channel is the `AggregatedTextFrame` itself.** These documents call it the
   **segment text**, because that is what it is — `frame.text`, the segment as the
   aggregator produced it.
-- **It is never rewritten.** Filters and transformers operate on a *copy* on its way to
-  the TTS; `frame.text` keeps what the aggregator produced.
+- **It is never rewritten past SPLIT 1.** The TTS service's transformers operate on a
+  *copy* on its way to the provider; `frame.text` keeps what the aggregator produced.
 - **The three only diverge where something acted.** With a `SimpleTextAggregator` and no
   transformers, all three are the same string.
 

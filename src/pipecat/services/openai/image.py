@@ -66,6 +66,10 @@ OpenAIImageQuality = Literal[
     "hd",
 ]
 
+# Hint set for the `moderation` argument to `images.generate`, redeclared and
+# used the same way as `OpenAIImageSize` above.
+OpenAIImageModeration = Literal["low", "auto"]
+
 
 @dataclass
 class OpenAIImageGenSettings(ImageGenSettings):
@@ -77,10 +81,16 @@ class OpenAIImageGenSettings(ImageGenSettings):
         quality: Rendering quality for generated images. Lower tiers generate
             faster at the cost of detail. ``None`` lets OpenAI pick the best
             quality for the model.
+        moderation: Content-moderation level applied to generated images, either
+            ``"low"`` for less restrictive filtering or ``"auto"``. ``None``
+            leaves OpenAI's default in place.
     """
 
     image_size: OpenAIImageSize | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     quality: OpenAIImageQuality | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    moderation: OpenAIImageModeration | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -130,6 +140,7 @@ class OpenAIImageGenService(ImageGenService):
             model="gpt-image-2.5-flare",
             image_size=None,
             quality=None,
+            moderation=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -162,12 +173,14 @@ class OpenAIImageGenService(ImageGenService):
 
         size = cast(OpenAIImageSize | None, assert_given(self._settings.image_size))
         quality = cast(OpenAIImageQuality | None, assert_given(self._settings.quality))
+        moderation = cast(OpenAIImageModeration | None, assert_given(self._settings.moderation))
         image = await self._client.images.generate(
             prompt=prompt,
             model=assert_given(self._settings.model),
             n=1,
             size=size,
             quality=quality,
+            moderation=moderation,
         )
 
         if not image.data:

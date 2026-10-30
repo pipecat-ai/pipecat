@@ -1,0 +1,606 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Anthropic LLM adapter for Pipecat."""
+
+import copy
+import json
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict, TypeGuard, TypeVar, cast
+
+from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
+from anthropic import NotGiven as AnthropicNotGiven
+from anthropic.types.cache_control_ephemeral_param import CacheControlEphemeralParam
+from anthropic.types.message_param import MessageParam
+from anthropic.types.text_block_param import TextBlockParam
+from anthropic.types.tool_union_param import ToolUnionParam
+from loguru import logger
+
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+    LLMStandardMessage,
+)
+
+_T = TypeVar("_T")
+
+AnthropicCacheTTL = Literal["5m", "1h"]
+"""Lifetime of an Anthropic prompt cache entry after it was last written or read."""
+
+
+def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided to the Anthropic SDK.
+
+    Asks about the SDK's sentinel, not Pipecat's — use
+    :func:`pipecat.utils.types.is_given` for values that are still Pipecat's::
+
+        if anthropic_is_given(system):
+            ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``AnthropicNotGiven`` (e.g. ``str | AnthropicNotGiven`` becomes ``str``).
+
+    Args:
+        value: The value to check.
+
+    Returns:
+        ``True`` if *value* is anything other than the SDK's ``NOT_GIVEN``.
+    """
+    return not isinstance(value, AnthropicNotGiven)
+
+
+class AnthropicLLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking Anthropic's LLM API."""
+
+    system: str | list[TextBlockParam] | AnthropicNotGiven
+    messages: list[MessageParam]
+    tools: list[ToolUnionParam]
+
+
+class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
+    """Adapter for converting tool schemas to Anthropic's function-calling format.
+
+    This adapter handles the conversion of Pipecat's standard function schemas
+    to the specific format required by Anthropic's Claude models for function calling.
+    """
+
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for Anthropic."""
+        return "anthropic"
+
+    async def get_llm_invocation_params(
+        self,
+        context: LLMContext,
+        enable_prompt_caching: bool,
+        system_instruction: str | None = None,
+        ensure_last_message_is_user: bool = False,
+        system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
+    ) -> AnthropicLLMInvocationParams:
+        """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+            enable_prompt_caching: Whether prompt caching should be enabled.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``.
+            ensure_last_message_is_user: Whether to append a minimal user message
+                when the converted message list ends with an assistant message.
+                Required by models without assistant-prefill support, which
+                reject requests ending with an assistant message.
+            system_prompt_cache_ttl: Lifetime of the system prompt's cache
+                entry when prompt caching is enabled. ``None`` uses Anthropic's
+                default of 5 minutes.
+
+        Returns:
+            Dictionary of parameters for invoking Anthropic's LLM API.
+        """
+        await self.prepare_file_content(context)
+        converted = self._from_universal_context_messages(
+            self.get_messages(context), system_instruction=system_instruction
+        )
+        if ensure_last_message_is_user:
+            self._ensure_last_message_is_user(converted.messages)
+        system = self._resolve_system_instruction(
+            converted.system if anthropic_is_given(converted.system) else None,
+            system_instruction,
+            discard_context_system=True,
+        )
+        system_param: str | list[TextBlockParam] | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+        if system is not None:
+            system_param = (
+                self._system_with_cache_control(system, system_prompt_cache_ttl)
+                if enable_prompt_caching
+                else system
+            )
+        return {
+            "system": system_param,
+            "messages": (
+                self._with_cache_control_markers(converted.messages)
+                if enable_prompt_caching
+                else converted.messages
+            ),
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
+            "tools": self.from_standard_tools(context.tools) or [],
+        }
+
+    def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
+        """Get messages from a universal LLM context in a format ready for logging about Anthropic.
+
+        Removes or truncates sensitive data like image content for safe logging.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages in a format ready for logging about Anthropic.
+        """
+        # Get messages in Anthropic's format
+        messages = self._from_universal_context_messages(self.get_messages(context)).messages
+
+        # Sanitize messages for logging
+        messages_for_logging: list[dict[str, Any]] = []
+        for message in messages:
+            msg: dict[str, Any] = copy.deepcopy(dict(message))
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "image":
+                        source = item.get("source")
+                        if isinstance(source, dict):
+                            source["data"] = "..."
+                    if item.get("type") == "thinking" and item.get("signature"):
+                        item["signature"] = "..."
+                    if item.get("type") == "document":
+                        source = item.get("source")
+                        if isinstance(source, dict) and "data" in source:
+                            source["data"] = "..."
+            messages_for_logging.append(msg)
+        return messages_for_logging
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Anthropic fetches image and PDF URLs itself; other files must be inlined."""
+        return url.startswith(("http://", "https://")) and (
+            mime_type.startswith("image/") or mime_type == "application/pdf"
+        )
+
+    @dataclass
+    class ConvertedMessages:
+        """Container for Anthropic-formatted messages converted from universal context."""
+
+        messages: list[MessageParam]
+        system: str | AnthropicNotGiven
+
+    def _from_universal_context_messages(
+        self,
+        universal_context_messages: list[LLMContextMessage],
+        *,
+        system_instruction: str | None = None,
+    ) -> ConvertedMessages:
+        system = ANTHROPIC_NOT_GIVEN
+
+        # Extract initial system message from universal messages BEFORE conversion,
+        # so the helper works with standard message format (not provider-specific).
+        remaining = list(universal_context_messages)
+        if remaining and not isinstance(remaining[0], LLMSpecificMessage):
+            extracted = self._extract_initial_system(
+                remaining, system_instruction=system_instruction
+            )
+            if extracted is not None:
+                system = extracted
+
+        # Convert remaining messages to Anthropic format, skipping messages that
+        # have no Anthropic representation. A conversion failure (e.g. a
+        # malformed message) is wrapped so it surfaces with its underlying cause.
+        try:
+            messages = [
+                converted
+                for m in remaining
+                if (converted := self._from_universal_context_message(m)) is not None
+            ]
+        except Exception as e:
+            raise LLMContextConversionError(e) from e
+
+        # Convert any subsequent "system"/"developer"-role messages to "user"-role
+        # messages, as Anthropic doesn't support system or developer input messages.
+        for message in messages:
+            if message["role"] in ("system", "developer"):
+                message["role"] = "user"
+
+        # Merge consecutive messages with the same role.
+        i = 0
+        while i < len(messages) - 1:
+            current_message = messages[i]
+            next_message = messages[i + 1]
+            if current_message["role"] == next_message["role"]:
+                # Convert content to list of dictionaries if it's a string
+                if isinstance(current_message["content"], str):
+                    current_message["content"] = [
+                        {"type": "text", "text": current_message["content"]}
+                    ]
+                if isinstance(next_message["content"], str):
+                    next_message["content"] = [{"type": "text", "text": next_message["content"]}]
+                # Concatenate the content. MessageParam types content as
+                # `str | Iterable[...]`, but this codebase assumes it's
+                # either a str or a list. The str case is handled above, so
+                # we assume that both are lists here.
+                cast(list[Any], current_message["content"]).extend(
+                    cast(list[Any], next_message["content"])
+                )
+                # Remove the next message from the list
+                messages.pop(i + 1)
+            else:
+                i += 1
+
+        # Avoid empty content in messages
+        for message in messages:
+            if isinstance(message["content"], str) and message["content"] == "":
+                message["content"] = "(empty)"
+            elif isinstance(message["content"], list) and len(message["content"]) == 0:
+                message["content"] = [{"type": "text", "text": "(empty)"}]
+
+        return self.ConvertedMessages(messages=messages, system=system)
+
+    @staticmethod
+    def _ensure_last_message_is_user(messages: list[MessageParam]) -> list[MessageParam]:
+        """Ensure the message list does not end with an assistant message.
+
+        Models without assistant-prefill support reject requests ending with
+        an assistant message. When the last message has ``role="assistant"``,
+        a minimal user message is appended so that the API request is
+        accepted. "." represents a language-neutral no-op user turn.
+
+        Args:
+            messages: The converted message list (may be mutated in-place).
+
+        Returns:
+            The same list, possibly with an appended user message.
+        """
+        if messages and messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": [{"type": "text", "text": "."}]})
+        return messages
+
+    def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam | None:
+        if isinstance(message, LLMSpecificMessage):
+            return self._from_anthropic_specific_message(message)
+        return self._from_standard_message(message)
+
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam | None:
+        """Convert LLMSpecificMessage to Anthropic format.
+
+        Anthropic-specific messages may either be special thought messages that
+        need to be handled in a special way, or messages already in Anthropic
+        format.
+
+        Args:
+            message: Anthropic-specific message.
+
+        Returns:
+            The message in Anthropic format, or None for a thought that can't be
+            represented as a thinking block.
+        """
+        # Handle special case of thought messages.
+        # These can be converted to standalone "assistant" messages; later
+        # these thinking messages will be properly merged into the assistant
+        # response messages before the context is sent to Anthropic for the
+        # next turn.
+        if isinstance(message.message, dict) and message.message.get("type") == "thought":
+            # A thinking block is valid to Anthropic only with a signature: it
+            # carries the encrypted reasoning the API decrypts when the block is
+            # passed back, and a block without one can't be round-tripped.
+            # Thought text can legitimately be empty, since models that default
+            # to `display: "omitted"` return thinking blocks with no text.
+            # https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display
+            signature = message.message.get("signature")
+            if not signature:
+                return None
+            return {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": message.message.get("text") or "",
+                        "signature": signature,
+                    }
+                ],
+            }
+
+        # Fall back to assuming that the message is already in Anthropic format
+        return cast(MessageParam, copy.deepcopy(message.message))
+
+    def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
+        """Convert standard universal context message to Anthropic format.
+
+        Handles conversion of text content, tool calls, and tool results.
+        Empty text content is converted to "(empty)".
+
+        Args:
+            message: Message in standard universal context format.
+
+        Returns:
+            Message in Anthropic format.
+
+        Examples:
+            Input standard format::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            Output Anthropic format::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "123",
+                            "name": "search",
+                            "input": {"q": "test"}
+                        }
+                    ]
+                }
+        """
+        # ChatCompletionMessageParam (input) and MessageParam (output) are
+        # different TypedDicts — work with the message as a plain dict for the
+        # transformations below and cast back to MessageParam at return sites.
+        msg = cast(dict[str, Any], copy.deepcopy(message))
+        if msg["role"] == "tool":
+            return cast(
+                MessageParam,
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg["tool_call_id"],
+                            "content": msg["content"],
+                        },
+                    ],
+                },
+            )
+        if msg.get("tool_calls"):
+            tc = msg["tool_calls"]
+            ret = {"role": "assistant", "content": []}
+            for tool_call in tc:
+                function = tool_call["function"]
+                arguments = json.loads(function["arguments"])
+                new_tool_use = {
+                    "type": "tool_use",
+                    "id": tool_call["id"],
+                    "name": function["name"],
+                    "input": arguments,
+                }
+                ret["content"].append(new_tool_use)
+            return cast(MessageParam, ret)
+        content = msg.get("content")
+        if isinstance(content, str):
+            # fix empty text
+            if content == "":
+                content = "(empty)"
+        elif isinstance(content, list):
+            new_content = []
+            for item in content:
+                # fix empty text
+                if item["type"] == "text" and item["text"] == "":
+                    item["text"] = "(empty)"
+                # handle image_url -> image conversion
+                if item["type"] == "image_url":
+                    if item["image_url"]["url"].startswith("data:"):
+                        # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": url.split(",")[1],
+                        }
+                        del item["image_url"]
+                    elif item["image_url"]["url"].startswith("http"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "url",
+                            "url": item["image_url"]["url"],
+                        }
+                        del item["image_url"]
+                    else:
+                        logger.warning(f"Unsupported 'image_url': {item['image_url']['url']}")
+                        continue
+                if item["type"] == "file_url":
+                    f_data = item["file"]
+                    # Raises for a URL the provider can't consume with nothing
+                    # resolved (wrapped as LLMContextConversionError by the
+                    # caller in _from_universal_context_messages).
+                    resolved = self.inlined_file_content(f_data)
+                    if resolved is None:
+                        # Pass-through: supports_file_url admits only images
+                        # and PDFs.
+                        item["type"] = (
+                            "image" if f_data["mime_type"].startswith("image/") else "document"
+                        )
+                        item["source"] = {
+                            "type": "url",
+                            "url": f_data["url"],
+                        }
+                        del item["file"]
+                    else:
+                        # Resolved content converts through the inline branch
+                        # below. Non-raw adapters always cache the data-URL form.
+                        item = {
+                            "type": "file_base64",
+                            "file": {**f_data, "file_data": cast(str, resolved)},
+                        }
+                if item["type"] == "file_base64":
+                    f_data = item["file"]
+                    if f_data["mime_type"].startswith("image/"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    elif f_data["mime_type"] == "application/pdf":
+                        item["type"] = "document"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": f_data["mime_type"],
+                            "data": f_data["file_data"].split(",")[1],
+                        }
+                        del item["file"]
+                    else:
+                        # Wrapped as LLMContextConversionError by the caller in
+                        # _from_universal_context_messages.
+                        raise ValueError(f"Unsupported 'file' MIME type: {f_data['mime_type']}")
+                new_content.append(item)
+            content = new_content
+            msg["content"] = content
+
+            # In the case where there's a single image or document in the list (like
+            # what would result from a UserImageRawFrame or UserFileRawFrame), ensure
+            # it comes before text, as recommended by Anthropic docs
+            # (https://docs.anthropic.com/en/docs/build-with-claude/vision#example-one-image)
+            media_indices = [
+                i for i, item in enumerate(content) if item["type"] in ("image", "document")
+            ]
+            text_indices = [i for i, item in enumerate(content) if item["type"] == "text"]
+            if len(media_indices) == 1 and text_indices:
+                media_idx = media_indices[0]
+                first_txt_idx = text_indices[0]
+                if media_idx > first_txt_idx:
+                    # Move the image/document before the first text
+                    media_item = content.pop(media_idx)
+                    content.insert(first_txt_idx, media_item)
+
+        return cast(MessageParam, msg)
+
+    def _with_cache_control_markers(self, messages: list[MessageParam]) -> list[MessageParam]:
+        """Add cache control markers to messages for prompt caching.
+
+        Args:
+            messages: List of messages in Anthropic format.
+
+        Returns:
+            List of messages with cache control markers added.
+        """
+
+        def add_cache_control_marker(message: MessageParam):
+            if isinstance(message["content"], str):
+                message["content"] = [{"type": "text", "text": message["content"]}]
+            # Assumptions on the next line:
+            #   - content is a list (str case handled above; this codebase only
+            #     ever constructs content as a str or a list)
+            #   - the list is non-empty (guaranteed by the empty-content
+            #     replacement in `_from_universal_context_messages`)
+            #   - the last item is a dict. The standard-message path enforces
+            #     this via TypedDicts (which are dicts at runtime); the
+            #     LLMSpecificMessage passthrough doesn't, but in practice
+            #     callers use dicts.
+            cast(list[Any], message["content"])[-1]["cache_control"] = {"type": "ephemeral"}
+
+        try:
+            # Add cache control markers to the most recent two user messages.
+            # - The marker at the most recent user message tells Anthropic to
+            #   cache the prompt up to that point.
+            # - The marker at the second-most-recent user message tells Anthropic
+            #   to look up the cached prompt that goes up to that point (the
+            #   point that *was* the last user message the previous turn).
+            # If we only added the marker to the last user message, we'd only
+            # ever be adding to the cache, never looking up from it.
+            # Why user messages? We're assuming that we're primarily running
+            # inference as soon as user turns come in. In Anthropic, turns
+            # strictly alternate between user and assistant.
+
+            messages_with_markers = copy.deepcopy(messages)
+
+            # Find the most recent two user messages
+            user_message_indices = []
+            for i in range(len(messages_with_markers) - 1, -1, -1):
+                if messages_with_markers[i]["role"] == "user":
+                    user_message_indices.append(i)
+                    if len(user_message_indices) == 2:
+                        break
+
+            # Add cache control markers to the identified user messages
+            for index in user_message_indices:
+                add_cache_control_marker(messages_with_markers[index])
+
+            return messages_with_markers
+        except Exception as e:
+            logger.error(f"Error adding cache control marker: {e}")
+            return messages_with_markers
+
+    @staticmethod
+    def _system_with_cache_control(
+        system: str, ttl: AnthropicCacheTTL | None = None
+    ) -> list[TextBlockParam]:
+        """Add a cache breakpoint to the end of a system prompt.
+
+        Anthropic accepts system prompts as either a string or a list of content
+        blocks. Converting a string to one text block lets the shared system
+        prompt be cached independently of the conversation messages.
+
+        A TTL longer than the message breakpoints' keeps the shared prefix
+        cached across gaps between conversations. Anthropic requires longer-TTL
+        breakpoints to come before shorter ones, which the system prompt always
+        does.
+
+        Args:
+            system: The system prompt to mark for caching.
+            ttl: Lifetime of the cache entry. ``None`` uses Anthropic's default.
+
+        Returns:
+            The system prompt as one cacheable text block.
+        """
+        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        if ttl is not None:
+            cache_control["ttl"] = ttl
+        return [{"type": "text", "text": system, "cache_control": cache_control}]
+
+    @staticmethod
+    def _to_anthropic_function_format(function: FunctionSchema) -> dict[str, Any]:
+        """Convert a single function schema to Anthropic's format.
+
+        Args:
+            function: The function schema to convert.
+
+        Returns:
+            Dictionary containing the function definition in Anthropic's format.
+        """
+        return {
+            "name": function.name,
+            "description": function.description,
+            "input_schema": {
+                "type": "object",
+                "properties": function.properties,
+                "required": function.required,
+            },
+        }
+
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
+        """Convert function schemas to Anthropic's function-calling format.
+
+        Args:
+            tools_schema: The tools schema containing functions to convert.
+
+        Returns:
+            List of function definitions formatted for Anthropic's API.
+        """
+        functions_schema = tools_schema.standard_tools
+        return [self._to_anthropic_function_format(func) for func in functions_schema]

@@ -30,9 +30,9 @@ from typing import (
 
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import AudioRawFrame, FileSourceType
 from pipecat.utils.image import encode_image

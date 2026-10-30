@@ -47,7 +47,7 @@ async def main():
             session_request=LiveAvatarNewSessionRequest(
                 is_sandbox=True,
                 # Sandbox mode only works with this specific avatar
-                # https://docs.liveavatar.com/docs/developing-in-sandbox-mode#sandbox-mode-behaviors
+                # https://docs.liveavatar.com/docs/sandbox-mode
                 avatar_id="dd73ea75-1218-4ef3-92ce-606d5f7fbc0a",
             ),
         )

@@ -371,12 +371,8 @@ class _Discard(FrameProcessor):
 
 class _FakeClient:
     def __init__(self, stream: EvalEventStream):
-        self.instruction: str | None = None
         self.hung_up = False
         self._stream = stream
-
-    async def configure_persona(self, instruction: str):
-        self.instruction = instruction
 
     async def hang_up(self):
         self.hung_up = True
@@ -473,7 +469,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         await task
 
         self.assertEqual(failures, [])
-        self.assertIn("A traveler.", client.instruction or "")
         self.assertTrue(client.hung_up)
         # One judge call saw the whole conversation, the criteria, and the goal.
         self.assertEqual(
