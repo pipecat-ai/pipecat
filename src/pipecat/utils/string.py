@@ -341,3 +341,33 @@ def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
+
+
+# Characters of scripts that are written without spaces between words (Chinese,
+# Japanese kana, Thai). A word boundary can't be required next to them: in
+# "你好小助手今天天气怎么样" there is no boundary between "手" and "今", because both
+# are word characters.
+_UNSPACED_SCRIPT_CHAR_RE = re.compile(
+    r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]"
+)
+
+
+def compile_phrase_pattern(phrase: str) -> re.Pattern:
+    """Compile a case-insensitive pattern that finds a spoken phrase in text.
+
+    The words of the phrase may be separated by any amount of whitespace
+    (including none). The match must start and end on a word boundary, except
+    next to characters of scripts written without spaces (Chinese, Japanese,
+    Thai), where speech-to-text output has no boundaries between words.
+
+    Args:
+        phrase: The phrase to find, for example "hey pipecat" or "小助手".
+
+    Returns:
+        The compiled pattern.
+    """
+    words = phrase.split()
+    body = r"\s*".join(re.escape(word) for word in words)
+    start = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"\b"
+    end = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"\b"
+    return re.compile(start + body + end, re.IGNORECASE)
