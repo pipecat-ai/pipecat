@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -24,6 +25,8 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
     END_TOKEN,
+    FINALIZE_MESSAGE,
+    FINALIZED_TOKEN,
     SonioxSTTService,
     _language_from_tokens,
     language_to_soniox_language,
@@ -728,3 +731,117 @@ async def test_soniox_error_code_sets_category(monkeypatch):
 @pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
 def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
     assert language_to_soniox_language(language) == "no"
+
+
+class _ScriptedSoniox:
+    """A Soniox socket that keeps sending empty token messages and
+    answers a finalize with the pending text as final tokens plus ``<fin>``."""
+
+    def __init__(self, pending_text: str):
+        self.state = State.OPEN
+        self.closed = False
+        self.finalizes = 0
+        self._pending_text = pending_text
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue.put_nowait(json.dumps({"tokens": [{"text": pending_text, "is_final": False}]}))
+
+    async def send(self, payload):
+        if payload == FINALIZE_MESSAGE:
+            self.finalizes += 1
+            await self._queue.put(
+                json.dumps(
+                    {
+                        "tokens": [
+                            {"text": self._pending_text, "is_final": True},
+                            {"text": FINALIZED_TOKEN, "is_final": True},
+                        ]
+                    }
+                )
+            )
+
+    async def close(self):
+        self.closed = True
+        self.state = State.CLOSED
+        await self._queue.put(None)
+
+    def __aiter__(self):
+        return self._iter_messages()
+
+    async def _iter_messages(self):
+        while True:
+            try:
+                message = await asyncio.wait_for(self._queue.get(), timeout=0.05)
+            except TimeoutError:
+                message = json.dumps({"tokens": []})  # Soniox's idle heartbeat
+            if message is None:
+                return
+            yield message
+
+
+async def _run_until_transcription(service, websocket, monkeypatch, timeout: float):
+    frames = []
+
+    async def fake_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+        frames.append(frame)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    service._setup = frame_processor_setup(TaskManager())
+    service._task_manager = service._setup.task_manager
+
+    await service._connect()
+    try:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if any(isinstance(f, TranscriptionFrame) for f in frames):
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        await service._disconnect()
+    return [f for f in frames if isinstance(f, TranscriptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_tokens_the_vad_never_ended_are_finalized(monkeypatch):
+    """A short, quiet "Bye bye" the VAD misses must still become final.
+
+    In Pipecat mode only a VAD stop sends finalize. Without one, Soniox keeps
+    the tokens non-final and the user turn waits on them for the rest of the
+    call.
+    """
+    service = SonioxSTTService(api_key="test-key", sample_rate=16000, auto_finalize_delay_secs=0.2)
+    websocket = _ScriptedSoniox("Bye bye.")
+
+    transcriptions = await _run_until_transcription(service, websocket, monkeypatch, 2.0)
+
+    assert [f.text for f in transcriptions] == ["Bye bye."]
+    assert websocket.finalizes == 1
+
+
+@pytest.mark.asyncio
+async def test_no_auto_finalize_while_the_vad_hears_the_user(monkeypatch):
+    """While the VAD reports speech, its own stop finalizes the turn."""
+    service = SonioxSTTService(api_key="test-key", sample_rate=16000, auto_finalize_delay_secs=0.1)
+    websocket = _ScriptedSoniox("still talking")
+    service._vad_user_speaking = True
+
+    transcriptions = await _run_until_transcription(service, websocket, monkeypatch, 0.6)
+
+    assert transcriptions == []
+    assert websocket.finalizes == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_can_be_disabled(monkeypatch):
+    service = SonioxSTTService(api_key="test-key", sample_rate=16000, auto_finalize_delay_secs=None)
+    websocket = _ScriptedSoniox("Bye bye.")
+
+    transcriptions = await _run_until_transcription(service, websocket, monkeypatch, 0.6)
+
+    assert transcriptions == []
+    assert websocket.finalizes == 0

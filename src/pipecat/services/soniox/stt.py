@@ -6,6 +6,7 @@
 
 """Soniox speech-to-text service implementation."""
 
+import asyncio
 import json
 import time
 from collections import Counter
@@ -48,6 +49,10 @@ FINALIZE_MESSAGE = '{"type": "finalize"}'
 END_TOKEN = "<end>"
 
 FINALIZED_TOKEN = "<fin>"
+
+# Default quiet period before pending tokens are finalized without a
+# VAD stop. See ``auto_finalize_delay_secs``.
+AUTO_FINALIZE_DELAY_SECS = 1.0
 
 
 class SonioxContextGeneralItem(BaseModel):
@@ -307,6 +312,7 @@ class SonioxSTTService(WebsocketSTTService):
         num_channels: int = 1,
         params: SonioxInputParams | None = None,
         vad_force_turn_endpoint: bool = True,
+        auto_finalize_delay_secs: float | None = AUTO_FINALIZE_DELAY_SECS,
         should_interrupt: bool = True,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = SONIOX_TTFS_P99,
@@ -341,6 +347,13 @@ class SonioxSTTService(WebsocketSTTService):
                 turn start on the local VAD signal when a VAD analyzer is
                 configured (most responsive) or on the first transcript token
                 otherwise, and a turn stop when the endpoint is detected.
+            auto_finalize_delay_secs: In Pipecat mode, how long tokens may wait
+                without new ones before the service sends a finalize message
+                itself. A VAD stop normally triggers the finalize, but speech the
+                VAD misses (short or quiet) never produces one, and the
+                transcript would stay interim for the rest of the call. Not used
+                while the VAD reports the user speaking, or once a finalize is
+                awaiting its reply. ``None`` disables it.
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in Soniox turn detection mode (vad_force_turn_endpoint=False). Only applies
                 when using Soniox's built-in endpoint detection. Passed along to the
@@ -417,6 +430,15 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._final_transcription_buffer = []
         self._last_tokens_received: float | None = None
+
+        # Auto-finalize state (Pipecat mode). Tokens are pending from
+        # the first token after an endpoint until the next endpoint; a finalize
+        # is outstanding from sending it until Soniox answers with an endpoint.
+        self._auto_finalize_delay_secs = auto_finalize_delay_secs
+        self._tokens_pending = False
+        self._finalize_outstanding = False
+        self._vad_user_speaking = False
+        self._auto_finalize_task: asyncio.Task | None = None
 
         # Turn tracking for Soniox turn-detection mode.
         self._user_turn_open = False
@@ -560,17 +582,47 @@ class SonioxSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._vad_user_speaking = True
             # In Soniox turn-detection mode the local VAD signal is the fast
             # path for opening the turn — the first transcript token arrives a
             # full network round-trip plus model TTFB later and remains the
             # fallback when no VAD analyzer is configured. No-op in Pipecat
             # mode or mid-turn.
             await self._user_turn_started()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
-            # Send finalize message to Soniox so we get the final tokens asap.
-            if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(FINALIZE_MESSAGE)
-                logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._vad_user_speaking = False
+            if self._vad_force_turn_endpoint:
+                # Send finalize message to Soniox so we get the final tokens asap.
+                await self._send_finalize(f"{frame.name=}, {direction=}")
+
+    async def _send_finalize(self, reason: str):
+        """Ask Soniox to finalize the tokens it holds."""
+        if self._websocket and self._websocket.state is State.OPEN:
+            await self._websocket.send(FINALIZE_MESSAGE)
+            self._finalize_outstanding = True
+            logger.debug(f"{self}: triggered finalize ({reason})")
+
+    async def _auto_finalize_handler(self):
+        """Finalize tokens the VAD never ended, once they stop changing.
+
+        Pipecat mode finalizes on a VAD stop. Speech the VAD misses produces no
+        stop, so without this the transcript stays interim, the user turn never
+        ends and the bot never answers.
+        """
+        delay = self._auto_finalize_delay_secs
+        assert delay is not None
+        check_every = min(0.25, delay / 4)
+        while True:
+            await asyncio.sleep(check_every)
+            if (
+                not self._tokens_pending
+                or self._finalize_outstanding
+                or self._vad_user_speaking
+                or self._last_tokens_received is None
+                or time.time() - self._last_tokens_received < delay
+            ):
+                continue
+            await self._send_finalize(f"no new tokens for {delay}s")
 
     async def _send_stop_recording(self):
         """Send the end-of-audio frame, an empty message that ends the session."""
@@ -594,6 +646,13 @@ class SonioxSTTService(WebsocketSTTService):
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
+        if (
+            self._vad_force_turn_endpoint
+            and self._auto_finalize_delay_secs is not None
+            and not self._auto_finalize_task
+        ):
+            self._auto_finalize_task = self.create_task(self._auto_finalize_handler())
+
     async def _disconnect(self):
         """Disconnect from the Soniox service.
 
@@ -604,6 +663,10 @@ class SonioxSTTService(WebsocketSTTService):
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
+
+        if self._auto_finalize_task:
+            await self.cancel_task(self._auto_finalize_task)
+            self._auto_finalize_task = None
 
         await self._disconnect_websocket()
 
@@ -717,6 +780,9 @@ class SonioxSTTService(WebsocketSTTService):
                 self._final_transcription_buffer = []
 
         async def finalize_turn():
+            # An endpoint settles everything Soniox held so far.
+            self._tokens_pending = False
+            self._finalize_outstanding = False
             await send_endpoint_transcript()
             await self._user_turn_stopped()
 
@@ -752,6 +818,13 @@ class SonioxSTTService(WebsocketSTTService):
                             self._final_transcription_buffer.append(token)
                     else:
                         non_final_transcription.append(token)
+
+                if tokens:
+                    # Whatever Soniox still holds after this message's
+                    # endpoint (if any) is pending until the next one.
+                    self._tokens_pending = bool(
+                        self._final_transcription_buffer or non_final_transcription
+                    )
 
                 if self._final_transcription_buffer or non_final_transcription:
                     final_text = "".join(
