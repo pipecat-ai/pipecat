@@ -101,6 +101,30 @@ class WorkerRegistry:
         if existing:
             await handler(existing)
 
+    def unwatch(self, worker_name: str, handler: WatchHandler) -> None:
+        """Stop watching for a worker's registration.
+
+        Tolerant: unwatching a handler that is not registered, or a worker
+        name that was never watched, is a no-op.
+
+        Because :meth:`watch` deduplicates by handler identity, a name and
+        handler pair has a single registration: unwatching it removes the
+        watch for every caller that installed it.
+
+        Args:
+            worker_name: The worker name the handler was watching.
+            handler: The handler passed to :meth:`watch`.
+        """
+        handlers = self._watches.get(worker_name)
+        if not handlers:
+            return
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            return
+        if not handlers:
+            del self._watches[worker_name]
+
     async def register(self, worker_data: WorkerReadyData) -> bool:
         """Register a worker. Returns True if the worker was new.
 
@@ -134,6 +158,10 @@ class WorkerRegistry:
         return True
 
     async def _notify(self, worker_data: WorkerReadyData) -> None:
-        """Notify watchers of a new registration."""
-        for handler in self._watches.get(worker_data.worker_name, []):
+        """Notify watchers of a new registration.
+
+        Iterates a snapshot: a handler may unwatch while this runs, and
+        mutating the list mid-iteration would skip the handler after it.
+        """
+        for handler in list(self._watches.get(worker_data.worker_name, ())):
             await handler(worker_data)
