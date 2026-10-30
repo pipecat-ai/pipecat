@@ -11,11 +11,13 @@ from typing import Any
 
 from loguru import logger
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -33,6 +35,11 @@ class JambonzFrameSerializer(FrameSerializer):
 
     - **Audio has no envelope.** Audio arrives and leaves as raw 16-bit signed
       little-endian mono PCM, not base64 inside a JSON event.
+    - **Text and audio share the socket.** The first text frame is the
+      preamble; later ones are events. With ``passDtmf`` set, a digit arrives
+      as ``{"event": "dtmf", "dtmf": "5", ...}``, and ``mark`` and ``playDone``
+      replies arrive the same way. Only the first is read as the preamble, so
+      an event cannot overwrite the call's identifiers.
     - **The audio geometry is per call.** The verb's ``sampleRate`` and
       ``mixType`` are stated by the server in a JSON preamble sent before any
       audio, so both are read from the connection rather than configured here.
@@ -93,6 +100,10 @@ class JambonzFrameSerializer(FrameSerializer):
         self._call_sid: str | None = None
         self._trace_id: str | None = None
         self._call_meta: dict[str, Any] = {}
+        # jambonz sends exactly one preamble, immediately, and every text frame
+        # after it is an event. Without this, a DTMF digit went through the
+        # preamble handler and replaced the call's identifiers with None.
+        self._preamble_seen: bool = False
         self._mix_type: str | None = None
         # The preamble arrives once but audio arrives fifty times a second, so
         # an unusable mixType has to be reported once rather than per frame.
@@ -177,20 +188,27 @@ class JambonzFrameSerializer(FrameSerializer):
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserialize jambonz WebSocket data to Pipecat frames.
 
-        Text data is the preamble jambonz sends once, before any audio, which
-        carries the negotiated audio geometry and the call's identifiers.
-        Everything else is raw PCM.
+        The first text frame is the preamble, which carries the negotiated
+        audio geometry and the call's identifiers. Later text frames are
+        events: a DTMF digit becomes an InputDTMFFrame, and anything else is
+        ignored. Binary data is raw PCM.
 
         Args:
             data: The raw WebSocket data from jambonz.
 
         Returns:
-            An InputAudioRawFrame for audio, or None for the preamble and for
+            An InputAudioRawFrame for audio, an InputDTMFFrame for a digit, or
+            None for the preamble, for events this does not handle, and for
             audio that cannot yet be interpreted.
         """
         if isinstance(data, str):
-            self._handle_preamble(data)
-            return None
+            if not self._preamble_seen:
+                # Set whether or not it parses: jambonz sends one preamble and
+                # it is this frame, so a later event must never be read as one.
+                self._preamble_seen = True
+                self._handle_preamble(data)
+                return None
+            return self._handle_event(data)
 
         if self._jambonz_sample_rate is None:
             logger.warning("Dropping audio: no jambonz audio preamble has arrived yet.")
@@ -218,6 +236,35 @@ class JambonzFrameSerializer(FrameSerializer):
             num_channels=1,
             sample_rate=self._sample_rate,
         )
+
+    def _handle_event(self, raw: str) -> Frame | None:
+        """Read a text frame that arrived after the preamble."""
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            logger.debug("Ignoring an undecodable text frame from jambonz.")
+            return None
+        if not isinstance(event, dict):
+            return None
+
+        # The digit is keyed on "event" and carries the digit directly, unlike
+        # Twilio's nested {"event": "dtmf", "dtmf": {"digit": ...}}.
+        if event.get("event") == "dtmf":
+            digit = event.get("dtmf")
+            try:
+                return InputDTMFFrame(KeypadEntry(digit))
+            except ValueError:
+                logger.debug(
+                    f"Ignoring a DTMF digit jambonz sent that is not on a keypad: {digit!r}"
+                )
+                return None
+
+        # mark and playDone replies, and anything jambonz adds later. Debug
+        # rather than warning: these are normal traffic, not faults.
+        logger.debug(
+            f"Ignoring an unhandled jambonz event: {event.get('type') or event.get('event')!r}"
+        )
+        return None
 
     def _handle_preamble(self, raw: str) -> None:
         """Read the JSON frame jambonz sends before the audio starts."""
