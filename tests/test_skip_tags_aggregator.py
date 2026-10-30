@@ -86,6 +86,32 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].text, "Hi there.")
 
+    async def test_closed_tag_content_not_split(self):
+        """Punctuation inside a closed tag is not a sentence boundary."""
+        await self.aggregator.reset()
+
+        text = "Your code is <spell>X. Y. Z</spell>. Say <spell>St. Louis</spell> slowly. Done"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        self.assertEqual(
+            [r.text for r in results],
+            ["Your code is <spell>X. Y. Z</spell>.", "Say <spell>St. Louis</spell> slowly."],
+        )
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, "Done")
+
+    async def test_tag_after_emitted_sentence_not_split(self):
+        """A tag is still recognized after an earlier sentence has been emitted."""
+        await self.aggregator.reset()
+
+        text = "Hi <spell>AB</spell>. My name is <spell>Bob. Smith</spell> today. Done"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        self.assertEqual(
+            [r.text for r in results],
+            ["Hi <spell>AB</spell>.", "My name is <spell>Bob. Smith</spell> today."],
+        )
+
 
 class TestSkipTagsAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

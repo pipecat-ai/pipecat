@@ -45,7 +45,7 @@ from pipecat.evals.client import (
     _PersonaTurnRelay,
     _tag_bot_segments,
 )
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
@@ -56,6 +56,7 @@ from pipecat.evals.scenario import (
     EvalScriptTurn,
     EvalSendAfter,
 )
+from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -242,12 +243,12 @@ class TestFramesToEvents(unittest.TestCase):
                 message={"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data}
             )
 
-        def bot_output(text_type, status, accumulated="Mm-hmm."):
+        def bot_output(output_type, status, accumulated="Mm-hmm."):
             return msg(
                 "bot-output",
                 {
                     "text": "Mm-hmm.",
-                    "text_type": text_type,
+                    "output_type": output_type,
                     "spoken_status": status,
                     "spoken_progress": {"accumulated_text": accumulated, "remaining_text": ""},
                 },
@@ -266,6 +267,63 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertIsNone(
             s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
         )
+
+    def test_expression_from_messages(self):
+        # Expressive conversation reports what the TTS performed: where the delivery
+        # of the spoken text change, and each event and pause.
+        s = _stream(bot_audio=True)
+
+        def bot_output(
+            segment_id, text_type="sentence", text="words", delivery=None, status="in-progress"
+        ):
+            data = {
+                "text": text,
+                "text_type": text_type,
+                "segment_id": segment_id,
+                "will_be_spoken": True,
+                "spoken_status": status,
+            }
+            if delivery is not None:
+                data["delivery"] = delivery
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
+            )
+
+        def expression(frame):
+            event = s.frame_to_event(frame)
+            return event and event["text"]
+
+        s.frame_to_event(LLMFullResponseStartFrame())
+        # Spoken text counts as it is spoken, not when it is announced.
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
+        self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="completed")))
+        self.assertEqual(
+            expression(bot_output(2, delivery=["excited", "emphasis"])), "<<excited, emphasis>>"
+        )
+        # Delivery can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, delivery=["calm"])), "<<calm>>")
+        # An event counts when it is heard, once.
+        self.assertIsNone(expression(bot_output(3, "expression_sound", "laughter", status="new")))
+        self.assertEqual(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed")),
+            "[[laughter]]",
+        )
+        self.assertIsNone(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed"))
+        )
+        self.assertEqual(
+            expression(bot_output(4, "expression_pause", "600", status="completed")),
+            "[[pause 600]]",
+        )
+        self.assertEqual(expression(bot_output(5, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, delivery=["excited"])))
+        self.assertEqual(expression(bot_output(7, delivery=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no delivery.
+        self.assertIsNone(expression(bot_output(8)))
+        # Each response starts from the baseline.
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertIsNone(expression(bot_output(9, delivery=[])))
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
@@ -827,6 +885,99 @@ class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await s.wait_bot_transcribed(0.01))
 
 
+class TestBotEnded(unittest.IsolatedAsyncioTestCase):
+    """Once the bot ends the call, a wait for its next event fails at once, after anything still on its way."""
+
+    async def test_a_wait_fails_at_once_once_the_bot_ended_the_call(self):
+        s = _stream()
+        s.frame_to_event(BotStartedSpeakingFrame())
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        self.assertFalse(s.bot_speaking)
+        started = time.monotonic()
+        with self.assertRaises(EvalBotEndedError):
+            await s.next_event("llm_response", time.monotonic() + 5)
+        self.assertLess(time.monotonic() - started, 1)
+
+    async def test_an_event_queued_before_the_bot_ended_still_matches(self):
+        s = _stream()
+        await s.append({"type": "llm_response", "text": "Goodbye!"})
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        event = await s.next_event("llm_response", time.monotonic() + 5)
+        self.assertEqual(event["text"], "Goodbye!")
+
+    async def test_a_transcript_landing_after_the_bot_ended_still_matches(self):
+        s = _stream(bot_audio=True)
+        s.bot_turn_started()
+        s.bot_ended()
+        wait = asyncio.create_task(s.next_event("response", time.monotonic() + 5))
+        await asyncio.sleep(0.05)
+        self.assertFalse(wait.done())
+        await s.bot_turn_stopped("Goodbye!")
+        self.assertEqual((await wait)["text"], "Goodbye!")
+
+    async def test_dropping_the_queued_bot_ended_event_keeps_the_call_ended(self):
+        s = _stream()
+        s.bot_ended()
+        await s.append({"type": "bot_ended"})
+        s.drop_pending_bot_output("before send")
+        with self.assertRaises(EvalBotEndedError):
+            await s.next_event("llm_response", time.monotonic() + 5)
+
+    async def test_an_empty_reply_then_the_bot_ending_fails_at_once(self):
+        m = _matcher()
+        await m._stream.append({"type": "llm_response", "text": ""})
+        m._stream.bot_ended()
+        expectation = EvalExpectation(event="llm_response", text_contains="Berlin")
+        with self.assertRaises(EvalBotEndedError):
+            await m.match(expectation, time.monotonic(), 5000, 0, 0)
+
+    @staticmethod
+    def _driver(stream: EvalEventStream, turn: EvalScriptTurn, progress: list) -> EvalScriptDriver:
+        async def on_progress(p):
+            progress.append(p)
+
+        return EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[turn]),
+            default_timeout_ms=5000,
+            client=None,
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+
+    async def test_the_driver_fails_the_turn_as_the_bot_ended_it(self):
+        progress = []
+        stream = _stream()
+        turn = EvalScriptTurn(user="hi", expect=[EvalExpectation(event="llm_response")])
+        driver = self._driver(stream, turn, progress)
+        stream.bot_ended()
+
+        failures = await driver._match_expectations(turn, 0)
+
+        self.assertEqual([f.kind for f in failures], ["bot_ended"])
+        self.assertIn("the bot ended the call", failures[0].reason)
+        self.assertFalse(driver.turns[0].expectations[0].passed)
+        self.assertEqual(progress[-1].status, "failed")
+
+    async def test_a_send_after_wait_fails_at_once_once_the_bot_ended_the_call(self):
+        progress = []
+        stream = _stream()
+        send_after = EvalSendAfter(event="bot_started_speaking", delay_ms=0)
+        driver = self._driver(stream, EvalScriptTurn(user="hi", send_after=send_after), progress)
+        stream.bot_ended()
+
+        started = time.monotonic()
+        failure = await driver._await_send_after(send_after, 0)
+
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(failure.kind, "bot_ended")
+        self.assertIn("the bot ended the call", failure.reason)
+        self.assertEqual(progress[-1].status, "failed")
+
+
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
 
@@ -838,6 +989,14 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         failure = await s.match(expectation, time.monotonic(), 100, 0, 0)
         self.assertIsNone(failure)
         self.assertIn("no 'llm_response'", s.last_match_text)
+
+    async def test_absent_passes_when_the_bot_ends_the_call(self):
+        s = _matcher()
+        s._stream.bot_ended()
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 5000, 0, 0)
+        self.assertIsNone(failure)
+        self.assertIn("before the bot ended the call", s.last_match_text)
 
     async def test_absent_fails_when_event_arrives(self):
         import time
@@ -995,6 +1154,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         failure = await s.match(exp, time.monotonic(), 100, 0, 0)
         self.assertEqual(failure.kind, "text_present")
         self.assertIn("'Berlin.●'", failure.reason)
+
+    async def test_text_matches_checks_the_accumulated_reply(self):
+        import time
+
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_matches=[r"^●"])
+        for first, kind in (("● Berlin.", None), ("Berlin. ●", "text_unmatched")):
+            s = _matcher(bot_audio=False)
+            s._stream._queue.put_nowait({"type": "llm_response", "text": first})
+            s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+            failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+            self.assertEqual(failure.kind if failure else None, kind)
 
     async def test_eval_yes_passes(self):
         s = _matcher()
@@ -1259,6 +1429,20 @@ class TestTextContainsResolution(unittest.TestCase):
         # Spacing is ignored, as for text_contains.
         exp = EvalExpectation(event="llm_response", text_excludes="not sure")
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
+
+    def test_text_matches(self):
+        exp = EvalExpectation(
+            event="llm_response", text_matches=[r"^\[\[voice:[^\]]*\]\]", r"\]\]\s*\S"]
+        )
+        ok = {"type": "llm_response", "text": "[[voice: emotion=warm]] Sure thing."}
+        self.assertIsNone(self._check(ok, exp))
+        failure = self._check({"type": "llm_response", "text": "Sure. [[voice: x]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn("does not match '^", failure.reason)
+        # Each pattern must match; the failure names the first that did not.
+        failure = self._check({"type": "llm_response", "text": "[[voice: emotion=warm]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn(repr(r"\]\]\s*\S"), failure.reason)
 
 
 class TestMarkerCheck(unittest.TestCase):

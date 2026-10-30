@@ -16,7 +16,7 @@ from typing import Any, Literal
 from loguru import logger
 from openai.types import CompletionUsage
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (

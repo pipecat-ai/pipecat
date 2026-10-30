@@ -33,6 +33,7 @@ class VoiceFormatter:
         self,
         *,
         strip_markdown: bool = True,
+        strip_urls: bool = True,
         expand_phone_numbers: bool = True,
         normalize_acronyms: bool = True,
         expand_currency: bool = True,
@@ -49,6 +50,9 @@ class VoiceFormatter:
         Args:
             strip_markdown: Strip Markdown formatting symbols (bold, italic, headers,
                 code spans). Enabled by default.
+            strip_urls: Reduce a Markdown link or image to its label or alt text so
+                the URL is not spoken. Enabled by default; only used when
+                ``strip_markdown=True``.
             expand_phone_numbers: Space out phone number digits for individual
                 pronunciation. Enabled by default.
             normalize_acronyms: Space out uppercase acronyms (e.g. ``"API"`` →
@@ -75,11 +79,9 @@ class VoiceFormatter:
         self._transforms = []
 
         if strip_markdown:
-            from pipecat.utils.text.transforms.strip_markdown import (
-                strip_markdown as _strip_markdown,
-            )
+            from pipecat.utils.text.transforms.strip_markdown import StripMarkdown
 
-            self._transforms.append(_strip_markdown)
+            self._transforms.append(StripMarkdown(strip_urls=strip_urls))
 
         # email_to_speech must run before expand_phone_numbers (phone regex matches
         # digit-only domains) and before normalize_acronyms (all-caps local parts get

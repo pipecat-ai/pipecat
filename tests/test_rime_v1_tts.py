@@ -140,55 +140,117 @@ def _audio_bytes(frames: list[Any]) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def test_service_defaults_to_binary_coda() -> None:
-    service = RimeV1TTSService(api_key="key")
+def test_coda_uses_binary_and_public_endpoint() -> None:
+    service = RimeV1TTSService(settings=RimeV1TTSService.Settings(model="coda"), api_key="key")
 
-    assert service._websocket_url == "wss://api.rime.ai/coda/ws"
+    assert service._websocket_url == "wss://coda.api.rime.ai/ws"
     assert service._websocket_protocol == "binary"
     assert service._settings.model == "coda"
     assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
 
 
 @pytest.mark.parametrize(
-    "url, model",
+    "model, url",
     [
-        ("wss://api.rime.ai/coda/ws", "coda"),
-        ("wss://api.rime.ai/mist/ws", "mistv3"),
-        ("wss://api.rime.ai/arcana/ws", "arcana"),
+        ("coda", "wss://coda.api.rime.ai/ws"),
+        ("mistv3", "wss://mist.api.rime.ai/ws"),
     ],
 )
-def test_model_comes_from_the_endpoint_path(url: str, model: str) -> None:
-    assert RimeV1TTSService(api_key="key", websocket_url=url)._settings.model == model
+def test_model_selects_the_public_endpoint(model: str, url: str) -> None:
+    service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model=model))
+    assert service._websocket_url == url
+    assert service._settings.model == model
 
 
-def test_dedicated_endpoint_requires_an_explicit_model() -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        "wss://coda.api.rime.ai/ws",
+        "wss://mist.api.rime.ai/ws",
+        "wss://voice.customer.example/custom/stream?deployment=test",
+        "wss://api.rime.ai/coda/ws",
+        "wss://api.rime.ai/mist/ws",
+    ],
+)
+def test_custom_endpoint_uses_the_explicit_model(url: str) -> None:
     service = RimeV1TTSService(
         api_key="key",
-        websocket_url="wss://customer.rime.ai/ws",
-        settings=RimeV1TTSService.Settings(model="mistv3"),
+        websocket_url=url,
+        settings=RimeV1TTSService.Settings(model="custom-model"),
     )
-    assert service._settings.model == "mistv3"
+    assert service._websocket_url == url
+    assert service._settings.model == "custom-model"
+    assert service._endpoint_model == "custom-model"
 
-    with pytest.raises(ValueError, match="requires a model for a dedicated endpoint"):
-        RimeV1TTSService(api_key="key", websocket_url="wss://customer.rime.ai/ws")
+
+def test_custom_model_requires_an_endpoint() -> None:
+    with pytest.raises(ValueError, match="websocket_url is required"):
+        RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model="custom-model"))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        None,
+        "wss://coda.api.rime.ai/ws",
+        "wss://mist.api.rime.ai/ws",
+        "wss://voice.customer.example/custom/stream",
+        "wss://api.rime.ai/coda/ws",
+        "wss://api.rime.ai/mist/ws",
+    ],
+)
+@pytest.mark.parametrize(
+    "settings",
+    [
+        None,
+        RimeV1TTSService.Settings(),
+        RimeV1TTSService.Settings(model=None),
+        RimeV1TTSService.Settings(model=""),
+    ],
+)
+def test_every_endpoint_requires_an_explicit_model(
+    url: str | None, settings: RimeV1TTSService.Settings | None
+) -> None:
+    with pytest.raises(ValueError, match="requires settings.model"):
+        RimeV1TTSService(api_key="key", websocket_url=url, settings=settings)
 
 
 def test_service_rejects_invalid_configuration() -> None:
     with pytest.raises(ValueError, match="binary"):
-        RimeV1TTSService(api_key="key", websocket_protocol="xml")
-    with pytest.raises(ValueError, match="must end with /ws"):
-        RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/coda")
-    with pytest.raises(ValueError, match="does not match"):
-        RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(model="mistv3"))
+        RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_protocol="xml",
+        )
+
+
+@pytest.mark.parametrize("url", ["https://coda.api.rime.ai/ws", "/ws", "wss:///ws"])
+def test_service_rejects_non_websocket_urls(url: str) -> None:
+    with pytest.raises(ValueError, match="absolute ws or wss URL"):
+        RimeV1TTSService(
+            api_key="key", websocket_url=url, settings=RimeV1TTSService.Settings(model="coda")
+        )
 
 
 @pytest.mark.parametrize(
     "url, settings, ignored",
     [
-        ("wss://api.rime.ai/mist/ws", {"text_lookahead_tokens": 4}, "text_lookahead_tokens"),
-        ("wss://api.rime.ai/arcana/ws", {"text_lookahead_tokens": 4}, "text_lookahead_tokens"),
-        ("wss://api.rime.ai/coda/ws", {"pause_between_brackets": True}, "pause_between_brackets"),
-        ("wss://api.rime.ai/coda/ws", {"save_oovs": False}, "save_oovs"),
+        (
+            "wss://mist.api.rime.ai/ws",
+            {"model": "mistv3", "text_lookahead_tokens": 4},
+            "text_lookahead_tokens",
+        ),
+        (
+            "wss://voice.customer.example/ws",
+            {"model": "arcana", "text_lookahead_tokens": 4},
+            "text_lookahead_tokens",
+        ),
+        (
+            "wss://coda.api.rime.ai/ws",
+            {"model": "coda", "pause_between_brackets": True},
+            "pause_between_brackets",
+        ),
+        ("wss://coda.api.rime.ai/ws", {"model": "coda", "save_oovs": False}, "save_oovs"),
         (
             "wss://customer.rime.ai/ws",
             {"model": "mistv2", "time_scale_factor": 1.2},
@@ -215,7 +277,9 @@ def test_settings_the_model_does_not_accept_are_left_out_with_a_warning(
 def test_unknown_settings_are_ignored() -> None:
     service = RimeV1TTSService(
         api_key="key",
-        settings=RimeV1TTSService.Settings.from_mapping({"repetition_penalty": 1.1}),
+        settings=RimeV1TTSService.Settings.from_mapping(
+            {"model": "coda", "repetition_penalty": 1.1}
+        ),
     )
     service._sample_rate = 24000
 
@@ -227,7 +291,11 @@ def test_coda_settings_map_to_the_start_request() -> None:
         api_key="key",
         sample_rate=22050,
         settings=RimeV1TTSService.Settings(
-            voice="astra", language=Language.EN, text_lookahead_tokens=0, time_scale_factor=1.2
+            model="coda",
+            voice="astra",
+            language=Language.EN,
+            text_lookahead_tokens=0,
+            time_scale_factor=1.2,
         ),
     )
     service._sample_rate = 22050
@@ -244,11 +312,15 @@ def test_coda_settings_map_to_the_start_request() -> None:
 
 
 def test_token_mode_asks_rime_to_accumulate_sentences() -> None:
-    sentences = RimeV1TTSService(api_key="key")
+    sentences = RimeV1TTSService(settings=RimeV1TTSService.Settings(model="coda"), api_key="key")
     sentences._sample_rate = 24000
     assert not sentences._build_start_request("turn").start.HasField("split_strategy")
 
-    tokens = RimeV1TTSService(api_key="key", text_aggregation_mode=TextAggregationMode.TOKEN)
+    tokens = RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="coda"),
+        api_key="key",
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
     tokens._sample_rate = 24000
     start = tokens._build_start_request("turn").start
     assert start.split_strategy == proto.SPLIT_STRATEGY_ACCUMULATE_SENTENCE
@@ -256,7 +328,9 @@ def test_token_mode_asks_rime_to_accumulate_sentences() -> None:
 
 @pytest.mark.asyncio
 async def test_languages_map_to_bcp47_tags() -> None:
-    service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(language="ja-JP"))
+    service = RimeV1TTSService(
+        api_key="key", settings=RimeV1TTSService.Settings(model="coda", language="ja-JP")
+    )
     service._sample_rate = 24000
     assert service._build_start_request("turn").start.language == "ja"
 
@@ -267,8 +341,10 @@ async def test_languages_map_to_bcp47_tags() -> None:
 def test_mist_settings_map_to_the_start_request() -> None:
     service = RimeV1TTSService(
         api_key="key",
-        websocket_url="wss://api.rime.ai/mist/ws",
-        settings=RimeV1TTSService.Settings(pause_between_brackets=True, save_oovs=False),
+        websocket_url="wss://mist.api.rime.ai/ws",
+        settings=RimeV1TTSService.Settings(
+            model="mistv3", pause_between_brackets=True, save_oovs=False
+        ),
     )
     service._sample_rate = 24000
 
@@ -280,7 +356,9 @@ def test_mist_settings_map_to_the_start_request() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_settings_apply_to_the_next_context(warning_log: list[str]) -> None:
-    service = RimeV1TTSService(api_key="key", settings=RimeV1TTSService.Settings(voice="old"))
+    service = RimeV1TTSService(
+        api_key="key", settings=RimeV1TTSService.Settings(model="coda", voice="old")
+    )
     service._sample_rate = 24000
 
     changed = await service._update_settings(RimeV1TTSService.Settings(voice="new"))
@@ -294,7 +372,11 @@ async def test_runtime_settings_apply_to_the_next_context(warning_log: list[str]
     assert not start.HasField("mist_parameters")
     assert any("mistv3 is not applied" in message for message in warning_log)
 
-    mist = RimeV1TTSService(api_key="key", websocket_url="wss://api.rime.ai/mist/ws")
+    mist = RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="mistv3"),
+        api_key="key",
+        websocket_url="wss://mist.api.rime.ai/ws",
+    )
     mist._sample_rate = 24000
     await mist._update_settings(RimeV1TTSService.Settings(text_lookahead_tokens=4))
     assert not mist._build_start_request("turn").start.HasField("coda_parameters")
@@ -355,17 +437,23 @@ _RESPONSE_ENVELOPES = [
 def test_requests_match_fixed_wire_envelopes(envelope: dict[str, Any], binary: str) -> None:
     request = json_format.ParseDict(envelope, proto.WebSocketRequest())
 
-    assert RimeV1TTSService(api_key="key")._encode(request) == bytes.fromhex(binary)
-    encoded_json = RimeV1TTSService(api_key="key", websocket_protocol="json")._encode(request)
+    assert RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="coda"), api_key="key"
+    )._encode(request) == bytes.fromhex(binary)
+    encoded_json = RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="coda"), api_key="key", websocket_protocol="json"
+    )._encode(request)
     assert json.loads(encoded_json) == envelope
 
 
 @pytest.mark.parametrize("envelope, binary", _RESPONSE_ENVELOPES)
 def test_responses_match_fixed_wire_envelopes(envelope: dict[str, Any], binary: str) -> None:
-    from_binary = RimeV1TTSService(api_key="key")._decode(bytes.fromhex(binary))
-    from_json = RimeV1TTSService(api_key="key", websocket_protocol="json")._decode(
-        json.dumps(envelope)
-    )
+    from_binary = RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="coda"), api_key="key"
+    )._decode(bytes.fromhex(binary))
+    from_json = RimeV1TTSService(
+        settings=RimeV1TTSService.Settings(model="coda"), api_key="key", websocket_protocol="json"
+    )._decode(json.dumps(envelope))
 
     assert json_format.MessageToDict(from_binary) == envelope
     assert json_format.MessageToDict(from_json) == envelope
@@ -381,8 +469,9 @@ def test_responses_match_fixed_wire_envelopes(envelope: dict[str, Any], binary: 
 async def test_round_trip_streams_one_context_per_turn(protocol: str) -> None:
     async with _rime_server(_speaking_reply(b"\x01\x02\x03\x04")) as (url, requests):
         service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
             api_key="test-key",
-            websocket_url=f"{url}/coda/ws",
+            websocket_url=f"{url}/custom/stream",
             websocket_protocol=protocol,
             sample_rate=24000,
         )
@@ -416,8 +505,9 @@ async def test_round_trip_streams_one_context_per_turn(protocol: str) -> None:
 async def test_token_mode_streams_tokens_and_keeps_spell_tags_whole() -> None:
     async with _rime_server(_speaking_reply()) as (url, requests):
         service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
             api_key="key",
-            websocket_url=f"{url}/coda/ws",
+            websocket_url=f"{url}/custom/stream",
             text_aggregation_mode=TextAggregationMode.TOKEN,
         )
         down_frames, up_frames = await run_test(
@@ -456,7 +546,11 @@ async def test_interruption_cancels_the_context_and_drops_late_audio() -> None:
         return []
 
     async with _rime_server(reply) as (url, requests):
-        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
@@ -494,7 +588,11 @@ async def test_context_error_reports_and_skips_the_rest_of_the_turn() -> None:
         ]
 
     async with _rime_server(reply) as (url, requests):
-        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
         started_at = time.monotonic()
         down_frames, up_frames = await run_test(
             service,
@@ -525,7 +623,11 @@ async def test_permanent_context_error_leaves_the_service_usable() -> None:
         return [_error(request, "invalid_input")] if request.HasField("start") else []
 
     async with _rime_server(reply) as (url, _):
-        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[TTSSpeakFrame(text="Rejected text."), SleepFrame(sleep=0.1)],
@@ -549,7 +651,11 @@ async def test_done_without_audio_ends_the_context() -> None:
         return []
 
     async with _rime_server(reply) as (url, _):
-        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
         down_frames, _ = await run_test(
             service,
             frames_to_send=[TTSSpeakFrame(text="This audio is empty."), SleepFrame(sleep=0.1)],
@@ -574,7 +680,11 @@ async def test_odd_length_audio_is_padded_without_an_error() -> None:
         return []
 
     async with _rime_server(reply) as (url, _):
-        service = RimeV1TTSService(api_key="key", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[
@@ -595,7 +705,11 @@ async def test_ready_error_is_reported_with_its_category() -> None:
         error=proto.WebSocketError(kind="unauthenticated", message="bad key")
     )
     async with _rime_server(_speaking_reply(), ready=ready) as (url, requests):
-        service = RimeV1TTSService(api_key="bad", websocket_url=f"{url}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="bad",
+            websocket_url=f"{url}/custom/stream",
+        )
         _, up_frames = await run_test(
             service, frames_to_send=[SleepFrame(sleep=0.05)], start_timeout=3.0
         )
@@ -627,7 +741,11 @@ async def test_next_turn_reconnects_after_rime_closes_the_socket() -> None:
 
     async with serve(handler, "127.0.0.1", 0, subprotocols=["rime.v1.binary"]) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        service = RimeV1TTSService(api_key="key", websocket_url=f"ws://{host}:{port}/coda/ws")
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda"),
+            api_key="key",
+            websocket_url=f"ws://{host}:{port}/custom/stream",
+        )
         down_frames, up_frames = await run_test(
             service,
             frames_to_send=[

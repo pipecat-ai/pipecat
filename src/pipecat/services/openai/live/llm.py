@@ -19,7 +19,7 @@ from openai._types import NotGiven as OpenAINotGiven
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.services.open_ai_live_adapter import (
+from pipecat.adapters.llm.services.open_ai_live_adapter import (
     OpenAILiveLLMAdapter,
     OpenAILiveLLMInvocationParams,
 )

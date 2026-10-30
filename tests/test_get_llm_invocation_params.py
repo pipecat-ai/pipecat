@@ -80,25 +80,25 @@ from unittest.mock import patch
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 from openai._types import NotGiven as OpenAINotGiven
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
-from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
-from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
-from pipecat.adapters.services.bedrock_adapter import (
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.llm.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
+from pipecat.adapters.llm.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.llm.services.bedrock_adapter import (
     AWSBedrockLLMAdapter,
     _sanitize_bedrock_document_name,
 )
-from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
-from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
-from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
-from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
-from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
+from pipecat.adapters.llm.services.deepseek_adapter import DeepSeekLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.services.gemini_live_adapter import GeminiLiveLLMAdapter
+from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.llm.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
+from pipecat.adapters.llm.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
@@ -425,7 +425,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
@@ -445,7 +445,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
@@ -463,7 +463,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
@@ -906,7 +906,7 @@ class TestGeminiGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -922,7 +922,7 @@ class TestGeminiGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -1804,7 +1804,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
@@ -1825,7 +1825,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
@@ -1860,7 +1860,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger"):
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger"):
             params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
@@ -2484,7 +2484,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -2500,7 +2500,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -2648,6 +2648,66 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         # Adapter should have moved the image before the text.
         self.assertIn("image", content[0])
         self.assertEqual(content[1]["text"], "What do you see?")
+
+    async def test_thought_converted_to_reasoning_content(self):
+        """A signed thought becomes a reasoning block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny", "tool_call_id": "t1"},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        # The thought and the tool call merge into a single assistant message,
+        # with the reasoning first.
+        self.assertEqual(len(params["messages"]), 3)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0],
+            {"reasoningContent": {"reasoningText": {"text": "Let me check.", "signature": "sig"}}},
+        )
+        self.assertEqual(content[1]["toolUse"]["toolUseId"], "t1")
+
+    async def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be passed back, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(llm="aws", message={"type": "thought", "text": "[REDACTED]"}),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][1]["content"], [{"text": "It's sunny."}])
+
+    def test_thought_signature_elided_from_logs(self):
+        """Reasoning signatures are elided from logged messages."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+            ]
+        )
+        messages = self.adapter.get_messages_for_logging(context)
+
+        reasoning = messages[1]["content"][0]["reasoningContent"]["reasoningText"]
+        self.assertEqual(reasoning, {"text": "Let me check.", "signature": "..."})
 
 
 class TestSanitizeBedrockDocumentName(unittest.TestCase):
@@ -3113,7 +3173,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             await adapter.get_llm_invocation_params(context)
             mock_logger.warning.assert_not_called()
 
@@ -3126,7 +3186,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
             warning_msg = mock_logger.warning.call_args[0][0]
@@ -3141,7 +3201,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3160,7 +3220,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await adapter.get_llm_invocation_params(
                 context, system_instruction="Be helpful."
             )
@@ -3178,7 +3238,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
@@ -3621,7 +3681,7 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase)
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3637,7 +3697,7 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase)
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3735,7 +3795,7 @@ class TestGrokRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3751,7 +3811,7 @@ class TestGrokRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3823,7 +3883,7 @@ class TestAWSNovaSonicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3839,7 +3899,7 @@ class TestAWSNovaSonicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
@@ -3920,7 +3980,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         ]
 
         adapter = OpenAILLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             content = adapter._extract_initial_system(messages, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
 
@@ -3946,7 +4006,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_both_system_discard(self):
         """Resolve with discard=True: system_instruction wins, warns."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 "from context", "from settings", discard_context_system=True
             )
@@ -3957,7 +4017,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_both_system_keep(self):
         """Resolve with discard=False: warns but returns system_instruction."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 "from context", "from settings", discard_context_system=False
             )
@@ -3967,7 +4027,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_only_system_instruction(self):
         """Only system_instruction: returns it, no warning."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 None, "from settings", discard_context_system=True
             )
@@ -4213,7 +4273,7 @@ class TestContextSystemMessageDeprecation(unittest.IsolatedAsyncioTestCase):
         """
         script = (
             "import asyncio\n"
-            "from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter\n"
+            "from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter\n"
             "from pipecat.processors.aggregators.llm_context import LLMContext\n"
             "ctx = LLMContext(messages=["
             "{'role': 'system', 'content': 'Be helpful.'},"
