@@ -125,6 +125,15 @@ class SmallestSTTSettings(STTSettings):
         numerals: Convert spoken numerals to digits.
         diarize: Enable speaker diarization.
         endpointing: Finalize promptly on trailing silence.
+        eou_timeout_ms: Trailing-silence duration, in milliseconds, before
+            Pulse finalizes the transcript on its own. Ranges 100-10000;
+            defaults to 600 when ``endpointing`` is ``True`` and 800 when
+            ``False``. Governs mid-utterance segmentation (e.g. a natural
+            pause) since the VAD-triggered ``finalize`` this service sends on
+            ``VADUserStoppedSpeakingFrame`` already finalizes the turn's last
+            segment immediately, ahead of this timer. No effect on
+            ``model="pulse-2"``, which uses its own built-in end-of-turn
+            detection.
         keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
             recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
         format: Apply punctuation and capitalization to transcripts.
@@ -151,6 +160,7 @@ class SmallestSTTSettings(STTSettings):
     numerals: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eou_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emotion_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -227,6 +237,7 @@ class SmallestSTTService(WebsocketSTTService):
             numerals="auto",
             diarize=False,
             endpointing=True,
+            eou_timeout_ms=None,
             keywords="",
             format=True,
             emotion_detection=True,
@@ -385,6 +396,11 @@ class SmallestSTTService(WebsocketSTTService):
             # so omit the parameter entirely when no keywords are configured.
             if self._settings.keywords:
                 query_params["keywords"] = self._settings.keywords
+
+            # Omitted unless set, so the server's endpointing-dependent default
+            # (600ms/800ms) applies.
+            if self._settings.eou_timeout_ms is not None:
+                query_params["eou_timeout_ms"] = str(self._settings.eou_timeout_ms)
 
             ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
 
