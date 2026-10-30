@@ -11,7 +11,9 @@ supporting multiple languages, voices, and SSML features.
 """
 
 from collections.abc import AsyncGenerator
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from typing import Any
 from xml.sax.saxutils import escape
 
 from loguru import logger
@@ -23,6 +25,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
@@ -33,11 +36,15 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 try:
     import aiobotocore.session
+    from aiobotocore.config import AioConfig
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use AWS services, you need to `uv add "pipecat-ai[aws]"`.')
     raise ImportError(f"Missing module: {e}") from e
+
+# How long the shared Polly client keeps an idle connection open for the next sentence.
+_KEEPALIVE_TIMEOUT_SECS = 300
 
 
 def language_to_aws_language(language: Language) -> str:
@@ -267,14 +274,23 @@ class AWSPollyTTSService(TTSService):
 
         # Explicit or environment keys. Without them, each client takes its
         # credentials from the session's default chain, which renews them.
-        self._aws_params = resolve_credentials(
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=api_key,
-            aws_session_token=aws_session_token,
-            region=region,
-        ).to_boto_kwargs()
+        self._aws_params = {
+            **resolve_credentials(
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=api_key,
+                aws_session_token=aws_session_token,
+                region=region,
+            ).to_boto_kwargs(),
+            # aiobotocore drops a connection idle for 12 s by default, which is shorter
+            # than the pause between many sentences, so every sentence would reconnect.
+            "config": AioConfig(connector_args={"keepalive_timeout": _KEEPALIVE_TIMEOUT_SECS}),
+        }
 
         self._aws_session = aiobotocore.session.get_session()
+
+        # Opened in setup() and shared by a pipeline's requests, so sentences reuse its connections.
+        self._client: Any = None
+        self._client_stack = AsyncExitStack()
 
         self._resampler = create_stream_resampler()
 
@@ -285,6 +301,39 @@ class AWSPollyTTSService(TTSService):
             True, as AWS Polly service supports metrics generation.
         """
         return True
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and open the Polly client its requests share.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._client = await self._client_stack.enter_async_context(
+            self._aws_session.create_client("polly", **self._aws_params)  # pyright: ignore[reportGeneralTypeIssues, reportArgumentType]
+        )
+
+    async def cleanup(self):
+        """Release the Polly client at teardown."""
+        await super().cleanup()
+        self._client = None
+        await self._client_stack.aclose()
+
+    @asynccontextmanager
+    async def _polly_client(self):
+        """Yield the shared client, or a client for this request outside a pipeline.
+
+        A service that was never set up gets no cleanup() call, so it keeps
+        nothing open between requests.
+        """
+        if self._client is not None:
+            yield self._client
+            return
+        async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+            "polly",
+            **self._aws_params,  # pyright: ignore[reportArgumentType]
+        ) as client:
+            yield client
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to AWS Polly language format.
@@ -361,15 +410,16 @@ class AWSPollyTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
-                "polly",
-                **self._aws_params,  # pyright: ignore[reportArgumentType]
-            ) as polly:
-                response = await polly.synthesize_speech(**filtered_params)  # pyright: ignore[reportGeneralTypeIssues]
+            async with self._polly_client() as polly:
+                response = await polly.synthesize_speech(**filtered_params)
                 if "AudioStream" in response:
                     # Get the streaming body and read it
                     stream = response["AudioStream"]
-                    audio_data = await stream.read()
+                    try:
+                        audio_data = await stream.read()
+                    finally:
+                        # Releases a body cut short (interruption); no-op after a full read.
+                        stream.close()
                 else:
                     logger.error(f"{self} No audio stream in response")
                     return
