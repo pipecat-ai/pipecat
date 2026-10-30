@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import EndFrame, Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
@@ -396,3 +396,68 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _CountingSerializer(FrameSerializer):
+    """Turns every binary message into an input audio frame and counts them."""
+
+    def __init__(self):
+        super().__init__()
+        self.deserialized = 0
+
+    async def serialize(self, frame: Frame):
+        return None
+
+    async def deserialize(self, data):
+        self.deserialized += 1
+        return InputAudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
+
+
+class TestInputKeepsReadingAfterEndFrame(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #6414.
+
+    The output transport keeps sending queued audio after the input transport
+    has seen the ``EndFrame``. If the input transport stops reading the socket
+    at that point, a peer that applies backpressure (e.g. Twilio Media
+    Streams) stalls, so incoming messages must be drained until the socket
+    closes.
+    """
+
+    async def test_stop_keeps_reading_and_discards_messages(self):
+        messages = asyncio.Queue()
+        reads = 0
+
+        async def receive():
+            nonlocal reads
+            reads += 1
+            return await messages.get()
+
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.receive = receive
+        mock_ws.close = AsyncMock()
+
+        serializer = _CountingSerializer()
+        transport = FastAPIWebsocketTransport(
+            mock_ws, FastAPIWebsocketParams(serializer=serializer)
+        )
+        input_transport = transport.input()
+        # The input and output transports both hold the client.
+        transport._client._leave_counter = 2
+        receive_task = asyncio.create_task(input_transport._receive_messages())
+        input_transport._receive_task = receive_task
+
+        await input_transport.stop(EndFrame())
+
+        # The output transport is still sending, so the socket stays open.
+        mock_ws.close.assert_not_called()
+        self.assertFalse(receive_task.done())
+
+        # The peer keeps streaming audio: it is read but not deserialized.
+        for _ in range(3):
+            await messages.put({"type": "websocket.receive", "bytes": b"\0" * 320, "text": None})
+        await messages.put({"type": "websocket.disconnect"})
+        await asyncio.wait_for(receive_task, timeout=5.0)
+
+        self.assertEqual(reads, 4)
+        self.assertEqual(serializer.deserialized, 0)
