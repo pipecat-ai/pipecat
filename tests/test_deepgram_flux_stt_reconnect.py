@@ -6,9 +6,10 @@
 
 """Connection handling of Deepgram Flux STT against a local fake Flux server.
 
-The service runs in a test pipeline fed with real-time 20 ms audio frames. The
-fake server can reject handshakes, drop a connection, or never confirm one
-with ``Connected``.
+Most tests run the service in a test pipeline fed with real-time 20 ms audio
+frames; the disconnect tests drive its connection directly. The fake server
+can reject handshakes, drop a connection, never confirm one with
+``Connected``, or stop reading so the client's close goes unanswered.
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from http import HTTPStatus
 
 import pytest
 from websockets.asyncio.server import serve
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     InputAudioRawFrame,
@@ -45,8 +47,14 @@ class _FakeFlux:
     resume_turn: bool = False
     # How many connections, from the first, never get Connected; None for all.
     unconfirmed: int | None = 0
+    # Stop reading once the connection is confirmed, so the client's close
+    # goes unanswered until the test resumes reading.
+    stop_reading: bool = False
     handshakes: int = 0
     audio_per_connection: list[int] = field(default_factory=list)
+    open_connections: int = 0
+    close_codes: list[int | None] = field(default_factory=list)
+    connections: list = field(default_factory=list)
 
     async def process_request(self, connection, request):
         self.handshakes += 1
@@ -58,10 +66,21 @@ class _FakeFlux:
         return None
 
     async def handle(self, websocket):
+        self.open_connections += 1
+        self.connections.append(websocket)
+        try:
+            await self._serve(websocket)
+        finally:
+            self.open_connections -= 1
+            self.close_codes.append(websocket.close_code)
+
+    async def _serve(self, websocket):
         index = len(self.audio_per_connection)
         self.audio_per_connection.append(0)
         if self.unconfirmed is not None and index >= self.unconfirmed:
             await websocket.send(json.dumps({"type": "Connected", "request_id": "test"}))
+        if self.stop_reading:
+            websocket.transport.pause_reading()
         async for message in websocket:
             if not isinstance(message, bytes):
                 continue
@@ -235,3 +254,82 @@ async def test_stopping_does_not_reconnect():
     await asyncio.sleep(0.3)
 
     assert server.handshakes == 1
+
+
+async def _wait_for(condition, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    return condition()
+
+
+async def _connected_service(server: _FakeFlux, url: str) -> DeepgramFluxSTTService:
+    service = DeepgramFluxSTTService(api_key="test-key", url=url)
+    service._websocket_url = url
+    await service._connect_websocket()
+    assert await _wait_for(lambda: server.open_connections == 1)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_closes_the_connection_cleanly():
+    server = _FakeFlux()
+    async with serve(server.handle, "127.0.0.1", 0) as s:
+        service = await _connected_service(
+            server, f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}"
+        )
+
+        await service._disconnect_websocket()
+
+        assert await _wait_for(lambda: server.open_connections == 0)
+    assert server.close_codes == [1000]
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_cancelled_before_close_stream_still_closes_the_connection():
+    """A cancelled teardown can't leave the session holding a Flux concurrency slot."""
+    server = _FakeFlux()
+    async with serve(server.handle, "127.0.0.1", 0) as s:
+        service = await _connected_service(
+            server, f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}"
+        )
+        sending = asyncio.Event()
+
+        async def stalled_close_stream():
+            # A send waiting on a full write buffer.
+            sending.set()
+            await asyncio.Event().wait()
+
+        service._send_close_stream = stalled_close_stream
+        disconnect = asyncio.create_task(service._disconnect_websocket())
+        await sending.wait()
+
+        disconnect.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await disconnect
+
+        assert service._websocket is None
+        assert await _wait_for(lambda: server.open_connections == 0, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_cancelled_during_the_close_handshake_does_not_wait_for_flux():
+    server = _FakeFlux(stop_reading=True)
+    async with serve(server.handle, "127.0.0.1", 0) as s:
+        service = await _connected_service(
+            server, f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}"
+        )
+        websocket = service._websocket
+        assert websocket is not None
+        disconnect = asyncio.create_task(service._disconnect_websocket())
+        assert await _wait_for(lambda: websocket.state is State.CLOSING)
+
+        disconnect.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await disconnect
+
+        assert service._websocket is None
+        # Ended at once, without waiting on Flux to answer the close.
+        assert await _wait_for(lambda: websocket.state is State.CLOSED, timeout=0.2)
+        server.connections[0].transport.resume_reading()
+        assert await _wait_for(lambda: server.open_connections == 0)
