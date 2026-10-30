@@ -1462,7 +1462,6 @@ class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assistant_msg["role"], "assistant")
         self.assertEqual(assistant_msg["content"], "I'm doing well, thank you!")
 
-
     async def test_tool_choice_mapped_to_anthropic_format(self):
         """LLMContext.tool_choice is forwarded in Anthropic's tool_choice shape."""
         from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
@@ -1500,11 +1499,8 @@ class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(params["tool_choice"], expected)
 
         context = LLMContext(messages=[{"role": "user", "content": "hi"}], tools=tools)
-        params = await self.adapter.get_llm_invocation_params(
-            context, enable_prompt_caching=False
-        )
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
         self.assertIsInstance(params["tool_choice"], type(ANTHROPIC_NOT_GIVEN))
-
 
     async def test_llm_specific_message_filtering(self):
         """Test that Anthropic-specific messages are included and others are filtered out."""
