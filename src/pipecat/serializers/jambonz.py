@@ -7,7 +7,6 @@
 """jambonz WebSocket frame serializer for audio streaming."""
 
 import json
-import time
 from typing import Any
 
 from loguru import logger
@@ -34,13 +33,16 @@ class JambonzFrameSerializer(FrameSerializer):
 
     - **Audio has no envelope.** Audio arrives and leaves as raw 16-bit signed
       little-endian mono PCM, not base64 inside a JSON event.
-    - **The sample rate is per call.** It is set by the verb's ``sampleRate``
-      and then stated by the server in a JSON preamble sent before any audio,
-      so it is read from the connection rather than configured here.
-    - **Interruptions need a gap.** ``killAudio`` flushes playing and buffered
-      audio, but message ordering on the socket is not guaranteed, so audio
-      written immediately afterwards can arrive after the flush and play over
-      the caller. The serializer withholds audio briefly after sending it.
+    - **The audio geometry is per call.** The verb's ``sampleRate`` and
+      ``mixType`` are stated by the server in a JSON preamble sent before any
+      audio, so both are read from the connection rather than configured here.
+      Only ``mono`` is handled; ``stereo`` and ``mixed`` carry two channels,
+      which this serializer would misread as mono at twice the rate.
+    - **Interruptions need no gap.** ``killAudio`` flushes playing and
+      buffered audio, and jambonz reads the socket on a single loop, so binary
+      frames sent after it are queued normally rather than racing it. Pipecat's
+      transport sends sequentially and drops its own queued output on an
+      interruption, so sending ``killAudio`` is sufficient on its own.
 
     Example::
 
@@ -62,9 +64,6 @@ class JambonzFrameSerializer(FrameSerializer):
                 Leave as None so the rate is taken from the connection's
                 preamble, which is what the ``listen`` verb actually negotiated.
             sample_rate: Optional override for the pipeline input sample rate.
-            kill_audio_guard_secs: How long to withhold outgoing audio after
-                sending ``killAudio``, so a frame written in the same moment
-                cannot arrive after the flush. Defaults to 0.1.
             resampler_clear_after_secs: Inherited from FrameSerializer. Defaults
                 to None here, since callers pause mid-sentence and the resampler
                 should not discard its history over an ordinary gap.
@@ -72,7 +71,6 @@ class JambonzFrameSerializer(FrameSerializer):
 
         jambonz_sample_rate: int | None = None
         sample_rate: int | None = None
-        kill_audio_guard_secs: float = 0.1
         resampler_clear_after_secs: float | None = None
 
     def __init__(self, params: InputParams | None = None, **kwargs):
@@ -95,8 +93,10 @@ class JambonzFrameSerializer(FrameSerializer):
         self._call_sid: str | None = None
         self._trace_id: str | None = None
         self._call_meta: dict[str, Any] = {}
-
-        self._guard_until: float = 0.0
+        self._mix_type: str | None = None
+        # The preamble arrives once but audio arrives fifty times a second, so
+        # an unusable mixType has to be reported once rather than per frame.
+        self._warned_mix_type: bool = False
 
         self._input_resampler = create_stream_resampler(
             clear_after_secs=self._params.resampler_clear_after_secs
@@ -109,6 +109,11 @@ class JambonzFrameSerializer(FrameSerializer):
     def jambonz_sample_rate(self) -> int | None:
         """The rate jambonz is forking this call at, from the preamble."""
         return self._jambonz_sample_rate
+
+    @property
+    def mix_type(self) -> str | None:
+        """The channel layout jambonz stated in the preamble, if it stated one."""
+        return self._mix_type
 
     @property
     def call_sid(self) -> str | None:
@@ -147,18 +152,9 @@ class JambonzFrameSerializer(FrameSerializer):
             there is nothing to send.
         """
         if isinstance(frame, InterruptionFrame):
-            # Opened before returning, so audio produced in the same moment as
-            # the flush is already being withheld.
-            self._guard_until = time.monotonic() + self._params.kill_audio_guard_secs
             return json.dumps({"type": "killAudio"})
 
         if isinstance(frame, AudioRawFrame):
-            if time.monotonic() < self._guard_until:
-                # Discarded rather than queued: this audio belongs to the turn
-                # the user interrupted, so delivering it late is worse than not
-                # delivering it.
-                return None
-
             if self._jambonz_sample_rate is None:
                 logger.warning("Dropping audio: no jambonz audio preamble has arrived yet.")
                 return None
@@ -200,6 +196,16 @@ class JambonzFrameSerializer(FrameSerializer):
             logger.warning("Dropping audio: no jambonz audio preamble has arrived yet.")
             return None
 
+        if self._mix_type is not None and self._mix_type != "mono":
+            if not self._warned_mix_type:
+                self._warned_mix_type = True
+                logger.warning(
+                    f"Dropping audio: jambonz is sending mixType={self._mix_type!r}, which carries "
+                    "two channels. Set mixType to 'mono' on the listen verb. Interleaved stereo "
+                    "read as mono would play at double speed with the channels alternating."
+                )
+            return None
+
         deserialized_data = await self._input_resampler.resample(
             data, self._jambonz_sample_rate, self._sample_rate
         )
@@ -226,6 +232,10 @@ class JambonzFrameSerializer(FrameSerializer):
         self._call_meta = meta
         self._call_sid = meta.get("callSid")
         self._trace_id = meta.get("traceId")
+
+        mix_type = meta.get("mixType")
+        if isinstance(mix_type, str) and mix_type:
+            self._mix_type = mix_type
 
         rate = meta.get("sampleRate")
         if isinstance(rate, int) and rate > 0 and self._params.jambonz_sample_rate is None:
