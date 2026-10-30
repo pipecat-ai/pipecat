@@ -91,7 +91,12 @@ def _get_turn_context(self):
         The turn context, or None if unavailable.
     """
     tracing_ctx = getattr(self, "_tracing_context", None)
-    return tracing_ctx.get_turn_context() if tracing_ctx else None
+    if tracing_ctx is None:
+        return None
+    try:
+        return tracing_ctx.get_turn_context()
+    except AttributeError:
+        return None
 
 
 def _get_parent_service_context(self):
@@ -111,7 +116,13 @@ def _get_parent_service_context(self):
 
     # Use the conversation context set by TurnTraceObserver via TracingContext.
     tracing_ctx = getattr(self, "_tracing_context", None)
-    conversation_context = tracing_ctx.get_conversation_context() if tracing_ctx else None
+    if tracing_ctx is None:
+        conversation_context = None
+    else:
+        try:
+            conversation_context = tracing_ctx.get_conversation_context()
+        except AttributeError:
+            conversation_context = None
     if conversation_context:
         return conversation_context
 
