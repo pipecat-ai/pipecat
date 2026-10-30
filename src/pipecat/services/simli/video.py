@@ -201,7 +201,7 @@ class SimliVideoService(AIService):
             is_trinity_avatar: Has no effect: the bot's audio goes to Simli as it
                 arrives, whatever the face.
 
-                .. deprecated:: 1.15.0
+                .. deprecated:: 1.16.0
                     No replacement. Will be removed in 2.0.0.
 
             params: Additional input parameters for session configuration.
@@ -236,7 +236,7 @@ class SimliVideoService(AIService):
                 enable_logging = params.enable_logging
         if is_trinity_avatar is not None:
             warn_deprecated(
-                "`SimliVideoService(is_trinity_avatar=...)` is deprecated since 1.15.0 and "
+                "`SimliVideoService(is_trinity_avatar=...)` is deprecated since 1.16.0 and "
                 "will be removed in 2.0.0. No replacement. It has no effect: the bot's audio "
                 "goes to Simli as it arrives, whatever the face.",
                 stacklevel=2,
