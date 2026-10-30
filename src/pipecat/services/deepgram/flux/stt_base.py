@@ -656,7 +656,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
 
         Fields in ``_CONFIGURE_FIELDS`` are sent to Deepgram via a Configure
         message. Fields Flux only reads from the connection URL trigger a
-        reconnect, which waits until the user stops speaking.
+        reconnect, which waits until the user stops speaking. With no live
+        connection, either kind reconnects at once.
         """
         changed = await super()._update_settings(delta)
 
@@ -664,10 +665,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             return changed
 
         configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        connection_fields = changed.keys() & self._CONNECTION_FIELDS
         if configure_fields and self._transport_is_active():
             await self._send_configure(configure_fields)
 
-        if changed.keys() & self._CONNECTION_FIELDS:
+        if not self._transport_is_active() and (configure_fields or connection_fields):
+            # Don't wait for the user's turn to end: without a connection, Flux never ends it.
+            await self._reconnect()
+        elif connection_fields:
             await self._request_reconnect()
 
         self._warn_unhandled_updated_settings(

@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     MetricsFrame,
     ProposedUserStoppedSpeakingFrame,
+    STTUpdateSettingsFrame,
     TranscriptionFrame,
 )
 from pipecat.metrics.metrics import STTUsageMetricsData
@@ -45,6 +46,7 @@ class _FakeFlux:
     resume_turn: bool = False
     # How many connections, from the first, never get Connected; None for all.
     unconfirmed: int | None = 0
+    refused_query: str | None = None
     handshakes: int = 0
     audio_per_connection: list[int] = field(default_factory=list)
 
@@ -55,6 +57,8 @@ class _FakeFlux:
         )
         if rejected:
             return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, "unavailable\n")
+        if self.refused_query and self.refused_query in request.path:
+            return connection.respond(HTTPStatus.BAD_REQUEST, "out of range\n")
         return None
 
     async def handle(self, websocket):
@@ -235,3 +239,23 @@ async def test_stopping_does_not_reconnect():
     await asyncio.sleep(0.3)
 
     assert server.handshakes == 1
+
+
+@pytest.mark.asyncio
+async def test_correcting_a_refused_setting_reconnects_with_it():
+    server = _FakeFlux(refused_query="eot_threshold=0.4")
+    correction = STTUpdateSettingsFrame(delta=DeepgramFluxSTTService.Settings(eot_threshold=0.7))
+
+    async with serve(server.handle, "127.0.0.1", 0, process_request=server.process_request) as s:
+        service = DeepgramFluxSTTService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}",
+            settings=DeepgramFluxSTTService.Settings(eot_threshold=0.4),
+        )
+        await run_test(
+            service, frames_to_send=_audio_frames(0.2) + [correction] + _audio_frames(0.5)
+        )
+        await asyncio.sleep(0.1)
+
+    assert server.handshakes == 2
+    assert server.audio_per_connection[0] > 0
