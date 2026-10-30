@@ -177,6 +177,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
 
         self._client: SageMakerBidiClient | None = None
         self._response_task: asyncio.Task | None = None
+        # Set while the service is stopping, so the session it closes doesn't
+        # end the turn in progress.
+        self._disconnecting = False
 
     # ------------------------------------------------------------------
     # Transport interface implementation
@@ -215,6 +218,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         """
         logger.debug("Connecting to Deepgram Flux on SageMaker...")
 
+        self._disconnecting = False
         self._connection_established_event.clear()
 
         self._client = SageMakerBidiClient(
@@ -273,6 +277,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
 
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
+        self._disconnecting = True
         self._connection_established_event.clear()
         # Discard any in-flight/pending Configure — the connection is going
         # away, so it can no longer be acked or sent.
@@ -346,3 +351,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             logger.debug("Response processor stopped")
+            # A turn lives in one session, so it ends when the session does,
+            # unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()

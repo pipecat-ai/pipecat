@@ -17,6 +17,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -99,6 +101,18 @@ class MistralTTSService(TTSService):
         )
 
         self._client = Mistral(api_key=api_key)
+        self._voxtral_3_expression_adapter = MistralExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: emotion tags on Voxtral 3 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("voxtral-mini-tts-3"):
+            return self._voxtral_3_expression_adapter
+        return super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

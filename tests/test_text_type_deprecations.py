@@ -127,11 +127,12 @@ def test_tts_service_transformer_aggregation_type():
     assert tts._text_transforms == []
 
 
-@pytest.mark.parametrize("field", ["text_type", "aggregated_by"])
-def test_bot_output_message_carries_both_fields(field):
+@pytest.mark.parametrize("field", ["output_type", "text_type", "aggregated_by"])
+def test_bot_output_message_carries_every_name(field):
     data = RTVI.BotOutputMessageData(text="Hello.", **{field: "status"})
     assert data.model_dump(exclude_none=True) == {
         "text": "Hello.",
+        "output_type": "status",
         "text_type": "status",
         "aggregated_by": "status",
     }

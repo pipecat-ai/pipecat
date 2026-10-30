@@ -16,6 +16,7 @@ import base64
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from enum import StrEnum
 from functools import partial
 from typing import Any
 
@@ -25,6 +26,13 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
+from pipecat.expressive.expression import (
+    EMPHASIS_DELIVERY,
+    FAST_DELIVERY,
+    SLOW_DELIVERY,
+    ExpressionDelivery,
+)
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     BotConnectedFrame,
     BotStoppedSpeakingFrame,
@@ -39,6 +47,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -140,6 +149,67 @@ class TavusApi:
             return response["persona_name"]
 
 
+class TavusEmotion(StrEnum):
+    """A facial emotion the Tavus replica can express."""
+
+    NEUTRAL = "neutral"
+    HAPPINESS = "happiness"
+    SADNESS = "sadness"
+    ANGER = "anger"
+    FEAR = "fear"
+    SURPRISE = "surprise"
+    DISGUST = "disgust"
+    CONTEMPT = "contempt"
+
+
+# The Tavus emotion each universal delivery converts to: Pipecat's core deliveries
+# (``CORE_DELIVERY``), and the plainest deliveries of each emotion the core leaves
+# out. Any other delivery, and the voice's baseline, converts to neutral.
+TAVUS_DELIVERY_EMOTIONS: dict[str, TavusEmotion] = {
+    ExpressionDelivery.CALM: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.CURIOUS: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.CONFIDENT: TavusEmotion.NEUTRAL,
+    ExpressionDelivery.WARM: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.EXCITED: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.GRATEFUL: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.HAPPY: TavusEmotion.HAPPINESS,
+    ExpressionDelivery.SYMPATHETIC: TavusEmotion.SADNESS,
+    ExpressionDelivery.APOLOGETIC: TavusEmotion.SADNESS,
+    ExpressionDelivery.SAD: TavusEmotion.SADNESS,
+    ExpressionDelivery.SURPRISED: TavusEmotion.SURPRISE,
+    ExpressionDelivery.ANGRY: TavusEmotion.ANGER,
+    ExpressionDelivery.FEARFUL: TavusEmotion.FEAR,
+    ExpressionDelivery.SCARED: TavusEmotion.FEAR,
+    ExpressionDelivery.DISGUSTED: TavusEmotion.DISGUST,
+    ExpressionDelivery.CONTEMPTUOUS: TavusEmotion.CONTEMPT,
+}
+
+
+def tavus_policy_warning(policy: ExpressionPolicy | None) -> str | None:
+    """Tell which of an expression policy's deliveries the replica has no emotion for.
+
+    The replica shows neutral when the bot speaks in one of them.
+
+    Args:
+        policy: The pipeline's expression policy, or None for the default.
+
+    Returns:
+        The warning, or None when the replica has an emotion for every delivery
+        the policy offers, as it has for the core ones offered without a list.
+        Slow and fast set the pace, not an emotion, so they're never named.
+    """
+    if policy is None or policy.delivery is None:
+        return None
+    handled = {*TAVUS_DELIVERY_EMOTIONS, SLOW_DELIVERY, FAST_DELIVERY}
+    unmapped = [name for name in policy.delivery if name not in handled]
+    if not unmapped:
+        return None
+    return (
+        f"the Tavus replica has no emotion for {', '.join(unmapped)} from the expression "
+        "policy, so it shows neutral when the bot speaks in them"
+    )
+
+
 class TavusCallbacks(BaseModel):
     """Callback handlers for Tavus events.
 
@@ -227,6 +297,8 @@ class TavusTransportClient:
         # Utterance tracking for the realtime-paced send path (see
         # send_realtime_audio_frame/end_realtime_utterance/reset_realtime_utterance).
         self._realtime_inference_id: str | None = None
+        # The emotion last sent to the replica (see update_emotion).
+        self._emotion: TavusEmotion | None = None
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
@@ -459,6 +531,46 @@ class TavusTransportClient:
             }
         )
         await self.send_message(transport_frame)
+
+    async def update_emotion(self, delivery: list[str] | None) -> None:
+        """Set the replica's emotion to follow the delivery of the bot's speech.
+
+        Sends ``conversation.set_emotion`` when the delivery maps to an emotion
+        other than the one last sent. Tavus applies it on arrival, not in step
+        with the audio it has buffered.
+
+        Args:
+            delivery: The delivery of a ``TTSTextFrame``.
+        """
+        emotion = self._delivery_emotion(delivery)
+        if emotion is None or emotion == self._emotion:
+            return
+        self._emotion = emotion
+        transport_frame = OutputTransportMessageUrgentFrame(
+            message={
+                "message_type": "conversation",
+                "event_type": "conversation.set_emotion",
+                "conversation_id": self._conversation_id,
+                "properties": {"emotion": emotion.value},
+            }
+        )
+        await self.send_message(transport_frame)
+
+    def _delivery_emotion(self, delivery: list[str] | None) -> TavusEmotion | None:
+        """The emotion of a delivery's mood, neutral without one, or None to keep the current one."""
+        if delivery is None:
+            return None
+        mood = next(
+            (
+                name
+                for name in delivery
+                if name not in (EMPHASIS_DELIVERY, SLOW_DELIVERY, FAST_DELIVERY)
+            ),
+            None,
+        )
+        if mood is None:
+            return TavusEmotion.NEUTRAL
+        return TAVUS_DELIVERY_EMOTIONS.get(mood, TavusEmotion.NEUTRAL)
 
     async def encode_audio_and_send(
         self, audio: bytes, done: bool, inference_id: str | None
@@ -778,6 +890,8 @@ class TavusOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+        if warning := tavus_policy_warning(setup.expression_policy):
+            logger.warning(f"{self}: {warning}")
 
         await self._client.setup(setup)
         await self._client.join()
@@ -788,7 +902,14 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Signal end of utterance when bot stops speaking."""
+        """Signal end of utterance when bot stops speaking, and follow the bot's delivery.
+
+        A ``TTSTextFrame`` with a presentation timestamp reaches here when the
+        transport's clock releases it, as its words are heard, so the replica's
+        emotion changes in step with the audio.
+        """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSTextFrame):
+            await self._client.update_emotion(frame.delivery)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, BotStoppedSpeakingFrame):
             # Handle BotStoppedSpeakingFrame because, by the time it is received, the base output transport
             # has already sent all audio frames via write_audio_frame(). At this point it is safe to mark

@@ -203,40 +203,35 @@ def parse_start_end_tags(
 ) -> tuple[StartEndTags | None, int]:
     """Parse text to identify start and end tag pairs.
 
-    If a start tag was previously found (i.e., current_tag is valid), wait for
-    the corresponding end tag. Otherwise, wait for a start tag.
-
-    This function returns the index in the text where parsing should continue
-    in the next call and the current or new tags.
+    Scans the text from ``current_tag_index``: inside a tag, for its end tag;
+    outside one, for the earliest start tag of any pair, and then for that
+    pair's end tag after it. A pair whose start and end tags are the same,
+    such as ``("^^", "^^")``, is found the same way.
 
     Args:
         text: The text to be parsed.
         tags: List of tuples containing start and end tags.
         current_tag: The currently active tags, if any.
-        current_tag_index: The current index in the text.
+        current_tag_index: Where in the text to resume scanning.
 
     Returns:
-        A tuple containing None or the current tag and the index of the text.
+        The tag the text ends inside, or None, and where to resume scanning:
+        just past the open tag's start, or past the last tag that closed.
     """
-    # If we are already inside a tag, check if the end tag is in the text.
-    if current_tag:
-        _, end_tag = current_tag
-        if end_tag in text[current_tag_index:]:
-            return (None, len(text))
-        return (current_tag, current_tag_index)
-
-    # Check if any start tag appears in the text
-    for start_tag, end_tag in tags:
-        start_tag_count = text[current_tag_index:].count(start_tag)
-        end_tag_count = text[current_tag_index:].count(end_tag)
-        if start_tag_count == 0 and end_tag_count == 0:
-            return (None, current_tag_index)
-        elif start_tag_count > end_tag_count:
-            return ((start_tag, end_tag), len(text))
-        elif start_tag_count == end_tag_count:
-            return (None, len(text))
-
-    return (None, current_tag_index)
+    index = current_tag_index
+    while True:
+        if current_tag:
+            end = text.find(current_tag[1], index)
+            if end < 0:
+                return (current_tag, index)
+            index = end + len(current_tag[1])
+            current_tag = None
+        starts = [(text.find(start, index), (start, end)) for start, end in tags]
+        found = [(position, tag) for position, tag in starts if position >= 0]
+        if not found:
+            return (None, index)
+        position, current_tag = min(found, key=lambda found_tag: found_tag[0])
+        index = position + len(current_tag[0])
 
 
 def longest_trailing_partial_match(text: str, candidates: Sequence[str]) -> int:

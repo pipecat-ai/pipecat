@@ -21,6 +21,9 @@ from openai.types.responses import (
     ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputRefusal,
+    ResponseOutputText,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseTextDeltaEvent,
@@ -574,6 +577,98 @@ class TestHttpStreamErrorEvents:
 
         error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
         assert error_frames, "Expected an ErrorFrame after an in-stream response.failed event"
+
+
+class TestHttpEmptyResponse:
+    """A response that completes with no text and no function call is reported."""
+
+    @staticmethod
+    def _completed(output):
+        response = MagicMock()
+        response.id = "resp_1"
+        response.model = "gpt-5.4-mini"
+        response.usage = None
+        response.output = output
+        event = MagicMock(spec=ResponseCompletedEvent)
+        event.response = response
+        return event
+
+    @staticmethod
+    def _message(content):
+        return ResponseOutputMessage(
+            id="msg_1", type="message", role="assistant", status="completed", content=content
+        )
+
+    async def _run(self, *events):
+        service = _make_service()
+        service.push_error = AsyncMock()
+        service.run_function_calls = AsyncMock()
+        with patch("pipecat.services.openai.responses.llm.logger") as mock_logger:
+            await _run(service, *events)
+        return service, mock_logger
+
+    @pytest.mark.asyncio
+    async def test_reasoning_only_response_pushes_error(self):
+        reasoning = ResponseReasoningItem(id="rs_1", type="reasoning", summary=[])
+        service, mock_logger = await self._run(self._completed([reasoning]))
+
+        service.push_error.assert_awaited_once()
+        assert "resp_1" in service.push_error.call_args.kwargs["error_msg"]
+        assert "['reasoning']" in mock_logger.warning.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_named_in_the_warning(self):
+        refusal = ResponseOutputRefusal(type="refusal", refusal="I can't help with that.")
+        service, mock_logger = await self._run(self._completed([self._message([refusal])]))
+
+        service.push_error.assert_awaited_once()
+        assert "['message[refusal]']" in mock_logger.warning.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_text_response_pushes_no_error(self):
+        text = ResponseOutputText(type="output_text", text="Hello", annotations=[])
+        service, mock_logger = await self._run(
+            _text_delta_event("Hello"), self._completed([self._message([text])])
+        )
+
+        service.push_error.assert_not_awaited()
+        mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_function_call_only_response_pushes_no_error(self):
+        call = ResponseFunctionToolCall(
+            id="fc_1", type="function_call", name="end_session", call_id="call_1", arguments="{}"
+        )
+        added = MagicMock(spec=ResponseOutputItemAddedEvent)
+        added.item = call
+        done = MagicMock(spec=ResponseOutputItemDoneEvent)
+        done.item = call
+        service, _ = await self._run(added, done, self._completed([call]))
+
+        service.push_error.assert_not_awaited()
+        service.run_function_calls.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_response_reaches_pipeline_as_error_frame(self):
+        service = _make_service()
+        reasoning = ResponseReasoningItem(id="rs_1", type="reasoning", summary=[])
+        service._client.responses.create = AsyncMock(
+            return_value=_FakeAsyncStream([self._completed([reasoning])])
+        )
+
+        down_frames, up_frames = await run_test(
+            service,
+            frames_to_send=[LLMContextFrame(context=LLMContext())],
+            expected_down_frames=[
+                LLMServiceMetadataFrame,
+                LLMFullResponseStartFrame,
+                LLMFullResponseEndFrame,
+            ],
+        )
+
+        error_frames = [f for f in list(down_frames) + list(up_frames) if isinstance(f, ErrorFrame)]
+        assert len(error_frames) == 1
+        assert not error_frames[0].fatal
 
 
 # ---------------------------------------------------------------------------
