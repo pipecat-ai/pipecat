@@ -455,6 +455,19 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         self._auto_mode = auto_mode
         self._enable_ssml_parsing = enable_ssml_parsing
 
+        # The text-to-speech multi-stream endpoint serves no Eleven v3 or v4
+        # model: the connection is rejected with a 400 at the handshake, which
+        # surfaces as an opaque error that leaves the processor unusable. Say
+        # so up front, with a pointer to the classes that do serve them.
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith(("eleven_v3", "eleven_v4")):
+            logger.warning(
+                f"{self}: {model!r} is an Eleven v3/v4 model, which the "
+                "text-to-speech WebSocket endpoint does not serve. Use "
+                "ElevenLabsDialogueTTSService for real-time synthesis, or "
+                "ElevenLabsHttpTTSService for HTTP streaming."
+            )
+
         if _pronunciation_dictionary_locators is not None:
             warn_deprecated(
                 "`pronunciation_dictionary_locators` is deprecated since 1.6.0 and will be "
