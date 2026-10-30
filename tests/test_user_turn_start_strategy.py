@@ -6,16 +6,22 @@
 
 import unittest
 import warnings
+from unittest import mock
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
     ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -314,3 +320,70 @@ class TestBaseUserTurnStartStrategyDeprecations(unittest.IsolatedAsyncioTestCase
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMinWordsBotPending(unittest.IsolatedAsyncioTestCase):
+    """``bot_pending_secs`` applies ``min_words`` before the bot starts speaking."""
+
+    def _strategy(self, **kwargs):
+        strategy = MinWordsUserTurnStartStrategy(min_words=2, **kwargs)
+        self.started = False
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            self.started = True
+
+        return strategy
+
+    async def _say(self, strategy, text):
+        await strategy.process_frame(TranscriptionFrame(text=text, user_id="cat", timestamp=""))
+
+    async def test_disabled_by_default(self):
+        strategy = self._strategy()
+        await strategy.process_frame(LLMRunFrame())
+        await self._say(strategy, "Hello")
+        self.assertTrue(self.started)
+
+    async def test_requested_response_needs_min_words(self):
+        for request in (
+            LLMRunFrame(),
+            LLMContextFrame(context=LLMContext()),
+            LLMMessagesAppendFrame(messages=[], run_llm=True),
+        ):
+            with self.subTest(request=type(request).__name__):
+                strategy = self._strategy(bot_pending_secs=5.0)
+                await strategy.process_frame(request)
+                await self._say(strategy, "Hello")
+                self.assertFalse(self.started)
+
+                await self._say(strategy, "Hello there")
+                self.assertTrue(self.started)
+
+    async def test_append_without_run_llm_is_not_a_request(self):
+        strategy = self._strategy(bot_pending_secs=5.0)
+        await strategy.process_frame(LLMMessagesAppendFrame(messages=[], run_llm=False))
+        await self._say(strategy, "Hello")
+        self.assertTrue(self.started)
+
+    async def test_pending_expires(self):
+        strategy = self._strategy(bot_pending_secs=5.0)
+        with mock.patch("time.monotonic", return_value=100.0):
+            await strategy.process_frame(LLMRunFrame())
+        with mock.patch("time.monotonic", return_value=105.0):
+            await self._say(strategy, "Hello")
+        self.assertTrue(self.started)
+
+    async def test_bot_stopped_speaking_ends_pending(self):
+        strategy = self._strategy(bot_pending_secs=5.0)
+        await strategy.process_frame(LLMRunFrame())
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(BotStoppedSpeakingFrame())
+        await self._say(strategy, "Hello")
+        self.assertTrue(self.started)
+
+    async def test_user_turn_started_ends_pending(self):
+        strategy = self._strategy(bot_pending_secs=5.0)
+        await strategy.process_frame(LLMRunFrame())
+        await strategy.handle_user_turn_started()
+        await self._say(strategy, "Hello")
+        self.assertTrue(self.started)
