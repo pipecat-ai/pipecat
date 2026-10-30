@@ -77,13 +77,17 @@ def anthropic_from_llm_context_tool_choice(
     if tool_choice == "required":
         return {"type": "any"}
     if isinstance(tool_choice, dict):
-        if tool_choice.get("type") in ("none", "auto", "any"):
-            return cast(ToolChoiceParam, {"type": tool_choice["type"]})
+        # OpenAI's ChatCompletionToolChoiceOptionParam is a TypedDict union;
+        # narrow to a plain mapping so pyright accepts key access across variants.
+        choice = cast(dict[str, Any], tool_choice)
+        if choice.get("type") in ("none", "auto", "any"):
+            return cast(ToolChoiceParam, {"type": choice["type"]})
         name = None
-        if isinstance(tool_choice.get("function"), dict):
-            name = tool_choice["function"].get("name")
-        elif tool_choice.get("type") == "tool":
-            name = tool_choice.get("name")
+        function = choice.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+        elif choice.get("type") == "tool":
+            name = choice.get("name")
         if name:
             return {"type": "tool", "name": name}
     return ANTHROPIC_NOT_GIVEN
