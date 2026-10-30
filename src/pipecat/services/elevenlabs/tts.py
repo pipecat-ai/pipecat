@@ -296,6 +296,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
+        pause_frame_processing: bool = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -354,6 +355,10 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                     Use ``text_aggregation_mode`` instead.
                     Will be removed in 2.0.0.
 
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, contexts synthesize
+                concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
+                at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.
         """
         # By default, we aggregate sentences before sending to TTS. This adds
@@ -434,7 +439,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
@@ -612,14 +617,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                     received_ctx_id not in self._alignment_started_context_ids,
                 )
                 self._alignment_started_context_ids.add(received_ctx_id)
-                word_times, self._partial_word, self._partial_word_start_time = (
-                    calculate_word_times(
-                        alignment,
-                        self._cumulative_time,
-                        self._partial_word,
-                        self._partial_word_start_time,
-                    )
-                )
+                word_times = self._word_times_from_alignment(received_ctx_id, alignment)
 
                 if word_times:
                     await self.add_word_timestamps(
@@ -633,18 +631,6 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                             else None
                         ),
                     )
-
-                # Alignment times restart at zero in every message, so the clock
-                # advances by each chunk's span, including chunks that complete no
-                # word, such as trailing punctuation arriving on its own.
-                char_start_times_ms = alignment.get("charStartTimesMs", [])
-                char_durations_ms = alignment.get("charDurationsMs", [])
-
-                if char_start_times_ms and char_durations_ms:
-                    chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                    self._cumulative_time += chunk_end_time_ms / 1000.0
-                elif word_times:
-                    self._cumulative_time = word_times[-1][1]
 
     async def _send_keepalive(self):
         """Send a single keepalive message to keep the WebSocket connection alive.

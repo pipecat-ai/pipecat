@@ -386,7 +386,7 @@ async def test_dialogue_wordless_alignment_still_advances_the_clock():
             },
         }
     )
-    after_first = service._cumulative_time
+    after_first = service._word_clocks["ctx-1"].cumulative_time
     assert after_first == pytest.approx(0.560)
 
     # "!" alone: completes no word, but occupies 320ms of audio.
@@ -401,7 +401,7 @@ async def test_dialogue_wordless_alignment_still_advances_the_clock():
         }
     )
 
-    assert service._cumulative_time == pytest.approx(after_first + 0.320), (
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(after_first + 0.320), (
         "word-less alignment chunk dropped from the clock; later word timestamps would run early"
     )
 
@@ -469,9 +469,7 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
 
     service.add_word_timestamps = _noop
 
-    # The next turn is under way with a fresh clock.
-    service._cumulative_time = 0.0
-    service._partial_word = ""
+    # The next turn is under way.
     service._audio_context_manager.remove("ctx-1")
     await service._audio_context_manager.create("ctx-2")
 
@@ -487,8 +485,94 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
         }
     )
 
-    assert service._cumulative_time == 0.0, "drained context advanced the next turn's clock"
-    assert service._partial_word == "", "drained context left a partial word behind"
+    assert "ctx-1" not in service._word_clocks, "drained context's alignment was processed"
+    assert "ctx-2" not in service._word_clocks, "drained context disturbed the next turn's clock"
+
+
+def _ttd_message(context_id: str, text: str) -> dict:
+    """A Text-to-Dialogue alignment message for text, one character every 10ms."""
+    alignment = _alignment(text)
+    return {
+        "context_id": context_id,
+        "alignment": {
+            "chars": alignment["chars"],
+            "char_start_times_ms": alignment["charStartTimesMs"],
+            "char_durations_ms": alignment["charDurationsMs"],
+        },
+    }
+
+
+def test_dialogue_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_dialogue_service()._pause_frame_processing is True
+    service = ElevenLabsDialogueTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
+@pytest.mark.asyncio
+async def test_dialogue_interleaved_contexts_align_words_independently():
+    """The server generates concurrent contexts together and interleaves their
+    alignment on one socket; a word split across one context's chunks must not
+    pick up another context's characters or clock."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word, start) for word, start in word_times)
+
+    service.add_word_timestamps = _record
+
+    for context_id, chunk in (
+        ("ctx-1", "Hello wor"),
+        ("ctx-2", "Good mor"),
+        ("ctx-1", "ld again "),
+        ("ctx-2", "ning all "),
+    ):
+        await service._handle_message(_ttd_message(context_id, chunk))
+
+    assert [(c, w) for c, w, _ in reported if c == "ctx-1"] == [
+        ("ctx-1", "Hello"),
+        ("ctx-1", "world"),
+        ("ctx-1", "again"),
+    ]
+    assert [(c, w) for c, w, _ in reported if c == "ctx-2"] == [
+        ("ctx-2", "Good"),
+        ("ctx-2", "morning"),
+        ("ctx-2", "all"),
+    ]
+    # Each context's times run on its own clock: "again" starts after ctx-1's
+    # first chunk (90ms) plus "ld " (30ms), whatever ctx-2 sent in between.
+    starts = {(c, w): t for c, w, t in reported}
+    assert starts[("ctx-1", "world")] == pytest.approx(0.06)
+    assert starts[("ctx-1", "again")] == pytest.approx(0.09 + 0.03)
+    assert starts[("ctx-2", "morning")] == pytest.approx(0.05)
+    assert starts[("ctx-2", "all")] == pytest.approx(0.08 + 0.05)
+
+
+@pytest.mark.asyncio
+async def test_dialogue_context_completion_resets_only_its_own_clock():
+    """A context finishing while another is mid-word must not wipe that word."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word) for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    await service._handle_message(_ttd_message("ctx-1", "Done "))
+    await service._handle_message(_ttd_message("ctx-2", "Kail"))
+    service._reset_alignment_state("ctx-1")  # ctx-1's audio context completes
+    await service._handle_message(_ttd_message("ctx-2", "ash "))
+
+    assert "ctx-1" not in service._word_clocks
+    assert ("ctx-2", "Kailash") in reported
 
 
 if __name__ == "__main__":
@@ -551,7 +635,7 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
         )
 
     assert reported == ["[excited]", "Good", "news", "[clear throat]", "it's"]
-    assert service._cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
 
 
 class TestAudioTagExpressionAdapter:

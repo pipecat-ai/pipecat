@@ -550,6 +550,51 @@ async def test_wordless_alignment_still_advances_the_clock():
     assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)
 
 
+def test_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_service()._pause_frame_processing is True
+    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
+@pytest.mark.asyncio
+async def test_interleaved_contexts_align_words_independently():
+    """Alignment for concurrent contexts arrives interleaved on one socket; a word
+    split across one context's chunks must not pick up another context's
+    characters or clock."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word, start) for word, start in word_times)
+
+    service.add_word_timestamps = _record
+    service._websocket = _MessagesWebSocket(
+        [
+            {"contextId": context_id, "alignment": _chunk(text)}
+            for context_id, text in (
+                ("ctx-1", "Hello wor"),
+                ("ctx-2", "Good mor"),
+                ("ctx-1", "ld "),
+                ("ctx-2", "ning "),
+            )
+        ]
+    )
+
+    await service._receive_messages()
+
+    assert [(c, w) for c, w, _ in reported] == [
+        ("ctx-1", "Hello"),
+        ("ctx-2", "Good"),
+        ("ctx-1", "world"),
+        ("ctx-2", "morning"),
+    ]
+    starts = {w: t for _, w, t in reported}
+    # "world" starts at "wor" in ctx-1's first chunk; "morning" at "mor" in ctx-2's.
+    assert starts["world"] == pytest.approx(0.6)
+    assert starts["morning"] == pytest.approx(0.5)
+
+
 @pytest.mark.parametrize(
     "model, adapter",
     [

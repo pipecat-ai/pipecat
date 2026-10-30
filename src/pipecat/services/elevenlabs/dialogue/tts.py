@@ -30,7 +30,6 @@ from pipecat.services.elevenlabs.tts_base import (
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
-    calculate_word_times,
     elevenlabs_language_code,
 )
 from pipecat.services.settings import TTSSettings
@@ -163,6 +162,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         seed: int | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
+        pause_frame_processing: bool = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs Text-to-Dialogue TTS service.
@@ -177,6 +177,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             text_aggregation_mode: How to aggregate incoming text before
                 synthesis. Only :attr:`TextAggregationMode.SENTENCE` is
                 supported; any other value is ignored with a warning.
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, contexts synthesize
+                concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
+                at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
@@ -194,7 +198,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             enable_logging=enable_logging,
             push_text_frames=False,
             push_stop_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             # Consecutive inputs are concatenated verbatim, so without a
             # trailing space one input's last word merges into the next's first.
             append_trailing_space=True,
@@ -387,12 +391,8 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             context.alignment_started = True
             # The audio tags expressive conversation sends mark when its sounds
             # are performed.
-            word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
-                alignment,
-                self._cumulative_time,
-                self._partial_word,
-                self._partial_word_start_time,
-                audio_tags=bool(self._expression_formatter),
+            word_times = self._word_times_from_alignment(
+                received_ctx_id, alignment, audio_tags=bool(self._expression_formatter)
             )
 
             if word_times:
@@ -407,19 +407,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                         else None
                     ),
                 )
-
-            # Alignment times restart at zero in every message, so the clock
-            # advances by each chunk's span. It has to advance for chunks that
-            # complete no word too — trailing punctuation arrives on its own —
-            # or every later word is timestamped early by the shortfall.
-            char_start_times_ms = alignment.get("charStartTimesMs", [])
-            char_durations_ms = alignment.get("charDurationsMs", [])
-
-            if char_start_times_ms and char_durations_ms:
-                chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                self._cumulative_time += chunk_end_time_ms / 1000.0
-            elif word_times:
-                self._cumulative_time = word_times[-1][1]
 
     async def _register_keepalive_context(self):
         """Open a context that exists only to keep the connection alive.
