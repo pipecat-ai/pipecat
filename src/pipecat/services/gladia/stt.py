@@ -33,8 +33,9 @@ from pipecat.frames.frames import (
     STTMetadataFrame,
     TranscriptionFrame,
     TranslationFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.gladia.config import (
     GladiaInputParams,
     LanguageConfig,
@@ -228,6 +229,7 @@ class GladiaSTTService(WebsocketSTTService):
         should_interrupt: bool = True,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = GLADIA_TTFS_P99,
+        finalize_on_vad_stop: bool = False,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -263,6 +265,11 @@ class GladiaSTTService(WebsocketSTTService):
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            finalize_on_vad_stop: Send ``{"type": "finalize"}`` when the pipeline's VAD
+                detects the end of speech, so Gladia sends the open utterance as a final
+                right away instead of after its own endpointing (the final then carries
+                ``from_finalize: true``). Requires an API that supports the ``finalize``
+                message (Gladia Enterprise). Defaults to False.
             **kwargs: Additional arguments passed to the STTService parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -339,6 +346,7 @@ class GladiaSTTService(WebsocketSTTService):
         self._audio_buffer = bytearray()
         self._bytes_sent = 0
         self._max_buffer_size = max_buffer_size
+        self._finalize_on_vad_stop = finalize_on_vad_stop
         self._buffer_lock = asyncio.Lock()
 
         # VAD state tracking
@@ -659,6 +667,28 @@ class GladiaSTTService(WebsocketSTTService):
                 logger.debug(f"{self} Sending {len(self._audio_buffer)} bytes of buffered audio")
                 await self._send_audio(bytes(self._audio_buffer))
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with Gladia-specific handling.
+
+        With ``finalize_on_vad_stop``, the end of speech detected by the pipeline's
+        VAD asks Gladia for the open utterance's final right away.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._finalize_on_vad_stop:
+            await self._send_finalize()
+
+    async def _send_finalize(self):
+        if self._websocket and self._websocket.state is State.OPEN:
+            # Mark that we're awaiting a final with from_finalize
+            self.request_finalize()
+            await self._websocket.send(json.dumps({"type": "finalize"}))
+            logger.trace(f"{self} Sent finalize")
+
     async def _send_stop_recording(self):
         if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(json.dumps({"type": "stop_recording"}))
@@ -706,6 +736,10 @@ class GladiaSTTService(WebsocketSTTService):
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
                     if is_final:
+                        # A final closed by our finalize request: only marked as
+                        # finalized when we asked for it AND Gladia confirms it.
+                        if content["data"].get("from_finalize"):
+                            self.confirm_finalize()
                         # Report usage before the transcription frame so
                         # tracing can attach it to the STT span the frame
                         # closes.
@@ -749,6 +783,16 @@ class GladiaSTTService(WebsocketSTTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
+                elif content["type"] == "finalize":
+                    # The answer to a finalize request. Nothing to finalize (the
+                    # final already went out), or a request the API could not
+                    # forward: report TTFB now instead of waiting for the timeout.
+                    data = content.get("data") or {}
+                    if not data.get("finalized"):
+                        await self.stop_ttfb_metrics()
+                        await self._cancel_ttfb_timeout()
+                    if not content.get("acknowledged", True):
+                        logger.debug(f"{self} finalize not forwarded: {content.get('error')}")
                 elif content["type"] == "speech_start":
                     await self._on_speech_started()
                 elif content["type"] == "speech_end":
