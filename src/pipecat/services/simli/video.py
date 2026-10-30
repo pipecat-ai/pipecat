@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     SpeechOutputAudioRawFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
-    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -415,7 +414,7 @@ class SimliVideoService(AIService):
             # has finished, so the output transport would take this as the bot
             # having stopped speaking while the avatar is still talking.
             return
-        elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
+        elif isinstance(frame, InterruptionFrame):
             await self._simli_client.clearBuffer()
 
         await self.push_frame(frame, direction)
