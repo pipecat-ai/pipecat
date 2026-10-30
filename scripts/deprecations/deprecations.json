@@ -1664,6 +1664,28 @@
       "location": "pipecat/runner/utils.py"
     },
     {
+      "subject": "GenesysAudioHookSerializer.create_resumed_response",
+      "module": "pipecat.serializers.genesys",
+      "kind": "method",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "GenesysAudioHookSerializer.create_resume_request",
+      "message": "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` instead.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.on_pause",
+      "module": "pipecat.serializers.genesys",
+      "kind": "event",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_paused",
+      "message": "Use ``on_paused`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
       "subject": "AnthropicLLMService.InputParams",
       "module": "pipecat.services.anthropic.llm",
       "kind": "class",

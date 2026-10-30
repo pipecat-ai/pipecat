@@ -44,17 +44,27 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 
 class AudioHookMessageType(StrEnum):
-    """AudioHook protocol message types."""
+    """AudioHook protocol message types.
+
+    The server (Pipecat) sends ``pause`` and ``resume`` to ask Genesys to pause
+    or resume the audio stream. Genesys sends ``paused`` and ``resumed`` when the
+    stream actually pauses or resumes, whether the server asked or Genesys
+    decided on its own.
+    """
 
     OPEN = "open"
     OPENED = "opened"
     CLOSE = "close"
     CLOSED = "closed"
     PAUSE = "pause"
+    PAUSED = "paused"
+    RESUME = "resume"
     RESUMED = "resumed"
+    DISCARDED = "discarded"
     PING = "ping"
     PONG = "pong"
     UPDATE = "update"
@@ -95,6 +105,26 @@ class GenesysAudioHookSerializer(FrameSerializer):
     - Text WebSocket frames for JSON control messages
     - Binary WebSocket frames for audio data
 
+    While Genesys has paused the stream, audio is dropped in both directions.
+    Genesys pauses on its own (for example during a hold) or when asked with
+    :meth:`create_pause_request`, and resumes the same way with
+    :meth:`create_resume_request`.
+
+    Event handlers available:
+
+    - on_open: Called when Genesys opens the session. Args: (message: dict)
+    - on_close: Called when Genesys closes the session. Args: (message: dict)
+    - on_ping: Called when Genesys sends a ping. Args: (message: dict)
+    - on_paused: Called when Genesys pauses the audio stream. Args: (message: dict)
+    - on_resumed: Called when Genesys resumes the audio stream. Args: (message: dict)
+    - on_update: Called when Genesys sends an update. Args: (message: dict)
+    - on_error: Called when Genesys reports an error. Args: (message: dict)
+    - on_dtmf: Called when Genesys sends a DTMF digit. Args: (message: dict)
+    - on_pause: Called when Genesys pauses the audio stream. Args: (message: dict)
+
+      .. deprecated:: 1.14.0
+          Use ``on_paused`` instead. Will be removed in 2.0.0.
+
     Example usage::
 
         serializer = GenesysAudioHookSerializer(
@@ -123,6 +153,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # Set output variables to return to Architect
         serializer.set_output_variables({"intent": "billing", "resolved": True})
 
+        # Resume a session opened with start_paused=True
+        await worker.queue_frame(
+            OutputTransportMessageUrgentFrame(message=serializer.create_resume_request())
+        )
+
     Parameters:
         PROTOCOL_VERSION: The AudioHook protocol version (currently "2").
     """
@@ -141,7 +176,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
             process_internal: Whether to process internal (agent) audio.
             supported_languages: List of language codes the bot supports (e.g., ["en-US", "es-ES"]).
             selected_language: Default language code to use.
-            start_paused: Whether to start the session in paused state.
+            start_paused: Whether Genesys starts the audio stream paused. Send
+                :meth:`GenesysAudioHookSerializer.create_resume_request` to start it.
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
@@ -200,10 +236,27 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._register_event_handler("on_open")
         self._register_event_handler("on_close")
         self._register_event_handler("on_ping")
+        self._register_event_handler("on_paused")
+        self._register_event_handler("on_resumed")
         self._register_event_handler("on_pause")
         self._register_event_handler("on_update")
         self._register_event_handler("on_error")
         self._register_event_handler("on_dtmf")
+
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        if event_name == "on_pause":
+            warn_deprecated(
+                "`on_pause` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+                "Use `on_paused` instead.",
+                stacklevel=2,
+            )
+        super().add_event_handler(event_name, handler)
 
     @property
     def session_id(self) -> str:
@@ -222,7 +275,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
     @property
     def is_paused(self) -> bool:
-        """Check if audio streaming is paused."""
+        """Whether Genesys has paused the audio stream."""
         return self._is_paused
 
     @property
@@ -394,6 +447,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
 
         self._is_open = True
+        # Genesys holds the stream until a 'resume', then confirms with 'resumed'.
+        self._is_paused = start_paused
 
         logger.debug(f"AudioHook session opened: {self._session_id}")
 
@@ -452,20 +507,42 @@ class GenesysAudioHookSerializer(FrameSerializer):
         msg = self._create_message(AudioHookMessageType.PONG)
         return msg
 
-    def create_resumed_response(self) -> dict[str, Any]:
-        """Create a 'resumed' response message.
+    def create_pause_request(self) -> dict[str, Any]:
+        """Create a 'pause' message asking Genesys to pause the audio stream.
 
-        This should be sent in response to a 'pause' message when ready to resume.
+        Genesys answers with a 'paused' message, which pauses the session.
 
         Returns:
-            Dictionary of the resumed response message.
+            Dictionary of the pause message.
         """
-        msg = self._create_message(AudioHookMessageType.RESUMED)
+        return self._create_message(AudioHookMessageType.PAUSE)
 
-        self._is_paused = False
-        logger.debug(f"AudioHook session resumed: {self._session_id}")
+    def create_resume_request(self) -> dict[str, Any]:
+        """Create a 'resume' message asking Genesys to resume the audio stream.
 
-        return msg
+        Genesys answers with a 'resumed' message, which resumes the session.
+        Send it to start a session opened with ``start_paused=True``.
+
+        Returns:
+            Dictionary of the resume message.
+        """
+        return self._create_message(AudioHookMessageType.RESUME)
+
+    @deprecated(
+        "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.14.0 and "
+        "will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` "
+        "instead."
+    )
+    def create_resumed_response(self) -> dict[str, Any]:
+        """Create a 'resume' message asking Genesys to resume the audio stream.
+
+        .. deprecated:: 1.14.0
+            Use :meth:`create_resume_request` instead. Will be removed in 2.0.0.
+
+        Returns:
+            Dictionary of the resume message.
+        """
+        return self.create_resume_request()
 
     def create_barge_in_event(self) -> dict[str, Any]:
         """Create a barge-in event message.
@@ -625,7 +702,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         - JSON 'open' -> OutputTransportMessageUrgentFrame with 'opened' response
         - JSON 'close' -> OutputTransportMessageUrgentFrame with 'closed' response
         - JSON 'ping' -> OutputTransportMessageUrgentFrame with 'pong' response
-        - JSON 'pause' -> Sets is_paused=True, returns None
+        - JSON 'paused' -> Sets is_paused=True, returns None
+        - JSON 'resumed' -> Sets is_paused=False, returns None
         - JSON 'dtmf' -> InputDTMFFrame
         - JSON 'update' -> Updates participant info, returns None
         - JSON 'error' -> Logs error, returns None
@@ -729,8 +807,15 @@ class GenesysAudioHookSerializer(FrameSerializer):
         elif msg_type == AudioHookMessageType.PING.value:
             return await self._handle_ping(message)
 
-        elif msg_type == AudioHookMessageType.PAUSE.value:
-            return await self._handle_pause(message)
+        elif msg_type == AudioHookMessageType.PAUSED.value:
+            return await self._handle_paused(message)
+
+        elif msg_type == AudioHookMessageType.RESUMED.value:
+            return await self._handle_resumed(message)
+
+        elif msg_type == AudioHookMessageType.DISCARDED.value:
+            logger.debug(f"AudioHook discarded audio: {message.get('parameters', {})}")
+            return None
 
         elif msg_type == AudioHookMessageType.UPDATE.value:
             return await self._handle_update(message)
@@ -868,28 +953,43 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # Return as urgent frame to be sent through pipeline immediately
         return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
 
-    async def _handle_pause(self, message: dict[str, Any]) -> Frame | None:
-        """Handle a 'pause' message from Genesys.
-
-        This is used when audio streaming is temporarily suspended
-        (e.g., during hold).
+    async def _handle_paused(self, message: dict[str, Any]) -> Frame | None:
+        """Handle a 'paused' message: Genesys has paused the audio stream.
 
         Args:
-            message: The pause message.
+            message: The paused message.
 
         Returns:
-            None (response should be sent via create_resumed_response()).
+            None.
         """
-        params = message.get("parameters", {})
-        reason = params.get("reason", "unknown")
-
-        logger.info(f"AudioHook pause request: reason={reason}")
+        logger.info(f"AudioHook session paused: {self._session_id}")
 
         self._is_paused = True
 
+        await self._call_event_handler("on_paused", message)
         await self._call_event_handler("on_pause", message)
+        return None
 
-        # Note: Application should call create_resumed_response() when ready
+    async def _handle_resumed(self, message: dict[str, Any]) -> Frame | None:
+        """Handle a 'resumed' message: Genesys has resumed the audio stream.
+
+        Args:
+            message: The resumed message. Its parameters give the stream
+                position where audio resumed (``start``) and how much audio
+                Genesys discarded while paused (``discarded``).
+
+        Returns:
+            None.
+        """
+        params = message.get("parameters", {})
+        logger.info(
+            f"AudioHook session resumed: {self._session_id}, "
+            f"start={params.get('start')}, discarded={params.get('discarded')}"
+        )
+
+        self._is_paused = False
+
+        await self._call_event_handler("on_resumed", message)
         return None
 
     async def _handle_update(self, message: dict[str, Any]) -> Frame | None:
