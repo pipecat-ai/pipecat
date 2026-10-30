@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import EndFrame, Frame, InterruptionFrame, OutputAudioRawFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
@@ -392,6 +393,112 @@ class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(written)
         output._write_audio_sleep.assert_not_awaited()
+
+
+class _PassthroughSerializer(FrameSerializer):
+    """Emits a payload for every frame, so every write reaches the socket."""
+
+    def __init__(self, payload: str | bytes = "payload"):
+        super().__init__()
+        self._payload = payload
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit the configured payload."""
+        return self._payload
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+class TestWriteFrameIsBounded(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #5789.
+
+    A peer that stops reading leaves the send waiting on socket buffers that
+    never drain. The message a telephony serializer emits on an interruption is
+    written while the frame is being handled, so a send that never returns
+    parks the task handling it, and the `EndFrame` queued behind it never
+    reaches the end of the pipeline.
+    """
+
+    def _make_output(self, send, serializer=None, timeout=0.1, **params_kwargs):
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        type(mock_ws).application_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.send_text = send
+        mock_ws.send_bytes = send
+
+        params = FastAPIWebsocketParams(
+            audio_out_enabled=True,
+            serializer=serializer or _PassthroughSerializer(),
+            audio_out_write_timeout_secs=timeout,
+            **params_kwargs,
+        )
+        output = FastAPIWebsocketTransport(mock_ws, params).output()
+        return output, mock_ws
+
+    @staticmethod
+    def _wedged_send():
+        never_returns = asyncio.Event()
+
+        async def wedged(*args, **kwargs):
+            await never_returns.wait()
+
+        return AsyncMock(side_effect=wedged)
+
+    async def test_peer_is_written_off_once(self):
+        """Paying the timeout per write would stall the task handling frames."""
+        send = self._wedged_send()
+        output, _ = self._make_output(send)
+
+        for _ in range(3):
+            written = await asyncio.wait_for(output._write_frame(InterruptionFrame()), timeout=5.0)
+            self.assertFalse(written)
+
+        self.assertEqual(send.await_count, 1)
+        self.assertFalse(output.is_usable)
+
+    async def test_end_frame_still_reaches_downstream(self):
+        """`process_frame` pushes the EndFrame only after `stop()` returns."""
+        output, _ = self._make_output(self._wedged_send())
+        output.push_frame = AsyncMock()
+
+        end_frame = EndFrame()
+        await asyncio.wait_for(
+            output.process_frame(end_frame, FrameDirection.DOWNSTREAM), timeout=5.0
+        )
+
+        pushed = [call.args[0] for call in output.push_frame.call_args_list]
+        self.assertIn(end_frame, pushed)
+
+    async def test_packetized_send_gives_up_on_the_first_wedged_packet(self):
+        """Bailing mid-buffer beats paying the timeout for every packet in it."""
+        send = self._wedged_send()
+        output, _ = self._make_output(
+            send,
+            serializer=_PassthroughSerializer(b"\x01" * 250),
+            fixed_audio_packet_size=100,
+        )
+
+        written = await asyncio.wait_for(output._write_frame(InterruptionFrame()), timeout=5.0)
+
+        self.assertFalse(written)
+        self.assertEqual(send.await_count, 1)
+
+    async def test_slow_write_within_the_bound_is_not_cut_short(self):
+        """A slow peer is not a stopped one, so the bound has to be the configured one."""
+
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(0.2)
+
+        send = AsyncMock(side_effect=slow)
+        output, _ = self._make_output(send, timeout=2.0)
+
+        written = await output._write_frame(InterruptionFrame())
+
+        self.assertTrue(written)
+        send.assert_awaited_once()
+        self.assertTrue(output.is_usable)
 
 
 if __name__ == "__main__":
