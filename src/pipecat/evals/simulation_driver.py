@@ -6,6 +6,7 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
+import re
 import time
 from collections.abc import Awaitable, Callable
 
@@ -54,6 +55,18 @@ def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
         return False
     actual = call.args or {}
     return all(actual.get(key) == value for key, value in (spec.args or {}).items())
+
+
+# Chinese and Japanese are written without spaces between words, so each of
+# their characters is counted as a word; CJK punctuation separates words.
+_CJK_CHARS = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+_CJK_CHAR_RE = re.compile(f"[{_CJK_CHARS}]")
+_CJK_SEPARATOR_RE = re.compile(f"[{_CJK_CHARS}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20]")
+
+
+def _count_words(text: str) -> int:
+    """Count the words in a reply, counting each Chinese or Japanese character as one."""
+    return len(_CJK_CHAR_RE.findall(text)) + len(_CJK_SEPARATOR_RE.sub(" ", text).split())
 
 
 class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
@@ -412,7 +425,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         if measure == "words":
             longest = max(
                 (
-                    len(line["content"].split())
+                    _count_words(line["content"])
                     for line in self.conversation()
                     if line["role"] == "assistant"
                 ),

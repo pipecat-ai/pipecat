@@ -590,6 +590,42 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
         )
 
+    async def test_words_counts_each_chinese_or_japanese_character_as_a_word(self):
+        metrics = [EvalSimulationMetric("words", measure="words", max_value=10)]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "柏林是德国的首都。"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Thanks"})
+            await stream.append({"type": "llm_response", "text": "ベルリンです、Berlin です。"})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        words = result.metrics[0]
+        # Eight ideographs, then eight kana plus one space-delimited English word.
+        self.assertEqual((words.value, words.passed), (9.0, True))
+
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def long_reply():
+            await stream.append(
+                {"type": "llm_response", "text": "柏林是德国的首都，也是德国最大的城市。"}
+            )
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(long_reply())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual((result.metrics[0].value, result.metrics[0].passed), (17.0, False))
+
     async def test_function_calls_are_checked_against_the_list_the_bot_should_make(self):
         metrics = [
             EvalSimulationMetric(
