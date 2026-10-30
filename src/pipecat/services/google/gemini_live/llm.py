@@ -84,6 +84,7 @@ from .file_api import GeminiFileAPI
 
 try:
     from google.genai import Client
+    from google.genai.errors import APIError
     from google.genai.live import AsyncSession
     from google.genai.types import (
         ActivityEnd,
@@ -1567,33 +1568,82 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         except Exception as e:
             await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
 
+    @staticmethod
+    def _is_resumption_handle_rejected(error: Exception) -> bool:
+        """Return whether a connect-time exception indicates a rejected resumption handle."""
+        if isinstance(error, APIError) and error.code in (400, 404, 410, 1007, 1008):
+            return True
+        rcvd = getattr(error, "rcvd", None)
+        if getattr(rcvd, "code", None) in (1007, 1008):
+            return True
+        response = getattr(error, "response", None)
+        if getattr(response, "status_code", None) in (400, 404, 410):
+            return True
+        return False
+
     async def _connection_task_handler(self, config: LiveConnectConfig):
+        """Manage the Gemini Live WebSocket session lifecycle, error recovery, and reconnection."""
         model = assert_given(self._settings.model)
         if model is None:
             raise ValueError("Gemini Live model must be specified")
-        async with self._client.aio.live.connect(model=model, config=config) as session:
-            logger.info("Connected to Gemini service")
+        attempted_handle = config.session_resumption.handle if config.session_resumption else None
+        connected_session: AsyncSession | None = None
+        try:
+            async with self._client.aio.live.connect(model=model, config=config) as session:
+                connected_session = session
+                logger.info("Connected to Gemini service")
 
-            # Mark connection start time
-            self._connection_start_time = time.time()
+                # Mark connection start time
+                self._connection_start_time = time.time()
 
-            await self._handle_session_ready(session)
+                await self._handle_session_ready(session)
 
-            while True:
-                try:
+                while True:
                     turn = session.receive()
                     async for message in turn:
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
                         await self._handle_server_message(message)
-                except Exception as e:
-                    if not self._disconnecting:
-                        should_reconnect = await self._handle_connection_error(e)
-                        if should_reconnect:
-                            await self._reconnect()
-                            return  # Exit this connection handler, _reconnect will start a new one
-                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if connected_session is not None and self._session is connected_session:
+                self._session = None
+                self._ready_for_realtime_input = False
+            elif connected_session is None and self._session is None:
+                self._ready_for_realtime_input = False
+
+            if self._disconnecting:
+                return
+
+            if (
+                connected_session is None
+                and attempted_handle
+                and self._session_resumption_handle == attempted_handle
+                and self._is_resumption_handle_rejected(e)
+            ):
+                logger.warning(
+                    f"Session resumption handle rejected during connect ({e}); "
+                    "falling back to a fresh session"
+                )
+                self._session_resumption_handle = None
+
+            should_reconnect = await self._handle_connection_error(e)
+            if should_reconnect:
+                if (
+                    connected_session is None
+                    and attempted_handle
+                    and self._session_resumption_handle == attempted_handle
+                    and self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES - 1
+                ):
+                    logger.warning("Clearing session resumption handle for final reconnect attempt")
+                    self._session_resumption_handle = None
+                await self._reconnect()
+        finally:
+            if connected_session is not None and self._session is connected_session:
+                self._session = None
+                self._ready_for_realtime_input = False
 
     async def _handle_server_message(self, message: LiveServerMessage):
         """Dispatch a single message from the Live API receive stream."""
@@ -1767,7 +1817,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(error_msg=error_msg, exception=error)
+            await self.push_error(
+                error_msg=error_msg,
+                exception=error,
+                force_treat_as_permanent=True,
+            )
             return False
         else:
             logger.info(
@@ -1787,7 +1841,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             self._disconnecting = True
             await self.stop_all_metrics()
             if self._connection_task:
-                await self.cancel_task(self._connection_task, timeout=1.0)
+                if self._connection_task is not asyncio.current_task():
+                    await self.cancel_task(self._connection_task, timeout=1.0)
                 self._connection_task = None
             if self._transcription_timeout_task:
                 await self.cancel_task(self._transcription_timeout_task)
