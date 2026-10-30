@@ -211,8 +211,13 @@ class SarvamLLMService(OpenAILLMService):
         """
         params = super().build_chat_completion_params(params_from_context)
         params.pop("stream_options", None)
-        params.pop("max_completion_tokens", None)
         params.pop("service_tier", None)
+
+        # Sarvam documents only `max_tokens`, so `max_completion_tokens` is sent
+        # under that name. An explicit `max_tokens` wins.
+        max_completion_tokens = params.pop("max_completion_tokens", None)
+        if isinstance(max_completion_tokens, int) and not isinstance(params.get("max_tokens"), int):
+            params["max_tokens"] = max_completion_tokens
 
         model = self._settings.model
 
