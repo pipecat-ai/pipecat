@@ -6337,7 +6337,7 @@ requires-dist = [
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.32" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
-    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=2.0.1" },
+    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=2.1.0" },
     { name = "soundfile", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=1.0.0" },
     { name = "speechmatics-agent-stt", marker = "extra == 'speechmatics'", specifier = "~=0.3.0" },
@@ -8806,7 +8806,7 @@ wheels = [
 
 [[package]]
 name = "simli-ai"
-version = "2.0.3"
+version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiortc" },
@@ -8816,9 +8816,9 @@ dependencies = [
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/7d/00c6d9cdcf8d6c1e7274f5fc9908faf12e8ee7b3ab4961f6af5dbe5c2bd7/simli_ai-2.0.3.tar.gz", hash = "sha256:0d3f8f211ae4392c4208fedc9a51ca1d583adf21d785a973ab4e4db3e211d859", size = 16393, upload-time = "2026-06-16T09:18:21.946Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/40/adc454191805caee6d4c17b5ab8fda1f4523a0552a89dca27197175a9578/simli_ai-2.1.1.tar.gz", hash = "sha256:07d28991431fa518f23ac41bbc85a1d5757921f34fa0c8b4d97effd67714e718", size = 36941, upload-time = "2026-10-27T12:07:31.938Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/63/86106eec68fc99b131333ba07e7fa19400e318598722fa60eb0656208b7d/simli_ai-2.0.3-py3-none-any.whl", hash = "sha256:6901c276c7fabecf51dab3e188ab0167ef119eebb4d4ca992839183d01acf5de", size = 19887, upload-time = "2026-06-16T09:18:20.795Z" },
+    { url = "https://files.pythonhosted.org/packages/92/bb/84de40c75490b1068c525a662bbcae3269cd4d91a3da3fef3116d270415d/simli_ai-2.1.1-py3-none-any.whl", hash = "sha256:6295911d4ccdbebb79429de18943441160a61212758ed2d4d81711543f30f6a6", size = 29601, upload-time = "2026-10-27T12:07:30.529Z" },
 ]
 
 [[package]]
