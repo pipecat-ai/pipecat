@@ -11,6 +11,8 @@ import unittest
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
@@ -55,6 +57,47 @@ def audio(num_bytes: int) -> bytes:
 def preamble_with(**overrides) -> str:
     """The preamble with fields replaced, for the cases jambonz can negotiate."""
     return json.dumps({**json.loads(PREAMBLE), **overrides})
+
+
+class TestJambonzDisconnect(unittest.IsolatedAsyncioTestCase):
+    """Ending the pipeline should end the call.
+
+    `disconnect` ends the `listen` verb, after which jambonz runs the verb's
+    actionHook or hangs up. This is the jambonz equivalent of Twilio's
+    auto_hang_up, and it needs no API credentials.
+    """
+
+    async def _serializer(self, **params):
+        serializer = JambonzFrameSerializer(JambonzFrameSerializer.InputParams(**params))
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+        await serializer.deserialize(PREAMBLE)
+        return serializer
+
+    async def test_the_pipeline_ending_ends_the_call(self):
+        for frame in (EndFrame(), CancelFrame()):
+            with self.subTest(frame=type(frame).__name__):
+                serializer = await self._serializer()
+
+                sent = await serializer.serialize(frame)
+
+                self.assertEqual(json.loads(sent), {"type": "disconnect"})
+
+    async def test_disconnect_is_sent_once(self):
+        """Both frames can arrive on one shutdown, and the second would be
+        written to a socket jambonz has already closed."""
+        serializer = await self._serializer()
+
+        self.assertIsNotNone(await serializer.serialize(EndFrame()))
+        self.assertIsNone(await serializer.serialize(CancelFrame()))
+        self.assertIsNone(await serializer.serialize(EndFrame()))
+
+    async def test_disconnect_can_be_turned_off(self):
+        """For an application that ends the verb itself, or wants the call to
+        outlive the pipeline."""
+        serializer = await self._serializer(disconnect_on_end=False)
+
+        self.assertIsNone(await serializer.serialize(EndFrame()))
+        self.assertIsNone(await serializer.serialize(CancelFrame()))
 
 
 class TestJambonzTextFrames(unittest.IsolatedAsyncioTestCase):

@@ -15,6 +15,8 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -45,6 +47,9 @@ class JambonzFrameSerializer(FrameSerializer):
       audio, so both are read from the connection rather than configured here.
       Only ``mono`` is handled; ``stereo`` and ``mixed`` carry two channels,
       which this serializer would misread as mono at twice the rate.
+    - **The bot can end the call.** Sending ``disconnect`` ends the ``listen``
+      verb, after which jambonz runs the verb's ``actionHook`` if it has one
+      and otherwise hangs up. No API credentials are involved, unlike Twilio.
     - **Interruptions need no gap.** ``killAudio`` flushes playing and
       buffered audio, and jambonz reads the socket on a single loop, so binary
       frames sent after it are queued normally rather than racing it. Pipecat's
@@ -71,6 +76,11 @@ class JambonzFrameSerializer(FrameSerializer):
                 Leave as None so the rate is taken from the connection's
                 preamble, which is what the ``listen`` verb actually negotiated.
             sample_rate: Optional override for the pipeline input sample rate.
+            disconnect_on_end: Whether to send ``disconnect`` when the pipeline
+                ends, which ends the ``listen`` verb so jambonz runs the verb's
+                ``actionHook`` or hangs up. The jambonz equivalent of Twilio's
+                ``auto_hang_up``, and unlike it needs no API credentials.
+                Defaults to True.
             resampler_clear_after_secs: Inherited from FrameSerializer. Defaults
                 to None here, since callers pause mid-sentence and the resampler
                 should not discard its history over an ordinary gap.
@@ -78,6 +88,7 @@ class JambonzFrameSerializer(FrameSerializer):
 
         jambonz_sample_rate: int | None = None
         sample_rate: int | None = None
+        disconnect_on_end: bool = True
         resampler_clear_after_secs: float | None = None
 
     def __init__(self, params: InputParams | None = None, **kwargs):
@@ -104,6 +115,9 @@ class JambonzFrameSerializer(FrameSerializer):
         # after it is an event. Without this, a DTMF digit went through the
         # preamble handler and replaced the call's identifiers with None.
         self._preamble_seen: bool = False
+        # EndFrame and CancelFrame can both arrive on one shutdown, and a
+        # second disconnect would be sent on a socket jambonz has closed.
+        self._disconnect_sent: bool = False
         self._mix_type: str | None = None
         # The preamble arrives once but audio arrives fifty times a second, so
         # an unusable mixType has to be reported once rather than per frame.
@@ -162,6 +176,14 @@ class JambonzFrameSerializer(FrameSerializer):
             Raw PCM bytes for audio, a JSON string for commands, or None when
             there is nothing to send.
         """
+        if (
+            self._params.disconnect_on_end
+            and not self._disconnect_sent
+            and isinstance(frame, (EndFrame, CancelFrame))
+        ):
+            self._disconnect_sent = True
+            return json.dumps({"type": "disconnect"})
+
         if isinstance(frame, InterruptionFrame):
             return json.dumps({"type": "killAudio"})
 
