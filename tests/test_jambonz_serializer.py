@@ -6,7 +6,6 @@
 
 """Tests for JambonzFrameSerializer wire format."""
 
-import asyncio
 import json
 import unittest
 
@@ -49,6 +48,39 @@ PUMP = 20
 
 def audio(num_bytes: int) -> bytes:
     return b"\x01\x02" * (num_bytes // 2)
+
+
+def preamble_with(**overrides) -> str:
+    """The preamble with fields replaced, for the cases jambonz can negotiate."""
+    return json.dumps({**json.loads(PREAMBLE), **overrides})
+
+
+class TestJambonzMixType(unittest.IsolatedAsyncioTestCase):
+    """Only mono is interpretable; the other two layouts carry two channels."""
+
+    async def _serializer(self, mix_type):
+        serializer = JambonzFrameSerializer()
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+        await serializer.deserialize(preamble_with(mixType=mix_type))
+        return serializer
+
+    async def test_a_mono_call_is_interpreted(self):
+        serializer = await self._serializer("mono")
+        self.assertEqual(serializer.mix_type, "mono")
+
+        frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
+        self.assertTrue([f for f in frames if f is not None])
+
+    async def test_a_two_channel_call_is_dropped_rather_than_misread(self):
+        """Interleaved stereo read as mono plays at double speed with the
+        channels alternating, which is worse than no audio at all."""
+        for mix_type in ("stereo", "mixed"):
+            with self.subTest(mix_type=mix_type):
+                serializer = await self._serializer(mix_type)
+                self.assertEqual(serializer.mix_type, mix_type)
+
+                frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
+                self.assertEqual([f for f in frames if f is not None], [])
 
 
 class TestJambonzDeserialize(unittest.IsolatedAsyncioTestCase):
@@ -177,17 +209,12 @@ class TestJambonzSerializeWireFormat(unittest.IsolatedAsyncioTestCase):
     async def test_an_unhandled_frame_produces_nothing(self):
         self.assertIsNone(await self.serializer.serialize(TTSStartedFrame()))
 
-    async def test_audio_is_withheld_briefly_after_kill_audio(self):
-        """Message ordering on the socket is not guaranteed, so audio written
-        immediately after killAudio can arrive after the flush and play over
-        the user. Every frame in the window has to be withheld, not just the
-        first, because the pipeline keeps producing the interrupted turn."""
+    async def test_audio_keeps_flowing_after_kill_audio(self):
+        """jambonz reads the socket on one loop, so frames sent after killAudio
+        are queued rather than racing the flush, and Pipecat's transport drops
+        its own queued output on an interruption. Withholding audio here would
+        add latency to every barge-in recovery for no reason."""
         await self.serializer.serialize(InterruptionFrame())
-
-        inside = [await self.serializer.serialize(self.bot_audio()) for _ in range(5)]
-        self.assertTrue(all(s is None for s in inside))
-
-        await asyncio.sleep(0.12)
 
         after = [await self.serializer.serialize(self.bot_audio()) for _ in range(PUMP)]
         self.assertTrue([s for s in after if s is not None])
