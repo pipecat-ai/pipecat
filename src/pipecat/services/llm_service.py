@@ -1848,7 +1848,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             item = self._functions.get(None)
         return item is not None and not item.cancel_on_interruption
 
-    async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
+    async def run_function_calls(
+        self,
+        function_calls: Sequence[FunctionCallFromLLM],
+        *,
+        group_id: str | None = None,
+    ):
         """Execute a sequence of function calls from the LLM.
 
         Triggers the on_function_calls_started event and executes functions
@@ -1856,6 +1861,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         Args:
             function_calls: The function calls to execute.
+            group_id: The group these calls join, for a service that receives
+                one LLM response's calls one at a time (a realtime service runs
+                each as its arguments complete): calls run under the same id
+                are one group, and the LLM is triggered once, after the last of
+                them completes. Defaults to a new group of these calls alone.
+                Ignored when ``group_parallel_tools`` is False.
         """
         if len(function_calls) == 0:
             return
@@ -1885,7 +1896,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # When group_parallel_tools is True all calls share a group_id so the
         # aggregator triggers the LLM exactly once after the last one completes.
         # When False, group_id is None and each result triggers inference independently.
-        group_id = str(uuid.uuid4()) if self._group_parallel_tools else None
+        if not self._group_parallel_tools:
+            group_id = None
+        elif group_id is None:
+            group_id = str(uuid.uuid4())
 
         runner_items = []
         for function_call in function_calls:
