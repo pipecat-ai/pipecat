@@ -118,22 +118,37 @@ def alnum_only(text: str) -> str:
     Returns:
         Lowercase alphanumeric-only string with tags stripped.
     """
-    text = strip_complete_markup(text)
-    result = []
-    for char in text:
-        # Ignore punctuation, spaces, emojis, etc.
-        # Keep only letters and numbers.
-        if not char.isalnum():
-            continue
-        if char.isalpha():
-            # Letters, including CJK and Hangul (both alphabetic per
-            # str.isalpha()): fold accents, a no-op for scripts that have none.
-            result.append(_fold_accented_char(char))
-        else:
-            # Digits and other alnum-but-not-alphabetic characters: no case or
-            # accent to fold, so keep as-is (lowercase conversion is a no-op).
-            result.append(char.lower())
-    return "".join(result)
+    if type(text) is not str or "<" in text:
+        text = strip_complete_markup(text)
+    if text.isascii():
+        if text.isalnum():
+            return text.lower()
+        # Fold ASCII case and remove punctuation in one translation pass.
+        # Zero entries cover only characters removed by the deletion argument.
+        return (
+            text.encode("ascii")
+            .translate(
+                b"\x00" * 48
+                + b"0123456789"
+                + b"\x00" * 7
+                + b"abcdefghijklmnopqrstuvwxyz"
+                + b"\x00" * 6
+                + b"abcdefghijklmnopqrstuvwxyz"
+                + b"\x00" * 133,
+                b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
+                b"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+                b" !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\x7f",
+            )
+            .decode("ascii")
+        )
+    fold = _fold_accented_char
+    return "".join(
+        [
+            char.lower() if char.isascii() or not char.isalpha() else fold(char)
+            for char in text
+            if char.isalnum()
+        ]
+    )
 
 
 def has_alnum(text: str) -> bool:
