@@ -3517,6 +3517,36 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
 
         self.assertIsInstance(params["tools"], OpenAINotGiven)
 
+    async def test_tool_choice_converted_to_responses_shape(self):
+        """A tool choice is converted to the Responses API shape."""
+        cases = [
+            ("required", "required"),
+            (
+                {"type": "function", "function": {"name": "get_weather"}},
+                {"type": "function", "name": "get_weather"},
+            ),
+            (
+                {
+                    "type": "allowed_tools",
+                    "allowed_tools": {
+                        "mode": "required",
+                        "tools": [{"type": "function", "function": {"name": "get_weather"}}],
+                    },
+                },
+                {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [{"type": "function", "name": "get_weather"}],
+                },
+            ),
+        ]
+        for tool_choice, expected in cases:
+            with self.subTest(tool_choice=tool_choice):
+                context = LLMContext(tool_choice=tool_choice)
+                params = await self.adapter.get_llm_invocation_params(context)
+
+                self.assertEqual(params["tool_choice"], expected)
+
     async def test_empty_messages(self):
         """Empty messages list produces empty input list."""
         context = LLMContext(messages=[])
