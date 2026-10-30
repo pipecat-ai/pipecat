@@ -35,13 +35,13 @@ class FrameSerializer(BaseObject):
             ignore_rtvi_messages: Whether to ignore RTVI protocol messages during serialization.
                 Defaults to True to prevent RTVI messages from being sent to external transports.
             resampler_clear_after_secs: Seconds of inactivity after which the stream resampler
-                clears its internal history to avoid audio artefacts from stale state. Set to
-                ``None`` to never clear — recommended for telephony providers (e.g. Genesys) that
-                have irregular gaps between audio chunks. Defaults to ``0.2``.
+                clears its internal history to avoid audio artefacts from stale state. Defaults to
+                ``None`` to never clear automatically on delivery gaps (interruption boundaries
+                explicitly reset the output resampler).
         """
 
         ignore_rtvi_messages: bool = True
-        resampler_clear_after_secs: float | None = 0.2
+        resampler_clear_after_secs: float | None = None
 
     def __init__(self, params: InputParams | None = None, **kwargs):
         """Initialize the FrameSerializer.
