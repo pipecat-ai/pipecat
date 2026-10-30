@@ -6,6 +6,7 @@
 
 """Deepgram Flux speech-to-text service implementation (WebSocket transport)."""
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -353,6 +354,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         Called on its own by the receive loop when it reconnects, so it leaves
         the receive loop and watchdog running.
         """
+        websocket = self._websocket
         try:
             self._connection_established_event.clear()
             # Discard any in-flight/pending Configure — the connection is going
@@ -361,10 +363,17 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             self._reset_configure_state()
             await self.stop_all_metrics()
 
-            if self._websocket:
+            if websocket:
                 await self._send_close_stream()
                 logger.debug(f"{self}: Disconnecting from Deepgram Flux Websocket")
-                await self._websocket.close()
+                await websocket.close()
+        except asyncio.CancelledError:
+            # An open socket keeps answering the server's keepalive pings and holds
+            # a Deepgram streaming-concurrency slot, so it is closed even when the
+            # disconnect is cancelled mid-way (for example by pipeline teardown).
+            if websocket:
+                await asyncio.shield(websocket.close())
+            raise
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
