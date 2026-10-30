@@ -579,6 +579,22 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         """
         return not self._expects_interaction_status
 
+    # First google-genai release documented to add AsyncSession.send_context_update.
+    _CONTEXT_UPDATE_MIN_SDK = "2.33.0"
+
+    @property
+    def _supports_context_update(self) -> bool:
+        """Whether system instruction and tools can change mid-session.
+
+        Gemini 3.8 Live accepts a ``context_update`` client message that
+        replaces the system instruction and/or the tool list without
+        reconnecting. The installed SDK must also be able to send it.
+        """
+        version = self._gemini_version
+        if version is None or version < (3, 8):
+            return False
+        return hasattr(AsyncSession, "send_context_update")
+
     def _tag_tool_behaviors(self, tools: list) -> None:
         """Set each function declaration's ``behavior`` for the current model.
 
@@ -767,6 +783,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         self._last_sent_time = 0
 
+        # On models that take mid-session context updates, a runtime
+        # `system_instruction` settings update replaces this too.
         self._system_instruction_from_init = self._settings.system_instruction
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
@@ -834,6 +852,18 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # Session resumption
         self._session_resumption_handle: str | None = None
 
+        # System instruction and tools the server holds for the live session.
+        # `_setup_*` is what the session was first set up with; a resumed
+        # session is treated as holding that setup, since a resumption handle
+        # isn't documented to carry later context updates. `_applied_*` is what
+        # the server holds right now, after any context updates.
+        self._setup_system_instruction: str | None = None
+        self._setup_tools: list | None = None
+        self._applied_system_instruction: str | None = None
+        self._applied_tools: list | None = None
+        self._warned_context_update_unsupported = False
+        self._context_update_lock = asyncio.Lock()
+
         # Bookkeeping for ending gracefully (i.e. after the bot is finished)
         self._end_frame_pending_bot_turn_finished: EndFrame | None = None
         self._end_frame_deferral_timeout_task: asyncio.Task | None = None
@@ -886,7 +916,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Settings are stored but not applied to the active connection.
+        On models that support mid-session context updates (Gemini 3.8 Live),
+        a ``system_instruction`` change is sent to the active session and kept
+        for later connections. Other settings are stored but not applied to the
+        active connection.
         """
         if isinstance(delta, self.Settings) and isinstance(delta.language, Language):
             delta.language = language_to_gemini_language(delta.language)
@@ -901,7 +934,15 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        unhandled = set(changed)
+        if "system_instruction" in unhandled and self._supports_context_update:
+            unhandled.discard("system_instruction")
+            # The user's prompt, not the composed instruction with the base
+            # service's addons, matching what the service was created with.
+            self._system_instruction_from_init = self._base_system_instruction
+            await self._apply_context_changes()
+
+        self._warn_unhandled_updated_settings(unhandled)
 
         return changed
 
@@ -1123,10 +1164,114 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             await self._handle_messages_append(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolsFrame):
-            # TODO: implement runtime tool updates for Gemini Live.
-            pass
+            # The context aggregator has already stored the new tools in the
+            # context. Models that take mid-session context updates get them
+            # now, with the registered tool handlers synced to match. Other
+            # models leave the handlers to the next LLMContextFrame, where the
+            # base service syncs them.
+            if self._supports_context_update:
+                self._sync_registered_tool_handlers(frame.tools)
+            await self._apply_context_changes(warn_if_unsupported=True)
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+    async def _effective_system_instruction_and_tools(self) -> tuple[str | None, list | None]:
+        """The system instruction and tools the session should currently have.
+
+        Tools from the context take precedence over the ones provided at
+        initialization time; the service's system instruction takes precedence
+        over a system message in the context. Tools come back tagged with their
+        behaviors for the current model.
+        """
+        adapter = self.get_llm_adapter()
+        if self._context:
+            params = await adapter.get_llm_invocation_params(
+                self._context,
+                system_instruction=assert_given(self._system_instruction_from_init),
+                service_tools=self._tools_from_init,
+            )
+            system_instruction = params["system_instruction"]
+            # The adapter settles the tools: the context's own when it has
+            # any, else the init-provided ones; built-in tools ride along
+            # either way.
+            tools = params["tools"]
+        else:
+            system_instruction = assert_given(self._system_instruction_from_init)
+            # No context yet: the init-provided tools; built-in tools ride along.
+            tools = adapter.from_standard_tools(self._tools_from_init)
+        if tools and self._supports_non_blocking_tools:
+            self._tag_tool_behaviors(tools)
+        return system_instruction or None, tools or None
+
+    def _session_tools(self) -> list | None:
+        """The tools the session should currently have, without converting messages.
+
+        The context's tools when it has any, else the ones provided at
+        initialization time, tagged with their behaviors for the current model.
+        """
+        context_tools = self._context.tools if self._context else None
+        tools = self.get_llm_adapter().session_tools(context_tools, self._tools_from_init)
+        if tools and self._supports_non_blocking_tools:
+            self._tag_tool_behaviors(tools)
+        return tools or None
+
+    async def _apply_context_changes(self, warn_if_unsupported: bool = False):
+        """Send changed system instruction and tools to the live session.
+
+        Compares what the session should have against what the server holds
+        and sends a ``context_update`` with only the fields that differ. Does
+        nothing without an open session: the next connection picks up the
+        current values (see :meth:`_handle_session_ready`).
+
+        Args:
+            warn_if_unsupported: Log a warning (once) when something changed
+                but the model or SDK can't take a mid-session update.
+        """
+        # Serialized: the session-ready handler and frame processing both call
+        # this, and each must diff against what the other has sent.
+        async with self._context_update_lock:
+            if self._disconnecting or not self._session:
+                return
+            # A system message in the context can't change the instruction
+            # mid-session: only the service's own instruction is sent.
+            system_instruction = assert_given(self._system_instruction_from_init)
+            tools = self._session_tools()
+            session = self._session
+            update: dict[str, Any] = {}
+            # The API documents no way to clear the instruction, so an empty one
+            # isn't sent; the server keeps the last instruction it got.
+            if system_instruction and system_instruction != self._applied_system_instruction:
+                update["system_instruction"] = system_instruction
+            if tools != self._applied_tools:
+                # An empty list removes every tool; None would leave them as is.
+                update["tools"] = tools or []
+            if not update:
+                return
+            if not self._supports_context_update:
+                if warn_if_unsupported and not self._warned_context_update_unsupported:
+                    self._warned_context_update_unsupported = True
+                    logger.warning(
+                        f"{self}: {self._settings.model} can't change "
+                        f"[{', '.join(sorted(update))}] mid-session; the change takes effect "
+                        f"on a new session. Mid-session updates need gemini-3.8-live or later "
+                        f"and google-genai>={self._CONTEXT_UPDATE_MIN_SDK}."
+                    )
+                return
+            logger.debug(f"{self}: sending context update for [{', '.join(sorted(update))}]")
+            try:
+                await session.send_context_update(**update)
+            except Exception as e:
+                if self._session is session:
+                    await self._handle_send_error(e)
+                return
+            # A session replaced mid-send starts from its own setup instead.
+            if self._session is not session:
+                return
+            if "system_instruction" in update:
+                self._applied_system_instruction = system_instruction
+            if "tools" in update:
+                self._applied_tools = tools
 
     @override
     def _service_tools(self) -> "ToolsSchema | list[Any] | None":
@@ -1188,8 +1333,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # We got our initial context
             self._context = context
 
-            # Reconnect if context changes the effective system instruction
-            # or tools compared to the initial connection (which used the
+            # Models that take context updates get the context's tools in
+            # place. Otherwise, or when the context supplies the system
+            # instruction, reconnect if the effective system instruction or
+            # tools differ from the initial connection (which used the
             # init-provided values). Note that the determination of "effective"
             # system instruction is delegated to the adapter, which still
             # chooses the init-provided value if there is one.
@@ -1206,7 +1353,15 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 logger.warning(
                     "Tools provided both at init time and in context; using context-provided value."
                 )
-            if system_instruction_changed or context_has_tools:
+            if self._supports_context_update and not system_instruction_changed:
+                # Update the open session in place instead of reconnecting.
+                # If the session isn't open yet, _handle_session_ready
+                # applies the context's values once it is. An instruction
+                # taken from a context system message is set up by a
+                # reconnect instead, since mid-session updates only carry the
+                # service's own instruction.
+                await self._apply_context_changes()
+            elif system_instruction_changed or context_has_tools:
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
@@ -1239,6 +1394,13 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         else:
             # We got an updated context.
             self._context = context
+            # The context may carry a new tool set (e.g. a Pipecat Flows node
+            # transition). Models that take mid-session context updates get it
+            # first, so the turn completed and the tool results sent below are
+            # answered with the new tools. The server processes updates in
+            # order with the rest of the input.
+            if self._supports_context_update:
+                await self._apply_context_changes()
             # A context frame from upstream is the aggregator asking for
             # inference — with the bot speech and user speech it accounts for —
             # so it is what has the model answer content appended since it
@@ -1536,30 +1698,18 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # Add system instruction and tools to configuration, if provided.
             # These settings from the context take precedence over the ones
             # provided at initialization time.
-            adapter = self.get_llm_adapter()
-            if self._context:
-                params = await adapter.get_llm_invocation_params(
-                    self._context,
-                    system_instruction=assert_given(self._system_instruction_from_init),
-                    service_tools=self._tools_from_init,
-                )
-                system_instruction = params["system_instruction"]
-                # The adapter settles the tools: the context's own when it has
-                # any, else the init-provided ones; built-in tools ride along
-                # either way.
-                tools = params["tools"]
-            else:
-                system_instruction = self._system_instruction_from_init
-                # No context yet: the init-provided tools; built-in tools ride along.
-                tools = adapter.from_standard_tools(self._tools_from_init)
+            system_instruction, tools = await self._effective_system_instruction_and_tools()
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
             if tools:
-                if self._supports_non_blocking_tools:
-                    self._tag_tool_behaviors(tools)
                 logger.debug(f"Setting tools: {tools}")
                 config.tools = tools
+            if not session_resumption_handle:
+                # A new session starts from this setup. A resumed one is
+                # treated as keeping the setup it was first created with.
+                self._setup_system_instruction = system_instruction
+                self._setup_tools = tools
 
             # Start the connection
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
@@ -2149,6 +2299,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     async def _handle_session_ready(self, session: AsyncSession):
         """Handle the session being ready."""
         self._session = session
+        # Treat the server as holding the setup the session was created with:
+        # this connection's for a new session, the original one for a resumed
+        # session (a resumption handle isn't documented to carry later context
+        # updates). Fields that differ are re-sent as soon as the session is
+        # ready, before realtime input resumes.
+        async with self._context_update_lock:
+            self._applied_system_instruction = self._setup_system_instruction
+            self._applied_tools = self._setup_tools
+        if self._supports_context_update:
+            await self._apply_context_changes()
         if self._run_llm_when_session_ready:
             # Initial connection: context arrived before session was ready.
             self._run_llm_when_session_ready = False
