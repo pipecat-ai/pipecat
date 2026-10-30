@@ -284,6 +284,7 @@ class SyncParallelPipeline(BasePipeline):
             return
 
         use_pipeline_order = self._frame_order == FrameOrder.PIPELINE
+        end_frame = frame if isinstance(frame, EndFrame) else None
 
         # The last processor of each pipeline needs to be synchronous otherwise
         # this element won't work. Since we know it should be synchronous we
@@ -305,6 +306,7 @@ class SyncParallelPipeline(BasePipeline):
             await processor.process_frame(frame, direction)
 
             if isinstance(frame, EndFrame):
+                # The EndFrame is pushed once, after every pipeline's output.
                 new_frame = await queue.get()
                 while not isinstance(new_frame, EndFrame):
                     if use_pipeline_order:
@@ -336,9 +338,6 @@ class SyncParallelPipeline(BasePipeline):
             frames_per_pipeline = await asyncio.gather(
                 *[wait_for_sync(s, self._down_queue, frame, direction) for s in self._sources]
             )
-
-        # The drain loops below reuse `frame`.
-        end_frame = frame if isinstance(frame, EndFrame) else None
 
         if use_pipeline_order:
             # Push frames in pipeline definition order, deduplicating by id.

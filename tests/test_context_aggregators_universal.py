@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import contextlib
 import io
 import json
 import unittest
@@ -16,6 +18,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -81,6 +84,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.empty_user_turn import DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
     FunctionCallUserMuteStrategy,
@@ -120,6 +124,21 @@ class CompletionStopStrategy(BaseUserTurnStopStrategy):
     async def process_frame(self, frame: Frame):
         if isinstance(frame, UserTurnInferenceCompletedFrame):
             await self.report_user_turn_stopped()
+
+
+class EndAfterTurnStop(FrameProcessor):
+    """Holds ``EndFrame`` until the turn stops, so ending the session can't stop it first."""
+
+    def __init__(self, turn_stopped: asyncio.Event):
+        super().__init__()
+        self._turn_stopped = turn_stopped
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, EndFrame):
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._turn_stopped.wait(), timeout=5.0)
+        await self.push_frame(frame, direction)
 
 
 class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
@@ -448,11 +467,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             [TurnAnalyzerUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy],
         )
 
-    async def _resume_after_the_answer_started(self, start: UserTurnStrategies) -> list[Frame]:
-        """Run a turn whose inference starts, then have the user speak again."""
+    async def _resume_after_the_answer_started(
+        self, start: UserTurnStrategies, *after: Frame, **params
+    ) -> list[Frame]:
+        """Run a turn whose inference starts, then have the user speak again, then send `after`."""
         user_aggregator = LLMUserAggregator(
             LLMContext(),
-            params=LLMUserAggregatorParams(user_turn_strategies=start),
+            params=LLMUserAggregatorParams(user_turn_strategies=start, **params),
         )
         down, _ = await run_test(
             user_aggregator,
@@ -464,6 +485,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
                 VADUserStartedSpeakingFrame(),
                 SleepFrame(),
+                *after,
             ],
         )
         return down
@@ -490,6 +512,61 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         answer = next(i for i, f in enumerate(down) if isinstance(f, LLMContextFrame))
         self.assertFalse(any(isinstance(f, InterruptionFrame) for f in down))
         self.assertTrue(any(isinstance(f, UserTurnResponseCancelFrame) for f in down[answer:]))
+
+    async def test_speech_without_words_recovers_the_voided_answer(self):
+        """The voided answer is recovered like an empty user turn that interrupted the bot."""
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            ),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        )
+
+        answers = [f for f in down if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(answers), 2)
+        self.assertEqual(
+            answers[-1].context.messages[-1],
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+        )
+
+    async def test_speech_without_words_leaves_the_voided_answer_without_recovery(self):
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            ),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            empty_user_turn=None,
+        )
+
+        self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)
+
+    async def test_session_end_does_not_recover_the_voided_answer(self):
+        """The session ending in the turn that voided the answer doesn't recover it."""
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)]
+            )
+        )
+
+        context = next(f.context for f in down if isinstance(f, LLMContextFrame))
+        self.assertNotIn(
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+            context.messages,
+        )
+
+    async def test_speech_without_words_does_not_run_an_answer_it_did_not_interrupt(self):
+        down = await self._resume_after_the_answer_started(
+            FilterIncompleteUserTurnStrategies(
+                start=[VADUserTurnStartStrategy(enable_interruptions=False)],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            ),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        )
+
+        self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)
 
     async def test_speaking_again_before_the_answer_started_interrupts_nothing(self):
         user_aggregator = LLMUserAggregator(
@@ -829,6 +906,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         should_stop = None
         stop_message = None
         timeout = None
+        turn_stopped = asyncio.Event()
 
         @user_aggregator.event_handler("on_user_turn_started")
         async def on_user_turn_started(aggregator, strategy):
@@ -840,21 +918,20 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             nonlocal should_stop, stop_message
             should_stop = True
             stop_message = message
+            turn_stopped.set()
 
         @user_aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
             nonlocal timeout
             timeout = True
 
-        pipeline = Pipeline([user_aggregator])
+        pipeline = Pipeline([EndAfterTurnStop(turn_stopped), user_aggregator])
 
-        # Transcript arrives before VAD stop, then we wait for user_speech_timeout
+        # Transcript arrives before VAD stop, then user_speech_timeout ends the turn.
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             VADUserStoppedSpeakingFrame(),
-            # Wait for user_speech_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
             pipeline,
@@ -3284,19 +3361,20 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         user, assistant = pair
 
         stop_messages: list[UserTurnStoppedMessage] = []
+        turn_stopped = asyncio.Event()
 
         @user.event_handler("on_user_turn_stopped")
         async def _on_stop(_a, _s, msg):
             stop_messages.append(msg)
+            turn_stopped.set()
 
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="hey", user_id="", timestamp="now"),
             VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
-            Pipeline([user, assistant]),
+            Pipeline([EndAfterTurnStop(turn_stopped), user, assistant]),
             frames_to_send=frames_to_send,
         )
         self.assertEqual(len(stop_messages), 1)
