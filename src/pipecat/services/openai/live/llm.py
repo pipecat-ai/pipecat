@@ -1417,7 +1417,10 @@ def _responses_delegation_config(delegation: ResponsesDelegation) -> dict[str, A
     return config
 
 
-_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
+# Chinese and Japanese end sentences with full-width marks and write no space
+# after them, so those are boundaries on their own.
+_CJK_SENTENCE_ENDINGS = "。！？"
+_SENTENCE_BOUNDARY = re.compile(rf"(?<=[.!?])\s+|(?<=[{_CJK_SENTENCE_ENDINGS}])\s*|\n+")
 
 
 def _estimated_tokens(text: str) -> int:
@@ -1483,8 +1486,11 @@ def _chunk_text(text: str, token_limit: int) -> list[str]:
             chunks.append(head)
         if not piece:
             continue
-        if current and _estimated_tokens(f"{current} {piece}") > token_limit:
+        # Rejoin with the space a Latin sentence break consumed; CJK sentences
+        # were never separated by one.
+        separator = "" if current.endswith(tuple(_CJK_SENTENCE_ENDINGS)) else " "
+        if current and _estimated_tokens(f"{current}{separator}{piece}") > token_limit:
             flush()
-        current = f"{current} {piece}".strip()
+        current = f"{current}{separator}{piece}".strip()
     flush()
     return chunks
