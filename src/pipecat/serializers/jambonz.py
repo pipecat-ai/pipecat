@@ -56,6 +56,37 @@ class JambonzFrameSerializer(FrameSerializer):
       transport sends sequentially and drops its own queued output on an
       interruption, so sending ``killAudio`` is sufficient on its own.
 
+    The verb needs three things set explicitly::
+
+        {
+            "verb": "listen",
+            "url": "wss://your-bot.example.com/ws",
+            "sampleRate": 16000,
+            "mixType": "mono",
+            "bidirectionalAudio": {
+                "enabled": true,
+                "streaming": true,
+                "sampleRate": 16000
+            }
+        }
+
+    - ``streaming`` defaults to **false**, and binary audio sent back is
+      ignored entirely while it is. Nothing reports this; the caller simply
+      hears nothing.
+    - ``sampleRate`` defaults to **8000**. The other allowed values are 16000,
+      24000, 48000 and 64000.
+    - ``bidirectionalAudio.sampleRate`` has no default. Omitted, the audio you
+      send is read at the call's negotiated codec rate -- 8 kHz for PCMU and
+      PCMA, higher for a wideband codec -- so it depends on the carrier and
+      should always be stated.
+
+      jambonz itself does not require the two rates to be equal; it resamples
+      whatever arrives at ``bidirectionalAudio.sampleRate``. The constraint is
+      this serializer's: it sends at the ``sampleRate`` it read from the
+      preamble, and nothing tells it the return rate. **So with this
+      serializer, set ``bidirectionalAudio.sampleRate`` to the same value as
+      ``sampleRate``.** Mismatched, playback runs fast or slow.
+
     Example::
 
         serializer = JambonzFrameSerializer()
