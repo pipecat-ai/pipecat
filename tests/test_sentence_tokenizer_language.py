@@ -144,6 +144,20 @@ async def test_parallel_channels_use_the_same_language_for_slicing():
 
 
 @pytest.mark.asyncio
+async def test_parallel_channels_keep_closers_with_their_sentence():
+    aggregator = _ParallelSentenceAggregator(language="zh")
+    result = []
+    for token in ["（「你好。」）下", "一句。", "（「再见。」）", "然后", "走了。", "好"]:
+        result.extend([a async for a in aggregator.aggregate(token, token, token)])
+    assert [a.tts_text for a in result] == [
+        "（「你好。」）",
+        "下一句。",
+        "（「再见。」）",
+        "然后走了。",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_targeted_update_does_not_change_other_service():
     tts = RecordingTTS()
     other = RecordingTTS(language=Language.EN)
