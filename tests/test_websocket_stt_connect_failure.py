@@ -18,6 +18,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import ErrorFrame, Frame, InputAudioRawFrame
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.tests.utils import SleepFrame, run_test
@@ -101,7 +102,7 @@ class ConnectFailingSTTService(WebsocketSTTService):
             pass
 
 
-async def _run(service: ConnectFailingSTTService, seconds: float = 0.5):
+async def _run(service: WebsocketSTTService, seconds: float = 0.5):
     frames: list[Frame] = []
     for _ in range(int(seconds * 50)):
         frames += [
@@ -171,6 +172,22 @@ async def test_teardown_stops_a_reconnect_waiting_on_backoff():
 
     assert time.monotonic() - start < 5
     assert service.connect_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_teardown_stops_a_reconnect_waiting_on_backoff():
+    service = AssemblyAISTTService(api_key="test-key")
+    service._reconnect_backoff_min_wait = 30
+    service._reconnect_backoff_max_wait = 30
+
+    async def fail_connect(uri, **kwargs):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    with patch("pipecat.services.websocket_service.websocket_connect", fail_connect):
+        await _run(service, 0.2)
+
+    assert not service.task_manager.current_tasks()
+    assert service._receive_task is None
 
 
 SERVICES = [

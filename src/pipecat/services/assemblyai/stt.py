@@ -996,6 +996,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         await super()._disconnect()
 
         if not self._connected or not self._websocket:
+            if self._receive_task:
+                await self.cancel_task(self._receive_task)
+                self._receive_task = None
             return
 
         try:
