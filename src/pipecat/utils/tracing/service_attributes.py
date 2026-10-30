@@ -43,14 +43,24 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
     SPECIAL_CASE_MAPPINGS = {
         # AWS
         "AWSBedrockLLMService": "aws.bedrock",
+        "AWSNovaSonicLLMService": "aws.bedrock",
         # Azure
         "AzureLLMService": "azure.ai.openai",
+        "AzureRealtimeLLMService": "azure.ai.openai",
+        "AzureVoiceLiveLLMService": "azure.ai.openai",
         # Google
         "GoogleLLMService": "gcp.gemini",
         "GoogleVertexLLMService": "gcp.vertex_ai",
+        "GeminiLiveLLMService": "gcp.gemini",
+        "GeminiLiveVertexLLMService": "gcp.vertex_ai",
+        # OpenAI
+        "OpenAIRealtimeLLMService": "openai",
         # Others
         "GrokLLMService": "x_ai",
+        "GrokRealtimeLLMService": "x_ai",
+        "InworldRealtimeLLMService": "inworld",
         "MistralLLMService": "mistral_ai",
+        "UltravoxRealtimeLLMService": "ultravox",
     }
 
     if service_name in SPECIAL_CASE_MAPPINGS:
@@ -313,7 +323,7 @@ def add_gemini_live_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.provider.name", "gcp.gemini")
+    span.set_attribute("gen_ai.provider.name", _get_provider_name_from_service_name(service_name))
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
@@ -389,8 +399,6 @@ def add_openai_realtime_span_attributes(
     session_properties: dict[str, Any] | None = None,
     transcript: str | None = None,
     is_input: bool | None = None,
-    context_messages: str | None = None,
-    function_calls: list[dict] | None = None,
     tools: list[dict] | None = None,
     tools_serialized: str | None = None,
     audio_data_size: int | None = None,
@@ -406,15 +414,13 @@ def add_openai_realtime_span_attributes(
         session_properties: Session configuration properties.
         transcript: Transcription text.
         is_input: Whether transcript is input (True) or output (False).
-        context_messages: JSON-serialized context messages.
-        function_calls: Function calls being made.
         tools: Available tools/functions list.
         tools_serialized: JSON-serialized tools for detailed inspection.
         audio_data_size: Size of audio data in bytes.
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.provider.name", "openai")
+    span.set_attribute("gen_ai.provider.name", _get_provider_name_from_service_name(service_name))
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
@@ -424,9 +430,6 @@ def add_openai_realtime_span_attributes(
         span.set_attribute("transcript", transcript)
         if is_input is not None:
             span.set_attribute("transcript.is_input", is_input)
-
-    if context_messages:
-        span.set_attribute("input", context_messages)
 
     if audio_data_size is not None:
         span.set_attribute("audio.data_size_bytes", audio_data_size)
@@ -450,18 +453,6 @@ def add_openai_realtime_span_attributes(
 
     if tools_serialized:
         span.set_attribute("tools.definitions", tools_serialized)
-
-    if function_calls:
-        span.set_attribute("function_calls.count", len(function_calls))
-        if function_calls:
-            call = function_calls[0]
-            if hasattr(call, "name"):
-                span.set_attribute(
-                    "function_calls.first_name",
-                    getattr(call, "name"),  # noqa: B009
-                )
-            elif isinstance(call, dict) and "name" in call:
-                span.set_attribute("function_calls.first_name", call["name"])
 
     # Add session properties if provided
     if session_properties:

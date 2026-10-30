@@ -62,6 +62,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWit
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -186,6 +187,7 @@ _NON_FATAL_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     """Inworld Realtime LLM service for real-time audio and text communication.
 

@@ -58,6 +58,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Result shipped as the client_tool_result when we see an async-tool
@@ -172,6 +173,7 @@ class JoinUrlInputParams(BaseModel):
     join_url: str
 
 
+@traced_realtime_llm
 class UltravoxRealtimeLLMService(LLMService):
     """Provides access to the Ultravox Realtime API.
 

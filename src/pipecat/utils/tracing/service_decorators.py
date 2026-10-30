@@ -11,12 +11,14 @@ rich information about service execution including configuration,
 parameters, and performance metrics.
 """
 
+import asyncio
 import functools
 import inspect
 import json
 import logging
+import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 # Type imports for type checking only
 if TYPE_CHECKING:
@@ -24,16 +26,31 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData
+from pipecat.metrics.metrics import LLMTokenUsage, TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.tracing.service_attributes import (
+    _get_provider_name_from_service_name,
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
     add_openai_realtime_span_attributes,
@@ -48,6 +65,7 @@ if is_tracing_available():
 
 T = TypeVar("T")
 R = TypeVar("R")
+P = TypeVar("P", bound=type[FrameProcessor])
 
 
 def _get_model_name(service) -> str:
@@ -1099,39 +1117,15 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
     return decorator
 
 
-def _gemini_audio_modality_tokens(details) -> int | None:
-    """Get the AUDIO token count from a Gemini modality breakdown, if reported.
-
-    Duck-typed (``entry.modality`` / ``entry.token_count``) so this module
-    doesn't depend on Google types. Gemini omits modalities with no tokens
-    (and omits the list entirely when there is no breakdown), so absence
-    means "not reported" rather than zero.
-
-    Args:
-        details: A modality breakdown from usage metadata, e.g.
-            ``prompt_tokens_details``.
-
-    Returns:
-        The AUDIO token count, or ``None`` if not reported.
-    """
-    for entry in details or []:
-        if getattr(getattr(entry, "modality", None), "value", None) == "AUDIO":
-            return entry.token_count
-    return None
-
-
 def traced_gemini_live(operation: str) -> Callable:
     """Trace Gemini Live service methods with operation-specific attributes.
 
-    This decorator automatically captures relevant information based on the operation type:
-
-    - llm_setup: Configuration, tools definitions, and system instructions
-    - llm_tool_call: Function call information
-    - llm_tool_result: Function execution results
-    - llm_response: Complete LLM response with usage and output
+    The only operation left is ``llm_setup``: configuration, tool definitions
+    and the system instruction, recorded when the session is set up. Replies
+    and tool calls are traced by :func:`traced_realtime_llm`.
 
     Args:
-        operation: The operation name (matches the event type being handled).
+        operation: The operation name. Only ``"llm_setup"`` is meaningful.
 
     Returns:
         Wrapped method with Gemini Live specific tracing.
@@ -1253,123 +1247,6 @@ def traced_gemini_live(operation: str) -> Callable:
                                     :500
                                 ]  # Truncate if very long
 
-                        elif operation == "llm_tool_call" and args:
-                            # Extract tool call information
-                            msg = args[0] if args else None
-                            if msg and hasattr(msg, "tool_call") and msg.tool_call.function_calls:
-                                function_calls = msg.tool_call.function_calls
-                                if function_calls:
-                                    # Add information about the first function call
-                                    call = function_calls[0]
-                                    operation_attrs["tool.function_name"] = call.name
-                                    operation_attrs["tool.call_id"] = call.id
-                                    operation_attrs["tool.calls_count"] = len(function_calls)
-
-                                    # Add all function names being called
-                                    all_function_names = [c.name for c in function_calls]
-                                    operation_attrs["tool.all_function_names"] = ",".join(
-                                        all_function_names
-                                    )
-
-                                    # Add arguments for the first call (truncated if too long)
-                                    try:
-                                        args_str = json.dumps(call.args) if call.args else "{}"
-                                        if len(args_str) > 1000:
-                                            args_str = args_str[:1000] + "..."
-                                        operation_attrs["tool.arguments"] = args_str
-                                    except Exception:
-                                        operation_attrs["tool.arguments"] = str(call.args)[:1000]
-
-                        elif operation == "llm_tool_result" and len(args) >= 3:
-                            # _tool_result(self, tool_call_id, tool_call_name, result); its
-                            # positional args, in order. ``result`` is expected to be
-                            # Gemini's FunctionResponse.response payload (a dict), but is
-                            # validated at runtime rather than assumed.
-                            tool_call_id, tool_call_name, result = args[0], args[1], args[2]
-                            try:
-                                if tool_call_id:
-                                    operation_attrs["tool.call_id"] = tool_call_id
-                                if tool_call_name:
-                                    operation_attrs["tool.function_name"] = tool_call_name
-                                if isinstance(result, dict):
-                                    result_str = json.dumps(result)
-                                    if len(result_str) > 2000:  # larger limit for results
-                                        result_str = result_str[:2000] + "..."
-                                    operation_attrs["tool.result"] = result_str
-                                    if "error" in result:
-                                        operation_attrs["tool.result_status"] = "error"
-                                    elif "success" in result:
-                                        operation_attrs["tool.result_status"] = "success"
-                                    else:
-                                        operation_attrs["tool.result_status"] = "completed"
-                            except Exception as e:
-                                logging.warning(
-                                    f"Error capturing tool result attributes for tracing: {e}"
-                                )
-
-                        elif operation == "llm_response" and args:
-                            # Extract usage and response metadata from turn complete event
-                            msg = args[0] if args else None
-
-                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
-                                usage = msg.usage_metadata
-                                operation_attrs["gen_ai.usage.input_tokens"] = (
-                                    usage.prompt_token_count or 0
-                                ) + (usage.tool_use_prompt_token_count or 0)
-                                operation_attrs["gen_ai.usage.output_tokens"] = (
-                                    usage.response_token_count or 0
-                                ) + (usage.thoughts_token_count or 0)
-                                if usage.cached_content_token_count is not None:
-                                    operation_attrs["gen_ai.usage.cache_read.input_tokens"] = (
-                                        usage.cached_content_token_count
-                                    )
-                                if usage.thoughts_token_count is not None:
-                                    operation_attrs["gen_ai.usage.reasoning.output_tokens"] = (
-                                        usage.thoughts_token_count
-                                    )
-                                input_audio_tokens = _gemini_audio_modality_tokens(
-                                    usage.prompt_tokens_details
-                                )
-                                if input_audio_tokens is not None:
-                                    operation_attrs["gen_ai.usage.audio.input_tokens"] = (
-                                        input_audio_tokens
-                                    )
-                                output_audio_tokens = _gemini_audio_modality_tokens(
-                                    usage.response_tokens_details
-                                )
-                                if output_audio_tokens is not None:
-                                    operation_attrs["gen_ai.usage.audio.output_tokens"] = (
-                                        output_audio_tokens
-                                    )
-                                cached_audio_tokens = _gemini_audio_modality_tokens(
-                                    usage.cache_tokens_details
-                                )
-                                if cached_audio_tokens is not None:
-                                    operation_attrs[
-                                        "gen_ai.usage.audio.cache_read.input_tokens"
-                                    ] = cached_audio_tokens
-
-                            # Get output text and modality from service state
-                            text = getattr(self, "_bot_text_buffer", "")
-                            audio_text = getattr(self, "_llm_output_buffer", "")
-
-                            if text:
-                                # TEXT modality
-                                operation_attrs["output"] = text
-                                operation_attrs["output_modality"] = "TEXT"
-                            elif audio_text:
-                                # AUDIO modality
-                                operation_attrs["output"] = audio_text
-                                operation_attrs["output_modality"] = "AUDIO"
-
-                            # Add turn completion status
-                            if (
-                                msg
-                                and hasattr(msg, "server_content")
-                                and msg.server_content.turn_complete
-                            ):
-                                operation_attrs["turn_complete"] = True
-
                         # Add all attributes to the span
                         add_gemini_live_span_attributes(
                             span=current_span,
@@ -1382,11 +1259,6 @@ def traced_gemini_live(operation: str) -> Callable:
                             settings=settings,
                             **operation_attrs,
                         )
-
-                        # Capture TTFB metric if available
-                        ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
-                        if ttfb is not None:
-                            current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
                         fn_called = True
@@ -1413,14 +1285,12 @@ def traced_gemini_live(operation: str) -> Callable:
 def traced_openai_realtime(operation: str) -> Callable:
     """Trace OpenAI Realtime service methods with operation-specific attributes.
 
-    This decorator automatically captures relevant information based on the operation type:
-
-    - llm_setup: Session configuration and tools
-    - llm_request: Context and input messages
-    - llm_response: Usage metadata, output, and function calls
+    The only operation left is ``llm_setup``: session configuration, tools and
+    instructions, recorded when the session is created. Replies and tool calls
+    are traced by :func:`traced_realtime_llm`.
 
     Args:
-        operation: The operation name (matches the event type being handled).
+        operation: The operation name. Only ``"llm_setup"`` is meaningful.
 
     Returns:
         Wrapped method with OpenAI Realtime specific tracing.
@@ -1509,116 +1379,6 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 except Exception as e:
                                     logging.warning(f"Error extracting context tools: {e}")
 
-                        elif operation == "llm_request":
-                            # Capture context messages being sent
-                            if hasattr(self, "_context") and self._context:
-                                try:
-                                    messages = self.get_llm_adapter().get_messages_for_logging(
-                                        self._context
-                                    )
-                                    if messages:
-                                        operation_attrs["context_messages"] = json.dumps(messages)
-                                except Exception as e:
-                                    logging.warning(f"Error getting context messages: {e}")
-
-                        elif operation == "llm_response" and args:
-                            # Extract usage and response metadata
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "response"):
-                                response = evt.response
-
-                                # Token usage, including the audio/cached
-                                # breakdown needed for cost attribution
-                                # (realtime audio tokens are priced separately
-                                # from text and cached-audio tokens).
-                                if hasattr(response, "usage"):
-                                    usage = response.usage
-                                    if hasattr(usage, "input_tokens"):
-                                        operation_attrs["gen_ai.usage.input_tokens"] = (
-                                            usage.input_tokens
-                                        )
-                                    if hasattr(usage, "output_tokens"):
-                                        operation_attrs["gen_ai.usage.output_tokens"] = (
-                                            usage.output_tokens
-                                        )
-                                    input_details = getattr(usage, "input_token_details", None)
-                                    if input_details:
-                                        if input_details.cached_tokens is not None:
-                                            operation_attrs[
-                                                "gen_ai.usage.cache_read.input_tokens"
-                                            ] = input_details.cached_tokens
-                                        if input_details.audio_tokens is not None:
-                                            operation_attrs["gen_ai.usage.audio.input_tokens"] = (
-                                                input_details.audio_tokens
-                                            )
-                                        cached_details = input_details.cached_tokens_details
-                                        if (
-                                            cached_details
-                                            and cached_details.audio_tokens is not None
-                                        ):
-                                            operation_attrs[
-                                                "gen_ai.usage.audio.cache_read.input_tokens"
-                                            ] = cached_details.audio_tokens
-                                    output_details = getattr(usage, "output_token_details", None)
-                                    if output_details and output_details.audio_tokens is not None:
-                                        operation_attrs["gen_ai.usage.audio.output_tokens"] = (
-                                            output_details.audio_tokens
-                                        )
-
-                                # Response status and metadata
-                                if hasattr(response, "status"):
-                                    operation_attrs["response.status"] = response.status
-
-                                if hasattr(response, "id"):
-                                    operation_attrs["response.id"] = response.id
-
-                                # Output items and extract transcript for output field
-                                if hasattr(response, "output") and response.output:
-                                    operation_attrs["response.output_items"] = len(response.output)
-
-                                    # Extract assistant transcript and function calls
-                                    assistant_transcript = ""
-                                    function_calls = []
-
-                                    for item in response.output:
-                                        if (
-                                            hasattr(item, "content")
-                                            and item.content
-                                            and hasattr(item, "role")
-                                            and item.role == "assistant"
-                                        ):
-                                            for content in item.content:
-                                                if (
-                                                    hasattr(content, "transcript")
-                                                    and content.transcript
-                                                ):
-                                                    assistant_transcript += content.transcript + " "
-
-                                        elif hasattr(item, "type") and item.type == "function_call":
-                                            function_call_info = {
-                                                "name": getattr(item, "name", "unknown"),
-                                                "call_id": getattr(item, "call_id", "unknown"),
-                                            }
-                                            if hasattr(item, "arguments"):
-                                                args_str = item.arguments
-                                                if len(args_str) > 500:
-                                                    args_str = args_str[:500] + "..."
-                                                function_call_info["arguments"] = args_str
-                                            function_calls.append(function_call_info)
-
-                                    if assistant_transcript.strip():
-                                        operation_attrs["output"] = assistant_transcript.strip()
-
-                                    if function_calls:
-                                        operation_attrs["function_calls"] = function_calls
-                                        operation_attrs["function_calls.count"] = len(
-                                            function_calls
-                                        )
-                                        all_names = [call["name"] for call in function_calls]
-                                        operation_attrs["function_calls.all_names"] = ",".join(
-                                            all_names
-                                        )
-
                         # Add all attributes to the span
                         add_openai_realtime_span_attributes(
                             span=current_span,
@@ -1627,12 +1387,6 @@ def traced_openai_realtime(operation: str) -> Callable:
                             operation_name=operation,
                             **operation_attrs,
                         )
-
-                        # Capture TTFB metric if available
-                        if operation == "llm_response":
-                            ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
-                            if ttfb is not None:
-                                current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
                         fn_called = True
@@ -1654,3 +1408,513 @@ def traced_openai_realtime(operation: str) -> Callable:
         return wrapper
 
     return decorator
+
+
+#
+# Realtime (speech-to-speech) LLM tracing
+#
+
+_REALTIME_TOOL_ATTR_MAX_CHARS = 2000
+_REALTIME_REPLY_EXPORT_GRACE_SECS = 2.0
+
+
+def _sum_token_usage(total: LLMTokenUsage | None, usage: LLMTokenUsage) -> LLMTokenUsage:
+    """Add a usage report to a running total, field by field.
+
+    Services that report usage in parts (Nova Sonic's partial ``usageEvent``
+    reports, Gemini's per-call reports on a held thinking turn) are summed
+    into one figure for the reply. A field that neither report sets stays
+    ``None``, so "not reported" is kept apart from zero.
+    """
+    if total is None:
+        return usage.model_copy()
+
+    def add(a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a + b
+
+    return LLMTokenUsage(
+        prompt_tokens=total.prompt_tokens + usage.prompt_tokens,
+        completion_tokens=total.completion_tokens + usage.completion_tokens,
+        total_tokens=total.total_tokens + usage.total_tokens,
+        cache_read_input_tokens=add(total.cache_read_input_tokens, usage.cache_read_input_tokens),
+        cache_creation_input_tokens=add(
+            total.cache_creation_input_tokens, usage.cache_creation_input_tokens
+        ),
+        reasoning_tokens=add(total.reasoning_tokens, usage.reasoning_tokens),
+        input_audio_tokens=add(total.input_audio_tokens, usage.input_audio_tokens),
+        output_audio_tokens=add(total.output_audio_tokens, usage.output_audio_tokens),
+        cache_read_input_audio_tokens=add(
+            total.cache_read_input_audio_tokens, usage.cache_read_input_audio_tokens
+        ),
+    )
+
+
+def _join_text_pieces(pieces: list[tuple[str, bool]]) -> str:
+    """Join text pieces, adding a space between pieces that don't carry their own."""
+    out = ""
+    for text, includes_spaces in pieces:
+        if not text:
+            continue
+        if includes_spaces or not out:
+            out += text
+        else:
+            out += " " + text
+    return out.strip()
+
+
+def _json_truncated(value: Any) -> str:
+    """Serialize ``value`` as JSON for a span attribute, truncated to a sane size."""
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        text = str(value)
+    if len(text) > _REALTIME_TOOL_ATTR_MAX_CHARS:
+        text = text[:_REALTIME_TOOL_ATTR_MAX_CHARS] + "..."
+    return text
+
+
+class _RealtimeReply:
+    """One model reply of a realtime service, from end of user speech to reply end.
+
+    The span is opened when the reply starts and exported later, once the data
+    that arrives after the reply ends (usage, the user transcript) is in, or
+    the grace period runs out.
+    """
+
+    def __init__(self, span, start_ns: int, answers_speech: bool, seq: int):
+        self.span = span
+        self.start_ns = start_ns
+        self.end_ns: int | None = None
+        self.answers_speech = answers_speech
+        self.seq = seq
+        self.interrupted = False
+        self.input_pieces: list[str] = []
+        self.llm_text: list[tuple[str, bool]] = []
+        self.tts_text: list[tuple[str, bool]] = []
+        self.had_audio = False
+        self.ttfb: float | None = None
+        self.usage: LLMTokenUsage | None = None
+        self.exported = False
+
+    @property
+    def complete(self) -> bool:
+        """Whether the reply can be exported before the grace period runs out.
+
+        Usage is reported once, so a reply that answers no speech is done when
+        it has usage. A reply that answers speech is never complete early: the
+        user's transcript comes in pieces (Gemini Live sends one frame per
+        sentence, plus a trailing fragment on a timeout), and nothing marks
+        the last one. It waits for the grace period or the next reply.
+        """
+        return self.usage is not None and not self.answers_speech
+
+
+class _RealtimeLLMTraceState:
+    """Per-service state for :func:`traced_realtime_llm`.
+
+    Everything here changes synchronously, from the frame handlers and the
+    usage hook. Frames reach a realtime service's ``push_frame`` from several
+    of its tasks, so no state change may ``await`` partway through.
+    """
+
+    def __init__(self):
+        self.reply: _RealtimeReply | None = None
+        self.pending: _RealtimeReply | None = None
+        self.seq = 0
+        # Speech end since the previous reply opened, in seconds, plus the turn
+        # context that was current when it ended.
+        self.speech_end: float | None = None
+        self.speech_end_turn_ctx = None
+        # Earliest speech onset since the last speech end, in seconds.
+        self.speech_onset: float | None = None
+        # Whether the user has spoken since the last reply that answered them
+        # opened. Speech not yet answered keeps its transcripts out of the
+        # replies around it.
+        self.user_started_since_reply = True
+        # Data that arrived while no reply was open, kept for the next one.
+        self.held_ttfb: float | None = None
+        self.held_text: list[tuple[str, bool]] = []
+        self.held_tts_text: list[tuple[str, bool]] = []
+        self.held_transcript: list[str] = []
+        self.tool_spans: dict[str, Any] = {}
+
+
+def traced_realtime_llm(cls: P) -> P:
+    """Trace a realtime (speech-to-speech) LLM service, one span per reply.
+
+    A realtime model takes audio in and sends audio out; there is no separate
+    speech-to-text stage to measure. So instead of ``stt`` and per-handler
+    ``llm_response`` spans, the service gets:
+
+    - one ``llm_response`` span per reply, from the end of the user's speech to
+      the end of the reply (or the interruption), nested inside its ``turn``
+      span. The user's transcript and the reply text are attributes on it,
+      along with token usage, TTFB and the modalities.
+    - one ``llm_tool_call`` span per function call, beside the reply.
+
+    A reply opens on ``LLMFullResponseStartFrame``, or on the first
+    ``FunctionCallInProgressFrame`` when no Start came first. It ends on
+    ``LLMFullResponseEndFrame`` or ``InterruptionFrame`` and is exported once
+    its late data (usage, the user's transcript) is in: at once for a reply
+    that answers no speech, otherwise when the next reply opens or after a
+    short grace period.
+
+    The decorator wraps the class's ``push_frame`` (reading each frame after
+    the original push), ``start_llm_usage_metrics`` and ``cleanup``. It checks
+    ``_tracing_enabled`` when called and is idempotent, so subclasses inherit
+    one wrapping. Only frames the service itself pushes drive the spans:
+    downstream frames, plus the ``TranscriptionFrame`` realtime services push
+    upstream.
+
+    Args:
+        cls: The realtime LLM service class.
+
+    Returns:
+        The same class, with the tracing wrappers installed.
+    """
+    if not is_tracing_available():
+        return cls
+
+    if getattr(cls, "__realtime_llm_tracing_wrapped__", False):
+        return cls
+
+    def get_state(service) -> _RealtimeLLMTraceState:
+        state = getattr(service, "_realtime_llm_trace_state", None)
+        if state is None:
+            state = _RealtimeLLMTraceState()
+            service._realtime_llm_trace_state = state
+        return state
+
+    def turn_context(service):
+        return _get_turn_context(service) or _get_parent_service_context(service)
+
+    def discard_held(state: _RealtimeLLMTraceState):
+        state.held_ttfb = None
+        state.held_text = []
+        state.held_tts_text = []
+
+    def export_reply(service, state: _RealtimeLLMTraceState, reply: _RealtimeReply):
+        """Set the reply's attributes and end its span at the recorded end time."""
+        if reply.exported:
+            return
+        reply.exported = True
+        if state.pending is reply:
+            state.pending = None
+        if state.reply is reply:
+            state.reply = None
+        span = reply.span
+        try:
+            span.set_attribute("gen_ai.output.type", "speech" if reply.had_audio else "text")
+            output = _join_text_pieces(reply.llm_text or reply.tts_text)
+            if output:
+                span.set_attribute("output", output)
+            span.set_attribute("output_modality", "AUDIO" if reply.had_audio else "TEXT")
+            if reply.input_pieces:
+                span.set_attribute("input", " ".join(p.strip() for p in reply.input_pieces))
+                span.set_attribute("input_modality", "AUDIO")
+            if reply.ttfb is not None:
+                span.set_attribute("metrics.ttfb", reply.ttfb)
+                span.set_attribute("gen_ai.response.time_to_first_chunk", reply.ttfb)
+            if reply.usage is not None:
+                _add_token_usage_to_span(span, reply.usage)
+            span.set_attribute("llm.interrupted", reply.interrupted)
+        except Exception as e:
+            logging.warning(f"Error setting realtime llm_response attributes: {e}")
+        end_ns = reply.end_ns if reply.end_ns is not None else time.time_ns()
+        span.end(end_time=max(end_ns, reply.start_ns))
+
+    def export_if_complete(service, state: _RealtimeLLMTraceState):
+        pending = state.pending
+        if pending is not None and pending.complete:
+            export_reply(service, state, pending)
+
+    def schedule_grace_export(service, state: _RealtimeLLMTraceState, reply: _RealtimeReply):
+        """Export the pending reply after the grace period, unless it was already exported.
+
+        The timer is never cancelled. It checks whether its reply is still the
+        one waiting and does nothing otherwise, so no state change has to
+        ``await`` it.
+        """
+
+        async def grace():
+            await asyncio.sleep(_REALTIME_REPLY_EXPORT_GRACE_SECS)
+            if state.pending is reply and not reply.exported:
+                export_reply(service, state, reply)
+
+        try:
+            create_task = getattr(service, "create_task", None)
+            if create_task is not None:
+                create_task(grace(), name="realtime-llm-trace-export")
+            else:
+                asyncio.get_running_loop().create_task(grace())
+        except Exception as e:
+            logging.warning(f"Error scheduling realtime llm_response export: {e}")
+            export_reply(service, state, reply)
+
+    def end_reply(service, state: _RealtimeLLMTraceState, end_ns: int, interrupted: bool):
+        """Record the end of the open reply and move it to pending."""
+        reply = state.reply
+        if reply is None:
+            return
+        reply.end_ns = max(end_ns, reply.start_ns)
+        reply.interrupted = interrupted
+        state.reply = None
+        if state.pending is not None and state.pending is not reply:
+            export_reply(service, state, state.pending)
+        state.pending = reply
+        if reply.complete:
+            export_reply(service, state, reply)
+        else:
+            schedule_grace_export(service, state, reply)
+
+    def open_reply(service, state: _RealtimeLLMTraceState):
+        if state.pending is not None:
+            export_reply(service, state, state.pending)
+        speech_end = state.speech_end
+        answers_speech = speech_end is not None
+        start_secs = speech_end if speech_end is not None else time.time()
+        parent = (state.speech_end_turn_ctx if answers_speech else None) or turn_context(service)
+        tracer = trace.get_tracer("pipecat")
+        start_ns = int(start_secs * 1e9)
+        span = tracer.start_span("llm_response", context=parent, start_time=start_ns)
+        state.seq += 1
+        reply = _RealtimeReply(span, start_ns, answers_speech, state.seq)
+        try:
+            span.set_attribute(
+                "gen_ai.provider.name",
+                _get_provider_name_from_service_name(service.__class__.__name__),
+            )
+            span.set_attribute("gen_ai.request.model", _get_model_name(service))
+            span.set_attribute("gen_ai.operation.name", "chat")
+        except Exception as e:
+            logging.warning(f"Error setting realtime llm_response attributes: {e}")
+        # Data that arrived before the start frame belongs to this reply.
+        reply.ttfb = state.held_ttfb
+        reply.llm_text = list(state.held_text)
+        reply.tts_text = list(state.held_tts_text)
+        if answers_speech and state.held_transcript:
+            reply.input_pieces = list(state.held_transcript)
+            state.held_transcript = []
+        discard_held(state)
+        state.speech_end = None
+        state.speech_end_turn_ctx = None
+        # speech_onset is kept: a user already speaking when the reply starts
+        # ends it at their onset, clamped to the reply's own start.
+        if answers_speech:
+            # This reply answers the user's speech; what they say from now on
+            # is theirs. A reply that answers no speech (a tool follow-up)
+            # leaves an utterance already under way to the reply that will
+            # answer it.
+            state.user_started_since_reply = False
+        state.reply = reply
+
+    def mark_pending_interrupted(state: _RealtimeLLMTraceState):
+        """Mark a reply the service ended itself on interruption.
+
+        The OpenAI family pushes ``LLMFullResponseEndFrame`` from its
+        interruption handler, so the reply has already ended when the
+        ``InterruptionFrame`` passes. The user's speech onset falling inside
+        the reply tells that End apart from one that ended the reply normally
+        before the user spoke.
+        """
+        pending = state.pending
+        onset = state.speech_onset
+        if pending is None or pending.exported or pending.end_ns is None or onset is None:
+            return
+        onset_ns = int(onset * 1e9)
+        if onset_ns < pending.end_ns:
+            pending.interrupted = True
+            pending.end_ns = max(onset_ns, pending.start_ns)
+
+    def interrupted_end_ns(state: _RealtimeLLMTraceState) -> int:
+        """When an interrupted reply ends: the user's speech onset, if known."""
+        if state.speech_onset is not None:
+            return int(state.speech_onset * 1e9)
+        return time.time_ns()
+
+    def note_speech_onset(state: _RealtimeLLMTraceState, onset: float):
+        if state.speech_onset is None or onset < state.speech_onset:
+            state.speech_onset = onset
+        state.user_started_since_reply = True
+        discard_held(state)
+
+    def note_speech_end(service, state: _RealtimeLLMTraceState, end: float):
+        state.speech_end = end
+        state.speech_end_turn_ctx = _get_turn_context(service)
+        state.speech_onset = None
+        discard_held(state)
+
+    def handle_transcript(service, state: _RealtimeLLMTraceState, text: str):
+        """Route a user transcript to the reply it answers, or hold it for the next."""
+        if not text:
+            return
+        target = state.reply or state.pending
+        if target is not None and not state.user_started_since_reply:
+            target.input_pieces.append(text)
+        else:
+            state.held_transcript.append(text)
+
+    def close_all(service, state: _RealtimeLLMTraceState):
+        """Close everything still open: pipeline end or service cleanup."""
+        if state.reply is not None:
+            end_reply(service, state, time.time_ns(), interrupted=True)
+        if state.pending is not None:
+            export_reply(service, state, state.pending)
+        for span in list(state.tool_spans.values()):
+            try:
+                span.set_attribute("tool.cancelled", True)
+                span.end()
+            except Exception as e:
+                logging.warning(f"Error ending realtime llm_tool_call span: {e}")
+        state.tool_spans = {}
+
+    def handle_tool_frame(service, state: _RealtimeLLMTraceState, frame):
+        if isinstance(frame, FunctionCallInProgressFrame):
+            if frame.tool_call_id in state.tool_spans:
+                return
+            tracer = trace.get_tracer("pipecat")
+            span = tracer.start_span("llm_tool_call", context=turn_context(service))
+            span.set_attribute("gen_ai.operation.name", "execute_tool")
+            span.set_attribute("gen_ai.tool.name", frame.function_name)
+            span.set_attribute("gen_ai.tool.call.id", frame.tool_call_id)
+            span.set_attribute("gen_ai.tool.call.arguments", _json_truncated(frame.arguments))
+            state.tool_spans[frame.tool_call_id] = span
+        elif isinstance(frame, FunctionCallResultFrame):
+            properties = frame.properties
+            if properties is not None and not properties.is_final:
+                return
+            span = state.tool_spans.pop(frame.tool_call_id, None)
+            if span is None:
+                return
+            span.set_attribute("gen_ai.tool.call.result", _json_truncated(frame.result))
+            if frame.error:
+                span.set_attribute("error.type", "tool_error")
+                span.set_status(trace.Status(trace.StatusCode.ERROR, frame.error))
+            span.end()
+        elif isinstance(frame, FunctionCallCancelFrame):
+            span = state.tool_spans.pop(frame.tool_call_id, None)
+            if span is None:
+                return
+            span.set_attribute("tool.cancelled", True)
+            span.end()
+
+    def handle_frame(service, state: _RealtimeLLMTraceState, frame, direction):
+        if direction == FrameDirection.UPSTREAM:
+            if isinstance(frame, TranscriptionFrame):
+                handle_transcript(service, state, frame.text)
+            return
+
+        if isinstance(frame, LLMFullResponseStartFrame):
+            if state.reply is None:
+                open_reply(service, state)
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            end_reply(service, state, time.time_ns(), interrupted=False)
+        elif isinstance(frame, InterruptionFrame):
+            if state.reply is not None:
+                end_reply(service, state, interrupted_end_ns(state), interrupted=True)
+            else:
+                mark_pending_interrupted(state)
+            discard_held(state)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            note_speech_end(service, state, frame.timestamp - frame.stop_secs)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            note_speech_onset(state, frame.timestamp - frame.start_secs)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            # A turn strategy can end the user's turn after a service using its
+            # own VAD has started replying; that stop is not the next reply's
+            # start. Local VAD, when present, is the better measure.
+            if state.reply is None and state.speech_end is None:
+                note_speech_end(service, state, time.time())
+            else:
+                discard_held(state)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            note_speech_onset(state, time.time())
+        elif isinstance(frame, ProposedUserStartedSpeakingFrame):
+            note_speech_onset(state, time.time())
+        elif isinstance(frame, LLMTextFrame):
+            piece = (frame.text, frame.includes_inter_frame_spaces)
+            if state.reply is not None:
+                state.reply.llm_text.append(piece)
+            else:
+                state.held_text.append(piece)
+        elif isinstance(frame, TTSTextFrame):
+            piece = (frame.text, frame.includes_inter_frame_spaces)
+            if state.reply is not None:
+                state.reply.tts_text.append(piece)
+            else:
+                state.held_tts_text.append(piece)
+        elif isinstance(frame, TTSAudioRawFrame):
+            if state.reply is not None:
+                state.reply.had_audio = True
+        elif isinstance(frame, MetricsFrame):
+            for data in frame.data:
+                if isinstance(data, TTFBMetricsData) and data.processor == service.name:
+                    if state.reply is not None:
+                        if state.reply.ttfb is None:
+                            state.reply.ttfb = data.value
+                    elif state.held_ttfb is None:
+                        state.held_ttfb = data.value
+                    break
+        elif isinstance(
+            frame, (FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallCancelFrame)
+        ):
+            if isinstance(frame, FunctionCallInProgressFrame) and state.reply is None:
+                # A function call is model output, so a reply is under way even
+                # when no Start frame announced it: OpenAI Realtime pushes none
+                # for a response that only calls tools.
+                open_reply(service, state)
+            handle_tool_frame(service, state, frame)
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            close_all(service, state)
+
+    original_push_frame = cls.push_frame
+
+    @functools.wraps(original_push_frame)
+    async def patched_push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+        await original_push_frame(self, frame, direction)
+        if not getattr(self, "_tracing_enabled", False):
+            return
+        try:
+            handle_frame(self, get_state(self), frame, direction)
+        except Exception as e:
+            logging.warning(f"Error in realtime LLM tracing: {e}")
+
+    original_start_llm_usage_metrics = cls.start_llm_usage_metrics
+
+    @functools.wraps(original_start_llm_usage_metrics)
+    async def patched_start_llm_usage_metrics(self, tokens):
+        await original_start_llm_usage_metrics(self, tokens)
+        if not getattr(self, "_tracing_enabled", False):
+            return
+        try:
+            state = get_state(self)
+            target = state.reply or state.pending
+            if target is None:
+                return
+            target.usage = _sum_token_usage(target.usage, tokens)
+            if target is state.pending:
+                export_if_complete(self, state)
+        except Exception as e:
+            logging.warning(f"Error in realtime LLM usage tracing: {e}")
+
+    original_cleanup = cls.cleanup
+
+    @functools.wraps(original_cleanup)
+    async def patched_cleanup(self):
+        await original_cleanup(self)
+        if not getattr(self, "_tracing_enabled", False):
+            return
+        try:
+            close_all(self, get_state(self))
+        except Exception as e:
+            logging.warning(f"Error in realtime LLM cleanup tracing: {e}")
+
+    cls.push_frame = patched_push_frame  # type: ignore[method-assign]
+    cls.start_llm_usage_metrics = patched_start_llm_usage_metrics  # type: ignore[method-assign]
+    cls.cleanup = patched_cleanup  # type: ignore[method-assign]
+    cls.__realtime_llm_tracing_wrapped__ = True  # type: ignore[attr-defined]
+    return cls

@@ -70,6 +70,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
@@ -261,6 +262,7 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     endpointing_sensitivity: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@traced_realtime_llm
 class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     """AWS Nova Sonic speech-to-speech LLM service.
 
