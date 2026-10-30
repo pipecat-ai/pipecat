@@ -11,6 +11,7 @@ sub-pipelines concurrently, with coordination for system frames and proper
 handling of pipeline lifecycle events.
 """
 
+import weakref
 from itertools import chain
 
 from loguru import logger
@@ -175,6 +176,8 @@ class ParallelPipeline(BasePipeline):
         """
         if frame.id not in self._seen_ids:
             self._seen_ids.add(frame.id)
+            # A frame nothing holds can't come out of another branch, so its id goes with it.
+            weakref.finalize(frame, self._seen_ids.discard, frame.id)
             if self._synchronizing:
                 self._buffered_frames.append((frame, direction))
             else:

@@ -1,0 +1,1 @@
+- Fixed `ParallelPipeline`, and so `ServiceSwitcher` and `LLMSwitcher`, using more memory the longer a session ran: it kept the ID of every frame it let through, input audio included.
