@@ -9,8 +9,10 @@
 import json
 import unittest
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InputDTMFFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -53,6 +55,83 @@ def audio(num_bytes: int) -> bytes:
 def preamble_with(**overrides) -> str:
     """The preamble with fields replaced, for the cases jambonz can negotiate."""
     return json.dumps({**json.loads(PREAMBLE), **overrides})
+
+
+class TestJambonzTextFrames(unittest.IsolatedAsyncioTestCase):
+    """The socket is not binary-only after the preamble.
+
+    With `passDtmf` set, jambonz sends digits as text frames, and it answers
+    `mark` and `killAudio` the same way. Routing all of those through the
+    preamble handler replaced `call_meta` and set `call_sid` and `trace_id` to
+    None, and lost the digit.
+    """
+
+    async def asyncSetUp(self):
+        self.serializer = JambonzFrameSerializer()
+        await self.serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+        await self.serializer.deserialize(PREAMBLE)
+        self.call_sid = self.serializer.call_sid
+        self.trace_id = self.serializer.trace_id
+
+    def assert_call_survived(self):
+        self.assertEqual(self.serializer.call_sid, self.call_sid)
+        self.assertEqual(self.serializer.trace_id, self.trace_id)
+        self.assertEqual(self.serializer.jambonz_sample_rate, JAMBONZ_RATE)
+
+    async def test_a_dtmf_digit_becomes_a_frame_and_keeps_the_call(self):
+        frame = await self.serializer.deserialize(
+            json.dumps({"event": "dtmf", "dtmf": "5", "duration": "1600"})
+        )
+
+        self.assertIsInstance(frame, InputDTMFFrame)
+        self.assertEqual(frame.button, KeypadEntry.FIVE)
+        self.assert_call_survived()
+
+    async def test_every_keypad_entry_is_recognised(self):
+        for digit in "0123456789*#":
+            with self.subTest(digit=digit):
+                frame = await self.serializer.deserialize(
+                    json.dumps({"event": "dtmf", "dtmf": digit})
+                )
+                self.assertIsInstance(frame, InputDTMFFrame)
+                self.assertEqual(frame.button.value, digit)
+
+    async def test_a_digit_that_is_not_on_a_keypad_is_ignored(self):
+        """Dropping it beats raising inside the transport's read loop."""
+        self.assertIsNone(
+            await self.serializer.deserialize(json.dumps({"event": "dtmf", "dtmf": "A"}))
+        )
+        self.assert_call_survived()
+
+    async def test_mark_and_play_done_replies_are_ignored(self):
+        for event in (
+            {"type": "mark", "data": {"name": "my-mark-1", "event": "playout"}},
+            {"type": "mark", "data": {"name": "my-mark-1", "event": "cleared"}},
+            {"type": "playDone"},
+        ):
+            with self.subTest(event=event):
+                self.assertIsNone(await self.serializer.deserialize(json.dumps(event)))
+                self.assert_call_survived()
+
+    async def test_only_the_first_text_frame_is_the_preamble(self):
+        """A second preamble-shaped frame is an event, not a renegotiation."""
+        await self.serializer.deserialize(
+            preamble_with(sampleRate=8000, callSid="other", traceId="other")
+        )
+
+        self.assert_call_survived()
+
+    async def test_an_undecodable_event_is_ignored(self):
+        self.assertIsNone(await self.serializer.deserialize("not json"))
+        self.assert_call_survived()
+
+    async def test_audio_still_arrives_after_an_event(self):
+        """The regression that mattered: a digit left the rate unusable, so
+        every audio frame after it was dropped."""
+        await self.serializer.deserialize(json.dumps({"event": "dtmf", "dtmf": "1"}))
+
+        frames = [await self.serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
+        self.assertTrue([f for f in frames if f is not None])
 
 
 class TestJambonzMixType(unittest.IsolatedAsyncioTestCase):
