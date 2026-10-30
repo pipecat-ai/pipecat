@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -38,6 +39,104 @@ class GeminiLLMInvocationParams(TypedDict):
     system_instruction: str | None
     messages: list[Content]
     tools: list[Any] | NotGiven
+
+
+def gemini_function_declarations(
+    functions: list[FunctionSchema], warned: set[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Convert function schemas to Gemini function declarations.
+
+    Each schema is adapted to the subset of JSON Schema Gemini accepts (see
+    :func:`_adapt_gemini_schema`), and the adaptations are logged as a warning
+    once per tool, so a stable tool set warns on the first inference rather
+    than on all of them, while a tool added later still gets reported.
+
+    Args:
+        functions: The function schemas to convert.
+        warned: The (adaptation, tool name) pairs already reported. Updated
+            in place with the ones this call reports.
+
+    Returns:
+        One function declaration per schema, with ``name``, ``description``
+        and ``parameters``.
+    """
+    declarations = []
+    adapted: dict[str, list[str]] = {}
+    for func in functions:
+        func_dict = func.to_default_dict()
+        notes: set[str] = set()
+        func_dict["parameters"] = _adapt_gemini_schema(func_dict["parameters"], notes)
+        for note in notes:
+            adapted.setdefault(note, []).append(func_dict["name"])
+        declarations.append(func_dict)
+
+    lines = []
+    for note, tools in sorted(adapted.items()):
+        fresh = [t for t in tools if (note, t) not in warned]
+        if not fresh:
+            continue
+        warned.update((note, t) for t in fresh)
+        listed = ", ".join(fresh[:3])
+        if len(fresh) > 3:
+            listed += f" and {len(fresh) - 3} more"
+        lines.append(f"  {note}: {listed}")
+    if lines:
+        logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
+
+    return declarations
+
+
+def _adapt_gemini_schema(schema: Any, notes: set[str]) -> Any:
+    """Recursively adapt a JSON schema to the subset Gemini accepts.
+
+    Tool schemas are JSON Schema, but Gemini takes only a limited subset of it
+    — its schema object follows OpenAPI 3.0's, which predates JSON Schema
+    alignment — and it rejects anything outside that subset. Three constructs
+    need adapting:
+
+    - Keys it has no field for, namely ``additionalProperties`` and vendor
+      extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's MCP
+      server attaches to its tool properties), are dropped.
+    - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
+    - ``enum`` members must be strings, so an ``enum`` holding other values is
+      dropped and its constraint lost.
+
+    Args:
+        schema: The JSON schema to process.
+        notes: Collects one description per kind of adaptation applied.
+
+    Returns:
+        The schema, in the form Gemini accepts.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    result: dict[str, Any] = {}
+
+    for key, value in schema.items():
+        if key == "additionalProperties" or key.startswith("x-"):
+            notes.add(f"dropped unsupported key '{key}'")
+        elif key == "properties" and isinstance(value, dict):
+            # Keys here name the tool's parameters rather than schema keywords,
+            # so adapt the values but keep every key.
+            result[key] = {name: _adapt_gemini_schema(prop, notes) for name, prop in value.items()}
+        elif key == "type" and isinstance(value, list):
+            notes.add("converted a union 'type' to 'anyOf'")
+            result["anyOf"] = [{"type": member} for member in value]
+        elif (
+            key == "enum"
+            and isinstance(value, list)
+            and not all(isinstance(member, str) for member in value)
+        ):
+            notes.add("dropped a non-string 'enum', losing its constraint")
+        elif isinstance(value, dict):
+            result[key] = _adapt_gemini_schema(value, notes)
+        elif isinstance(value, list):
+            result[key] = [_adapt_gemini_schema(item, notes) for item in value]
+        else:
+            result[key] = value
+
+    return result
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
@@ -109,71 +208,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             List of tool definitions formatted for Gemini's function-calling API.
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
-
-        def _adapt_schema(schema: Any, notes: set[str]) -> Any:
-            """Recursively adapt a JSON schema to the subset Gemini accepts.
-
-            Tool schemas are JSON Schema, but Gemini takes only a limited subset
-            of it — its schema object follows OpenAPI 3.0's, which predates JSON
-            Schema alignment — and it rejects anything outside that subset. Three
-            constructs need adapting:
-
-            - Keys it has no field for, namely ``additionalProperties`` and vendor
-              extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's
-              MCP server attaches to its tool properties), are dropped.
-            - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
-            - ``enum`` members must be strings, so an ``enum`` holding other values
-              is dropped and its constraint lost.
-
-            Args:
-                schema: The JSON schema to process.
-                notes: Collects one description per kind of adaptation applied.
-
-            Returns:
-                The schema, in the form Gemini accepts.
-            """
-            if not isinstance(schema, dict):
-                return schema
-
-            result: dict[str, Any] = {}
-
-            for key, value in schema.items():
-                if key == "additionalProperties" or key.startswith("x-"):
-                    notes.add(f"dropped unsupported key '{key}'")
-                elif key == "properties" and isinstance(value, dict):
-                    # Keys here name the tool's parameters rather than schema
-                    # keywords, so adapt the values but keep every key.
-                    result[key] = {name: _adapt_schema(prop, notes) for name, prop in value.items()}
-                elif key == "type" and isinstance(value, list):
-                    notes.add("converted a union 'type' to 'anyOf'")
-                    result["anyOf"] = [{"type": member} for member in value]
-                elif (
-                    key == "enum"
-                    and isinstance(value, list)
-                    and not all(isinstance(member, str) for member in value)
-                ):
-                    notes.add("dropped a non-string 'enum', losing its constraint")
-                elif isinstance(value, dict):
-                    result[key] = _adapt_schema(value, notes)
-                elif isinstance(value, list):
-                    result[key] = [_adapt_schema(item, notes) for item in value]
-                else:
-                    result[key] = value
-
-            return result
-
         functions_schema = tools_schema.standard_tools
         if functions_schema:
-            formatted_functions = []
-            adapted: dict[str, list[str]] = {}
-            for func in functions_schema:
-                func_dict = func.to_default_dict()
-                notes: set[str] = set()
-                func_dict["parameters"] = _adapt_schema(func_dict["parameters"], notes)
-                for note in notes:
-                    adapted.setdefault(note, []).append(func_dict["name"])
-                formatted_functions.append(func_dict)
-            self._warn_schema_adaptations(adapted)
+            formatted_functions = gemini_function_declarations(
+                functions_schema, self._warned_schema_adaptations
+            )
             formatted_standard_tools = [{"function_declarations": formatted_functions}]
         else:
             formatted_standard_tools = []
@@ -182,30 +221,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
         return formatted_standard_tools + custom_gemini_tools
-
-    def _warn_schema_adaptations(self, adapted: dict[str, list[str]]) -> None:
-        """Report tool schemas that had to be adapted before Gemini would accept them.
-
-        Each (adaptation, tool) pair is reported once, so a stable tool set warns
-        on the first inference rather than on all of them, while a tool added
-        later still gets reported.
-
-        Args:
-            adapted: Adaptation description mapped to the tools it applied to.
-        """
-        lines = []
-        for note, tools in sorted(adapted.items()):
-            fresh = [t for t in tools if (note, t) not in self._warned_schema_adaptations]
-            if not fresh:
-                continue
-            self._warned_schema_adaptations.update((note, t) for t in fresh)
-            listed = ", ".join(fresh[:3])
-            if len(fresh) > 3:
-                listed += f" and {len(fresh) - 3} more"
-            lines.append(f"  {note}: {listed}")
-
-        if lines:
-            logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
 
     @staticmethod
     def to_function_response_dict(content: Any) -> dict[str, Any]:
