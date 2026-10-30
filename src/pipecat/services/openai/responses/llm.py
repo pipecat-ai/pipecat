@@ -1146,15 +1146,17 @@ class OpenAIResponsesLLMService(
         """Report the token usage of a response received over the WebSocket."""
         if not usage:
             return
+        # As in `_token_usage`: third-party Responses servers can send a count as an
+        # explicit null, which `.get(key, 0)` would pass through, so coalesce each to 0.
         input_details = usage.get("input_tokens_details") or {}
         output_details = usage.get("output_tokens_details") or {}
         tokens = LLMTokenUsage(
-            prompt_tokens=usage.get("input_tokens", 0),
-            completion_tokens=usage.get("output_tokens", 0),
-            total_tokens=usage.get("total_tokens", 0),
-            cache_read_input_tokens=input_details.get("cached_tokens", 0),
-            cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
-            reasoning_tokens=output_details.get("reasoning_tokens", 0),
+            prompt_tokens=usage.get("input_tokens") or 0,
+            completion_tokens=usage.get("output_tokens") or 0,
+            total_tokens=usage.get("total_tokens") or 0,
+            cache_read_input_tokens=input_details.get("cached_tokens") or 0,
+            cache_creation_input_tokens=input_details.get("cache_write_tokens") or 0,
+            reasoning_tokens=output_details.get("reasoning_tokens") or 0,
         )
         await self.start_llm_usage_metrics(tokens)
 

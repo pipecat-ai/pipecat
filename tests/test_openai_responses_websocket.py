@@ -434,6 +434,43 @@ class TestReceiveResponseEventsText:
         tokens = service.start_llm_usage_metrics.call_args[0][0]
         assert tokens.cache_creation_input_tokens == 0
 
+    @pytest.mark.asyncio
+    async def test_token_usage_metrics_with_null_counts(self):
+        """A server that sends a count as an explicit null reports 0 for it."""
+        service = _make_service()
+        service._push_llm_text = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        ws = _ws_events(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "model": "gpt-4.1",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": None,
+                        "total_tokens": None,
+                        "input_tokens_details": {"cached_tokens": None, "cache_write_tokens": None},
+                        "output_tokens_details": {"reasoning_tokens": None},
+                    },
+                },
+            },
+        )
+        service._websocket = ws
+
+        context = MagicMock(spec=LLMContext)
+        await service._receive_response_events(context, [])
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert tokens.prompt_tokens == 100
+        assert tokens.completion_tokens == 0
+        assert tokens.total_tokens == 0
+        assert tokens.cache_read_input_tokens == 0
+        assert tokens.cache_creation_input_tokens == 0
+        assert tokens.reasoning_tokens == 0
+
 
 # ---------------------------------------------------------------------------
 # _receive_response_events — function calls
