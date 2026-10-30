@@ -1932,7 +1932,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
-        self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -2020,6 +2019,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            if self._context_push_owed:
+                await self._maybe_push_context()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
