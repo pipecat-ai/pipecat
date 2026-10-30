@@ -12,7 +12,6 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
-import websockets
 from loguru import logger
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as websocket_connect
@@ -181,7 +180,7 @@ class WebsocketService(ABC):
                 ``None`` to wait indefinitely.
             **kwargs: Additional arguments (unused, for compatibility).
         """
-        self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
+        self._websocket = None
         self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
         self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
         self._reconnect_on_error = reconnect_on_error
@@ -196,6 +195,35 @@ class WebsocketService(ABC):
         # survives after being established.
         self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
+
+    # Backs the _websocket property. A class attribute, so the property reads
+    # None before __init__ runs: some subclasses initialize their other bases
+    # first.
+    __websocket: ClientConnection | None = None
+
+    @property
+    def _websocket(self) -> ClientConnection | None:
+        """The connection the service is using, if any.
+
+        Replacing or clearing it aborts the connection it held unless that
+        connection is already closed, so the service never loses track of an
+        open connection. The abort is synchronous: a disconnect cancelled
+        before its close completes still ends the connection when it clears
+        the reference.
+        """
+        return self.__websocket
+
+    @_websocket.setter
+    def _websocket(self, websocket: ClientConnection | None):
+        previous = self.__websocket
+        if (
+            previous is not websocket
+            and isinstance(previous, ClientConnection)
+            and previous.state is not State.CLOSED
+        ):
+            logger.debug(f"{self}: dropping a websocket connection that is still open, aborting it")
+            previous.transport.abort()
+        self.__websocket = websocket
 
     @property
     def _is_service_usable(self) -> bool:
