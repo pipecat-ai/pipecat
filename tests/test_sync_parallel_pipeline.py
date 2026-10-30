@@ -8,11 +8,15 @@ import asyncio
 import unittest
 from dataclasses import dataclass
 
-from pipecat.frames.frames import Frame, TextFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, TextFrame
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import QueuedFrameProcessor, run_test
+from pipecat.workers.runner import WorkerRunner
 
 
 @dataclass
@@ -46,6 +50,29 @@ class EmitTaggedFrameProcessor(FrameProcessor):
             await self.push_frame(TaggedFrame(tag=self._tag))
         else:
             await self.push_frame(frame, direction)
+
+
+async def end_pipeline(pipeline: SyncParallelPipeline, frames: list[Frame]) -> list[Frame]:
+    """Send frames and an EndFrame through the pipeline and return what came out.
+
+    The worker waits for the EndFrame for as long as it takes, so if it doesn't
+    come out the run is ended with a CancelFrame pushed from inside.
+    """
+    head = IdentityFilter()
+    received = asyncio.Queue()
+    sink = QueuedFrameProcessor(queue=received, queue_direction=FrameDirection.DOWNSTREAM)
+    worker = PipelineWorker(Pipeline([head, pipeline, sink]))
+    await worker.queue_frames([*frames, EndFrame()])
+
+    runner = WorkerRunner()
+    await runner.add_workers(worker)
+    run = asyncio.create_task(runner.run())
+    done, _ = await asyncio.wait([run], timeout=2.0)
+    if not done:
+        await head.push_frame(CancelFrame())
+        await run
+
+    return [received.get_nowait() for _ in range(received.qsize())]
 
 
 class TestSyncParallelPipeline(unittest.IsolatedAsyncioTestCase):
@@ -106,6 +133,25 @@ class TestSyncParallelPipeline(unittest.IsolatedAsyncioTestCase):
             "slow",
             "fast",
         ], f"Expected pipeline definition order (slow, fast) in each batch, got {tags}"
+
+    async def test_end_frame_after_pipeline_output(self):
+        """An EndFrame comes out after the output a pipeline pushes when it ends."""
+        pipeline = SyncParallelPipeline([SentenceAggregator()])
+
+        down_frames = await end_pipeline(pipeline, [TextFrame(text="Hello")])
+
+        assert [type(f) for f in down_frames] == [TextFrame, EndFrame]
+
+    async def test_end_frame_after_every_pipeline_output(self):
+        """An EndFrame comes out once, after the output of every pipeline."""
+        for frame_order in FrameOrder:
+            pipeline = SyncParallelPipeline(
+                [IdentityFilter()], [SentenceAggregator()], frame_order=frame_order
+            )
+
+            down_frames = await end_pipeline(pipeline, [TextFrame(text="Hello")])
+
+            assert [type(f) for f in down_frames] == [TextFrame, TextFrame, EndFrame], frame_order
 
     async def test_default_is_arrival(self):
         """The default frame_order should be ARRIVAL."""

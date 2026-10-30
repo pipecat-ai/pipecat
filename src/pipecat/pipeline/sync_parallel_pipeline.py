@@ -284,6 +284,7 @@ class SyncParallelPipeline(BasePipeline):
             return
 
         use_pipeline_order = self._frame_order == FrameOrder.PIPELINE
+        end_frame = frame if isinstance(frame, EndFrame) else None
 
         # The last processor of each pipeline needs to be synchronous otherwise
         # this element won't work. Since we know it should be synchronous we
@@ -305,20 +306,15 @@ class SyncParallelPipeline(BasePipeline):
             await processor.process_frame(frame, direction)
 
             if isinstance(frame, EndFrame):
+                # The EndFrame is pushed once, after every pipeline's output.
                 new_frame = await queue.get()
-                if isinstance(new_frame, EndFrame):
+                while not isinstance(new_frame, EndFrame):
                     if use_pipeline_order:
                         output_frames.append(new_frame)
                     else:
                         await main_queue.put(new_frame)
-                else:
-                    while not isinstance(new_frame, EndFrame):
-                        if use_pipeline_order:
-                            output_frames.append(new_frame)
-                        else:
-                            await main_queue.put(new_frame)
-                        queue.task_done()
-                        new_frame = await queue.get()
+                    queue.task_done()
+                    new_frame = await queue.get()
             else:
                 await processor.process_frame(SyncFrame(), direction)
                 new_frame = await queue.get()
@@ -368,6 +364,9 @@ class SyncParallelPipeline(BasePipeline):
                     await self.push_frame(frame, FrameDirection.DOWNSTREAM)
                     seen_ids.add(frame.id)
                 self._down_queue.task_done()
+
+        if end_frame:
+            await self.push_frame(end_frame, direction)
 
     async def _start_pipelines(self, frame: StartFrame):
         """Start every pipeline, then pass the StartFrame on once it is through all of them."""
