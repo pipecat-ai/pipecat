@@ -1,0 +1,36 @@
+name: Contribution gate
+
+# Closes pull requests from first-time contributors that don't fix an accepted
+# issue, and reopens them once the issue is accepted. See "Pull Request
+# Requirements" in CONTRIBUTING.md and .github/scripts/contribution-gate.js.
+#
+# pull_request_target runs with a write token on pull requests from forks. The
+# job only checks out the base branch and calls the GitHub API; it never runs
+# code from the pull request.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, labeled]
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: contribution-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const gate = require("./.github/scripts/contribution-gate.js");
+            await gate({ github, context, core });
