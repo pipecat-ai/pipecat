@@ -100,6 +100,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-krisp-viva.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-krisp-stt-tts.py
+    scenarios: [scripted/capital_question, scripted/interruption]
   - bot: voice/voice-langchain.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-meta.py
