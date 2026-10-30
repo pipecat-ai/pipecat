@@ -502,3 +502,71 @@ class TestSmallWebRTCTransportNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _answer_audio_codecs(sdp: str) -> list[str]:
+    """Codec names on the answer's audio m-line, in order."""
+    rtpmap = {}
+    payload_types = []
+    for line in sdp.splitlines():
+        if line.startswith("m=audio"):
+            payload_types = line.split()[3:]
+        elif line.startswith("a=rtpmap:"):
+            pt, codec = line[len("a=rtpmap:") :].split(" ", 1)
+            rtpmap[pt] = codec.split("/")[0]
+    return [rtpmap[pt] for pt in payload_types]
+
+
+class TestAudioCodecs(unittest.IsolatedAsyncioTestCase):
+    """``audio_codecs`` restricts and orders the codecs in the answer."""
+
+    async def _answer(self, connection):
+        client, _screen = _browser_like_client()
+        await client.setLocalDescription(await client.createOffer())
+        try:
+            await connection.initialize(
+                sdp=client.localDescription.sdp, type=client.localDescription.type
+            )
+            return connection.get_answer()["sdp"]
+        finally:
+            await connection.disconnect()
+            await client.close()
+
+    async def test_default_keeps_all_offered_codecs(self):
+        sdp = await self._answer(SmallWebRTCConnection())
+        self.assertEqual(_answer_audio_codecs(sdp)[0], "opus")
+        self.assertIn("PCMA", _answer_audio_codecs(sdp))
+
+    async def test_restricts_and_orders_audio_codecs(self):
+        connection = SmallWebRTCConnection(audio_codecs=["PCMA", "PCMU"])
+        sdp = await self._answer(connection)
+        self.assertEqual(_answer_audio_codecs(sdp), ["PCMA", "PCMU"])
+        self.assertEqual(connection.pc.getTransceivers()[0].kind, "audio")
+        self.assertEqual(len(connection.pc.getTransceivers()), 3)
+
+    async def test_codec_names_are_case_insensitive(self):
+        sdp = await self._answer(SmallWebRTCConnection(audio_codecs=["pcmu"]))
+        self.assertEqual(_answer_audio_codecs(sdp), ["PCMU"])
+
+    async def test_preferences_survive_peer_connection_restart(self):
+        client, _screen = _browser_like_client()
+        await client.setLocalDescription(await client.createOffer())
+        connection = SmallWebRTCConnection(audio_codecs=["PCMU"])
+        try:
+            await connection.initialize(
+                sdp=client.localDescription.sdp, type=client.localDescription.type
+            )
+            await connection.renegotiate(
+                sdp=client.localDescription.sdp,
+                type=client.localDescription.type,
+                restart_pc=True,
+            )
+            sdp = connection.get_answer()["sdp"]
+            self.assertEqual(_answer_audio_codecs(sdp), ["PCMU"])
+        finally:
+            await connection.disconnect()
+            await client.close()
+
+    def test_unsupported_codec_raises(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported audio codec 'AMR'"):
+            SmallWebRTCConnection(audio_codecs=["AMR"])
