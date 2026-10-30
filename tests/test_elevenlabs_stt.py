@@ -115,6 +115,7 @@ async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
             language=Language.EN,
             keyterms=["Pipecat", "Scribe V2"],
             vad_threshold=0.7,
+            secondary_languages=["spa", "fra"],
         ),
     )
     service._audio_format = audio_format_from_sample_rate(16000)
@@ -133,6 +134,7 @@ async def test_elevenlabs_realtime_websocket_url_includes_keyterms(monkeypatch):
     assert query["include_timestamps"] == ["true"]
     assert query["vad_threshold"] == ["0.7"]
     assert query["keyterms"] == ["Pipecat", "Scribe V2"]
+    assert query["secondary_languages"] == ["spa", "fra"]
     assert captured["headers"] == {"xi-api-key": "test-key"}
 
 
@@ -215,6 +217,7 @@ async def test_elevenlabs_realtime_websocket_url_omits_unset_filter_background_a
 
     query = parse_qs(urlparse(captured["url"]).query)
     assert "filter_background_audio" not in query
+    assert "secondary_languages" not in query
 
 
 @pytest.mark.asyncio

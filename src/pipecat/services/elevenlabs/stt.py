@@ -210,6 +210,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    secondary_languages: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_background_audio: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -499,6 +500,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             include_timestamps: Whether to include word-level timestamps in transcripts.
             enable_logging: Whether to enable logging on ElevenLabs' side.
             include_language_detection: Whether to include language detection in transcripts.
+            secondary_languages: ISO-639-1 or ISO-639-3 language codes to consider.
         """
 
         language_code: str | None = None
@@ -510,6 +512,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         include_timestamps: bool = False
         enable_logging: bool = False
         include_language_detection: bool = False
+        secondary_languages: list[str] | None = None
 
     def __init__(
         self,
@@ -589,6 +592,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 include_timestamps = params.include_timestamps
                 enable_logging = params.enable_logging
                 include_language_detection = params.include_language_detection
+                default_settings.secondary_languages = params.secondary_languages
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -770,6 +774,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
             if self._settings.language:
                 params.append(f"language_code={self._settings.language}")
+
+            secondary_languages = self._settings.secondary_languages
+            if is_given(secondary_languages) and secondary_languages is not None:
+                for language in secondary_languages:
+                    params.append(urlencode({"secondary_languages": language}))
 
             params.append(f"audio_format={self._audio_format}")
             params.append(f"commit_strategy={self._commit_strategy.value}")
