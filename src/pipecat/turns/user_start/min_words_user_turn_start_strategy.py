@@ -6,6 +6,8 @@
 
 """User turn start strategy based on a minimum number of words spoken by the user."""
 
+import re
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -17,13 +19,26 @@ from pipecat.frames.frames import (
 )
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
+# Chinese and Japanese are written without spaces between words, so each of
+# their characters is counted as a word; CJK punctuation separates words.
+_CJK_CHARS = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+_CJK_CHAR_RE = re.compile(f"[{_CJK_CHARS}]")
+_CJK_SEPARATOR_RE = re.compile(f"[{_CJK_CHARS}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20]")
+
+
+def _count_words(text: str) -> int:
+    """Count the words in a transcript, counting each Chinese or Japanese character as one."""
+    return len(_CJK_CHAR_RE.findall(text)) + len(_CJK_SEPARATOR_RE.sub(" ", text).split())
+
 
 class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
     """User turn start strategy based on a minimum number of words spoken by the user.
 
     This strategy signals the start of a user turn once the user has spoken at
     least a specified number of words, as determined from transcription frames.
-    Optionally, interim transcriptions can be used for earlier detection.
+    Chinese and Japanese are written without spaces, so each of their
+    characters counts as a word. Optionally, interim transcriptions can be used
+    for earlier detection.
 
     """
 
@@ -96,7 +111,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         min_words = self._min_words if self._bot_speaking else 1
 
-        word_count = len(frame.text.split())
+        word_count = _count_words(frame.text)
         should_trigger = word_count >= min_words
         is_interim = isinstance(frame, InterimTranscriptionFrame)
 

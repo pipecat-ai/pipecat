@@ -121,6 +121,58 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
 
+    async def test_bot_speaking_chinese_and_japanese_transcriptions(self):
+        # Chinese and Japanese have no spaces between words, so each character counts as one.
+        strategy = MinWordsUserTurnStartStrategy(min_words=3)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="好的", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="等一下，这辆车的价格是多少？", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+        should_start = None
+        await strategy.handle_user_turn_started()
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(
+            InterimTranscriptionFrame(text="ちょっと待って", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+    async def test_bot_speaking_mixed_cjk_and_latin_transcriptions(self):
+        strategy = MinWordsUserTurnStartStrategy(min_words=3)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        # One ideograph plus one Latin word: two words, below the threshold.
+        await strategy.process_frame(
+            TranscriptionFrame(text="买 iPhone", user_id="cat", timestamp="")
+        )
+        self.assertFalse(should_start)
+
+        # Two ideographs plus one Latin word reach the threshold.
+        await strategy.process_frame(
+            TranscriptionFrame(text="我要iPhone", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
     async def test_bot_not_speaking_transcriptions(self):
         strategy = MinWordsUserTurnStartStrategy(min_words=2)
 
