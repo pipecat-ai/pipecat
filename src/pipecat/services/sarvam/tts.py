@@ -1178,13 +1178,18 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
+        # Each call reads a single connection (reconnects call this again), so the
+        # request ID is logged once per connection rather than on every audio chunk.
+        logged_request_id = None
         async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
-                    request_id = msg.get("data", {}).get("request_id", "N/A")
-                    logger.trace(f"TTS request_id={request_id}, context_id={context_id}")
+                    request_id = msg.get("data", {}).get("request_id")
+                    if request_id and request_id != logged_request_id:
+                        logger.trace(f"{self} TTS request_id={request_id}")
+                        logged_request_id = request_id
 
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
