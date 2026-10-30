@@ -1,0 +1,1 @@
+- Fixed memory leak in `LiveKitTransport` when `audio_in_enabled` is `False`: every subscribed participant's audio was still queued, with nothing reading it.

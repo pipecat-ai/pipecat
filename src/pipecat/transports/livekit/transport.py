@@ -769,12 +769,14 @@ class LiveKitTransportClient:
             # for the same participant.
             await self._close_audio_stream(participant.identity)
             self._audio_tracks[participant.identity] = track
-            audio_stream = rtc.AudioStream(track)
-            task = self._task_manager.create_task(
-                self._process_audio_stream(audio_stream, participant.identity),
-                f"{self}::_process_audio_stream",
-            )
-            self._audio_streams[participant.identity] = (audio_stream, task)
+            # Nothing reads ``_audio_queue`` without audio input.
+            if self._params.audio_in_enabled:
+                audio_stream = rtc.AudioStream(track)
+                task = self._task_manager.create_task(
+                    self._process_audio_stream(audio_stream, participant.identity),
+                    f"{self}::_process_audio_stream",
+                )
+                self._audio_streams[participant.identity] = (audio_stream, task)
             await self._callbacks.on_audio_track_subscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             video_source = _video_source(publication)
