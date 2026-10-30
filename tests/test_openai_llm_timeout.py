@@ -249,7 +249,7 @@ async def test_openai_llm_removes_file_message_on_context_conversion_error():
     never surfaces as an invalid_request_error, but it's just as much
     evidence the file was the problem.
     """
-    from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+    from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
 
     with patch.object(OpenAILLMService, "create_client"):
         service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))

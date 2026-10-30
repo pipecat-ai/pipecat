@@ -617,6 +617,11 @@ class EvalClient:
                 self._refuse("connect_failed", str(frame.exception))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
+        # Before the pipeline runs, so the persona is configured before it can
+        # hear the bot, which may greet as soon as the input transport starts.
+        if self._persona is not None:
+            await self._configure_persona(self._persona.instruction)
+
         runner = WorkerRunner()
         await runner.add_workers(self._worker)
         self._run_task = asyncio.create_task(runner.run())
@@ -807,21 +812,6 @@ class EvalClient:
         self._trace.log("discard: bot speech held in its open turn before the interrupting send")
         await self._bot_turns.reset()
 
-    async def configure_persona(self, instruction: str) -> None:
-        """Give the persona LLM its instruction, and say whether its replies are spoken.
-
-        In text mode a reply goes to the bot as text; in audio mode the user TTS
-        speaks it.
-
-        Args:
-            instruction: The persona's system instruction.
-        """
-        assert self._sink is not None  # pipeline built before any send
-        await self._sink.inject(
-            LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=instruction))
-        )
-        await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
-
     async def hang_up(self) -> None:
         """End the persona's part of the conversation: it answers nothing more."""
         assert self._persona is not None
@@ -835,6 +825,14 @@ class EvalClient:
         """
         assert self._relay is not None  # pipeline built before the persona replies
         await self._relay.end_call(event)
+
+    async def _configure_persona(self, instruction: str) -> None:
+        """Give the persona LLM its instruction, and say whether its replies are spoken or sent as text."""
+        assert self._sink is not None  # pipeline built before the persona is configured
+        await self._sink.inject(
+            LLMUpdateSettingsFrame(delta=LLMSettings(system_instruction=instruction))
+        )
+        await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
 
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
@@ -918,6 +916,7 @@ class EvalClient:
             # Before bot-ready a close is a refusal, such as Pipecat Cloud's
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
+            self._stream.bot_ended()
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport

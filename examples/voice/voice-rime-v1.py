@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Run a voice bot with Rime WebSocket v1 binary streaming."""
+"""Run a voice bot with Rime WebSocket v1 binary streaming.
+
+Set ``model="coda"`` or ``model="mistv3"`` in the TTS settings to select the
+public endpoint. For a custom deployment, also pass ``websocket_url`` to the service.
+"""
 
 import os
 
@@ -67,6 +71,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     tts = RimeV1TTSService(
         api_key=os.environ["RIME_API_KEY"],
         settings=RimeV1TTSService.Settings(
+            model="coda",
             voice="astra",
         ),
     )

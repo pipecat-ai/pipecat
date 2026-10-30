@@ -13,11 +13,12 @@ reply across its segments, the any-order matching of a turn's function calls,
 and the inverted ``absent:`` check.
 """
 
+import re
 import time
 
 from loguru import logger
 
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
@@ -98,6 +99,9 @@ class ExpectationMatcher:
             TimeoutError: When no matching event arrives at all (so the caller
                 can report "no matching event arrived"). A response that arrives
                 but never satisfies the content check returns a failure instead.
+            EvalBotEndedError: When the bot ends the call before the expectation
+                is met. An ``absent:`` expectation is met instead, since the
+                event can no longer arrive.
         """
         deadline = anchor + (budget_ms / 1000.0)
         self.last_match_text = ""
@@ -190,6 +194,9 @@ class ExpectationMatcher:
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
             if status == "pass":
+                unmatched = self._text_unmatched(aggregate, expectation, turn_idx, exp_idx)
+                if unmatched is not None:
+                    return unmatched
                 self.last_match_text = aggregate
                 self._last_match_at = time.monotonic()
                 return None
@@ -220,7 +227,7 @@ class ExpectationMatcher:
             until = min(deadline, time.monotonic() + JUDGE_NO_GRACE_S)
         try:
             return await self._stream.next_event(event_type, until, since=since)
-        except TimeoutError:
+        except (TimeoutError, EvalBotEndedError):
             return None
 
     def _unsatisfied(
@@ -267,6 +274,9 @@ class ExpectationMatcher:
             except TimeoutError:
                 # The quiet window held: absence confirmed.
                 self.last_match_text = f"no {expectation.event!r} for {budget_ms}ms"
+                return None
+            except EvalBotEndedError:
+                self.last_match_text = f"no {expectation.event!r} before the bot ended the call"
                 return None
             if expectation.event == "response" and not self._reply_began_after_last_match():
                 self._trace.log(
@@ -445,6 +455,9 @@ class ExpectationMatcher:
         excluded = self._text_excluded(self._event_text(event), expectation, turn_idx, exp_idx)
         if excluded is not None:
             return excluded
+        unmatched = self._text_unmatched(self._event_text(event), expectation, turn_idx, exp_idx)
+        if unmatched is not None:
+            return unmatched
         if expectation.marker is not None:
             kind = event.get("kind")
             wanted = (
@@ -579,6 +592,21 @@ class ExpectationMatcher:
             f"text {content.strip()!r} contains {expectation.text_excludes!r}",
             "text_present",
         )
+
+    def _text_unmatched(
+        self, content: str, expectation: EvalExpectation, turn_idx: int, exp_idx: int
+    ) -> EvalAssertionFailure | None:
+        """The failure for the first ``text_matches`` pattern ``content`` misses, else ``None``."""
+        for pattern in expectation.text_matches or []:
+            if not re.search(pattern, content):
+                return self._failure(
+                    expectation,
+                    turn_idx,
+                    exp_idx,
+                    f"text {content.strip()[:200]!r} does not match {pattern!r}",
+                    "text_unmatched",
+                )
+        return None
 
     def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring spacing."""

@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import os
+import ssl
 from collections.abc import Callable
 
 import httpx
@@ -267,6 +268,28 @@ class TestOpenAIDecisionsClient:
 
         with pytest.raises(ClassifierError, match="failed"):
             await client.ask("a", PREDICATE)
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_broken_tls_connection_is_an_error(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise ssl.SSLError("bad record mac")
+
+        client = _client(handler)
+
+        with pytest.raises(ClassifierError, match="failed"):
+            await client.ask("a", PREDICATE)
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_broken_tls_connection_at_connect_is_an_error(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise ssl.SSLError("bad record mac")
+
+        client = _client(handler)
+
+        with pytest.raises(ClassifierError, match="could not connect"):
+            await client.connect()
         await client.close()
 
     @pytest.mark.asyncio

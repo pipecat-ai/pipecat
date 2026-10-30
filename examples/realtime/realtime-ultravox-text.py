@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy

@@ -1,0 +1,260 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""OpenAI Realtime LLM adapter for Pipecat."""
+
+import copy
+import json
+from dataclasses import dataclass
+from typing import Any, TypedDict, cast
+
+from loguru import logger
+
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
+from pipecat.services.openai.realtime import events
+
+
+class OpenAIRealtimeLLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking OpenAI Realtime API.
+
+    This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
+    """
+
+    system_instruction: str | None
+    messages: list[events.ConversationItem]
+    tools: list[dict[str, Any]]
+
+
+class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
+    """LLM adapter for OpenAI Realtime API function calling.
+
+    Converts Pipecat's tool schemas into the specific format required by
+    OpenAI's Realtime API for function calling capabilities.
+    """
+
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for OpenAI Realtime."""
+        return "openai-realtime"
+
+    async def get_llm_invocation_params(
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: str | None = None,
+        service_tools: Any = None,
+    ) -> OpenAIRealtimeLLMInvocationParams:
+        """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
+
+        The ``tools`` returned are the set the session should carry: the
+        context's own when it has any, else the init-provided ones. Built-in
+        tools ride along with whichever set is in use, and are the set when
+        there is neither.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings.
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them: a ``ToolsSchema`` or a
+                provider-native tool list, or ``None``.
+
+        Returns:
+            Dictionary of parameters for invoking OpenAI Realtime's API.
+        """
+        messages = self._from_universal_context_messages(self.get_messages(context))
+        effective_system = self._resolve_system_instruction(
+            messages.system_instruction,
+            system_instruction,
+            discard_context_system=True,
+        )
+        return {
+            "system_instruction": effective_system,
+            "messages": messages.messages,
+            "tools": self._realtime_session_tools(context.tools, service_tools) or [],
+        }
+
+    def get_messages_for_logging(self, context) -> list[dict[str, Any]]:
+        """Get messages from a universal LLM context in a format ready for logging about OpenAI Realtime.
+
+        Binary data (images, audio) is replaced with short placeholders.
+
+        This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages in a format ready for logging about OpenAI Realtime.
+        """
+        return cast(list[dict[str, Any]], self.get_messages(context, truncate_large_values=True))
+
+    @dataclass
+    class ConvertedMessages:
+        """Container for OpenAI-formatted messages converted from universal context."""
+
+        messages: list[events.ConversationItem]
+        system_instruction: str | None = None
+
+    def _from_universal_context_messages(
+        self, universal_context_messages: list[LLMContextMessage]
+    ) -> ConvertedMessages:
+        # We can't load a long conversation history into the openai realtime api yet. (The API/model
+        # forgets that it can do audio, if you do a series of `conversation.item.create` calls.) So
+        # our general strategy until this is fixed is just to put everything into a first "user"
+        # message as a single input.
+
+        if not universal_context_messages:
+            return self.ConvertedMessages(messages=[])
+
+        # NOTE: This adapter does not yet handle ``LLMSpecificMessage`` — those
+        # are filtered out below. Other adapters (e.g. Anthropic) dispatch
+        # LLMSpecific items through a per-provider passthrough. For OpenAI
+        # Realtime, the strategy here packs a multi-message history into a
+        # single text message (see comment further down), which doesn't
+        # compose with opaque per-provider payloads. If/when this adapter
+        # adopts the per-message strategy, LLMSpecific items can flow
+        # through `_from_universal_context_message` like in other adapters.
+        messages: list[dict[str, Any]] = [
+            cast(dict[str, Any], m)
+            for m in copy.deepcopy(universal_context_messages)
+            if isinstance(m, dict)
+        ]
+        system_instruction = None
+
+        # If we have a "system" message as our first message,
+        # pull that out into session "instructions"
+        if messages and messages[0].get("role") == "system":
+            self._warn_context_system_message()
+            system = messages.pop(0)
+            content = system.get("content")
+            if isinstance(content, str):
+                system_instruction = content
+            elif isinstance(content, list):
+                system_instruction = content[0].get("text")
+            if not messages:
+                return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
+
+        # Convert any remaining "system"/"developer" messages to "user"
+        for msg in messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
+
+        # If we have just a single "user" item, we can just send it normally
+        if len(messages) == 1 and messages[0].get("role") == "user":
+            return self.ConvertedMessages(
+                messages=[
+                    self._from_universal_context_message(cast(LLMContextMessage, messages[0]))
+                ],
+                system_instruction=system_instruction,
+            )
+
+        # Otherwise, let's pack everything into a single "user" message with a bit of
+        # explanation for the LLM
+        intro_text = """
+        This is a previously saved conversation. Please treat this conversation history as a
+        starting point for the current conversation."""
+
+        trailing_text = """
+        This is the end of the previously saved conversation. Please continue the conversation
+        from here. If the last message is a user instruction or question, act on that instruction
+        or answer the question. If the last message is an assistant response, simple say that you
+        are ready to continue the conversation."""
+
+        return self.ConvertedMessages(
+            messages=[
+                events.ConversationItem(
+                    role="user",
+                    type="message",
+                    content=[
+                        events.ItemContent(
+                            type="input_text",
+                            text="\n\n".join(
+                                [
+                                    intro_text,
+                                    json.dumps(messages, indent=2, ensure_ascii=False),
+                                    trailing_text,
+                                ]
+                            ),
+                        )
+                    ],
+                )
+            ],
+            system_instruction=system_instruction,
+        )
+
+    def _from_universal_context_message(
+        self, message: LLMContextMessage
+    ) -> events.ConversationItem:
+        # NOTE: ``LLMSpecificMessage`` is not yet handled here — see the
+        # corresponding note in `_from_universal_context_messages`.
+        msg = cast(dict[str, Any], message)
+        if msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, list):
+                content = ""
+                for c in msg.get("content", []):
+                    if c.get("type") == "text":
+                        content += " " + c.get("text")
+                    else:
+                        logger.error(
+                            f"Unhandled content type in context message: {c.get('type')} - {msg}"
+                        )
+            return events.ConversationItem(
+                role="user",
+                type="message",
+                content=[events.ItemContent(type="input_text", text=content)],
+            )
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tc = msg["tool_calls"][0]
+            return events.ConversationItem(
+                type="function_call",
+                call_id=tc["id"],
+                name=tc["function"]["name"],
+                arguments=tc["function"]["arguments"],
+            )
+        raise ValueError(f"Unhandled message type in _from_universal_context_message: {msg}")
+
+    @staticmethod
+    def _to_openai_realtime_function_format(function: FunctionSchema) -> dict[str, Any]:
+        """Convert a function schema to OpenAI Realtime format.
+
+        Args:
+            function: The function schema to convert.
+
+        Returns:
+            Dictionary in OpenAI Realtime function format.
+        """
+        return {
+            "type": "function",
+            "name": function.name,
+            "description": function.description,
+            "parameters": {
+                "type": "object",
+                "properties": function.properties,
+                "required": function.required,
+            },
+        }
+
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
+        """Convert tool schemas to OpenAI Realtime function-calling format.
+
+        Args:
+            tools_schema: The tools schema containing functions to convert.
+
+        Returns:
+            List of function definitions in OpenAI Realtime format.
+        """
+        functions_schema = tools_schema.standard_tools
+        formatted_standard_tools = [
+            self._to_openai_realtime_function_format(func) for func in functions_schema
+        ]
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return formatted_standard_tools + custom_openai_tools

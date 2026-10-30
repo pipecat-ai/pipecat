@@ -3,6 +3,226 @@
   "schema_version": 1,
   "deprecations": [
     {
+      "subject": "pipecat.adapters.base_llm_adapter",
+      "module": "pipecat.adapters.base_llm_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.base_llm_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.base_llm_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/base_llm_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.schemas.direct_function",
+      "module": "pipecat.adapters.schemas.direct_function",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.schemas.direct_function",
+      "message": "Moved to :mod:`pipecat.adapters.llm.schemas.direct_function`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/schemas/direct_function.py"
+    },
+    {
+      "subject": "pipecat.adapters.schemas.function_schema",
+      "module": "pipecat.adapters.schemas.function_schema",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.schemas.function_schema",
+      "message": "Moved to :mod:`pipecat.adapters.llm.schemas.function_schema`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/schemas/function_schema.py"
+    },
+    {
+      "subject": "pipecat.adapters.schemas.tools_schema",
+      "module": "pipecat.adapters.schemas.tools_schema",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.schemas.tools_schema",
+      "message": "Moved to :mod:`pipecat.adapters.llm.schemas.tools_schema`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/schemas/tools_schema.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.anthropic_adapter",
+      "module": "pipecat.adapters.services.anthropic_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.anthropic_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.anthropic_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/anthropic_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.aws_nova_sonic_adapter",
+      "module": "pipecat.adapters.services.aws_nova_sonic_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.aws_nova_sonic_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.aws_nova_sonic_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/aws_nova_sonic_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.azure_voice_live_adapter",
+      "module": "pipecat.adapters.services.azure_voice_live_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.azure_voice_live_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.azure_voice_live_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/azure_voice_live_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.bedrock_adapter",
+      "module": "pipecat.adapters.services.bedrock_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.bedrock_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.bedrock_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/bedrock_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.deepseek_adapter",
+      "module": "pipecat.adapters.services.deepseek_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.deepseek_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.deepseek_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/deepseek_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.gemini_adapter",
+      "module": "pipecat.adapters.services.gemini_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.gemini_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.gemini_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/gemini_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.gemini_live_adapter",
+      "module": "pipecat.adapters.services.gemini_live_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.gemini_live_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.gemini_live_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/gemini_live_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.grok_realtime_adapter",
+      "module": "pipecat.adapters.services.grok_realtime_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.grok_realtime_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.grok_realtime_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/grok_realtime_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.inworld_realtime_adapter",
+      "module": "pipecat.adapters.services.inworld_realtime_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.inworld_realtime_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.inworld_realtime_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/inworld_realtime_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.mistral_adapter",
+      "module": "pipecat.adapters.services.mistral_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.mistral_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.mistral_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/mistral_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.nvidia_omni_adapter",
+      "module": "pipecat.adapters.services.nvidia_omni_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.nvidia_omni_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.nvidia_omni_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/nvidia_omni_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.open_ai_adapter",
+      "module": "pipecat.adapters.services.open_ai_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.open_ai_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.open_ai_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/open_ai_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.open_ai_live_adapter",
+      "module": "pipecat.adapters.services.open_ai_live_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.open_ai_live_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.open_ai_live_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/open_ai_live_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.open_ai_realtime_adapter",
+      "module": "pipecat.adapters.services.open_ai_realtime_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.open_ai_realtime_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.open_ai_realtime_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/open_ai_realtime_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.open_ai_responses_adapter",
+      "module": "pipecat.adapters.services.open_ai_responses_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.open_ai_responses_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.open_ai_responses_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/open_ai_responses_adapter.py"
+    },
+    {
+      "subject": "pipecat.adapters.services.perplexity_adapter",
+      "module": "pipecat.adapters.services.perplexity_adapter",
+      "kind": "module",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.adapters.llm.services.perplexity_adapter",
+      "message": "Moved to :mod:`pipecat.adapters.llm.services.perplexity_adapter`. Will be removed in 2.0.0.",
+      "location": "pipecat/adapters/services/perplexity_adapter.py"
+    },
+    {
       "subject": "ResampyResampler",
       "module": "pipecat.audio.resamplers.resampy_resampler",
       "kind": "class",
@@ -729,6 +949,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "EagerEndOfTurnCancelFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UserTurnResponseCancelFrame",
+      "message": "`EagerEndOfTurnCancelFrame` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `UserTurnResponseCancelFrame` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "EndTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -1241,8 +1472,19 @@
       "deprecated_in": "1.13.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "text_type",
-      "message": "Use ``text_type`` instead. Will be removed in 2.0.0.",
+      "replacement": "output_type",
+      "message": "Use ``output_type`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
+      "subject": "BotOutputMessageData.text_type",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "output_type",
+      "message": "Use ``output_type`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
@@ -3842,6 +4084,17 @@
       "location": "pipecat/services/openrouter/llm.py"
     },
     {
+      "subject": "PerplexityLLMService",
+      "module": "pipecat.services.perplexity.llm",
+      "kind": "class",
+      "deprecated_in": "1.13.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "PerplexityAgentHttpLLMService",
+      "message": "`PerplexityLLMService` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `PerplexityAgentHttpLLMService` instead.",
+      "location": "pipecat/services/perplexity/llm.py"
+    },
+    {
       "subject": "PerplexityLLMService.model",
       "module": "pipecat.services.perplexity.llm",
       "kind": "parameter",
@@ -4513,6 +4766,17 @@
       "location": "pipecat/services/tts_service.py"
     },
     {
+      "subject": "TTSService.text_filters",
+      "module": "pipecat.services.tts_service",
+      "kind": "parameter",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_transforms",
+      "message": "Use ``text_transforms`` instead, with :data:`~pipecat.utils.text.transforms.strip_markdown` in place of :class:`~pipecat.utils.text.markdown_text_filter.MarkdownTextFilter`. Will be removed in 2.0.0.",
+      "location": "pipecat/services/tts_service.py"
+    },
+    {
       "subject": "WebsocketWordTTSService",
       "module": "pipecat.services.tts_service",
       "kind": "class",
@@ -4533,6 +4797,17 @@
       "replacement": "TTSService",
       "message": "`WordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `TTSService` instead.",
       "location": "pipecat/services/tts_service.py"
+    },
+    {
+      "subject": "WebsocketService.send_with_retry",
+      "module": "pipecat.services.websocket_service",
+      "kind": "method",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`WebsocketService.send_with_retry` is deprecated since 1.14.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/services/websocket_service.py"
     },
     {
       "subject": "BaseWhisperSTTService.language",
@@ -4843,14 +5118,25 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "ProcessFrameResult",
+      "module": "pipecat.turns.types",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.turns.user_turn_strategies.StrategyMode",
+      "message": "Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead. Every strategy sees every frame, and a list whose strategies all have to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/types.py"
+    },
+    {
       "subject": "BaseUserTurnStartStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
       "kind": "parameter",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_started",
-      "message": "Use :meth:`trigger_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_started",
+      "message": "Use :meth:`report_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
@@ -4865,14 +5151,25 @@
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
+      "subject": "BaseUserTurnStartStrategy.trigger_user_turn_started",
+      "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_started",
+      "message": "`BaseUserTurnStartStrategy.trigger_user_turn_started` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_started` instead.",
+      "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
       "subject": "BaseUserTurnStopStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
       "kind": "parameter",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_stopped",
-      "message": "Use :meth:`trigger_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_stopped",
+      "message": "Use :meth:`report_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {
@@ -4885,6 +5182,83 @@
       "replacement": "handle_user_turn_started",
       "message": "Use :meth:`handle_user_turn_started` and :meth:`handle_user_turn_stopped` instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_finalized",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "start_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `start_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "cancel_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `cancel_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_stopped",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_stopped` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "DeferredUserTurnStopStrategy",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`DeferredUserTurnStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "deferred",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "function",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`deferred` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "ExternalUserTurnCompletionStopStrategy",
+      "module": "pipecat.turns.user_stop.external_user_turn_completion_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "ExternalUserTurnStopStrategy",
+      "message": "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `ExternalUserTurnStopStrategy` instead.",
+      "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
     },
     {
       "subject": "TaskManager.setup",
@@ -4929,6 +5303,28 @@
       "replacement": "TextType",
       "message": "Use :class:`TextType` instead. Will be removed in 2.0.0.",
       "location": "pipecat/utils/text/base_text_aggregator.py"
+    },
+    {
+      "subject": "BaseTextFilter",
+      "module": "pipecat.utils.text.base_text_filter",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.utils.text.transforms.TextTransform",
+      "message": "Use a :data:`~pipecat.utils.text.transforms.TextTransform` instead: an async ``(text, text_type) -> text`` callable registered with ``text_transforms`` on a TTS service to rewrite what is spoken, or on :class:`~pipecat.processors.aggregators.llm_text_processor.LLMTextProcessor` to rewrite what everything downstream sees. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/base_text_filter.py"
+    },
+    {
+      "subject": "MarkdownTextFilter",
+      "module": "pipecat.utils.text.markdown_text_filter",
+      "kind": "class",
+      "deprecated_in": "1.14.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "strip_markdown",
+      "message": "`MarkdownTextFilter` is deprecated since 1.14.0 and will be removed in 2.0.0. Use `strip_markdown` instead.",
+      "location": "pipecat/utils/text/markdown_text_filter.py"
     },
     {
       "subject": "BaseUIWorker",
