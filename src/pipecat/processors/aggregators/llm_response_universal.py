@@ -780,6 +780,10 @@ class LLMUserAggregator(LLMContextAggregator):
             self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
+        # Whether the paired assistant aggregator ran the LLM during the current
+        # turn without waiting for it, because the user was muted. That run answers
+        # the turn, so an empty turn isn't recovered.
+        self._muted_user_turn_ran_llm = False
         self._user_turn_start_timestamp = ""
         # One-shot guard: whether the first realtime LLM service metadata frame
         # has been handled this session — see _handle_llm_service_metadata.
@@ -1499,6 +1503,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
         self._user_turn_answer_voided = False
+        self._muted_user_turn_ran_llm = False
 
         # Unless the bot is waiting for the user, it's thinking, speaking or
         # running a function call, and the interruption below cancels that.
@@ -1701,6 +1706,13 @@ class LLMUserAggregator(LLMContextAggregator):
             if not await self._maybe_recover_empty_user_turn(interrupted_bot):
                 await self._user_idle_controller.wait_for_user()
 
+    def _muted_user_turn_answered(self):
+        """Note that the paired assistant aggregator ran the LLM during a muted turn.
+
+        Pair-internal: called by :class:`LLMAssistantAggregator`.
+        """
+        self._muted_user_turn_ran_llm = True
+
     async def _maybe_recover_empty_user_turn(
         self, interrupted_bot: bool, *, turn_inference: bool = False
     ) -> bool:
@@ -1731,8 +1743,14 @@ class LLMUserAggregator(LLMContextAggregator):
             return False
 
         # A pending function call result runs the LLM itself, and a muted user
-        # shouldn't be prompted to speak.
-        if self._user_is_muted or self._user_idle_controller.function_calls_in_progress:
+        # shouldn't be prompted to speak. A turn during which the user was muted
+        # may already have been answered by a run the assistant aggregator didn't
+        # hold for it.
+        if (
+            self._user_is_muted
+            or self._muted_user_turn_ran_llm
+            or self._user_idle_controller.function_calls_in_progress
+        ):
             return False
 
         logger.debug(
@@ -1815,7 +1833,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             _paired_user_aggregator: Pair-internal. Back-reference to
                 the paired ``LLMUserAggregator``. The assistant flushes
                 it on ``LLMFullResponseStartFrame`` so the user message
-                lands in context before the assistant turn starts.
+                lands in context before the assistant turn starts, and
+                tells it when a run answers a turn during which the user was
+                muted.
             **kwargs: Additional arguments.
         """
         params = params or LLMAssistantAggregatorParams()
@@ -1840,6 +1860,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks: set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
+        # Whether the user was muted during their current turn. A user muted during
+        # their turn isn't waited for, for the rest of that turn, even once the mute
+        # ends: a held context push runs while they are still speaking.
+        self._user_muted_during_turn: bool = False
         self._bot_speaking: bool = False
 
         # When a function call result arrives while the bot is speaking, we defer the LLM
@@ -1854,6 +1878,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # `run_llm` says. A run that starts meanwhile, such as the one the user's turn
         # brings, settles it: that run sees the context as it stands. A user turn with
         # nothing in it brings no run, so the push stays owed until the next arrival.
+        # A user muted during their turn isn't waited for.
         self._context_push_owed: bool = False
 
         self._assistant_turn_start_timestamp = ""
@@ -1933,6 +1958,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
         self._context_push_owed = False
+
+    @property
+    def _waiting_for_user(self) -> bool:
+        """Whether a context push waits for the user's turn to bring its run."""
+        return self._user_speaking and not self._user_muted_during_turn
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -2016,17 +2046,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_assistant_image_frame(frame)
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
+            self._user_muted_during_turn = False
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
+            self._user_muted_during_turn = False
             await self.push_frame(frame, direction)
+        elif isinstance(frame, UserMuteStartedFrame):
+            # Stays set until the turn ends, even once the mute does.
+            newly_muted = self._user_speaking and not self._user_muted_during_turn
+            if newly_muted:
+                self._user_muted_during_turn = True
+            await self.push_frame(frame, direction)
+            if newly_muted and self._context_push_owed:
+                await self._maybe_push_context()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
-            if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
+            if self._push_context_on_bot_stopped_speaking and not self._waiting_for_user:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, LLMServiceMetadataFrame):
@@ -2141,6 +2181,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         frame = await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
         self._context_push_owed = False
+        # A run during a muted turn isn't held for it, so it answers that turn.
+        if (
+            direction == FrameDirection.UPSTREAM
+            and self._user_speaking
+            and self._user_muted_during_turn
+            and self._paired_user_aggregator is not None
+        ):
+            self._paired_user_aggregator._muted_user_turn_answered()
         return frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
@@ -2156,7 +2204,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self.add_messages(frame.messages)
         if frame.run_llm:
             self._context_push_owed = True
-        if self._context_push_owed and not self._user_speaking:
+        if self._context_push_owed and not self._waiting_for_user:
             await self._maybe_push_context()
         elif self._context_push_owed:
             logger.debug(f"{self}: User is speaking — context frame push owed until the turn ends.")
@@ -2298,7 +2346,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if run_llm:
             self._context_push_owed = True
 
-        if self._context_push_owed and not self._user_speaking:
+        if self._context_push_owed and not self._waiting_for_user:
             await self._maybe_push_context()
 
         # Call the `on_context_updated` callback once the function call result
@@ -2406,7 +2454,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         group_id = function_call.group_id
         del self._function_calls_in_progress[frame.tool_call_id]
 
-        if not frame.run_llm or self._user_speaking:
+        if not frame.run_llm:
             return
 
         # Hold off while siblings from the same LLM response are still running:
@@ -2418,7 +2466,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         ):
             return
 
-        await self._maybe_push_context()
+        self._context_push_owed = True
+        if not self._waiting_for_user:
+            await self._maybe_push_context()
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
