@@ -314,6 +314,56 @@ async def test_soniox_error_code_sets_category(monkeypatch):
     assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
 
 
+def _stream_not_found(stream_id: str) -> dict:
+    return {
+        "stream_id": stream_id,
+        "error_code": 400,
+        "error_type": "invalid_stream_state",
+        "error_message": f"Stream {stream_id} not found. Send a start message first.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_soniox_cancel_crossing_the_stream_end_is_not_an_error(monkeypatch):
+    # The stream ends on Soniox's side as the interruption cancels it: Soniox's
+    # `terminated` is on its way, and the cancel then finds no stream.
+    service = SonioxTTSService(api_key="test-key")
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append(kwargs)
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [{"stream_id": "stream-1", "terminated": True}, _stream_not_found("stream-1")]
+    )
+
+    await service._send_config("stream-1")
+    await service.on_audio_context_interrupted("stream-1")
+    await service._receive_messages()
+
+    assert service._websocket.sent[-1] == {"stream_id": "stream-1", "cancel": True}
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_soniox_stream_not_found_for_a_stream_not_cancelled_is_an_error(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket([_stream_not_found("stream-1")])
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.INVALID_REQUEST]
+
+
 @pytest.mark.asyncio
 async def test_soniox_run_tts_send_failure_yields_error_with_exception(monkeypatch):
     from pipecat.frames.frames import ErrorFrame
