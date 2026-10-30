@@ -1833,6 +1833,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._paired_user_aggregator = _paired_user_aggregator
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
+        # Running calls whose placeholder a thinking reply has seen.
+        self._function_calls_seen_by_thinking: set[str] = set()
+        # Results that arrive while a cascade LLM's response streams wait for it
+        # to end, so they follow its thought in the context: providers such as
+        # Anthropic reject a thought that has content added before it.
+        self._llm_responding: bool = False
+        self._results_held_for_response: list[FunctionCallResultFrame] = []
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
         # Markers seen on LLMMarkerFrames, so a service configured with markers
         # other than the defaults still gets them stripped from transcripts.
@@ -2174,9 +2181,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
+        await self._handle_results_held_for_response()
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
+        await self._handle_results_held_for_response()
         await self._cleanup()
 
     async def _cleanup(self):
@@ -2232,6 +2241,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if self._llm_responding:
+            self._results_held_for_response.append(frame)
+            return
+
         logger.debug(
             f"{self} FunctionCallResultFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
@@ -2321,10 +2334,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         results from ``FunctionCallResultFrame`` directly — so the same push
         is load-bearing for both modes.
         """
-        if self.has_queued_frame(FunctionCallResultFrame) or self.has_queued_frame(
-            LLMMessagesAppendFrame
+        if (
+            self._results_held_for_response
+            or self.has_queued_frame(FunctionCallResultFrame)
+            or self.has_queued_frame(LLMMessagesAppendFrame)
         ):
-            # Another result or append is already queued. Defer the context push
+            # Another result or append is already queued or held. Defer the context push
             # to bundle them all into a single LLM call instead of triggering one
             # inference pass per frame. The push is owed until it happens, so the last
             # frame in the queue makes it whether or not that frame asks to run —
@@ -2370,7 +2385,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         triggers LLM inference when appropriate.
         """
         deferred = self._is_deferred(in_progress_frame)
-        del self._function_calls_in_progress[frame.tool_call_id]
+        self._forget_function_call(frame.tool_call_id)
 
         result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
 
@@ -2395,8 +2410,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Update context with the function call cancellation. An async call is
         # settled with a developer message, the same channel its results use,
         # whether or not the conversation moved on, since the notice says the
-        # call did not complete and asks for the user to be told.
-        if function_call.cancel_on_interruption:
+        # call did not complete and asks for the user to be told. So is a call
+        # a thinking reply has seen (see _is_deferred).
+        if function_call.cancel_on_interruption and not self._is_deferred(function_call):
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
         else:
             self._context.add_message(
@@ -2404,7 +2420,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
         group_id = function_call.group_id
-        del self._function_calls_in_progress[frame.tool_call_id]
+        self._forget_function_call(frame.tool_call_id)
 
         if not frame.run_llm or self._user_speaking:
             return
@@ -2499,6 +2515,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if self._realtime_service_mode:
             await self._realtime_handle_llm_start()
             return
+        self._llm_responding = True
         await self._trigger_assistant_turn_started()
 
     async def _realtime_handle_llm_start(self):
@@ -2523,6 +2540,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if self._realtime_service_mode and self._paired_user_aggregator is not None:
             await self._paired_user_aggregator._realtime_handoff_flush_immediate()
         await self._trigger_assistant_turn_stopped()
+        await self._handle_results_held_for_response()
+
+    async def _handle_results_held_for_response(self):
+        self._llm_responding = False
+        while self._results_held_for_response:
+            await self._handle_function_call_result(self._results_held_for_response.pop(0))
 
     async def _handle_tts_started(self, frame: TTSStartedFrame):
         # If this TTS output will be written to context and we don't already have an
@@ -2616,6 +2639,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # an empty string here for typing purposes.
         self._thought_llm = frame.llm or ""
         self._thought_start_time = time_now_iso8601()
+        if frame.append_to_context:
+            # This reply sees every running call's placeholder.
+            self._function_calls_seen_by_thinking.update(
+                tool_call_id
+                for tool_call_id, in_progress_frame in self._function_calls_in_progress.items()
+                if in_progress_frame is not None
+            )
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
         # Make sure we really have text (spaces count, too!)
@@ -2685,12 +2715,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
         placeholder that is no longer in the context, because the context was
         rebuilt while the call ran, also defers.
 
+        Any call, synchronous or async, also defers once a thinking reply has
+        seen its placeholder: providers such as Anthropic bind that thinking to
+        the placeholder and reject it once the placeholder is rewritten.
+
         Args:
             in_progress_frame: The call's in-progress frame.
 
         Returns:
             True when the result goes into a developer message.
         """
+        if in_progress_frame.tool_call_id in self._function_calls_seen_by_thinking:
+            return True
         if in_progress_frame.cancel_on_interruption:
             return False
         tool_call_id = in_progress_frame.tool_call_id
@@ -2713,6 +2749,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 continue
             return True
         return not after_placeholder
+
+    def _forget_function_call(self, tool_call_id: str):
+        del self._function_calls_in_progress[tool_call_id]
+        self._function_calls_seen_by_thinking.discard(tool_call_id)
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
         for message in self._context.get_messages():
