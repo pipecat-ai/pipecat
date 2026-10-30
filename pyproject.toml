@@ -229,6 +229,8 @@ where = ["src"]
     # Agent-readiness files written by `pipecat init` (AGENTS.md + CLAUDE.md).
     "agent_templates/**/*",
 ]
+# The page `pipecat textflow serve` serves.
+"pipecat.textflow" = ["static/*"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose -n auto"
