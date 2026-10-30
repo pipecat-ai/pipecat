@@ -600,6 +600,10 @@ async def _create_telephony_transport(
             call_sid=call_data["call_id"],
             account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
             auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+            api_key_sid=os.getenv("TWILIO_API_KEY") or None,
+            api_key_secret=os.getenv("TWILIO_API_SECRET") or None,
+            region=os.getenv("TWILIO_REGION") or None,
+            edge=os.getenv("TWILIO_EDGE") or None,
         )
     elif transport_type == "telnyx":
         from pipecat.serializers.telnyx import TelnyxFrameSerializer

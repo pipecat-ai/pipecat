@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.services.google.gemini_live.llm import (
     GeminiLiveLLMService,
     GeminiMediaResolution,

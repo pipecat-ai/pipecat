@@ -43,6 +43,9 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
 | `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
 | `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |
+| `pipeline/llm_with_backend/**`              | `api-reference/server/composite-services/llm-with-backend.mdx` and `pipecat/learn/llm-with-backend.mdx` |
+| `pipeline/service_switcher.py`              | `api-reference/server/composite-services/service-switcher.mdx`                                    |
+| `pipeline/llm_switcher.py`                  | `api-reference/server/composite-services/llm-switcher.mdx`                                         |
 | `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                     |
 | `flows/types.py`                            | `api-reference/pipecat-flows/types.mdx`                                                          |
 | `flows/manager.py`                          | `api-reference/pipecat-flows/flow-manager.mdx`                                                   |

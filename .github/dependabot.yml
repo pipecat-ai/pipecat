@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # The actions every workflow pins by commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # A release that turns out to be compromised is usually caught within
+    # days; a week's wait keeps it out of the jobs that publish to PyPI and
+    # hold the app keys.
+    cooldown:
+      default-days: 7
+    # Minor and patch updates in one pull request; each major on its own.
+    groups:
+      actions:
+        update-types: [minor, patch]

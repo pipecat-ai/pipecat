@@ -89,6 +89,7 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
 
     async def test_aggregated_text_is_handled_once_it_has_gone_through_the_transport(self):
         frame = AggregatedTextFrame(text="hello", text_type="sentence")
+        frame.will_be_spoken = True
         transport = BaseOutputTransport(TransportParams())
 
         await self._push(frame)
@@ -97,8 +98,117 @@ class TestRTVIObserverPushes(unittest.IsolatedAsyncioTestCase):
         await self._push(frame, first_push=False, source=transport)
         self.assertEqual(self.observer._queued_aggregated_text_frames, [frame])
 
+    @staticmethod
+    def _left_out(text, text_type="sentence"):
+        """Text the TTS left out of speech, marked as it marks it."""
+        frame = AggregatedTextFrame(text, text_type)
+        frame.skip_tts = True
+        return frame
+
+    async def test_text_the_tts_left_out_is_sent_without_waiting_for_the_bot_to_speak(self):
+        transport = BaseOutputTransport(TransportParams())
+
+        await self._push(self._left_out("Hello there."), source=transport)
+
+        self.assertEqual(self._sent_outputs(), ["Hello there."])
+
+    async def test_text_the_tts_left_out_waits_behind_text_queued_before_it(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Here it is.", "sentence")
+        spoken.will_be_spoken = True
+
+        await self._push(spoken, source=transport)
+        await self._push(self._left_out("print(1)", "code"), source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is.", "print(1)"])
+
+    async def test_a_transcript_spoken_without_a_tts_service_waits_for_the_bot_to_speak(self):
+        transport = BaseOutputTransport(TransportParams())
+        cut_off = TTSTextFrame("Let me check.", TextType.SENTENCE)
+        transcript = TTSTextFrame("Here it is.", TextType.SENTENCE)
+
+        await self._push(cut_off, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(transcript, source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
+
+    async def test_an_interruption_drops_queued_text_whose_speech_it_cut_off(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Let me check.", "sentence")
+        spoken.will_be_spoken = True
+
+        await self._push(spoken, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(self._left_out("Here it is."), source=transport)
+        await self._push(BotStartedSpeakingFrame())
+
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
+
+    async def test_an_interruption_keeps_queued_text_whose_speech_it_cant_cut_off(self):
+        transport = BaseOutputTransport(TransportParams())
+        spoken = AggregatedTextFrame("Please hold.", "sentence")
+        spoken.will_be_spoken = True
+        spoken.interruptible = False
+
+        await self._push(spoken, source=transport)
+        await self._push(InterruptionFrame())
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Please hold."])
+
+    async def test_bot_output_follows_the_speech_without_speaking_messages(self):
+        self.observer = RTVIObserver(params=RTVIObserverParams(bot_speaking_enabled=False))
+        self.observer.send_rtvi_message = AsyncMock()
+        transport = BaseOutputTransport(TransportParams())
+        cut_off = AggregatedTextFrame("Let me check.", "sentence")
+        cut_off.will_be_spoken = True
+        spoken = AggregatedTextFrame("Here it is.", "sentence")
+        spoken.will_be_spoken = True
+
+        await self._push(cut_off, source=transport)
+        await self._push(InterruptionFrame())
+        await self._push(spoken, source=transport)
+        self.assertEqual(self._sent_outputs(), [])
+
+        await self._push(BotStartedSpeakingFrame())
+        await self._push(BotStoppedSpeakingFrame())
+        self.assertEqual(self._sent_outputs(), ["Here it is."])
+        self.assertEqual([type(m) for m in self._sent_messages()], [RTVI.BotOutputMessage])
+
+    async def test_text_that_isnt_spoken_starts_a_segment(self):
+        transport = BaseOutputTransport(TransportParams())
+        sentence = AggregatedTextFrame("Hello there.", "sentence")
+        sentence.skip_tts = True
+        code = AggregatedTextFrame("print(1)", "code")
+        transcript = TTSTextFrame("Here it is.", TextType.SENTENCE)
+
+        await self._push(BotStartedSpeakingFrame())
+        for frame in (sentence, code, transcript):
+            await self._push(frame, source=transport)
+
+        self.assertEqual(
+            [(d.text, d.spoken_status, d.spoken_progress) for d in self._sent_output_data()],
+            [
+                ("Hello there.", "new", None),
+                ("print(1)", "new", None),
+                ("Here it is.", "new", None),
+            ],
+        )
+
     def _sent_messages(self):
         return [call.args[0] for call in self.observer.send_rtvi_message.await_args_list]
+
+    def _sent_output_data(self):
+        return [m.data for m in self._sent_messages() if isinstance(m, RTVI.BotOutputMessage)]
+
+    def _sent_outputs(self):
+        return [data.text for data in self._sent_output_data()]
 
     async def test_a_user_backchannel_is_sent_as_user_input(self):
         await self._push(UserBackchannelFrame(text="mhm", user_id="user", timestamp="now"))
@@ -244,6 +354,46 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [("new", sentence.id), ("completed", sentence.id)],
         )
 
+    async def test_a_segment_reports_the_modes_of_each_word_as_it_is_spoken(self):
+        segment = self._segment("I'm back", TextType.SENTENCE)
+        first = self._progress(segment, "I'm", " back")
+        first.delivery = ["calm"]
+        second = self._progress(segment, "I'm back", "")
+        second.delivery = ["excited", "emphasis"]
+        await self._push(segment)
+        await self._push(self._word("I'm", segment))
+        await self._push(first)
+        await self._push(self._word("back", segment))
+        await self._push(second)
+
+        self.assertEqual(
+            [(data.spoken_status, data.delivery) for data in self._sent_outputs()],
+            [("new", None), ("in-progress", ["calm"]), ("completed", ["excited", "emphasis"])],
+        )
+
+    async def test_an_expression_sound_is_a_segment_of_its_own_once_performed(self):
+        laugh = TTSTextFrame("laugh", TextType.EXPRESSION_SOUND, context_id="turn")
+        laugh.will_be_spoken = True
+        await self._push(laugh)
+
+        self.assertEqual(
+            [
+                (d.text, d.text_type, d.spoken_status, d.segment_id, d.delivery)
+                for d in self._sent_outputs()
+            ],
+            [("laugh", TextType.EXPRESSION_SOUND, "completed", laugh.id, None)],
+        )
+
+    async def test_text_with_no_words_to_show_is_not_sent(self):
+        # A unit that is only tags, announced and then spoken.
+        segment = self._segment("", TextType.SENTENCE)
+        await self._push(segment)
+        spoken = TTSTextFrame("", TextType.SENTENCE, context_id="turn", raw_text="<<calm>>")
+        spoken.will_be_spoken = True
+        await self._push(spoken)
+
+        self.observer.send_rtvi_message.assert_not_awaited()
+
     async def test_a_skipped_segment_keeps_its_progress_and_words_from_the_client(self):
         status = self._segment("One moment, please.", "status")
         await self._push(status)
@@ -324,7 +474,7 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [RTVI.BotOutputMessage, RTVI.BotTTSTextMessage, RTVI.BotOutputMessage],
         )
         self.assertEqual(
-            [(data.text_type, data.spoken_status) for data in self._sent_outputs()],
+            [(data.output_type, data.spoken_status) for data in self._sent_outputs()],
             [(TextType.BACKCHANNEL, "new"), (TextType.BACKCHANNEL, "in-progress")],
         )
         self.assertEqual(messages[1].data.text, "Mm-hmm,")
@@ -367,6 +517,34 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
 
         self.observer.send_rtvi_message.assert_not_awaited()
         self.assertEqual(self.observer._skipped_segment_ids, set())
+
+    async def test_an_expression_sound_is_sent_as_output_alone(self):
+        # Not as TTS text, which a client takes for words the bot spoke.
+        self._connect_client([2, 3, 0])
+        self.observer._params.tts_raw_text_enabled = True
+        for text, text_type in (
+            ("laugh", TextType.EXPRESSION_SOUND),
+            ("400", TextType.EXPRESSION_PAUSE),
+        ):
+            sound = TTSTextFrame(text, text_type, context_id="turn")
+            sound.will_be_spoken = True
+            await self._push(sound)
+
+        self.assertEqual(
+            [(type(m), m.data.text) for m in self._sent_messages()],
+            [(RTVI.BotOutputMessage, "laugh"), (RTVI.BotOutputMessage, "400")],
+        )
+
+    async def test_an_expression_sound_is_kept_from_older_clients(self):
+        for version in ([2, 2, 0], [1, 4, 0]):
+            with self.subTest(version=version):
+                self._connect_client(version)
+                for text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE):
+                    sound = TTSTextFrame("laugh", text_type, context_id="turn")
+                    sound.will_be_spoken = True
+                    await self._push(sound)
+
+                self.observer.send_rtvi_message.assert_not_awaited()
 
     async def test_a_segment_after_a_backchannel_is_sent_to_older_clients(self):
         self._connect_client([2, 1, 0])

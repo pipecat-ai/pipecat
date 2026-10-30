@@ -15,7 +15,7 @@ uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 # Install pre-commit hooks
 uv run pre-commit install
 
-# Run all tests
+# Run all tests (in parallel, one worker per CPU core; `-n 0` runs them in one process)
 uv run pytest
 
 # Run a single test file
@@ -108,7 +108,9 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 
 - **Interruptions**: Interruptions are usually triggered by a user turn start strategy (e.g. `VADUserTurnStartStrategy`), but any processor can trigger one by calling `await self.broadcast_interruption()`, which broadcasts an `InterruptionFrame` both upstream and downstream. The old `push_interruption_task_frame_and_wait()` is deprecated and delegates to `broadcast_interruption()`.
 
-- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone.
+- **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. Every frame carries an `interruptible` flag, True by default; a frame class such as `EndFrame` or `StopFrame` declares `interruptible: bool = field(default=False, init=False)` to be uninterruptible by default, and setting the flag on a frame before pushing it decides for that frame alone. A frame that must act after the bot speaks, such as a transfer, needs `interruptible = False` on both it and the `TTSSpeakFrame` before it, so the user talking over the bot can't drop either one.
+
+- **Frames are the primary public interface**: Some classes have public methods that do the same work as a frame. When the frame gets the job done, prefer it, and don't add a new method that duplicates it. Use the method only when the work has to happen outside the frame order: a method acts at once, ahead of frames already queued. A method that duplicates a frame says so in its docstring and names the frame.
 
 - **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to execute fast.
 
@@ -136,7 +138,7 @@ Runnable examples live in `examples/multi-worker/` (local handoff, distributed h
 | `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
 | `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`       | User turn management                               |
-| `src/pipecat/adapters/`    | LLM provider adapters (context/tools conversion)   |
+| `src/pipecat/adapters/`    | LLM adapters (`llm/`): context/tools conversion    |
 | `src/pipecat/runner/`      | Development runner (multi-transport bot hosting)   |
 | `src/pipecat/cli/`         | `pipecat` CLI (`init`, `eval`)                     |
 | `src/pipecat/evals/`       | Behavioral eval framework (run via `pipecat eval`) |
@@ -218,6 +220,17 @@ When adding a new service:
 6. Add metrics tracking via `MetricsData` if relevant
 7. Follow the pattern of existing services in `src/pipecat/services/`
 
+### Expression adapters
+
+A TTS service performs expressive conversation's tags through an expression adapter, a `BaseExpressionAdapter` (`src/pipecat/adapters/tts/base_expression_adapter.py`); provider adapters live in `src/pipecat/adapters/tts/services/`. When adding one:
+
+- Add an adapter only for a model that performs sounds, deliveries or emphasis; pauses alone don't qualify. Choose it by model or voice in `get_expression_adapter()`, returning `BaseExpressionAdapter()` for a model that performs none.
+- Declare what the service performs in `ExpressionCapabilities`, by the provider's own names. Where the provider takes free text, set `allows_free_text_delivery` or `allows_free_text_sounds` for that kind instead of listing names.
+- Map each universal name (`ExpressionDelivery`, `ExpressionSound`) the provider names differently in `service_vocabulary`, keyed by members.
+- A name the provider performs that has no universal name gets one in the enums: one spelling per word, an adjective for a delivery and a base word for a sound. Synonyms stay distinct, and sounds that aren't a voice get none. Add the adapter to `ADAPTERS` in `tests/test_universal_names.py`, which checks that every declared voice is reached.
+- Set markup apart from the words with spaces, and have the service report provider markup in its word timestamps as one bracketed word, so word tracking lines up.
+- Add an example in `examples/expressive-conversation/` and an entry in `evals/release/manifest.yaml`.
+
 ## Testing
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
@@ -226,7 +239,7 @@ When adding a new service:
 
 There are two kinds of scenario, told apart by the scenario's keys:
 
-- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
+- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, `text_matches` regular expressions the text must match, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
 - A **simulated** scenario, a simulation for short (`persona:` and `goal:`), lets an LLM play a caller who pursues the goal and hangs up with an `end_call` tool. A judge then reads the whole conversation, the bot's tool calls in place, and decides whether the bot did its job (`success:`, prose) and how each reply scored on the `metrics:`. A judged metric (`criterion`, optionally `min_score`) says what every reply should be and scores the share of turns that satisfied it; a measured one (`measure: turns | duration | words | latency` with `min_value` / `max_value`, or `measure: function_calls` with the `calls` the bot should make, `[]` for none) is computed from the run. A run passes when the goal is met and no metric falls short, and a simulation's `runs` must all pass.
 
 To confirm a behavior while developing:

@@ -6,6 +6,8 @@
 
 """Per-frame bookkeeping for the words a TTS provider reports speaking."""
 
+import re
+
 from loguru import logger
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap
@@ -68,6 +70,7 @@ class WordCompletionTracker:
         tts_text: str,
         llm_text: str | None = None,
         user_facing_text: str | None = None,
+        llm_markup: re.Pattern[str] | None = None,
     ):
         """Initialize the tracker with the frame's three texts.
 
@@ -83,6 +86,8 @@ class WordCompletionTracker:
                 keeps those delimiters in the conversation context.
             user_facing_text: What a client displays -- no tags, no rewrites.
                 Defaults to ``tts_text`` with markup stripped.
+            llm_markup: Tags only ``llm_text`` carries, beyond ``<...>`` markup,
+                which word tracking passes over in it.
         """
         # --- The three texts ---
         self._tts_text = tts_text
@@ -114,7 +119,9 @@ class WordCompletionTracker:
         # is_complete would keep saying False; this flag is the answer instead.
         self._force_completed = False
 
-        self._segment_map = TextSegmentMap(tts_text, self._user_facing_text, llm_text)
+        self._segment_map = TextSegmentMap(
+            tts_text, self._user_facing_text, llm_text, llm_markup=llm_markup
+        )
 
     def add_word_and_check_complete(self, word: str) -> bool:
         """Record one word the TTS provider reported speaking.
@@ -289,8 +296,11 @@ class WordCompletionTracker:
 
         A False answer means the provider dropped an event. Callers ask this
         before adding a word so they can offer it to the next frame instead;
-        adding it anyway force-completes this one.
+        adding it anyway force-completes this one. A frame that is only markup,
+        such as a pause tag, is never reported, so no word belongs to it.
         """
+        if not strip_complete_markup(self._tts_text).strip():
+            return False
         return self._segment_map.word_belongs_current_segment(word)
 
     def suppress_in_context(self) -> bool:

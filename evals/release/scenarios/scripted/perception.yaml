@@ -1,0 +1,47 @@
+name: perception
+
+# Perception, end to end: a producer after the STT reads how each user turn was
+# meant, the user aggregator writes the reading at the head of the user
+# message, and the LLM is taught to read it. Each turn checks that the bot
+# answers what the user meant and never writes the reading into its reply.
+# The words alone often say what the reading does, so these checks catch a
+# reading that misleads the bot or leaks into its reply rather than proving
+# the reading changed it.
+#
+# For a bot with PipelineParams(enable_expressive_conversation=True), a
+# perception producer that reads emotion and sarcasm, and the policy's
+# guidance to apologize to an angry user and answer what a sarcastic one
+# means, such as examples/expressive-conversation/expressive-conversation-tone.py.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  - name: perception
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "Oh great, my flight just got cancelled. Just perfect, exactly what I needed today."
+        expect:
+          - event: llm_response
+            text_excludes: "[emotion"
+          - event: response
+            eval: "the bot understands the user is unhappy that their flight was cancelled and doesn't treat it as good news"
+
+      - user: "This is ridiculous. I've been on hold for an hour and nobody can tell me anything!"
+        expect:
+          - event: llm_response
+            text_excludes: "[emotion"
+          - event: response
+            eval: "the bot acknowledges the user's frustration or apologizes, and offers to help"
+
+      - user: "Okay, thanks. Can you tell me how to rebook?"
+        expect:
+          - event: llm_response
+            text_excludes: "[emotion"
+          - event: response
+            eval: "the bot helps the user rebook, or asks what it needs to, without apologizing again for the user's frustration"

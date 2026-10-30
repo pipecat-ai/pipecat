@@ -147,37 +147,24 @@ def _fragment_type(name: str) -> str:
     return next((part for part in name.split(".") if part in FRAGMENT_TYPES), "other")
 
 
-def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+def _rename_changelog_fragments(
+    sh: Shell, repo_root: Path, branch: str, number: str, added: list[str]
+) -> None:
     """Give a PR's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
     when a branch is committed, and must not guess a number. Once the PR is
-    open its number is known: one follow-up commit renames every fragment the
-    branch adds that does not already carry it — orphans and wrong guesses
-    alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type. Works from the branch as pushed, in a
-    detached worktree, so it needs no local branch and cannot collide with a
-    leftover researcher worktree still holding one.
+    open its number is known: one follow-up commit renames every fragment in
+    ``added`` (the fragments the PR adds) that does not already carry it —
+    orphans and wrong guesses alike — to ``<number>.<type>.md``, with
+    ``.2``/``.3`` counters when a branch adds several of one type. Works from
+    the branch as pushed, in a detached worktree, so it needs no local branch
+    and cannot collide with a leftover researcher worktree still holding one.
     """
-    number = pr_url.rstrip("/").split("/")[-1]
-    if not number.isdigit():
-        return
-    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
-    added = sh.run(
-        "git",
-        "diff",
-        "--name-only",
-        "--diff-filter=A",
-        # Three-dot: only what the branch itself adds, however far main has
-        # moved since the branch was cut.
-        f"{_main_base(sh, repo_root)}...FETCH_HEAD",
-        "--",
-        "changelog/",
-        cwd=repo_root,
-    ).split()
     rename = sorted(p for p in added if not Path(p).name.startswith(f"{number}."))
     if not rename:
         return
+    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
     counters: dict[str, int] = {}
     for path in added:
         if Path(path).name.startswith(f"{number}."):
@@ -250,13 +237,19 @@ def rename_open_pr_fragments(sh: Shell, repo_root: Path, pipecat_repo: str) -> l
         files = json.loads(
             sh.run("gh", "pr", "view", number, "--repo", pipecat_repo, "--json", "files") or "{}"
         ).get("files")
-        fragments = [f["path"] for f in files or [] if f["path"].startswith("changelog/")]
-        if all(Path(p).name.startswith(f"{number}.") for p in fragments):
+        # GitHub lists the PR's files against the current main. This clone's
+        # origin/main can be days old (the digest job checks out the run's
+        # triggering commit), and a diff against it would also claim fragments
+        # other PRs added since.
+        added = [
+            f["path"]
+            for f in files or []
+            if f["path"].startswith("changelog/") and f.get("changeType") == "ADDED"
+        ]
+        if all(Path(p).name.startswith(f"{number}.") for p in added):
             continue
         try:
-            _rename_changelog_fragments(
-                sh, repo_root, head, f"https://github.com/{pipecat_repo}/pull/{number}"
-            )
+            _rename_changelog_fragments(sh, repo_root, head, number, added)
         except RuntimeError as exc:
             skipped.append(f"{head}: fragments not renamed: {exc}")
     return skipped
