@@ -7,22 +7,30 @@
 """AWS Polly text-to-speech service implementation.
 
 This module provides integration with Amazon Polly for text-to-speech synthesis,
-supporting multiple languages, voices, and SSML features.
+supporting multiple languages, voices, SSML features, and per-word timestamps
+from Polly speech marks.
 """
 
+import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
+    StartFrame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
@@ -153,6 +161,10 @@ class AWSPollyTTSService(TTSService):
     Provides text-to-speech synthesis using Amazon Polly with support for
     multiple languages, voices, SSML features, and voice customization
     options including prosody controls.
+
+    With ``word_timestamps`` enabled, the service makes a second Polly call
+    per sentence for word speech marks and emits one timestamped
+    ``TTSTextFrame`` per word. The generative engine has no speech marks.
     """
 
     Settings = AWSPollyTTSSettings
@@ -194,6 +206,7 @@ class AWSPollyTTSService(TTSService):
         region: str | None = None,
         voice_id: str | None = None,
         sample_rate: int | None = None,
+        word_timestamps: bool = False,
         params: InputParams | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -215,6 +228,10 @@ class AWSPollyTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             sample_rate: Audio sample rate. If None, uses service default.
+            word_timestamps: Whether to emit per-word timestamped TTSTextFrames
+                from Polly speech marks. Each sentence then costs a second,
+                concurrent Polly request. Defaults to False, which pushes each
+                sentence as one TTSTextFrame with no timing.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -259,6 +276,8 @@ class AWSPollyTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            # With word timestamps, the base pushes one TTSTextFrame per timed word.
+            push_text_frames=not word_timestamps,
             push_start_frame=True,
             push_stop_frames=True,
             settings=default_settings,
@@ -278,6 +297,17 @@ class AWSPollyTTSService(TTSService):
 
         self._resampler = create_stream_resampler()
 
+        self._word_timestamps = word_timestamps
+        self._warned_generative_untimed = False
+        # Cumulative time offset (seconds) so each sentence's word timestamps
+        # land after the previous sentence on the shared turn timeline. Reset at
+        # the start of the service and on interruption / end of turn.
+        self._cumulative_time = 0.0
+
+        # One Polly client for every sentence, so each request reuses its connection.
+        self._client = None
+        self._client_ctx = None
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -285,6 +315,71 @@ class AWSPollyTTSService(TTSService):
             True, as AWS Polly service supports metrics generation.
         """
         return True
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and open its Polly client.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._client_ctx = self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+            "polly",
+            **self._aws_params,  # pyright: ignore[reportArgumentType]
+        )
+        self._client = await self._client_ctx.__aenter__()
+
+    async def cleanup(self):
+        """Clean up the service and close its Polly client."""
+        await super().cleanup()
+        await self._close_client()
+
+    async def _close_client(self):
+        if self._client_ctx is not None:
+            try:
+                await self._client_ctx.__aexit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"{self}: error closing the Polly client: {e}")
+            self._client_ctx = None
+            self._client = None
+
+    async def start(self, frame: StartFrame):
+        """Start the service.
+
+        Args:
+            frame: The start frame.
+        """
+        await super().start(frame)
+        self._cumulative_time = 0.0
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close its Polly client.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._close_client()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close its Polly client.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._close_client()
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream and reset timing state on interruption or stop.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
+            self._cumulative_time = 0.0
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to AWS Polly language format.
@@ -332,9 +427,60 @@ class AWSPollyTTSService(TTSService):
 
         return ssml
 
+    def _language_is_written_without_spaces(self) -> bool:
+        """Whether the synthesis language joins its words without spaces (Chinese, Japanese)."""
+        language = self._settings.language or ""
+        return language.split("-")[0].lower() in {"cmn", "yue", "ja"}
+
+    async def _fetch_word_marks(self, polly, base_params: dict) -> list[tuple[str, float]]:
+        """Fetch per-word speech marks from Polly for the same utterance.
+
+        Makes a second ``synthesize_speech`` call with ``OutputFormat="json"``
+        and ``SpeechMarkTypes=["word"]``. Polly's ``OutputFormat`` is
+        single-valued, so audio and marks cannot come from one call. The marks
+        arrive as newline-delimited JSON in the ``AudioStream`` body.
+
+        If the request fails or the marks can't be parsed, it returns an empty
+        list so audio is unaffected and the sentence is timed as a whole.
+
+        Args:
+            polly: An open aiobotocore Polly client.
+            base_params: The shared synthesis parameters (Text, VoiceId, etc.).
+
+        Returns:
+            A list of ``(word, start_seconds_within_this_utterance)`` tuples.
+        """
+        marks_params = {**base_params, "OutputFormat": "json", "SpeechMarkTypes": ["word"]}
+        # SampleRate does not apply to JSON marks.
+        marks_params.pop("SampleRate", None)
+        try:
+            response = await polly.synthesize_speech(**marks_params)
+            if "AudioStream" not in response:
+                return []
+            raw = await response["AudioStream"].read()
+            word_times: list[tuple[str, float]] = []
+            for line in raw.splitlines():
+                if not line.strip():
+                    continue
+                mark = json.loads(line)
+                if mark.get("type") == "word":
+                    # A mark's value is a substring of the SSML input, so undo
+                    # the escaping applied in _construct_ssml. Polly reports the
+                    # start time in milliseconds.
+                    word_times.append((unescape(mark["value"]), mark["time"] / 1000.0))
+            return word_times
+        except (BotoCoreError, ClientError, ValueError, KeyError, TypeError) as error:
+            logger.warning(f"{self}: Polly speech marks fetch failed: {error}")
+            return []
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using AWS Polly.
+
+        When word timestamps are enabled, a concurrent second Polly call fetches
+        word speech marks; the parsed timings are fed to the base class via
+        ``add_word_timestamps`` so it can emit one timestamped ``TTSTextFrame``
+        per word, aligned to the audio.
 
         Args:
             text: The text to synthesize into speech.
@@ -343,50 +489,80 @@ class AWSPollyTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
+        ssml = self._construct_ssml(text)
+
+        # Parameters shared by the audio call and the marks call. Both must use
+        # identical Text/Voice/Engine so the word timings line up with the audio.
+        base_params = {
+            "Text": ssml,
+            "TextType": "ssml",
+            "VoiceId": self._settings.voice,
+            "Engine": self._settings.engine,
+            # AWS only supports 8000 and 16000 for PCM. We select 16000.
+            "SampleRate": "16000",
+            "LexiconNames": self._settings.lexicon_names,
+        }
+        # Filter out None values
+        base_params = {k: v for k, v in base_params.items() if v is not None}
+
         try:
-            # Construct the parameters dictionary
-            ssml = self._construct_ssml(text)
-
-            params = {
-                "Text": ssml,
-                "TextType": "ssml",
-                "OutputFormat": "pcm",
-                "VoiceId": self._settings.voice,
-                "Engine": self._settings.engine,
-                # AWS only supports 8000 and 16000 for PCM. We select 16000.
-                "SampleRate": "16000",
-                "LexiconNames": self._settings.lexicon_names,
-            }
-
-            # Filter out None values
-            filtered_params = {k: v for k, v in params.items() if v is not None}
-
-            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
-                "polly",
-                **self._aws_params,  # pyright: ignore[reportArgumentType]
-            ) as polly:
-                response = await polly.synthesize_speech(**filtered_params)  # pyright: ignore[reportGeneralTypeIssues]
-                if "AudioStream" in response:
-                    # Get the streaming body and read it
-                    stream = response["AudioStream"]
-                    audio_data = await stream.read()
-                else:
+            assert self._client is not None
+            polly = self._client
+            marks_task = None
+            if self._word_timestamps:
+                # The marks call runs alongside the audio call, so it adds no latency.
+                if self._settings.engine != "generative":
+                    marks_task = self.create_task(self._fetch_word_marks(polly, base_params))
+                elif not self._warned_generative_untimed:
+                    logger.warning(
+                        f"{self}: the generative engine has no speech marks, so its "
+                        "text is pushed a sentence at a time"
+                    )
+                    self._warned_generative_untimed = True
+            try:
+                audio_params = {**base_params, "OutputFormat": "pcm"}
+                response = await polly.synthesize_speech(**audio_params)  # pyright: ignore[reportGeneralTypeIssues]
+                if "AudioStream" not in response:
                     logger.error(f"{self} No audio stream in response")
                     return
 
-                audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
+                pcm = await response["AudioStream"].read()
+                # Marks carry only start times, so derive the utterance duration
+                # from the PCM length (16-bit mono at 16000 Hz).
+                utterance_seconds = len(pcm) / (16000 * 2)
+
+                audio = await self._resampler.resample(pcm, 16000, self.sample_rate)
 
                 await self.start_tts_usage_metrics(text)
 
-                CHUNK_SIZE = self.chunk_size
-
-                for i in range(0, len(audio_data), CHUNK_SIZE):
-                    chunk = audio_data[i : i + CHUNK_SIZE]
+                # Yield audio first so the first chunk stops TTFB and anchors the
+                # word-timestamp baseline.
+                for i in range(0, len(audio), self.chunk_size):
+                    chunk = audio[i : i + self.chunk_size]
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
-                        yield frame
+                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
 
+                if self._word_timestamps:
+                    word_marks = []
+                    if marks_task is not None:
+                        word_marks = await marks_task
+                        marks_task = None
+                    # Without marks, the sentence is timed as a whole at its start, so
+                    # it still reaches the context as soon as its audio plays.
+                    word_times = [
+                        (word, self._cumulative_time + start) for word, start in word_marks
+                    ] or [(text, self._cumulative_time)]
+                    await self.add_word_timestamps(
+                        word_times,
+                        context_id,
+                        includes_inter_frame_spaces=self._language_is_written_without_spaces(),
+                    )
+                    self._cumulative_time += utterance_seconds
+            finally:
+                # Cancel a marks call still in flight (audio call failed, or the
+                # generator was closed by an interruption).
+                if marks_task is not None:
+                    await self.cancel_task(marks_task)
         except (BotoCoreError, ClientError) as error:
-            error_message = f"AWS Polly TTS error: {str(error)}"
-            yield ErrorFrame(error=error_message)
+            yield ErrorFrame(error=f"AWS Polly TTS error: {str(error)}")
