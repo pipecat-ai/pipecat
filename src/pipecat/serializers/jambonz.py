@@ -33,7 +33,7 @@ class JambonzFrameSerializer(FrameSerializer):
 
     jambonz forks call audio to a WebSocket through the ``listen`` verb, with
     ``bidirectionalAudio`` providing the return path. The wire format differs
-    from the other telephony serializers in three ways:
+    from the other telephony serializers in five ways:
 
     - **Audio has no envelope.** Audio arrives and leaves as raw 16-bit signed
       little-endian mono PCM, not base64 inside a JSON event.
@@ -45,8 +45,12 @@ class JambonzFrameSerializer(FrameSerializer):
     - **The audio geometry is per call.** The verb's ``sampleRate`` and
       ``mixType`` are stated by the server in a JSON preamble sent before any
       audio, so both are read from the connection rather than configured here.
-      Only ``mono`` is handled; ``stereo`` and ``mixed`` carry two channels,
-      which this serializer would misread as mono at twice the rate.
+      Only ``mono`` is handled, and the other two are refused for different
+      reasons. ``stereo`` sends both legs as two interleaved channels, which
+      read as mono would play at double speed with the channels alternating.
+      ``mixed`` is a single channel, so it would be interpreted correctly --
+      but it is both legs summed together, which means it carries the bot's
+      own audio back to it.
     - **The bot can end the call.** Sending ``disconnect`` ends the ``listen``
       verb, after which jambonz runs the verb's ``actionHook`` if it has one
       and otherwise hangs up. No API credentials are involved, unlike Twilio.
@@ -270,10 +274,18 @@ class JambonzFrameSerializer(FrameSerializer):
         if self._mix_type is not None and self._mix_type != "mono":
             if not self._warned_mix_type:
                 self._warned_mix_type = True
+                # The two layouts are unusable for different reasons, and the
+                # reason is what tells someone which knob to turn.
+                why = (
+                    "it is both legs summed into one channel, so it carries the bot's own audio "
+                    "back to it"
+                    if self._mix_type == "mixed"
+                    else "it interleaves two channels, which read as mono plays at double speed "
+                    "with the channels alternating"
+                )
                 logger.warning(
-                    f"Dropping audio: jambonz is sending mixType={self._mix_type!r}, which carries "
-                    "two channels. Set mixType to 'mono' on the listen verb. Interleaved stereo "
-                    "read as mono would play at double speed with the channels alternating."
+                    f"Dropping audio: jambonz is sending mixType={self._mix_type!r} and {why}. "
+                    "Set mixType to 'mono' on the listen verb."
                 )
             return None
 

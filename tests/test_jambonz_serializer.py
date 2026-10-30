@@ -193,16 +193,25 @@ class TestJambonzMixType(unittest.IsolatedAsyncioTestCase):
         frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
         self.assertTrue([f for f in frames if f is not None])
 
-    async def test_a_two_channel_call_is_dropped_rather_than_misread(self):
-        """Interleaved stereo read as mono plays at double speed with the
+    async def test_stereo_is_dropped_rather_than_misread(self):
+        """Two interleaved channels read as mono play at double speed with the
         channels alternating, which is worse than no audio at all."""
-        for mix_type in ("stereo", "mixed"):
-            with self.subTest(mix_type=mix_type):
-                serializer = await self._serializer(mix_type)
-                self.assertEqual(serializer.mix_type, mix_type)
+        serializer = await self._serializer("stereo")
+        self.assertEqual(serializer.mix_type, "stereo")
 
-                frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
-                self.assertEqual([f for f in frames if f is not None], [])
+        frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
+        self.assertEqual([f for f in frames if f is not None], [])
+
+    async def test_mixed_is_dropped_even_though_it_would_decode(self):
+        """`mixed` is a single channel, so it would be interpreted correctly.
+        It is refused because it is both legs summed, so the bot would be fed
+        its own audio -- a different reason from stereo, and the one that is
+        easy to get wrong."""
+        serializer = await self._serializer("mixed")
+        self.assertEqual(serializer.mix_type, "mixed")
+
+        frames = [await serializer.deserialize(audio(FRAME_BYTES)) for _ in range(PUMP)]
+        self.assertEqual([f for f in frames if f is not None], [])
 
 
 class TestJambonzDeserialize(unittest.IsolatedAsyncioTestCase):
