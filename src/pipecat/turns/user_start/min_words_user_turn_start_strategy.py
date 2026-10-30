@@ -6,6 +6,8 @@
 
 """User turn start strategy based on a minimum number of words spoken by the user."""
 
+import time
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -13,6 +15,9 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
     TranscriptionFrame,
 )
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
@@ -25,9 +30,20 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
     least a specified number of words, as determined from transcription frames.
     Optionally, interim transcriptions can be used for earlier detection.
 
+    The minimum applies while the bot is speaking. With ``bot_pending_secs`` it
+    also applies once a response has been requested but before the bot starts
+    speaking, so a single word can't cut off a response that is about to play.
+
     """
 
-    def __init__(self, *, min_words: int, use_interim: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        min_words: int,
+        use_interim: bool = True,
+        bot_pending_secs: float = 0.0,
+        **kwargs,
+    ):
         """Initialize the minimum words bot turn start strategy.
 
         Args:
@@ -35,12 +51,17 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 start of a user turn.
             use_interim: Whether to consider interim transcription frames for
                 earlier detection.
+            bot_pending_secs: How long after a response is requested the bot
+                counts as speaking, covering the LLM and TTS latency before it
+                actually speaks. ``0`` only counts the time the bot is speaking.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._min_words = min_words
         self._use_interim = use_interim
+        self._bot_pending_secs = bot_pending_secs
         self._bot_speaking = False
+        self._response_requested_at: float | None = None
 
     async def handle_user_turn_started(self):
         """Ready the strategy for a new user turn.
@@ -49,6 +70,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         from the single-word interruption threshold.
         """
         self._bot_speaking = False
+        self._response_requested_at = None
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect the start of a user turn.
@@ -63,6 +85,10 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
             await self._handle_bot_started_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking(frame)
+        elif isinstance(frame, (LLMContextFrame, LLMRunFrame)) or (
+            isinstance(frame, LLMMessagesAppendFrame) and frame.run_llm
+        ):
+            self._response_requested_at = time.monotonic()
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
@@ -77,6 +103,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be processed.
         """
         self._bot_speaking = True
+        self._response_requested_at = None
 
     async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
         """Handle bot started speaking frame.
@@ -94,7 +121,11 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Args:
             frame: The transcription frame to be processed.
         """
-        min_words = self._min_words if self._bot_speaking else 1
+        bot_pending = (
+            self._response_requested_at is not None
+            and time.monotonic() - self._response_requested_at < self._bot_pending_secs
+        )
+        min_words = self._min_words if self._bot_speaking or bot_pending else 1
 
         word_count = len(frame.text.split())
         should_trigger = word_count >= min_words
@@ -102,7 +133,8 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         logger.debug(
             f"{self} should_trigger={should_trigger} num_spoken_words={word_count} "
-            f"min_words={min_words} bot_speaking={self._bot_speaking} interim_transcription={is_interim}"
+            f"min_words={min_words} bot_speaking={self._bot_speaking} bot_pending={bot_pending} "
+            f"interim_transcription={is_interim}"
         )
 
         if should_trigger:
