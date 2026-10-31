@@ -10,13 +10,17 @@ import base64
 import copy
 import json
 from typing import TYPE_CHECKING, Any, TypedDict, cast
-from urllib.parse import urlsplit
 
 from loguru import logger
 
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.adapters.llm.services.gemini_adapter import gemini_function_declarations
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE,
+    gemini_function_declarations,
+    gemini_supports_file_url,
+    gemini_text_bookmark_matches,
+)
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -72,10 +76,7 @@ class GeminiInteractionsLLMAdapter(BaseLLMAdapter[GeminiInteractionsLLMInvocatio
 
     def supports_file_url(self, url: str, mime_type: str) -> bool:
         """The Gemini developer API consumes its own Files API URIs; other URLs must be inlined."""
-        hostname = urlsplit(url).hostname or ""
-        return url.startswith("https://") and (
-            hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
-        )
+        return gemini_supports_file_url(url)
 
     async def get_llm_invocation_params(
         self,
@@ -416,7 +417,7 @@ _MODEL_STEP_TYPES = ("model_output", "function_call", "thought")
 
 _STEP_TYPES = ("user_input", "function_result", *_MODEL_STEP_TYPES)
 
-_PLACEHOLDER_SIGNATURE = base64.b64encode(b"skip_thought_signature_validator").decode()
+_PLACEHOLDER_SIGNATURE = base64.b64encode(GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE).decode()
 
 
 def _media_type(mime_type: str) -> str:
@@ -465,11 +466,8 @@ def _bookmark_matches(bookmark: dict[str, Any], step: dict[str, Any]) -> bool:
     if step["type"] != "model_output":
         return False
     if text := bookmark.get("text"):
-        step_text = " ".join("".join(i.get("text", "") for i in step["content"]).split())
-        text = " ".join(text.split())
-        # Either may be a prefix of the other: an interruption cuts the stored
-        # text short, and a signature can arrive with the first chunk of a reply.
-        return bool(step_text) and (text.startswith(step_text) or step_text.startswith(text))
+        step_text = "".join(item.get("text", "") for item in step["content"])
+        return gemini_text_bookmark_matches(text, step_text)
     if (inline_data := bookmark.get("inline_data")) is not None:
         data = getattr(inline_data, "data", None)
         # Matching in conversation order, the size is enough to tell images apart.

@@ -16,6 +16,7 @@ from typing import Any, cast
 from loguru import logger
 
 from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.gemini_adapter import gemini_thought_signature_message
 from pipecat.adapters.llm.services.gemini_interactions_adapter import (
     GeminiInteractionsLLMAdapter,
     GeminiInteractionsLLMInvocationParams,
@@ -568,11 +569,7 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
             LLMMessagesAppendFrame(
                 [
                     self.get_llm_adapter().create_llm_specific_message(
-                        {
-                            "type": "thought_signature",
-                            "signature": _decode_signature(signature),
-                            "bookmark": bookmark,
-                        }
+                        gemini_thought_signature_message(_decode_signature(signature), bookmark)
                     )
                 ]
             )

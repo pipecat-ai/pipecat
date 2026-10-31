@@ -24,7 +24,10 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GeminiLLMAdapter,
+    gemini_thought_signature_message,
+)
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     Frame,
@@ -776,11 +779,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                         LLMMessagesAppendFrame(
                                             [
                                                 self.get_llm_adapter().create_llm_specific_message(
-                                                    {
-                                                        "type": "thought_signature",
-                                                        "signature": part.thought_signature,
-                                                        "bookmark": bookmark,
-                                                    }
+                                                    gemini_thought_signature_message(
+                                                        part.thought_signature, bookmark
+                                                    )
                                                 )
                                             ]
                                         )

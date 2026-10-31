@@ -139,6 +139,66 @@ def _adapt_gemini_schema(schema: Any, notes: set[str]) -> Any:
     return result
 
 
+# Gemini 3 rejects a model turn whose function calls carry no thought
+# signature, which is what a call from another provider (an LLM switched
+# mid-conversation) or one injected by the application looks like. Google
+# documents this placeholder to skip that check; both the Gemini API and
+# Vertex AI accept it, and the SDK encodes it on the wire as it would a
+# real signature.
+GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
+
+
+def gemini_thought_signature_message(
+    signature: bytes | str, bookmark: dict[str, Any]
+) -> dict[str, Any]:
+    """The Google-specific context message that stores a thought signature.
+
+    Every Gemini service stores signatures this way and every Gemini adapter
+    reads them back, so a context carries them between the services.
+
+    Args:
+        signature: The signature, as raw bytes, or as base64 text when it
+            arrived in a form that doesn't decode.
+        bookmark: What the signature arrived with, for putting it back in
+            place: ``{"function_call": <call id>}``, ``{"text": <text>}`` or
+            ``{"inline_data": <Blob>}``.
+
+    Returns:
+        The message, to wrap with the adapter's ``create_llm_specific_message``.
+    """
+    return {"type": "thought_signature", "signature": signature, "bookmark": bookmark}
+
+
+def gemini_text_bookmark_matches(bookmark_text: str, text: str) -> bool:
+    """Whether a thought signature's text bookmark names a reply's text.
+
+    Whitespace is normalized, and either text may be a prefix of the other: an
+    interruption cuts the stored text short, and a signature can arrive with
+    the first chunk of a reply.
+
+    Args:
+        bookmark_text: The text the signature arrived with.
+        text: The text of a reply in the context.
+    """
+    bookmark_text = " ".join(bookmark_text.split())
+    text = " ".join(text.split())
+    return bool(text) and (bookmark_text.startswith(text) or text.startswith(bookmark_text))
+
+
+def gemini_supports_file_url(url: str) -> bool:
+    """Whether the Gemini developer API reads a file URL itself.
+
+    Only its own Files API URIs qualify; other URLs must be inlined.
+
+    Args:
+        url: The file URL.
+    """
+    hostname = urlsplit(url).hostname or ""
+    return url.startswith("https://") and (
+        hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
+    )
+
+
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     """Gemini-specific adapter for Pipecat.
 
@@ -314,10 +374,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         to use instead). Only Vertex reads ``gs://`` directly — see
         :class:`GeminiVertexLLMAdapter`.
         """
-        hostname = urlsplit(url).hostname or ""
-        return url.startswith("https://") and (
-            hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
-        )
+        return gemini_supports_file_url(url)
 
     @dataclass
     class MessageConversionParams:
@@ -753,14 +810,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return merged_messages
 
-    # Gemini 3 rejects a model turn whose function calls carry no thought
-    # signature, which is what a call from another provider (an LLM switched
-    # mid-conversation) or one injected by the application looks like. Google
-    # documents this placeholder to skip that check; both the Gemini API and
-    # Vertex AI accept it, and the SDK encodes it on the wire as it would a
-    # real signature.
-    _PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
-
     def _add_placeholder_thought_signatures(self, messages: list[Content]) -> None:
         """Give function calls in unsigned model turns the placeholder signature.
 
@@ -774,7 +823,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 continue
             for part in message.parts:
                 if getattr(part, "function_call", None):
-                    part.thought_signature = self._PLACEHOLDER_THOUGHT_SIGNATURE
+                    part.thought_signature = GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: list[dict], messages: list[Content]
@@ -880,18 +929,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
     def _thought_signature_text_bookmark_matches_part(self, bookmark_text: str, part: Part) -> bool:
         if hasattr(part, "text") and part.text:
-            # Normalize whitespace for comparison
-            bookmark_text = " ".join(bookmark_text.split())
-            part_text = " ".join(part.text.split())
-            # Check that either:
-            # - the part text is the same as the bookmark text
-            # - a prefix of the bookmark text (in case the part text was truncated due to interruption)
-            # - the bookmark text is a prefix of the part text (in case the bookmark represents just first chunk of multi-chunk text)
-            if (
-                part_text == bookmark_text
-                or bookmark_text.startswith(part_text)
-                or part_text.startswith(bookmark_text)
-            ):
+            if gemini_text_bookmark_matches(bookmark_text, part.text):
                 log_display_text = f"{part.text[:50]}..." if len(part.text) > 50 else part.text
                 logger.trace(f"Thought signature text match: {log_display_text}")
                 return True
