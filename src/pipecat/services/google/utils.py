@@ -158,11 +158,17 @@ async def close_stream(stream: Any) -> None:
 
     Closing is best-effort: ``generateContent``'s stream type only promises
     ``AsyncIterator``, which has no ``aclose()``, and the Interactions API's
-    stream closes with ``close()``.
+    stream closes with ``close()``, which leaves the event generator it reads
+    from open. That generator is closed first, so it is finalized here rather
+    than by the event loop's async generator hooks, which crash under uvloop
+    on Python 3.12+ (MagicStack/uvloop#699).
 
     Args:
         stream: The streamed response.
     """
+    generator = getattr(stream, "generator", None)
+    if generator is not None and hasattr(generator, "aclose"):
+        await generator.aclose()
     for name in ("aclose", "close"):
         close = getattr(stream, name, None)
         if close is not None:
