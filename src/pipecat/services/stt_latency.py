@@ -64,6 +64,8 @@ SMALLEST_TTFS_P99: float = 1.59
 SONIOX_TTFS_P99: float = 0.35
 SPEECHMATICS_TTFS_P99: float = 0.74
 XAI_TTFS_P99: float = 2.14
+# Pipecat turn detection mode (vad_force_turn_endpoint=True), default model.
+ZOOM_AI_TTFS_P99: float = 0.53
 TOGETHER_TTFS_P99: float = 1.00
 
 # These services run locally and should be replaced with measured values

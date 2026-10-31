@@ -22,7 +22,11 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ZOOM_AI_TTFS_P99
 from pipecat.services.zoom_ai import stt as zoom_ai_stt
 from pipecat.services.zoom_ai.stt import ZoomAISTTService
 from pipecat.transcriptions.language import Language
@@ -937,3 +941,104 @@ async def test_refused_handshake_reports_zoom_reason(monkeypatch, body, expected
 
     push_error.assert_awaited_once_with(error_msg=expected, exception=refusal)
     assert connection_errors == [expected.removeprefix("Unable to connect to Zoom Scribe Live: ")]
+
+
+# Pipecat turn detection (vad_force_turn_endpoint=True)
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_turns_off_scribe_vad(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(
+        vad_force_turn_endpoint=True,
+        # Neither the silence length nor ``extra`` can turn Scribe's VAD back on.
+        settings=ZoomAISTTService.Settings(
+            silence_duration_ms=500, extra={"turn_detection": {"silence_duration_ms": 600}}
+        ),
+    )
+
+    await service._connect_websocket()
+
+    assert json.loads(websocket.sent[0])["turn_detection"] == {"type": "none"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vad_force_turn_endpoint", [True, False])
+async def test_vad_stop_commits_only_in_pipecat_mode(monkeypatch, vad_force_turn_endpoint):
+    service = _live(vad_force_turn_endpoint=vad_force_turn_endpoint)
+    service._websocket = _FakeWebsocket()
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    sent = [json.loads(m) for m in service._websocket.sent if isinstance(m, str)]
+    assert (sent == [{"type": "input_audio_buffer.commit"}]) is vad_force_turn_endpoint
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_pushes_the_committed_final_without_turn_frames(monkeypatch):
+    service = _live(vad_force_turn_endpoint=True)
+    service._websocket = _FakeWebsocket(
+        [
+            _event("session.updated"),
+            _event("input_audio_buffer.speech_started", item_id="item_1", audio_start_ms=0),
+            _event("input_audio_buffer.committed", item_id="item_1"),
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="What is the capital of France?",
+                audio_start_ms=0,
+                audio_end_ms=900,
+            ),
+            # Scribe opens its next turn right after the commit.
+            _event("input_audio_buffer.speech_started", item_id="item_2", audio_start_ms=900),
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+    service.request_finalize()  # as the VAD stop's commit does
+
+    await service._receive_messages()
+
+    assert [type(f) for f in frames] == [TranscriptionFrame]
+    assert frames[0].text == "What is the capital of France?"
+    assert service._finalize_pending  # the frame is marked finalized when pushed
+    assert service._can_reconnect  # Scribe's turn events don't hold reconnects
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_skips_an_empty_final(monkeypatch):
+    service = _live(vad_force_turn_endpoint=True)
+    service._websocket = _FakeWebsocket([_event("transcription.completed", transcript="")])
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    assert frames == []
+
+
+def test_pipecat_mode_reports_ttfs_and_keeps_default_turn_strategies():
+    service = _live(vad_force_turn_endpoint=True)
+
+    frame = service.service_metadata_frame()
+
+    assert frame.user_turn_strategies is None
+    assert service.supports_ttfs is True
+    assert frame.ttfs_p99_latency == ZOOM_AI_TTFS_P99
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_sends_no_input_gap_silence(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(vad_force_turn_endpoint=True)
+    started = []
+    monkeypatch.setattr(
+        service, "create_task", lambda coro, name=None: started.append(name) or coro.close()
+    )
+
+    await service._connect()
+
+    assert "receive" in started
+    assert "input_gap" not in started
