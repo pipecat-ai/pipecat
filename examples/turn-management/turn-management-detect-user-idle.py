@@ -11,7 +11,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import LLMContextMessage
+from pipecat.adapters.llm.base_llm_adapter import LLMContextMessage
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (

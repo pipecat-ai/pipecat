@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from sensor import SensorReader, SensorStats
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.evals.transport import EvalTransportParams

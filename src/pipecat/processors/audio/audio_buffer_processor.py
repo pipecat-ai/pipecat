@@ -249,6 +249,10 @@ class AudioBufferProcessor(FrameProcessor):
         Calls audio handlers with any remaining buffered audio before stopping,
         then triggers the ``on_recording_stopped`` event. Does nothing when
         recording is not active.
+
+        Stops at once, so bot audio still queued in the pipeline isn't recorded.
+        To stop after queued audio has played, push an
+        ``AudioBufferStopRecordingFrame`` instead.
         """
         if not self._recording:
             return

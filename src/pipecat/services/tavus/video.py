@@ -10,6 +10,7 @@ This module implements Tavus as a sink transport layer, providing video
 avatar functionality through Tavus's streaming API.
 """
 
+import asyncio
 from dataclasses import dataclass
 
 import aiohttp
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -37,7 +39,9 @@ from pipecat.transports.tavus.transport import (
     TavusCallbacks,
     TavusParams,
     TavusTransportClient,
+    tavus_policy_warning,
 )
+from pipecat.utils.time import nanoseconds_to_seconds
 
 
 @dataclass
@@ -107,6 +111,10 @@ class TavusVideoService(AIService):
         self._client: TavusTransportClient | None = None
         self._transport_ready = False
 
+        # Deliveries waiting for their words to be heard (see _emotion_task_handler).
+        self._emotion_queue: asyncio.Queue[tuple[int | None, list[str] | None]] = asyncio.Queue()
+        self._emotion_task: asyncio.Task | None = None
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Tavus video service.
 
@@ -114,6 +122,8 @@ class TavusVideoService(AIService):
             setup: Frame processor setup configuration.
         """
         await super().setup(setup)
+        if warning := tavus_policy_warning(setup.expression_policy):
+            logger.warning(f"{self}: {warning}")
         callbacks = TavusCallbacks(
             on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,
@@ -225,6 +235,7 @@ class TavusVideoService(AIService):
             return
 
         await self._client.start_send_task()
+        self._create_emotion_task()
 
     async def stop(self, frame: EndFrame):
         """Stop the Tavus video service.
@@ -265,6 +276,10 @@ class TavusVideoService(AIService):
         elif isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSTextFrame):
+            if direction == FrameDirection.DOWNSTREAM:
+                await self._emotion_queue.put((frame.pts, frame.delivery))
+            await self.push_frame(frame, direction)
         elif isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
         elif isinstance(frame, BotStartedSpeakingFrame):
@@ -284,8 +299,39 @@ class TavusVideoService(AIService):
         await self._client.send_interrupt_message()
         await self._client.start_send_task()
 
+        # The words still waiting won't be spoken, so neither is their delivery.
+        await self._cancel_emotion_task()
+        self._create_emotion_task()
+
+    def _create_emotion_task(self):
+        if not self._emotion_task:
+            self._emotion_queue = asyncio.Queue()
+            self._emotion_task = self.create_task(self._emotion_task_handler())
+
+    async def _cancel_emotion_task(self):
+        if self._emotion_task:
+            await self.cancel_task(self._emotion_task)
+            self._emotion_task = None
+
+    async def _emotion_task_handler(self):
+        """Set the replica's emotion as each word is heard.
+
+        The TTS reports words ahead of their audio, and Tavus applies an emotion
+        as it arrives, so each delivery waits until its word's presentation
+        timestamp. A word without one follows the word before it.
+        """
+        while True:
+            pts, delivery = await self._emotion_queue.get()
+            if pts is not None:
+                wait = pts - self.get_clock().get_time()
+                if wait > 0:
+                    await asyncio.sleep(nanoseconds_to_seconds(wait))
+            if self._client:
+                await self._client.update_emotion(delivery)
+
     async def _teardown(self):
         """Gracefully ends the Tavus conversation and cancels the send task."""
+        await self._cancel_emotion_task()
         await self._end_conversation()
         if self._client:
             await self._client.cancel_send_task()

@@ -12,9 +12,9 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 
@@ -1063,11 +1063,11 @@ class Usage(BaseModel):
         output_token_details: Detailed breakdown of output token usage.
     """
 
-    total_tokens: int
-    input_tokens: int
-    output_tokens: int
-    input_token_details: TokenDetails
-    output_token_details: TokenDetails
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    input_token_details: TokenDetails | None = None
+    output_token_details: TokenDetails | None = None
 
 
 class Response(BaseModel):
@@ -1089,11 +1089,11 @@ class Response(BaseModel):
         output_audio_format: The format of output audio.
     """
 
-    id: str
-    object: Literal["realtime.response"]
-    status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
-    status_details: Any
-    output: list[ConversationItem]
+    id: str | None = None
+    object: Literal["realtime.response"] | None = None
+    status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"] | None = None
+    status_details: Any = None
+    output: list[ConversationItem] | None = None
     output_modalities: list[Modality] | None = None
     max_output_tokens: int | Literal["inf"] | None = None
     audio: AudioConfiguration | None = None
@@ -1145,16 +1145,17 @@ def parse_server_event(str):
         str: JSON string containing the server event.
 
     Returns:
-        Parsed server event object of the appropriate type.
+        Parsed server event object of the appropriate type, or ``None`` if the
+        event type has no model here.
 
     Raises:
-        Exception: If the event type is unimplemented or parsing fails.
+        Exception: If parsing fails.
     """
     try:
         event = json.loads(str)
         event_type = event["type"]
         if event_type not in _server_event_types:
-            raise Exception(f"Unimplemented server event type: {event_type}")
+            return None
         return _server_event_types[event_type].model_validate(event)
     except Exception as e:
         raise Exception(f"{e} \n\n{str}")

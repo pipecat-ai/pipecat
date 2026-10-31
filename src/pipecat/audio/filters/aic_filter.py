@@ -16,6 +16,7 @@ Classes:
 """
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 
@@ -26,7 +27,7 @@ from aic_sdk import (
     ProcessorAsync,
     ProcessorConfig,
     ProcessorParameter,
-    # Exported at runtime but absent from aic-sdk 3.0.0's type stub.
+    # Exported at runtime but absent from aic-sdk's type stub.
     set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger
@@ -282,6 +283,7 @@ class AICFilter(BaseAudioFilter):
         self._model = None
         self._processor = None
         self._processor_ctx = None
+        self._pre_process_tap: Callable[[np.ndarray, int], None] | None = None
 
         # Pre-allocated buffers (resized in start() once frames_per_block is known)
         self._in_f32: np.ndarray | None = None
@@ -306,6 +308,23 @@ class AICFilter(BaseAudioFilter):
             return
 
         self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
+
+    def set_pre_process_tap(self, tap: Callable[[np.ndarray, int], None] | None):
+        """Set a callable that receives the input audio before enhancement.
+
+        The filter calls ``tap(block, sample_rate)`` with each float32 block,
+        normalized to the range -1 to +1, before it enhances the block. The
+        filter writes each new block into the same buffer, so the tap must copy
+        the data that it keeps. The filter does not remove the tap when it
+        stops. The caller that sets the tap must also remove it.
+
+        The tap gets no audio when the enhancement processor fails to
+        initialize, because the filter then passes audio through unchanged.
+
+        Args:
+            tap: The callable to call for each block, or None to remove the tap.
+        """
+        self._pre_process_tap = tap
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -461,6 +480,9 @@ class AICFilter(BaseAudioFilter):
             # Reuse input buffer, in-place divide
             np.copyto(self._in_f32, block_i16)
             self._in_f32 /= self._scale
+
+            if self._pre_process_tap is not None:
+                self._pre_process_tap(self._in_f32, self._sample_rate)
 
             out_f32 = await self._processor.process_async(self._in_f32)
 

@@ -123,6 +123,9 @@ class ParallelPipeline(BasePipeline):
             TypeError: If any processor list argument is not actually a list.
         """
         await super().setup(setup)
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
         await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):

@@ -9,6 +9,8 @@ import unittest
 import warnings
 from unittest.mock import patch
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
@@ -21,6 +23,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
@@ -852,6 +855,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_external_strategy(self):
         strategy = ExternalUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(self.task_manager))
 
         should_start = None
 
@@ -879,6 +883,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
+        await strategy.cleanup()
 
     async def test_proposal_finalizes_with_emission_enabled(self):
         strategy = ExternalUserTurnStopStrategy()
@@ -904,11 +909,10 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(params.enable_user_speaking_frames)
         await strategy.cleanup()
 
-    async def test_no_timer_driven_finalization_while_no_turn_is_open(self):
-        """The idle timer must stay quiet between turns.
+    async def test_no_decisions_while_no_turn_is_open(self):
+        """The strategy stays quiet between turns, with wait_for_transcript off too.
 
-        With wait_for_transcript off (how realtime mode configures this
-        strategy) the timer path would otherwise fire on every tick forever.
+        That's how realtime mode configures this strategy.
         """
         strategy = ExternalUserTurnStopStrategy(timeout=0.05, wait_for_transcript=False)
         await strategy.setup(frame_processor_setup(self.task_manager))
@@ -920,11 +924,11 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
             nonlocal fired
             fired += 1
 
-        # Never started a turn: several timer ticks should pass in silence.
+        # Never started a turn: nothing decides.
         await asyncio.sleep(0.3)
         self.assertEqual(fired, 0)
 
-        # Once a turn opens, the timer finalizes it as before.
+        # Once a turn opens, the stop signal ends it.
         await strategy.handle_user_turn_started()
         await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
         self.assertEqual(fired, 1)
@@ -940,7 +944,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         """Finalization from the transcript timeout carries the right flags.
 
         A transcript that arrives after the stop signal closes the turn from
-        the internal timeout, long after the signal that determined whether
+        the transcript timer, long after the signal that determined whether
         emission is suppressed. This ordering happens with services whose
         stop signal and transcript come from independent events; a service
         that pushes the transcript before proposing the stop takes the
@@ -961,7 +965,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.handle_user_turn_started()
 
         # Stop signal first, transcript after: the stop resolves from the
-        # timeout in the strategy's task handler.
+        # transcript timer.
         await strategy.process_frame(UserStartedSpeakingFrame())
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertIsNone(params)
@@ -970,6 +974,90 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.15)
         self.assertIsNotNone(params)
         self.assertFalse(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def _open_turn(self, strategy) -> list:
+        decisions = []
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            decisions.append(params)
+
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.handle_user_turn_started()
+        return decisions
+
+    async def _say(self, strategy, text: str):
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text=text, user_id="", timestamp="now"))
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+    async def test_it_decides_once_while_the_turn_stays_open(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+
+        await self._say(strategy, "Hello!")
+        await asyncio.sleep(0.3)
+
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
+    async def test_speech_the_service_did_not_hear_lets_it_decide_again(self):
+        """VAD hearing a cough clears the controller's decisions, so it decides again after it."""
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Hello!")
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_speech_the_service_heard_waits_for_its_stop(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Hello!")
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 1)
+
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_new_text_after_the_decision_gets_a_decision_of_its_own(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.05)
+        decisions = await self._open_turn(strategy)
+        await self._say(strategy, "Book a flight")
+
+        await strategy.process_frame(
+            TranscriptionFrame(text=" to Boston", user_id="", timestamp="now")
+        )
+        await asyncio.sleep(0.15)
+
+        self.assertEqual(len(decisions), 2)
+        await strategy.cleanup()
+
+    async def test_a_transcription_in_pieces_after_the_stop_gets_one_decision(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=0.1)
+        decisions = await self._open_turn(strategy)
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="Book a flight", user_id="", timestamp="now")
+        )
+        await asyncio.sleep(0.05)
+        await strategy.process_frame(
+            TranscriptionFrame(text=" to Boston", user_id="", timestamp="now")
+        )
+        self.assertEqual(decisions, [])
+
+        await asyncio.sleep(0.2)
+        self.assertEqual(len(decisions), 1)
         await strategy.cleanup()
 
     async def test_subclass_can_delay_finalization(self):
@@ -990,7 +1078,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
                     await self.cancel_task(task)
                 return await super().process_frame(frame)
 
-            async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+            async def report_user_turn_stopped(self, *, enable_user_speaking_frames=None):
                 if self.pending:
                     return
                 self.pending = self.create_task(self._finalize_later(enable_user_speaking_frames))
@@ -998,7 +1086,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
             async def _finalize_later(self, enable_user_speaking_frames):
                 await asyncio.sleep(0.2)
                 self.pending = None
-                await super().trigger_user_turn_stopped(
+                await super().report_user_turn_stopped(
                     enable_user_speaking_frames=enable_user_speaking_frames
                 )
 
@@ -1053,7 +1141,7 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
             strategy = BaseUserTurnStopStrategy(enable_user_speaking_frames=False)
         captured = await self._capture_params(strategy)
 
-        await strategy.trigger_user_turn_stopped()
+        await strategy.report_user_turn_stopped()
         self.assertFalse(captured[0].enable_user_speaking_frames)
 
     async def test_omitting_enable_user_speaking_frames_is_silent(self):
@@ -1062,8 +1150,130 @@ class TestBaseUserTurnStopStrategyDeprecations(unittest.IsolatedAsyncioTestCase)
             strategy = BaseUserTurnStopStrategy()
         captured = await self._capture_params(strategy)
 
-        await strategy.trigger_user_turn_stopped()
+        await strategy.report_user_turn_stopped()
         self.assertTrue(captured[0].enable_user_speaking_frames)
+
+    async def test_an_override_of_the_deprecated_trigger_still_gets_reports(self):
+        with self.assertWarns(DeprecationWarning):
+
+            class OldStopStrategy(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    await super().trigger_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = OldStopStrategy()
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped(enable_user_speaking_frames=False)
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual([p.enable_user_speaking_frames for p in captured], [False])
+
+        # The old method never confirmed a speculation, so a confirmation skips it.
+        await strategy.report_user_turn_stopped(confirms_speculation=True)
+        self.assertEqual(strategy.calls, 1)
+        self.assertTrue(captured[-1].confirms_speculation)
+
+    async def test_a_half_migrated_override_reports_once(self):
+        """An override of the old method that calls the new one through super()."""
+        with self.assertWarns(DeprecationWarning):
+
+            class HalfMigrated(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    await super().report_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = HalfMigrated()
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped(enable_user_speaking_frames=False)
+
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual([p.enable_user_speaking_frames for p in captured], [False])
+
+    async def test_a_half_migrated_override_reports_once_from_its_own_task(self):
+        """As the custom external turn strategy example does after a grace period."""
+        with self.assertWarns(DeprecationWarning):
+
+            class DelayedHalfMigrated(BaseUserTurnStopStrategy):
+                def __init__(self):
+                    super().__init__()
+                    self.calls = 0
+
+                async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames=None):
+                    self.calls += 1
+                    self.create_task(self._report_later(enable_user_speaking_frames))
+
+                async def _report_later(self, enable_user_speaking_frames):
+                    await asyncio.sleep(0.05)
+                    await super().report_user_turn_stopped(
+                        enable_user_speaking_frames=enable_user_speaking_frames
+                    )
+
+        strategy = DelayedHalfMigrated()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        captured = await self._capture_params(strategy)
+
+        await strategy.report_user_turn_stopped()
+        await asyncio.sleep(0.2)
+
+        self.assertEqual(strategy.calls, 1)
+        self.assertEqual(len(captured), 1)
+        await strategy.cleanup()
+
+    async def test_the_deprecated_speculation_methods_still_fire(self):
+        strategy = BaseUserTurnStopStrategy()
+        speculations, cancels = [], []
+
+        @strategy.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(strategy, speculation):
+            speculations.append(speculation)
+
+        @strategy.event_handler("on_user_turn_speculation_cancelled")
+        async def on_user_turn_speculation_cancelled(strategy):
+            cancels.append(None)
+
+        speculation = UserTurnSpeculation("Hello")
+        await strategy.trigger_user_turn_inference_triggered(speculation=speculation)
+        await strategy.trigger_user_turn_speculation_cancelled()
+
+        self.assertEqual(speculations, [speculation])
+        self.assertEqual(cancels, [None])
+
+
+class TestInferenceWithoutSpeculation(unittest.IsolatedAsyncioTestCase):
+    async def test_a_call_without_a_speculation_warns_once_and_is_ignored(self):
+        strategy = BaseUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        fired = []
+
+        @strategy.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(strategy, speculation):
+            fired.append(speculation)
+
+        messages = []
+        sink = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+        try:
+            await strategy.trigger_user_turn_inference_triggered()
+            await strategy.trigger_user_turn_inference_triggered()
+        finally:
+            logger.remove(sink)
+
+        self.assertEqual(fired, [])
+        warned = [m for m in messages if "without a speculation" in m]
+        self.assertEqual(len(warned), 1)
+        await strategy.cleanup()
 
 
 if __name__ == "__main__":
