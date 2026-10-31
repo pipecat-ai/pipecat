@@ -14,6 +14,7 @@ function calling.
 import asyncio
 import json
 import re
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,7 +39,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
@@ -54,6 +55,7 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     import aiobotocore.session
+    from aiobotocore.config import AioConfig
     from botocore.config import Config
     from botocore.exceptions import ClientError, ReadTimeoutError
 except ModuleNotFoundError as e:
@@ -237,10 +239,13 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         # Initialize the AWS Bedrock client
         if not client_config:
-            client_config = Config(
+            client_config = AioConfig(
                 connect_timeout=300,  # 5 minutes
                 read_timeout=300,  # 5 minutes
                 retries={"max_attempts": 3},
+                # aiobotocore drops a connection idle for 12 s, shorter than the gap
+                # between turns; the server closes idle ones well after this.
+                connector_args={"keepalive_timeout": 3600},
             )
 
         self._aws_session = aiobotocore.session.get_session()
@@ -254,6 +259,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             region=aws_region,
         )
         self._aws_params = {**resolved.to_boto_kwargs(), "config": client_config}
+
+        # Opened in setup() and shared by a pipeline's requests, so turns reuse its connections.
+        self._client: Any = None
+        self._client_stack = AsyncExitStack()
 
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
@@ -269,6 +278,38 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             True if metrics generation is supported.
         """
         return True
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and open the Bedrock client its requests share.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._client = await self._client_stack.enter_async_context(
+            self._aws_session.create_client(service_name="bedrock-runtime", **self._aws_params)
+        )
+
+    async def cleanup(self):
+        """Release the Bedrock client at teardown."""
+        await super().cleanup()
+        self._client = None
+        await self._client_stack.aclose()
+
+    @asynccontextmanager
+    async def _bedrock_client(self):
+        """Yield the shared client, or a client for this request outside a pipeline.
+
+        A service that was never set up (e.g. one only used by a classifier) gets no
+        cleanup() call, so it keeps nothing open between requests.
+        """
+        if self._client is not None:
+            yield self._client
+            return
+        async with self._aws_session.create_client(
+            service_name="bedrock-runtime", **self._aws_params
+        ) as client:
+            yield client
 
     def _build_inference_config(self) -> dict[str, Any]:
         """Build inference config with only the parameters that are set.
@@ -350,9 +391,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         # The aiobotocore client is untyped; its methods are created dynamically.
         client: Any
-        async with self._aws_session.create_client(
-            service_name="bedrock-runtime", **self._aws_params
-        ) as client:
+        async with self._bedrock_client() as client:
             # Call Bedrock without streaming
             response = await client.converse(**request_params)
 
@@ -468,6 +507,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         use_completion_tokens_estimate = False
 
         using_noop_tool = False
+        response_stream: Any = None
         # Amazon Nova (v1) models write their reasoning into a text block,
         # wrapped in <thinking> tags, ahead of a tool call. A response can hold
         # several such blocks, so each text block is parsed on its own.
@@ -567,11 +607,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
             self._log_llm_response(context)
 
-            async with self._aws_session.create_client(
-                service_name="bedrock-runtime", **self._aws_params
-            ) as client:
+            async with self._bedrock_client() as client:
                 # Call AWS Bedrock with streaming
                 response = await self._create_converse_stream(client, request_params)
+                response_stream = response["stream"]
 
                 # Process the streaming response. Bedrock emits each tool call as
                 # its own content block, identified by contentBlockIndex, so we key
@@ -730,6 +769,9 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
+            if response_stream is not None:
+                # Releases a stream cut short (interruption); no-op after a full read.
+                response_stream.close()
             # Closes a thought left open by an interrupted or failed stream.
             await self._push_thinking_chunks(thinking_parser.reset())
             if reasoning_index is not None:
