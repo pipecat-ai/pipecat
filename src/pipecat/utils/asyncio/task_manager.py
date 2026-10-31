@@ -198,7 +198,12 @@ class TaskManager(BaseTaskManager):
                 last = tb[-1]
                 logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
-        task = self._loop.create_task(run_coroutine(), context=context or self._context)
+        # An explicitly passed Context() is empty and falsy; only a missing
+        # argument falls back to the manager's default context (#6495).
+        task = self._loop.create_task(
+            run_coroutine(),
+            context=context if context is not None else self._context,
+        )
         task.set_name(name)
 
         def close_unawaited_coroutine(_: asyncio.Task):

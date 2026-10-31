@@ -16,6 +16,22 @@ from pipecat.utils.asyncio.task_manager import TaskManager
 class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
     """Tests for TaskManager.create_task() cancellation handling."""
 
+    async def test_explicit_empty_context_is_honored(self):
+        """An explicitly passed empty Context must not fall back to the
+        caller's or the manager's default context (issue #6495): Context()
+        is falsy, so the old `context or self._context` swallowed it."""
+        from contextvars import Context, ContextVar
+
+        marker = ContextVar("marker_tm_test", default="unset")
+        manager = self._create_task_manager()
+
+        async def read() -> str:
+            return marker.get()
+
+        with_context = Context()
+        task = manager.create_task(read(), "empty-context", context=with_context)
+        self.assertEqual(await task, "unset")
+
     def _create_task_manager(self) -> TaskManager:
         task_manager = TaskManager()
         return task_manager
