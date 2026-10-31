@@ -590,6 +590,30 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
         )
 
+    async def test_words_measure_counts_each_cjk_character(self):
+        chinese = "这是一个比较长的中文回复用来测量字数"
+        metrics = [EvalSimulationMetric("words", measure="words", max_value=10)]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": chinese})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "好"})
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        words = result.metrics[0]
+        self.assertEqual(words.value, float(len(chinese)))
+        self.assertFalse(words.passed)
+        self.assertIn("longest reply", words.reason)
+
     async def test_function_calls_are_checked_against_the_list_the_bot_should_make(self):
         metrics = [
             EvalSimulationMetric(
