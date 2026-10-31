@@ -10,12 +10,11 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
-import asyncio
 import io
 import os
 import re
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union, cast
@@ -41,7 +40,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import stream_with_retry, update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
@@ -659,10 +658,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     async def _stream_response(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         """Yield the model's streamed chunks, re-issuing the request once if it stalls.
 
-        The API client sends the request lazily, when the first chunk is pulled, so a
-        request that is accepted and then produces nothing shows up as a first chunk
-        that never arrives. Re-issuing is safe only up to that point: once a chunk has
-        been yielded, its content is already on its way downstream.
+        The API client sends the request lazily, when the first chunk is pulled, so
+        a stalled request shows up as a first chunk that never arrives.
 
         Args:
             context: The context to generate a response for.
@@ -673,80 +670,18 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Raises:
             TimeoutError: If the stream stalls past the timeout it is bounded by.
         """
-        if self._retry_on_timeout:
-            async with aclosing(
-                self._iter_stream(
-                    await self._stream_content(context),
-                    first_chunk_timeout=self._retry_timeout_secs,
-                )
-            ) as stream:
-                try:
-                    first_chunk = await stream.__anext__()
-                except StopAsyncIteration:
-                    return
-                except (TimeoutError, DeadlineExceeded):
-                    logger.debug(f"{self}: retrying content generation due to timeout")
-                else:
-                    yield first_chunk
-                    async for chunk in stream:
-                        yield chunk
-                    return
-
-        # Either retries are disabled, or the initial attempt timed out.
         async with aclosing(
-            self._iter_stream(
-                await self._stream_content(context),
-                first_chunk_timeout=self._stream_idle_timeout_secs,
+            stream_with_retry(
+                lambda: self._stream_content(context),
+                idle_timeout=self._stream_idle_timeout_secs,
+                retry_timeout=self._retry_timeout_secs,
+                retry_on_timeout=bool(self._retry_on_timeout),
+                timeout_errors=(TimeoutError, DeadlineExceeded),
+                label=str(self),
             )
         ) as stream:
             async for chunk in stream:
                 yield chunk
-
-    async def _iter_stream(
-        self,
-        response: AsyncIterator[GenerateContentResponse],
-        *,
-        first_chunk_timeout: float | None,
-    ) -> AsyncGenerator[GenerateContentResponse, None]:
-        """Yield streamed chunks, giving up if the stream stalls between them.
-
-        A stream that stops producing without closing would otherwise leave the
-        response open indefinitely, since the API client applies no timeout of its
-        own. The timeout covers the gap between chunks rather than the response as
-        a whole, so a slow but healthy stream is never cut short.
-
-        Args:
-            response: The streamed response to consume.
-            first_chunk_timeout: How long to wait for the first chunk. Every later
-                chunk is bounded by ``stream_idle_timeout_secs``.
-
-        Yields:
-            Each chunk of the streamed response.
-
-        Raises:
-            TimeoutError: If the next chunk doesn't arrive in time.
-        """
-        chunks = response.__aiter__()
-        timeout = first_chunk_timeout
-        try:
-            while True:
-                try:
-                    if timeout is None:
-                        chunk = await chunks.__anext__()
-                    else:
-                        chunk = await asyncio.wait_for(chunks.__anext__(), timeout=timeout)
-                except StopAsyncIteration:
-                    return
-                yield chunk
-                timeout = self._stream_idle_timeout_secs
-        finally:
-            # Release the HTTP resources held by a stream we walk away from, whether
-            # that's because it stalled, was interrupted, or is being re-issued.
-            # Closing is best-effort: the client's stream type only promises
-            # AsyncIterator, which has no aclose().
-            aclose = getattr(response, "aclose", None)
-            if aclose is not None:
-                await aclose()
 
     def _handle_finish_reason(self, finish_reason: FinishReason):
         """Log why Gemini stopped generating, when it stopped for a notable reason.
