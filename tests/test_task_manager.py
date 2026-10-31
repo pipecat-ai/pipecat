@@ -23,14 +23,35 @@ class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
         from contextvars import Context, ContextVar
 
         marker = ContextVar("marker_tm_test", default="unset")
-        manager = self._create_task_manager()
+        marker.set("ambient")  # the caller context the pre-fix bug leaked in
 
         async def read() -> str:
             return marker.get()
 
-        with_context = Context()
-        task = manager.create_task(read(), "empty-context", context=with_context)
+        manager = TaskManager()  # no default context
+
+        # Explicit empty override over an ambient value: the pre-fix code ran
+        # the task in the caller's context and read "ambient".
+        task = manager.create_task(read(), "empty-override", context=Context())
         self.assertEqual(await task, "unset")
+
+        # Explicit empty override over a populated manager default: the same
+        # falsy-context fall-through pinned the task to the manager default.
+        populated_default = Context()
+        populated_default.run(marker.set, "manager-default")
+        manager_with_default = TaskManager(context=populated_default)
+        task2 = manager_with_default.create_task(
+            read(), "empty-override-2", context=Context()
+        )
+        self.assertEqual(await task2, "unset")
+
+        # Unchanged behavior: a populated manager default applies when no
+        # override is passed, and a no-default manager still sees the caller
+        # context.
+        task3 = manager_with_default.create_task(read(), "manager-default")
+        self.assertEqual(await task3, "manager-default")
+        task4 = manager.create_task(read(), "no-override")
+        self.assertEqual(await task4, "ambient")
 
     def _create_task_manager(self) -> TaskManager:
         task_manager = TaskManager()
