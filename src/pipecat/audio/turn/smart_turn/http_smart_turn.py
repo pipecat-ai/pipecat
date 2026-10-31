@@ -18,7 +18,9 @@ import aiohttp
 import numpy as np
 from loguru import logger
 
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutException
+from pipecat.metrics.metrics import MetricsData
 
 
 class HttpSmartTurnAnalyzer(BaseSmartTurn):
@@ -48,6 +50,19 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         self._url = url
         self._headers = headers or {}
         self._aiohttp_session = aiohttp_session
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
+        """Analyze the current audio state to determine if turn has ended.
+
+        Returns:
+            Tuple containing the end-of-turn state and optional metrics data
+            from the remote ML service.
+        """
+        # The prediction runs on the model thread, which has no event loop, so
+        # remember the loop that owns the aiohttp session for the request.
+        self._loop = asyncio.get_running_loop()
+        return await super().analyze_end_of_turn()
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
         """Serialize NumPy audio array to bytes for HTTP transmission."""
@@ -108,11 +123,14 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         """Predict end-of-turn using remote HTTP ML service."""
         try:
             serialized_array = self._serialize_array(audio_array)
-            loop = asyncio.get_running_loop()
+            if self._loop is None:
+                raise RuntimeError("analyze_end_of_turn() must run before a prediction")
             future = asyncio.run_coroutine_threadsafe(
-                self._send_raw_request(serialized_array), loop
+                self._send_raw_request(serialized_array), self._loop
             )
             return future.result()
+        except SmartTurnTimeoutException:
+            raise
         except Exception as e:
             logger.error(f"Smart turn prediction failed: {str(e)}")
             # Return an incomplete prediction when a failure occurs
