@@ -23,7 +23,11 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.observers.user_bot_latency_observer import (
+    LatencyBreakdown,
+    TextAggregationBreakdownMetrics,
+    UserBotLatencyObserver,
+)
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -499,6 +503,84 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         conv_id = conv_spans[0].attributes["conversation.id"]
         self.assertIsNotNone(conv_id)
         self.assertGreater(len(conv_id), 0)
+
+    async def test_text_aggregation_on_turn_span(self):
+        """Test that text aggregation is added to the turn span."""
+        _, _, trace_observer, _ = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown(
+            text_aggregation=TextAggregationBreakdownMetrics(
+                processor="CartesiaTTSService#0",
+                start_time=1000.0,
+                duration_secs=0.119,
+            )
+        )
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=2.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertIn("turn.text_aggregation_seconds", turn_spans[0].attributes)
+        self.assertAlmostEqual(
+            turn_spans[0].attributes["turn.text_aggregation_seconds"], 0.119, places=3
+        )
+
+    async def test_no_text_aggregation_when_absent(self):
+        """Test that text aggregation is omitted when not in the breakdown."""
+        _, _, trace_observer, _ = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown()
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=1.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertNotIn("turn.text_aggregation_seconds", turn_spans[0].attributes)
+
+    async def test_user_turn_seconds_on_turn_span(self):
+        """Test that user turn duration is added to the turn span."""
+        _, _, trace_observer, _ = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown(user_turn_secs=0.321)
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=2.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertIn("turn.user_turn_seconds", turn_spans[0].attributes)
+        self.assertAlmostEqual(turn_spans[0].attributes["turn.user_turn_seconds"], 0.321, places=3)
+
+    async def test_no_user_turn_seconds_when_absent(self):
+        """Test that user turn duration is omitted when not in the breakdown."""
+        _, _, trace_observer, _ = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown()
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=1.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertNotIn("turn.user_turn_seconds", turn_spans[0].attributes)
 
 
 if __name__ == "__main__":
