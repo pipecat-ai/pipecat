@@ -601,6 +601,30 @@ class TestFunctionCallHandling(unittest.TestCase):
         # Check that tool result is included
         self.assertIn('TOOL_RESULT[call_123]: {"time": "10:30 AM"}', transcript)
 
+    def test_tool_result_appears_once_in_transcript(self):
+        """Test that a tool result is written to the transcript only once."""
+        messages = [
+            {"role": "user", "content": "What time is it?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'},
+            {"role": "assistant", "content": "It's 10:30 AM"},
+        ]
+
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
+
+        self.assertEqual(transcript.count('{"time": "10:30 AM"}'), 1)
+        self.assertNotIn("TOOL: ", transcript)
+
     def test_no_function_calls(self):
         """Test that summarization works normally without function calls."""
         context = LLMContext()
