@@ -3471,6 +3471,96 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             assistant._require_paired_user_aggregator()
 
+    async def test_realtime_user_forwards_run_and_append_after_initial_context(self):
+        # Realtime mode: the first run pushes the context frame that sets the
+        # service up. Later runs and appends are the application asking the
+        # model to speak (Flows does this on every node switch): they travel on
+        # to the service, which reads appended content, and to the assistant
+        # half, whose upstream context frame completes the turn. The user half
+        # records the appended messages on the way.
+        _, pair = self._build_pair(realtime_service_mode=True)
+        user = pair.user()
+        context = user.context
+
+        frames_to_send = [
+            LLMRunFrame(),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "System: payment received."}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+            LLMRunFrame(),
+            SleepFrame(),
+        ]
+        expected_down_frames = [
+            SpeechControlParamsFrame,
+            LLMContextFrame,
+            LLMMessagesAppendFrame,
+            LLMRunFrame,
+        ]
+        await run_test(
+            Pipeline([user]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(
+            [m["content"] for m in context.get_messages()], ["System: payment received."]
+        )
+
+    async def test_realtime_pair_append_runs_model_once_and_records_message_once(self):
+        # An append that asks to run, after the initial context push, reaches
+        # the assistant half, which pushes the context frame upstream that has
+        # the realtime service answer the appended content. The appended
+        # message is recorded once: the user half added it before forwarding.
+        _, pair = self._build_pair(realtime_service_mode=True)
+        user, assistant = pair
+        context = user.context
+
+        frames_to_send = [
+            LLMRunFrame(),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "System: payment received."}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+        ]
+        await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=frames_to_send,
+            expected_up_frames=[SpeechControlParamsFrame, LLMContextFrame],
+        )
+        self.assertEqual(
+            [m["content"] for m in context.get_messages()], ["System: payment received."]
+        )
+
+    async def test_realtime_assistant_owed_push_made_when_user_stops_speaking(self):
+        # Realtime mode: an append that asks to run while the user speaks is
+        # owed. The user turn brings no run of its own in this mode (the
+        # service answers speech it heard itself, and a locally detected turn
+        # the service did not hear brings nothing), so the end of the turn
+        # makes the owed push.
+        _, pair = self._build_pair(realtime_service_mode=True)
+        assistant = pair.assistant()
+
+        frames_to_send = [
+            UserStartedSpeakingFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "System: payment received."}],
+                run_llm=True,
+            ),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        await run_test(
+            Pipeline([assistant]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=[UserStartedSpeakingFrame, UserStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
