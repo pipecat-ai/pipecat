@@ -58,6 +58,7 @@ from pipecat.transports.smallwebrtc.connection import (  # noqa: E402
 from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
+    RawAudioTrack,
     SmallWebRTCCallbacks,
     SmallWebRTCClient,
     SmallWebRTCTransport,
@@ -502,3 +503,45 @@ class TestSmallWebRTCTransportNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRawAudioTrackPacing(unittest.IsolatedAsyncioTestCase):
+    """RawAudioTrack paces frames in real time without bursting."""
+
+    async def _recv_times(self, track: RawAudioTrack, n: int) -> list[float]:
+        loop = asyncio.get_running_loop()
+        times = []
+        for _ in range(n):
+            await track.recv()
+            times.append(loop.time())
+        return times
+
+    async def test_clock_starts_on_first_recv(self):
+        """Time before the first recv() must not be sent as a burst."""
+        track = RawAudioTrack(sample_rate=16000)
+        await asyncio.sleep(0.2)
+        start = asyncio.get_running_loop().time()
+        await self._recv_times(track, 6)
+        # First frame is immediate, the next 5 are paced at 10ms each.
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - start, 0.045)
+
+    async def test_resyncs_after_stall_instead_of_bursting(self):
+        """After a stall longer than MAX_LAG_SECS, frames stay paced."""
+        track = RawAudioTrack(sample_rate=16000)
+        await track.recv()
+        await asyncio.sleep(0.3)  # the peer stopped pulling for 300ms
+        await track.recv()  # late: delivered immediately and re-anchored
+        start = asyncio.get_running_loop().time()
+        await self._recv_times(track, 5)
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - start, 0.045)
+
+    async def test_frame_timestamps_are_contiguous(self):
+        track = RawAudioTrack(sample_rate=16000)
+        track.add_audio_bytes(b"\x01\x00" * 320)
+        first = await track.recv()
+        await asyncio.sleep(0.3)
+        await track.recv()
+        third = await track.recv()
+        self.assertEqual(first.pts, 0)
+        self.assertEqual(third.pts, 320)
+        self.assertEqual(third.time_base, fractions.Fraction(1, 16000))

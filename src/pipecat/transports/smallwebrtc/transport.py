@@ -101,7 +101,14 @@ class RawAudioTrack(AudioStreamTrack):
 
     Handles audio frame generation and timing for WebRTC transmission,
     supporting queued audio data with proper synchronization.
+
+    The pacing clock starts on the first ``recv()`` call (not at construction)
+    and uses a monotonic clock. If the sender falls behind by more than
+    ``MAX_LAG_SECS`` (e.g. the event loop was blocked), the clock is
+    re-anchored instead of bursting the missed frames out back-to-back.
     """
+
+    MAX_LAG_SECS = 0.1
 
     def __init__(self, sample_rate: int, auto_silence: bool = True):
         """Initialize the raw audio track.
@@ -117,7 +124,9 @@ class RawAudioTrack(AudioStreamTrack):
         self._samples_per_10ms = sample_rate * 10 // 1000
         self._bytes_per_10ms = self._samples_per_10ms * 2  # 16-bit (2 bytes per sample)
         self._timestamp = 0
-        self._start = time.time()
+        # Set on the first recv() so that time spent before the peer starts
+        # pulling frames is not "owed" as a burst of frames.
+        self._start: float | None = None
         # Queue of (bytes, future), broken into 10ms sub chunks as needed
         self._chunk_queue = deque()
 
@@ -154,10 +163,16 @@ class RawAudioTrack(AudioStreamTrack):
             and ``auto_silence`` is True.
         """
         # Compute required wait time for synchronization
-        if self._timestamp > 0:
-            wait = self._start + (self._timestamp / self._sample_rate) - time.time()
+        now = time.monotonic()
+        if self._start is None:
+            self._start = now - self._timestamp / self._sample_rate
+        else:
+            wait = self._start + (self._timestamp / self._sample_rate) - now
             if wait > 0:
                 await asyncio.sleep(wait)
+            elif -wait > self.MAX_LAG_SECS:
+                # Too far behind: re-anchor instead of sending a burst.
+                self._start = now - self._timestamp / self._sample_rate
 
         if not self._chunk_queue:
             if self._auto_silence:
