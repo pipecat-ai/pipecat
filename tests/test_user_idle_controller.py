@@ -6,12 +6,14 @@
 
 import asyncio
 import unittest
-import unittest.mock
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallCancelFrame,
+    FunctionCallFromLLM,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
@@ -197,7 +199,13 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         # Function call starts shortly after, cancels the timer
         await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            )
         )
 
         # Wait longer than timeout — should not fire
@@ -210,7 +218,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         """Test race condition: FunctionCallsStarted arrives before BotStopped.
 
         A race condition can cause FunctionCallsStarted to arrive before
-        BotStoppedSpeaking. The counter guard prevents the timer from starting
+        BotStoppedSpeaking. Pending calls prevent the timer from starting
         while a function call is in progress.
         """
         controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
@@ -225,7 +233,13 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         # LLM emits function call and "let me check" concurrently
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            )
         )
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
@@ -469,7 +483,13 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            )
         )
         await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
 
@@ -538,7 +558,13 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
             idle_triggered = True
 
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            )
         )
         await controller.wait_for_user()
 
@@ -547,6 +573,103 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(idle_triggered)
 
         await controller.cleanup()
+
+    async def test_intermediate_result_keeps_call_pending_after_bot_speech(self):
+        controller = UserIdleController()
+        await controller.setup(frame_processor_setup(self.task_manager))
+        self.addAsyncCleanup(controller.cleanup)
+        await controller.process_frame(
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="search", tool_call_id="real", arguments={}, context=None
+                    )
+                ]
+            )
+        )
+
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="search",
+                tool_call_id="real",
+                arguments={},
+                result="still working",
+                properties=FunctionCallResultProperties(is_final=False),
+            )
+        )
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        self.assertFalse(controller.waiting_for_user)
+
+    async def test_untracked_result_does_not_rearm_waiting(self):
+        controller = UserIdleController()
+        await controller.setup(frame_processor_setup(self.task_manager))
+        self.addAsyncCleanup(controller.cleanup)
+        await controller.process_frame(
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="search", tool_call_id="real", arguments={}, context=None
+                    )
+                ]
+            )
+        )
+
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="cancel_search", tool_call_id="cancel-1", arguments={}, result={}
+            )
+        )
+        await controller.wait_for_user()
+
+        self.assertFalse(controller.waiting_for_user)
+
+    async def test_duplicate_result_keeps_another_call_pending(self):
+        controller = UserIdleController()
+        await controller.setup(frame_processor_setup(self.task_manager))
+        self.addAsyncCleanup(controller.cleanup)
+        await controller.process_frame(
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="search", tool_call_id="first", arguments={}, context=None
+                    ),
+                    FunctionCallFromLLM(
+                        function_name="search", tool_call_id="second", arguments={}, context=None
+                    ),
+                ]
+            )
+        )
+        result = FunctionCallResultFrame(
+            function_name="search", tool_call_id="first", arguments={}, result="done"
+        )
+        await controller.process_frame(result)
+
+        await controller.process_frame(result)
+        await controller.wait_for_user()
+
+        self.assertFalse(controller.waiting_for_user)
+
+    async def test_cancelled_call_allows_waiting_for_user(self):
+        controller = UserIdleController()
+        await controller.setup(frame_processor_setup(self.task_manager))
+        self.addAsyncCleanup(controller.cleanup)
+        await controller.process_frame(
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="search", tool_call_id="real", arguments={}, context=None
+                    )
+                ]
+            )
+        )
+
+        await controller.process_frame(
+            FunctionCallCancelFrame(function_name="search", tool_call_id="real")
+        )
+        await controller.wait_for_user()
+
+        self.assertTrue(controller.waiting_for_user)
 
     async def test_waiting_for_user(self):
         """Test that waiting_for_user follows the bot finishing and the user speaking."""
