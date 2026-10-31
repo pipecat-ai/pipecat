@@ -39,6 +39,12 @@ class NullableModel(BaseModel):
     value: str | None = "default"
 
 
+class UnsetModel(BaseModel):
+    """Metadata model with a nullable field that defaults to null."""
+
+    value: str | None = None
+
+
 class TestExplicitNullRoundTrip(unittest.TestCase):
     """Explicit nulls remain distinct from omitted settings across a network bus."""
 
@@ -69,6 +75,19 @@ class TestExplicitNullRoundTrip(unittest.TestCase):
 
         self.assertIsInstance(restored.frame.metadata["config"], NullableModel)
         self.assertIsNone(restored.frame.metadata["config"].value)
+
+    def test_unset_pydantic_fields_stay_unset(self):
+        frame = TextFrame(text="hello")
+        frame.metadata["unset"] = UnsetModel()
+        frame.metadata["explicit"] = UnsetModel(value=None)
+        message = BusFrameMessage(
+            source="controller", frame=frame, direction=FrameDirection.DOWNSTREAM
+        )
+
+        restored = self.round_trip(message)
+
+        self.assertEqual(restored.frame.metadata["unset"].model_fields_set, set())
+        self.assertEqual(restored.frame.metadata["explicit"].model_fields_set, {"value"})
 
     def test_llm_delta_clears_settings(self):
         delta = LLMSettings(temperature=None, max_tokens=None)

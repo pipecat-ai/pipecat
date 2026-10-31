@@ -103,7 +103,12 @@ class JSONMessageSerializer(MessageSerializer):
         if isinstance(value, BaseModel):
             return {
                 "__type__": f"{type(value).__module__}.{type(value).__name__}",
-                "__data__": {k: self._serialize_value(v) for k, v in value.__dict__.items()},
+                # Skip unset nulls so they stay out of the rebuilt model's `model_fields_set`.
+                "__data__": {
+                    k: self._serialize_value(v)
+                    for k, v in value.__dict__.items()
+                    if v is not None or k in value.model_fields_set
+                },
             }
         if callable(value):
             return None
