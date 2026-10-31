@@ -741,6 +741,11 @@ class LLMUserAggregator(LLMContextAggregator):
         # itself, at which point _handle_llm_service_metadata flips this to True.
         # Explicit True/False force the mode on or off (legacy context writes).
         self._realtime_service_mode = _realtime_service_mode
+        # Realtime mode: a realtime service sets its session up from the first
+        # context frame. After that it keeps the conversation itself, so run
+        # requests and appends travel on to it and to the assistant aggregator
+        # as frames instead of becoming context frames here.
+        self._context_pushed = False
 
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
@@ -1383,12 +1388,27 @@ class LLMUserAggregator(LLMContextAggregator):
         return should_mute_frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
+        if self._realtime_service_mode and self._context_pushed:
+            # The assistant aggregator answers the request with the upstream
+            # context frame that has the realtime service complete the turn; a
+            # downstream context frame is read for tool results only.
+            await self.push_frame(frame)
+            return
         await self.push_context_frame()
+        self._context_pushed = True
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
+        if self._realtime_service_mode and self._context_pushed:
+            # The realtime service puts the messages into its session, and the
+            # assistant aggregator runs the model if the append asks for it.
+            # The messages are recorded here, once; the assistant aggregator
+            # leaves them alone.
+            await self.push_frame(frame)
+            return
         if frame.run_llm:
             await self.push_context_frame()
+            self._context_pushed = True
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
@@ -2020,6 +2040,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            if self._realtime_service_mode and self._context_push_owed:
+                # In realtime mode the user turn brings no run of its own that
+                # could settle an owed push: the service answers speech it heard
+                # itself, and a turn only detected locally brings nothing.
+                await self._maybe_push_context()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
@@ -2153,7 +2178,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # results queued behind it. Run at once, a message appended
         # mid-sentence runs the model on a context that lacks the answer in
         # progress, and the model answers it again.
-        self.add_messages(frame.messages)
+        if not self._realtime_service_mode:
+            # In realtime mode the user aggregator records them before forwarding.
+            self.add_messages(frame.messages)
         if frame.run_llm:
             self._context_push_owed = True
         if self._context_push_owed and not self._user_speaking:
