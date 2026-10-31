@@ -642,6 +642,9 @@ class LLMUserAggregator(LLMContextAggregator):
     occur while a user turn is active and pushes the final aggregation when the
     user turn is finished.
 
+    Muted speech signals update turn state without starting new turns. Existing
+    turns retain their configured stop and inference behavior.
+
     Event handlers available:
 
     - on_user_turn_started: Called when the user turn starts
@@ -780,6 +783,8 @@ class LLMUserAggregator(LLMContextAggregator):
             self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
+        self._announced_user_speaking: set[FrameDirection] = set()
+        self._muted_user_turn_stop_forwarded: set[FrameDirection] = set()
         self._user_turn_start_timestamp = ""
         # One-shot guard: whether the first realtime LLM service metadata frame
         # has been handled this session — see _handle_llm_service_metadata.
@@ -912,6 +917,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().process_frame(frame, direction)
 
         if await self._maybe_mute_frame(frame):
+            await self._process_muted_speech_state(frame, direction)
             return
 
         if isinstance(frame, StartFrame):
@@ -982,6 +988,13 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
             if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            self._announced_user_speaking.add(direction)
+            self._muted_user_turn_stop_forwarded.discard(direction)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._announced_user_speaking.discard(direction)
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -991,6 +1004,42 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
+
+    async def _process_muted_speech_state(self, frame: Frame, direction: FrameDirection) -> None:
+        """Track muted speech and close existing turns without opening new ones.
+
+        Args:
+            frame: Input suppressed by the mute policy.
+            direction: The direction of the input frame.
+        """
+        if not isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                ProposedUserStoppedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
+            ),
+        ):
+            return
+
+        if (
+            isinstance(frame, UserStoppedSpeakingFrame)
+            and direction in self._announced_user_speaking
+        ):
+            # A broadcast's sibling already carries the stop in the other direction.
+            if frame.broadcast_sibling_id is not None:
+                self._announced_user_speaking.clear()
+                self._muted_user_turn_stop_forwarded.update(FrameDirection)
+            else:
+                self._announced_user_speaking.discard(direction)
+                self._muted_user_turn_stop_forwarded.add(direction)
+            await self.push_frame(frame, direction)
+            await self._user_idle_controller.process_frame(frame)
+
+        await self._user_turn_controller.process_frame(frame, allow_turn_start=False)
 
     async def reset(self):
         """Reset the aggregation state, with the turn's reading of how the user spoke."""
@@ -1497,6 +1546,7 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         self._user_turn_start_timestamp = time_now_iso8601()
+        self._muted_user_turn_stop_forwarded.clear()
         self._full_user_turn_aggregation = None
         self._user_turn_answer_voided = False
 
@@ -1507,6 +1557,7 @@ class LLMUserAggregator(LLMContextAggregator):
         )
 
         if params.enable_user_speaking_frames:
+            self._announced_user_speaking.update(FrameDirection)
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
@@ -1613,7 +1664,13 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            await self.broadcast_frame(UserStoppedSpeakingFrame)
+            self._announced_user_speaking.clear()
+            if not self._muted_user_turn_stop_forwarded:
+                await self.broadcast_frame(UserStoppedSpeakingFrame)
+            else:
+                for direction in FrameDirection:
+                    if direction not in self._muted_user_turn_stop_forwarded:
+                        await self.push_frame(UserStoppedSpeakingFrame(), direction)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
