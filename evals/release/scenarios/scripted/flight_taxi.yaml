@@ -1,0 +1,30 @@
+name: flight_taxi
+
+# Text, end to end: two tool calls where the second depends on the first's
+# result (the taxi time comes from the flight's departure), so the LLM makes
+# them one after another. Tests that a thinking model's reasoning carries
+# across sequential calls, and that the conversation continues after them.
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  - name: flight_taxi
+    turns:
+      # Wait for the bot's on-connect greeting before speaking (avoids barging into it).
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "Check the status of flight AA100 and, if it's delayed, book me a taxi two hours before its departure time."
+        expect:
+          - event: function_call
+            calls:
+              - name: check_flight_status
+              - name: book_taxi
+          - event: response
+            eval: "the response says the flight is delayed and that a taxi was booked for 12:30 (two hours before the 14:30 departure)"
+
+      - user: "Thanks. What time does my flight leave again?"
+        expect:
+          - event: response
+            eval: "the response says the flight departs at 14:30 (2:30 PM)"
