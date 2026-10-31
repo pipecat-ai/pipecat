@@ -49,14 +49,21 @@ class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
     """Settings for ElevenLabsDialogueTTSService.
 
     Parameters:
-        stability: Voice stability control (0.0 to 1.0), the only voice setting
-            Text-to-Dialogue reads. ElevenLabs documents three reference points:
-            0.0 is the most expressive but can hallucinate, 0.5 stays closest to
-            the reference recording, and 1.0 is the most consistent but least
-            responsive to audio tags. Values in between are accepted.
+        stability: Voice stability control (0.0 to 1.0). ElevenLabs documents
+            three reference points: 0.0 is the most expressive but can
+            hallucinate, 0.5 stays closest to the reference recording, and 1.0
+            is the most consistent but least responsive to audio tags. Values
+            in between are accepted.
+        clone_strength: Professional-voice-clone control (0.0 to 1.0) the v4
+            models read. Controls how closely the voice follows its clone
+            samples; ElevenLabs recommends 0 for most use cases, and on the
+            Text-to-Dialogue endpoints it also decides whether a v4
+            Professional Voice Clone runs as a PVC or an IVC. Dropped with a
+            warning on models that don't read it, such as eleven_v3.
     """
 
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    clone_strength: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields in the WS URL — changing any of these requires a reconnect. Voice
     #: is absent because Text-to-Dialogue registers voices per context rather
@@ -65,7 +72,9 @@ class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
 
     #: Fields carried in the per-context registration message — changing these
     #: requires closing the current audio context so the next one picks them up.
-    VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset({"voice", "stability"})
+    VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"voice", "stability", "clone_strength"}
+    )
 
 
 def build_elevenlabs_ttd_voice_settings(
@@ -73,24 +82,39 @@ def build_elevenlabs_ttd_voice_settings(
 ) -> dict[str, float] | None:
     """Build a Text-to-Dialogue voice settings dict.
 
-    ``stability`` is the only setting Text-to-Dialogue reads. The endpoint
-    silently ignores the other voice settings the text-to-speech endpoint
-    accepts, so sending them would suggest an effect they don't have.
+    Text-to-Dialogue reads ``stability``, plus ``clone_strength`` on the v4
+    models, whose Professional Voice Clones it shapes. The endpoint silently
+    ignores the other voice settings the text-to-speech endpoint accepts, so
+    sending them would suggest an effect they don't have; ``clone_strength``
+    is likewise dropped, with a warning, on models that don't read it.
 
     Args:
-        settings: A settings object or dict to read ``stability`` from.
+        settings: A settings object or dict to read the voice settings and the
+            model from.
 
     Returns:
-        The voice settings dict, or None if stability is unset.
+        The voice settings dict, or None if no supported setting is set.
     """
-    stability = (
-        getattr(settings, "stability", None)
-        if isinstance(settings, TTSSettings)
-        else settings.get("stability")
-    )
-    if stability is None or stability is NOT_GIVEN:
-        return None
-    return {"stability": stability}
+
+    def _get(key: str) -> Any:
+        return (
+            getattr(settings, key, None) if isinstance(settings, TTSSettings) else settings.get(key)
+        )
+
+    voice_settings: dict[str, float] = {}
+    stability = _get("stability")
+    if stability is not None and stability is not NOT_GIVEN:
+        voice_settings["stability"] = stability
+    clone_strength = _get("clone_strength")
+    if clone_strength is not None and clone_strength is not NOT_GIVEN:
+        model = _get("model")
+        if isinstance(model, str) and model.startswith("eleven_v4"):
+            voice_settings["clone_strength"] = clone_strength
+        else:
+            logger.warning(
+                f"clone_strength not applied. Only eleven_v4 models read it; {model!r} doesn't."
+            )
+    return voice_settings or None
 
 
 def _normalize_ttd_alignment(alignment: Mapping[str, Any]) -> dict[str, Any]:

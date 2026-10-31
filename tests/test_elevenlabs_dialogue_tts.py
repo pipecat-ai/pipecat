@@ -340,6 +340,29 @@ def test_dialogue_voice_settings_omitted_when_stability_unset():
     assert service._voice_settings is None
 
 
+def test_dialogue_clone_strength_is_sent_for_v4_models():
+    """The v4 websocket voice settings read clone_strength; it shapes v4 PVCs."""
+    service = _make_dialogue_service(stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3, "clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_alone_is_enough():
+    service = _make_dialogue_service(clone_strength=0.2)
+    assert service._voice_settings == {"clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_is_dropped_for_v3_models():
+    """Only eleven_v4 models read clone_strength; v3 reads stability alone."""
+    service = _make_dialogue_service(model="eleven_v3", stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3}
+
+
+def test_dialogue_clone_strength_change_does_not_require_reconnect():
+    """clone_strength rides in the per-context registration, not the URL."""
+    assert "clone_strength" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
+    assert "clone_strength" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
 def test_dialogue_voice_change_does_not_require_reconnect():
     """Voices are registered per context, so a voice change just needs a new one."""
     assert "voice" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS

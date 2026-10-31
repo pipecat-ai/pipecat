@@ -12,6 +12,7 @@ import unittest.mock
 from typing import Any
 
 import pytest
+from loguru import logger
 from websockets.exceptions import ConnectionClosedOK
 from websockets.frames import Close
 from websockets.protocol import State
@@ -512,6 +513,38 @@ def test_every_mapped_language_is_accepted_by_some_model():
             assert elevenlabs_language_code("eleven_v3", code) == code
         if code in ELEVENLABS_V4_LANGUAGES:
             assert elevenlabs_language_code("eleven_v4_turbo", code) == code
+
+
+def test_websocket_service_warns_on_v3_v4_models():
+    """The multi-stream TTS endpoint serves no v3/v4 model; the handshake
+    rejects one with a 400 that leaves the processor unusable, so a clear
+    warning with a pointer to the classes that do serve them beats it."""
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        service = ElevenLabsTTSService(
+            api_key="test-key",
+            settings=ElevenLabsTTSService.Settings(voice="test-voice", model="eleven_v4_turbo"),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert service._settings.model == "eleven_v4_turbo"
+    assert any("eleven_v4_turbo" in w and "ElevenLabsDialogueTTSService" in w for w in warnings)
+
+
+def test_websocket_service_accepts_flash_models_without_a_warning():
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        ElevenLabsTTSService(
+            api_key="test-key",
+            settings=ElevenLabsTTSService.Settings(voice="test-voice", model="eleven_flash_v2_5"),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert not [w for w in warnings if "v3/v4" in w or "does not serve" in w]
 
 
 class _MessagesWebSocket:
