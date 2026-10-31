@@ -6,6 +6,7 @@
 
 """Soniox speech-to-text service implementation."""
 
+import asyncio
 import json
 import time
 from collections import Counter
@@ -15,11 +16,13 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
@@ -308,6 +311,7 @@ class SonioxSTTService(WebsocketSTTService):
         params: SonioxInputParams | None = None,
         vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
+        auto_finalize_delay_ms: int | None = 3000,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = SONIOX_TTFS_P99,
         **kwargs,
@@ -347,6 +351,16 @@ class SonioxSTTService(WebsocketSTTService):
                 user turn strategies this service recommends, which own the
                 interruption; a user-supplied ``user_turn_strategies`` overrides the
                 recommendation and this setting with it. Defaults to True.
+            auto_finalize_delay_ms: Pipecat mode only (``vad_force_turn_endpoint=True``).
+                When no tokens of any kind are received for this long, a finalize
+                message is sent to Soniox so pending (non-final) tokens are finalized
+                and the turn can close. Covers the case where the local VAD misses an
+                utterance (quiet short speech) and would otherwise never send
+                ``VADUserStoppedSpeakingFrame``, leaving the turn open forever.
+                Restores the pre-0.0.78 safeguard with a wider trigger: the removed
+                version only fired when finalized tokens were already buffered, so a
+                stream of non-final tokens (the common case) was never covered.
+                Set to ``None`` to disable. Defaults to 3000.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -417,6 +431,9 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._final_transcription_buffer = []
         self._last_tokens_received: float | None = None
+        self._pending_tokens = False
+        self._auto_finalize_delay_ms = auto_finalize_delay_ms
+        self._finalize_if_no_tokens_task = None
 
         # Turn tracking for Soniox turn-detection mode.
         self._user_turn_open = False
@@ -594,6 +611,17 @@ class SonioxSTTService(WebsocketSTTService):
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
+        # Auto-finalize is a Pipecat-mode fallback: in Soniox turn-detection mode the
+        # server's endpointing owns turn endings and a forced finalize would fight it.
+        if (
+            self._vad_force_turn_endpoint
+            and self._auto_finalize_delay_ms is not None
+            and not self._finalize_if_no_tokens_task
+        ):
+            self._finalize_if_no_tokens_task = self.create_task(
+                self._finalize_if_no_tokens_task_handler()
+            )
+
     async def _disconnect(self):
         """Disconnect from the Soniox service.
 
@@ -604,6 +632,10 @@ class SonioxSTTService(WebsocketSTTService):
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
+
+        if self._finalize_if_no_tokens_task:
+            await self.cancel_task(self._finalize_if_no_tokens_task)
+            self._finalize_if_no_tokens_task = None
 
         await self._disconnect_websocket()
 
@@ -718,6 +750,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         async def finalize_turn():
             await send_endpoint_transcript()
+            self._pending_tokens = False
             await self._user_turn_stopped()
 
         async for message in self._get_websocket():
@@ -733,6 +766,7 @@ class SonioxSTTService(WebsocketSTTService):
                     else:
                         # Got at least one token, so we can reset the auto finalize delay.
                         self._last_tokens_received = time.time()
+                        self._pending_tokens = True
 
                 # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = []
@@ -795,6 +829,47 @@ class SonioxSTTService(WebsocketSTTService):
                 logger.warning(f"Received non-JSON message: {message}")
             except Exception as e:
                 logger.warning(f"Error processing message: {e}")
+
+    async def _maybe_auto_finalize(self) -> bool:
+        """Send finalize if pending tokens have been idle for ``auto_finalize_delay_ms``.
+
+        Returns True when a finalize message was sent.
+        """
+        if not self._vad_force_turn_endpoint or self._auto_finalize_delay_ms is None:
+            return False
+        if not self._websocket or self._websocket.state is not State.OPEN:
+            return False
+        if not self._pending_tokens or self._last_tokens_received is None:
+            return False
+        last_token_age_ms = (time.time() - self._last_tokens_received) * 1000
+        if last_token_age_ms <= self._auto_finalize_delay_ms:
+            return False
+        # One-shot: wait for new tokens (including the finals this finalize
+        # produces) before considering another idle finalize, as the removed
+        # pre-0.0.78 handler did with ``_last_tokens_received = None``.
+        self._last_tokens_received = None
+        self._pending_tokens = False
+        logger.debug("No tokens received, sending finalize message")
+        await self._websocket.send(FINALIZE_MESSAGE)
+        return True
+
+    async def _finalize_if_no_tokens_task_handler(self):
+        """Call finalize if no new tokens are received for a configured duration."""
+        try:
+            while True:
+                await asyncio.sleep(0.5)
+                try:
+                    await self._maybe_auto_finalize()
+                except ConnectionClosed:
+                    # Expected when closing the connection.
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"{self} error (_finalize_if_no_tokens_task_handler): {e}")
+            await self.push_error(
+                ErrorFrame(f"{self} error (_finalize_if_no_tokens_task_handler): {e}")
+            )
 
     async def _send_keepalive(self, silence: bytes):
         """Send a Soniox protocol-level keepalive message.

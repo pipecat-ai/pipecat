@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,6 +26,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
     END_TOKEN,
+    FINALIZE_MESSAGE,
     SonioxSTTService,
     _language_from_tokens,
     language_to_soniox_language,
@@ -728,3 +731,146 @@ async def test_soniox_error_code_sets_category(monkeypatch):
 @pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
 def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
     assert language_to_soniox_language(language) == "no"
+
+
+# --- auto-finalize safeguard (pipecat#6477) ---
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_sends_finalize_on_token_idle():
+    """Non-final tokens that stop arriving get finalized so the turn can close."""
+
+    service = SonioxSTTService(api_key="test-key")
+    websocket = _FakeWebsocket([], state=State.OPEN)
+    service._websocket = websocket
+    service._last_tokens_received = time.time() - 4.0
+    service._pending_tokens = True
+
+    assert await service._maybe_auto_finalize() is True
+    assert websocket.send.await_args.args[0] == FINALIZE_MESSAGE
+    assert service._pending_tokens is False
+    assert service._last_tokens_received is None
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_skips_without_pending_tokens():
+    """Heartbeat-only streams ({"tokens": []}) must not trigger finalize."""
+
+    service = SonioxSTTService(api_key="test-key")
+    websocket = _FakeWebsocket([], state=State.OPEN)
+    service._websocket = websocket
+    service._last_tokens_received = time.time() - 4.0
+    service._pending_tokens = False
+
+    assert await service._maybe_auto_finalize() is False
+    websocket.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_skips_before_delay_elapses():
+
+    service = SonioxSTTService(api_key="test-key")
+    websocket = _FakeWebsocket([], state=State.OPEN)
+    service._websocket = websocket
+    service._last_tokens_received = time.time() - 1.0
+    service._pending_tokens = True
+
+    assert await service._maybe_auto_finalize() is False
+    websocket.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_disabled_in_soniox_turn_detection_mode():
+    """In Soniox mode the server's endpointing owns turn endings: no forced finalize."""
+
+    service = SonioxSTTService(api_key="test-key", vad_force_turn_endpoint=False)
+    websocket = _FakeWebsocket([], state=State.OPEN)
+    service._websocket = websocket
+    service._last_tokens_received = time.time() - 4.0
+    service._pending_tokens = True
+
+    assert await service._maybe_auto_finalize() is False
+    websocket.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_disabled_with_none_delay():
+
+    service = SonioxSTTService(api_key="test-key", auto_finalize_delay_ms=None)
+    websocket = _FakeWebsocket([], state=State.OPEN)
+    service._websocket = websocket
+    service._last_tokens_received = time.time() - 4.0
+    service._pending_tokens = True
+
+    assert await service._maybe_auto_finalize() is False
+    websocket.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_finalize_covers_non_final_only_stream(monkeypatch):
+    """The #6477 hang: quiet utterance, VAD misses it, tokens never finalize.
+
+    The removed pre-0.0.78 handler only checked the final buffer, so an
+    all-non-final token stream never reached the finalize path. The restored
+    one keys on tokens of any kind.
+    """
+
+    service = SonioxSTTService(api_key="test-key")
+    pushed_frames = []
+
+    async def fake_push_frame(frame):
+        pushed_frames.append(frame)
+
+    async def fake_handle_transcription(transcript, is_final, language=None):
+        pass
+
+    service._websocket = _FakeWebsocket(
+        [
+            json.dumps(
+                {
+                    "tokens": [
+                        {"text": "Bye", "is_final": False},
+                        {"text": " bye", "is_final": False},
+                    ]
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
+
+    await asyncio.wait_for(service._receive_messages(), timeout=2)
+
+    # The hung state: tokens seen, none finalized, turn still open.
+    assert service._pending_tokens is True
+    assert service._last_tokens_received is not None
+
+    service._last_tokens_received = time.time() - 4.0
+    assert await service._maybe_auto_finalize() is True
+    assert service._websocket.send.await_args.args[0] == FINALIZE_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_endpoint_clears_pending_tokens(monkeypatch):
+    """Once the endpoint closes the turn, the pending flag is cleared."""
+
+    service = SonioxSTTService(api_key="test-key")
+
+    async def fake_push_frame(frame):
+        pass
+
+    async def fake_handle_transcription(transcript, is_final, language=None):
+        pass
+
+    service._websocket = _FakeWebsocket(
+        [
+            json.dumps({"tokens": [{"text": "Hi", "is_final": False}]}),
+            json.dumps({"tokens": [{"text": END_TOKEN, "is_final": True}]}),
+        ]
+    )
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
+
+    await asyncio.wait_for(service._receive_messages(), timeout=2)
+
+    assert service._pending_tokens is False
