@@ -1,0 +1,1 @@
+- Protobuf audio messages preserve a presentation timestamp of zero and keep an omitted timestamp unset.
