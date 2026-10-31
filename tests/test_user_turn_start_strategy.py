@@ -314,3 +314,84 @@ class TestBaseUserTurnStartStrategyDeprecations(unittest.IsolatedAsyncioTestCase
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMinWordsCJKCounting(unittest.IsolatedAsyncioTestCase):
+    async def test_cjk_transcript_counts_characters(self):
+        """Chinese/Japanese text has no spaces: each character is a word (pipecat#6402)."""
+        strategy = MinWordsUserTurnStartStrategy(min_words=3)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="你好", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)  # 2 chars < 3 words
+
+        await strategy.process_frame(TranscriptionFrame(text="你好呀", user_id="cat", timestamp=""))
+        self.assertTrue(should_start)  # 3 chars >= 3 words
+
+    async def test_cjk_two_characters_meet_min_words_threshold(self):
+        """Two CJK characters meet min_words=2 while the bot is speaking.
+
+        With the old whitespace counting this transcript was one "word" and the
+        interruption never fired (pipecat#6402).
+        """
+        strategy = MinWordsUserTurnStartStrategy(min_words=2)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="停下", user_id="cat", timestamp="")  # "stop it"
+        )
+        self.assertTrue(should_start)
+
+    async def test_korean_still_counts_by_spaces(self):
+        """Korean uses eojeol spacing: whitespace counting stays correct."""
+        strategy = MinWordsUserTurnStartStrategy(min_words=2)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="안녕", user_id="cat", timestamp="")  # one word
+        )
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="안녕 하세요", user_id="cat", timestamp="")  # two words
+        )
+        self.assertTrue(should_start)
+
+    async def test_mixed_language_counts_both_channels(self):
+        """Mixed CJK + spaced text counts CJK chars and whitespace words together."""
+        strategy = MinWordsUserTurnStartStrategy(min_words=4)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        # 2 CJK chars + "hello there" (2 words) = 4
+        await strategy.process_frame(
+            TranscriptionFrame(text="你好 hello there", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)

@@ -6,6 +6,8 @@
 
 """User turn start strategy based on a minimum number of words spoken by the user."""
 
+import re
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -16,6 +18,29 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+
+# Chinese and Japanese are written without spaces between words, so whitespace
+# splitting counts a whole utterance as one word (pipecat#6402). Hangul is
+# excluded on purpose: Korean uses spaces between words (eojeol).
+_CJK_CHAR = re.compile(
+    "["
+    "\u3040-\u30ff"  # Hiragana + Katakana
+    "\u3400-\u4dbf"  # CJK Unified Ideographs Extension A
+    "\u4e00-\u9fff"  # CJK Unified Ideographs
+    "\uf900-\ufaff"  # CJK Compatibility Ideographs
+    "]"
+)
+
+
+def _count_words(text: str) -> int:
+    """Count words, handling unspaced (Chinese/Japanese) text.
+
+    Each CJK character counts as one word; the remaining text counts by
+    whitespace, so mixed-language transcripts work.
+    """
+    cjk_chars = len(_CJK_CHAR.findall(text))
+    non_cjk = _CJK_CHAR.sub(" ", text)
+    return cjk_chars + len(non_cjk.split())
 
 
 class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -96,7 +121,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         min_words = self._min_words if self._bot_speaking else 1
 
-        word_count = len(frame.text.split())
+        word_count = _count_words(frame.text)
         should_trigger = word_count >= min_words
         is_interim = isinstance(frame, InterimTranscriptionFrame)
 
