@@ -149,6 +149,33 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
 
+    async def test_bot_speaking_cjk_counts_each_character(self):
+        strategy = MinWordsUserTurnStartStrategy(min_words=3)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="你好", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="等一下，这辆车的价格是多少？", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+        should_start = None
+        await strategy.handle_user_turn_started()
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="こんにちは", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
 
 class TestVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_vad_strategy(self):
