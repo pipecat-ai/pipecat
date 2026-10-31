@@ -1508,6 +1508,34 @@ class GeminiTTSService(GoogleBaseTTSService):
             return False
         return "-3.8-" in model or model.startswith("sonic-")
 
+    @staticmethod
+    def _genai_voice_config(voice: str | None) -> genai.types.VoiceConfig:
+        """Build the Gemini API voice config for a prebuilt name or a custom id.
+
+        Custom voices from Voice design use ids that start with ``voice_``.
+        The API takes those as ``VoiceConfig.voice``. A prebuilt name such as
+        ``Kore`` goes in ``prebuilt_voice_config``.
+
+        Args:
+            voice: The configured voice name or custom voice id. ``None`` is sent
+                as a prebuilt voice with no name.
+
+        Returns:
+            The voice config for a ``GenerateContentConfig`` speech config.
+
+        Raises:
+            RuntimeError: The installed google-genai cannot send a custom voice id.
+        """
+        if voice and voice.startswith("voice_"):
+            if "voice" not in genai.types.VoiceConfig.model_fields:
+                raise RuntimeError(
+                    f"Custom Gemini voices require google-genai >= 2.25.0 (voice: {voice})"
+                )
+            return genai.types.VoiceConfig(voice=voice)
+        return genai.types.VoiceConfig(
+            prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(voice_name=voice)
+        )
+
     def _warn_unsupported_genai_settings(
         self, *, multi_speaker: bool | None, prompt: str | None, model: str | None
     ) -> None:
@@ -1697,11 +1725,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 "response_modalities": ["AUDIO"],
                 "speech_config": genai.types.SpeechConfig(
                     language_code=assert_given(self._settings.language),
-                    voice_config=genai.types.VoiceConfig(
-                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
-                            voice_name=assert_given(self._settings.voice)
-                        )
-                    ),
+                    voice_config=self._genai_voice_config(assert_given(self._settings.voice)),
                 ),
             }
 

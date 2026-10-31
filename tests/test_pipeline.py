@@ -1474,11 +1474,12 @@ class TestPipelineWorkerStartup(unittest.IsolatedAsyncioTestCase):
         slow = StartRecorder(t0, setup_secs=30.0)
         worker = PipelineWorker(Pipeline([first, slow]), cancel_timeout_secs=3.0)
 
-        async def cancel_soon():
-            await asyncio.sleep(0.2)
+        async def cancel_while_the_next_processor_connects():
+            # The first processor has the StartFrame; the next is still in its long setup.
+            await asyncio.wait_for(first.started.wait(), timeout=2.0)
             await worker.cancel()
 
-        await asyncio.gather(self.run_worker(worker), cancel_soon())
+        await asyncio.gather(self.run_worker(worker), cancel_while_the_next_processor_connects())
 
         assert worker.has_finished()
         assert time.monotonic() - t0 < 3.0

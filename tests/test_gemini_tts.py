@@ -381,6 +381,55 @@ async def test_genai_38_request_shape(mock_genai_client_class):
     assert config.speech_config.voice_config.prebuilt_voice_config.voice_name == "Puck"
 
 
+requires_custom_voice = pytest.mark.skipif(
+    "voice" not in genai.types.VoiceConfig.model_fields,
+    reason="Custom Gemini voices require google-genai >= 2.25.0",
+)
+
+
+@requires_custom_voice
+@pytest.mark.asyncio
+@patch("google.genai.Client")
+async def test_genai_custom_voice_uses_voice_field(mock_genai_client_class):
+    """A custom voice_ id is sent as VoiceConfig.voice."""
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+
+    mock_stream = AsyncMock()
+    mock_client.aio.models.generate_content_stream = mock_stream
+
+    async def mock_generator(*args, **kwargs):
+        yield MockChunk(b"\x00" * 4800)
+
+    mock_stream.side_effect = mock_generator
+
+    tts = GeminiTTSService(
+        api_key="test-api-key",
+        settings=GeminiTTSService.Settings(
+            model="gemini-3.8-flash-tts",
+            voice="voice_custom123",
+        ),
+    )
+
+    await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hello world.")])
+
+    voice_config = mock_stream.call_args.kwargs["config"].speech_config.voice_config
+    assert voice_config.voice == "voice_custom123"
+    assert voice_config.prebuilt_voice_config is None
+
+
+def test_custom_voice_requires_the_voice_field():
+    """A voice_ id raises when the installed SDK has no VoiceConfig.voice field."""
+    fields = {
+        name: field
+        for name, field in genai.types.VoiceConfig.model_fields.items()
+        if name != "voice"
+    }
+    with patch.object(genai.types.VoiceConfig, "model_fields", fields):
+        with pytest.raises(RuntimeError, match="google-genai >= 2.25.0"):
+            GeminiTTSService._genai_voice_config("voice_custom123")
+
+
 @requires_speech_metadata
 @pytest.mark.asyncio
 @patch("google.genai.Client")
