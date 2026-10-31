@@ -197,6 +197,17 @@ def _google(model: str) -> Callable[[], LLMService]:
     return make
 
 
+def _google_interactions():
+    from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService
+
+    return GoogleInteractionsLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        settings=GoogleInteractionsLLMService.Settings(
+            thinking=GoogleInteractionsLLMService.ThinkingConfig(thinking_level="low"),
+        ),
+    )
+
+
 def _gemini_live():
     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 
@@ -282,6 +293,12 @@ CASES = [
         prompt=CODE_EXECUTION_PROMPT,
         tools={AdapterType.GEMINI: [{"code_execution": {}}]},
         checks_provider_total=True,
+    ),
+    _Case(
+        "google_interactions",
+        ("GOOGLE_API_KEY",),
+        _google_interactions,
+        expects_reasoning=True,
     ),
     _Case(
         "gemini_live",
