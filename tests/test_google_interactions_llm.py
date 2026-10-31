@@ -306,6 +306,27 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("response incomplete, the interaction ended incomplete", sink.getvalue())
 
+    async def test_empty_response_reported(self):
+        """Test a completed response with no text or function call reported as an error."""
+        service = make_service()
+        stub_client(service, [*signed_thought(), *text_reply(" "), completed()])
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            _, up = await run_test(service, frames_to_send=[LLMContextFrame(user_context())])
+        finally:
+            logger.remove(handler_id)
+
+        self.assertIn(
+            "completed with no text or function call (steps: ['thought', 'model_output'])",
+            sink.getvalue(),
+        )
+        errors = [f for f in up if isinstance(f, ErrorFrame)]
+        self.assertEqual(
+            [e.error for e in errors], ["LLM response completed with no text or function call"]
+        )
+
 
 class TestErrors(unittest.IsolatedAsyncioTestCase):
     async def test_stalled_stream_times_out(self):

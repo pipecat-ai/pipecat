@@ -522,6 +522,8 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
                 logger.warning(
                     f"{self}: response incomplete, the interaction ended {interaction.status}"
                 )
+            elif not response.function_calls and not "".join(response.text.values()).strip():
+                await self._report_empty_response(response)
             return interaction.usage
 
         elif event_type == "error":
@@ -530,6 +532,17 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
             await self.push_error(error_msg=f"LLM response error: {message}")
 
         return None
+
+    async def _report_empty_response(self, response: "_ResponseState"):
+        """Report a completed response that produced no text and no function call.
+
+        Nothing reaches the TTS for such a response, so the bot stays silent
+        until the user speaks again. The warning lists the steps the response
+        produced instead, and the non-fatal error lets the application react.
+        """
+        steps = [response.steps[index] for index in sorted(response.steps)]
+        logger.warning(f"{self}: response completed with no text or function call (steps: {steps})")
+        await self.push_error(error_msg="LLM response completed with no text or function call")
 
     async def _bookmark_pending_signature(self, response: "_ResponseState", index: int):
         """Tie a signature received in a thought step to the step that follows it.
