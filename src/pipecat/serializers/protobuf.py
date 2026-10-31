@@ -9,6 +9,7 @@
 import dataclasses
 import json
 
+from google.protobuf.message import DecodeError
 from loguru import logger
 
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
@@ -118,7 +119,11 @@ class ProtobufFrameSerializer(FrameSerializer):
         Returns:
             Deserialized frame instance, or None if deserialization fails.
         """
-        proto = frame_protos.Frame.FromString(data)  # type: ignore[attr-defined]
+        try:
+            proto = frame_protos.Frame.FromString(data)  # type: ignore[attr-defined]
+        except (DecodeError, TypeError) as e:
+            logger.warning(f"ProtobufFrameSerializer: failed to parse protobuf message: {e}")
+            return None
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:
             logger.error("Unable to deserialize a valid frame")

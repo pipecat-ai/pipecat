@@ -217,18 +217,27 @@ class PlivoFrameSerializer(FrameSerializer):
         """
         try:
             message = json.loads(data)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             logger.warning(f"Failed to parse JSON message: {data}")
             return None
 
+        if not isinstance(message, dict):
+            logger.warning(f"Ignoring JSON message that is not an object: {data}")
+            return None
+
         if message.get("event") == "media":
-            media = message.get("media", {})
-            payload_base64 = media.get("payload")
+            media = message.get("media")
+            payload_base64 = media.get("payload") if isinstance(media, dict) else None
 
             if not payload_base64:
                 return None
 
-            payload = base64.b64decode(payload_base64)
+            try:
+                payload = base64.b64decode(payload_base64)
+            except (TypeError, ValueError):
+                # ValueError covers binascii.Error; TypeError covers non-string payloads.
+                logger.warning("Failed to decode base64 media payload")
+                return None
 
             # Input: Convert Plivo's 8kHz μ-law to PCM at pipeline input rate
             deserialized_data = await ulaw_to_pcm(
@@ -243,8 +252,8 @@ class PlivoFrameSerializer(FrameSerializer):
             )
             return audio_frame
         elif message.get("event") == "dtmf":
-            dtmf_data = message.get("dtmf", {})
-            digit = dtmf_data.get("digit")
+            dtmf = message.get("dtmf")
+            digit = dtmf.get("digit") if isinstance(dtmf, dict) else None
             if digit:
                 try:
                     return InputDTMFFrame(KeypadEntry(digit))
