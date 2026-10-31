@@ -10,12 +10,11 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
-import asyncio
 import io
 import os
 import re
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union, cast
@@ -25,7 +24,10 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GeminiLLMAdapter,
+    gemini_thought_signature_message,
+)
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     Frame,
@@ -41,7 +43,13 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    _MODELS_SUPPORTING_THINKING_LEVEL,
+    _model_name,
+    _thinking_default,
+    stream_with_retry,
+    update_google_client_http_options,
+)
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
@@ -70,59 +78,6 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
-
-
-# The lowest thinking setting Google documents for each model, sent when the
-# caller doesn't configure ``thinking``, keyed by model name. The 2.5 models
-# take a budget, where 0 turns thinking off and 2.5 Pro's minimum is 128; later
-# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and 4 Argon reject
-# "minimal", and the Flash-Lite models already default to it. Aliases such as
-# ``gemini-flash-latest`` are left out, since the model they name changes.
-_THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
-    "gemini-2.5-flash": {"thinking_budget": 0},
-    "gemini-2.5-flash-lite": {"thinking_budget": 0},
-    "gemini-2.5-pro": {"thinking_budget": 128},
-    "gemini-3-flash-preview": {"thinking_level": "minimal"},
-    "gemini-3.1-flash-lite": {"thinking_level": "minimal"},
-    "gemini-3.1-pro-preview": {"thinking_level": "low"},
-    "gemini-3.1-pro-preview-customtools": {"thinking_level": "low"},
-    "gemini-3.5-flash": {"thinking_level": "minimal"},
-    "gemini-3.5-flash-lite": {"thinking_level": "minimal"},
-    "gemini-3.6-flash": {"thinking_level": "minimal"},
-    "gemini-3.7-flash": {"thinking_level": "low"},
-    "gemini-3.8-flash": {"thinking_level": "low"},
-    "gemini-4-argon": {"thinking_level": "low"},
-    "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
-    "gemma-4-31b-it": {"thinking_level": "minimal"},
-}
-
-
-def _model_name(model: str) -> str:
-    """The name a model id refers to, for looking the model up.
-
-    ``_THINKING_DEFAULTS`` and ``_MODELS_SUPPORTING_THINKING_LEVEL`` are keyed by
-    name. Ids can name a model by resource path (``models/gemini-3.6-flash``,
-    ``publishers/google/models/gemini-3.6-flash``) or by version
-    (``gemini-2.5-flash-001``).
-    """
-    return re.sub(r"-\d{3}$", "", model.lower().rsplit("/", 1)[-1])
-
-
-# Models that take their thinking configuration from thinking_level, keyed by
-# model name prefix. Whether one of these honors a thinking_budget set alongside
-# it varies by model and by backend, so such a budget can't be relied on.
-_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3", "gemini-4", "gemma-4")
-
-
-def _can_think(name: str) -> bool:
-    """Whether a model name belongs to a Gemini or Gemma text model that can think.
-
-    Covers Gemini 2.5 and later, Gemma 4, and aliases such as
-    ``gemini-flash-latest``. Image, speech and embedding models are excluded.
-    """
-    if any(kind in name for kind in ("image", "tts", "audio", "live", "embedding")):
-        return False
-    return bool(re.match(r"gemini-(2\.5|[3-9])|gemma-4|gemini-[a-z-]+-latest$", name))
 
 
 class GoogleThinkingConfig(BaseModel):
@@ -577,13 +532,12 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         if "thinking_config" in generation_params:
             return
         model = assert_given(self._settings.model) or ""
-        name = _model_name(model)
-        thinking = _THINKING_DEFAULTS.get(name)
+        thinking, can_think = _thinking_default(model)
         self._apply_thinking_default(
             generation_params,
             model,
             {"thinking_config": thinking} if thinking is not None else None,
-            can_think=_can_think(name),
+            can_think=can_think,
             provider="Google",
             settings_fields="`thinking`",
         )
@@ -659,10 +613,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     async def _stream_response(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         """Yield the model's streamed chunks, re-issuing the request once if it stalls.
 
-        The API client sends the request lazily, when the first chunk is pulled, so a
-        request that is accepted and then produces nothing shows up as a first chunk
-        that never arrives. Re-issuing is safe only up to that point: once a chunk has
-        been yielded, its content is already on its way downstream.
+        The API client sends the request lazily, when the first chunk is pulled, so
+        a stalled request shows up as a first chunk that never arrives.
 
         Args:
             context: The context to generate a response for.
@@ -673,80 +625,18 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Raises:
             TimeoutError: If the stream stalls past the timeout it is bounded by.
         """
-        if self._retry_on_timeout:
-            async with aclosing(
-                self._iter_stream(
-                    await self._stream_content(context),
-                    first_chunk_timeout=self._retry_timeout_secs,
-                )
-            ) as stream:
-                try:
-                    first_chunk = await stream.__anext__()
-                except StopAsyncIteration:
-                    return
-                except (TimeoutError, DeadlineExceeded):
-                    logger.debug(f"{self}: retrying content generation due to timeout")
-                else:
-                    yield first_chunk
-                    async for chunk in stream:
-                        yield chunk
-                    return
-
-        # Either retries are disabled, or the initial attempt timed out.
         async with aclosing(
-            self._iter_stream(
-                await self._stream_content(context),
-                first_chunk_timeout=self._stream_idle_timeout_secs,
+            stream_with_retry(
+                lambda: self._stream_content(context),
+                idle_timeout=self._stream_idle_timeout_secs,
+                retry_timeout=self._retry_timeout_secs,
+                retry_on_timeout=bool(self._retry_on_timeout),
+                timeout_errors=(TimeoutError, DeadlineExceeded),
+                label=str(self),
             )
         ) as stream:
             async for chunk in stream:
                 yield chunk
-
-    async def _iter_stream(
-        self,
-        response: AsyncIterator[GenerateContentResponse],
-        *,
-        first_chunk_timeout: float | None,
-    ) -> AsyncGenerator[GenerateContentResponse, None]:
-        """Yield streamed chunks, giving up if the stream stalls between them.
-
-        A stream that stops producing without closing would otherwise leave the
-        response open indefinitely, since the API client applies no timeout of its
-        own. The timeout covers the gap between chunks rather than the response as
-        a whole, so a slow but healthy stream is never cut short.
-
-        Args:
-            response: The streamed response to consume.
-            first_chunk_timeout: How long to wait for the first chunk. Every later
-                chunk is bounded by ``stream_idle_timeout_secs``.
-
-        Yields:
-            Each chunk of the streamed response.
-
-        Raises:
-            TimeoutError: If the next chunk doesn't arrive in time.
-        """
-        chunks = response.__aiter__()
-        timeout = first_chunk_timeout
-        try:
-            while True:
-                try:
-                    if timeout is None:
-                        chunk = await chunks.__anext__()
-                    else:
-                        chunk = await asyncio.wait_for(chunks.__anext__(), timeout=timeout)
-                except StopAsyncIteration:
-                    return
-                yield chunk
-                timeout = self._stream_idle_timeout_secs
-        finally:
-            # Release the HTTP resources held by a stream we walk away from, whether
-            # that's because it stalled, was interrupted, or is being re-issued.
-            # Closing is best-effort: the client's stream type only promises
-            # AsyncIterator, which has no aclose().
-            aclose = getattr(response, "aclose", None)
-            if aclose is not None:
-                await aclose()
 
     def _handle_finish_reason(self, finish_reason: FinishReason):
         """Log why Gemini stopped generating, when it stopped for a notable reason.
@@ -889,11 +779,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                         LLMMessagesAppendFrame(
                                             [
                                                 self.get_llm_adapter().create_llm_specific_message(
-                                                    {
-                                                        "type": "thought_signature",
-                                                        "signature": part.thought_signature,
-                                                        "bookmark": bookmark,
-                                                    }
+                                                    gemini_thought_signature_message(
+                                                        part.thought_signature, bookmark
+                                                    )
                                                 )
                                             ]
                                         )

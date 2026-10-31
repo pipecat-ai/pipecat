@@ -86,6 +86,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-google-interactions.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-gradium.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
@@ -216,6 +218,10 @@ suite:
     scenarios:
       - scripted/weather_function_call
       - scripted/weather_and_restaurant
+  - bot: function-calling/function-calling-google-interactions.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-google-vertex.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-grok.py
@@ -318,6 +324,15 @@ suite:
     scenarios: [scripted/mcp_memory]
 
   #
+  # Thinking: a thinking model makes two tool calls in sequence, the second
+  # depending on the first's result, then answers a follow-up about them.
+  #
+  - bot: thinking/thinking-functions-google.py
+    scenarios: [scripted/flight_taxi]
+  - bot: thinking/thinking-functions-google-interactions.py
+    scenarios: [scripted/flight_taxi]
+
+  #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
   # describes it. The body file resolves relative to this manifest; relative
   # paths inside it (the image) resolve next to the body file.
@@ -343,6 +358,10 @@ suite:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-gemini-flash.py
+    runner_body:
+      path: scenarios/vision-cat.yaml
+    scenarios: [scripted/vision_describe]
+  - bot: vision/vision-google-interactions.py
     runner_body:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
