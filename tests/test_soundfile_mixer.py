@@ -105,7 +105,7 @@ async def test_mix_loops_when_sound_runs_out(tmp_path):
     await mixer.mix(_pcm([0, 0, 0]))
     looped = await mixer.mix(_pcm([0, 0, 0]))
 
-    assert _samples(looped).tolist() == [1, 2, 3]
+    assert _samples(looped).tolist() == [4, 1, 2]
 
 
 @pytest.mark.asyncio
@@ -116,6 +116,7 @@ async def test_mix_passes_audio_through_when_not_looping(tmp_path):
     await mixer.mix(_pcm([0, 0, 0]))
     audio = _pcm([5, 5, 5])
 
+    assert _samples(await mixer.mix(audio)).tolist() == [9, 5, 5]
     assert await mixer.mix(audio) == audio
 
 
@@ -168,4 +169,35 @@ async def test_update_settings_changes_volume_and_loop(tmp_path):
     assert _samples(await mixer.mix(_pcm([0, 0]))).tolist() == [500, 500]
     # The sound is exhausted and looping is off, so audio passes through.
     audio = _pcm([7, 7])
+    assert await mixer.mix(audio) == audio
+
+
+@pytest.mark.asyncio
+async def test_mix_repeats_short_sound_across_large_chunks(tmp_path):
+    path = _write_wav(tmp_path / "short.wav", [10, 20])
+    mixer = await _started_mixer({"short": path}, "short", volume=1.0)
+
+    first = await mixer.mix(_pcm([1, 1, 1, 1, 1]))
+    second = await mixer.mix(_pcm([1, 1, 1]))
+
+    assert _samples(first).tolist() == [11, 21, 11, 21, 11]
+    assert _samples(second).tolist() == [21, 11, 21]
+
+
+@pytest.mark.asyncio
+async def test_mix_non_looping_short_sound_keeps_tail(tmp_path):
+    path = _write_wav(tmp_path / "short.wav", [10, 20])
+    mixer = await _started_mixer({"short": path}, "short", volume=1.0, loop=False)
+    audio = _pcm([1, 1, 1, 1, 1])
+
+    assert _samples(await mixer.mix(audio)).tolist() == [11, 21, 1, 1, 1]
+    assert await mixer.mix(audio) == audio
+
+
+@pytest.mark.asyncio
+async def test_mix_empty_sound_passes_audio_through(tmp_path):
+    path = _write_wav(tmp_path / "empty.wav", [])
+    mixer = await _started_mixer({"empty": path}, "empty", volume=1.0)
+    audio = _pcm([1, 2, 3])
+
     assert await mixer.mix(audio) == audio
