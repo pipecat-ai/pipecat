@@ -40,7 +40,13 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.google.utils import stream_with_retry, update_google_client_http_options
+from pipecat.services.google.utils import (
+    _MODELS_SUPPORTING_THINKING_LEVEL,
+    _model_name,
+    _thinking_default,
+    stream_with_retry,
+    update_google_client_http_options,
+)
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
@@ -69,59 +75,6 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
-
-
-# The lowest thinking setting Google documents for each model, sent when the
-# caller doesn't configure ``thinking``, keyed by model name. The 2.5 models
-# take a budget, where 0 turns thinking off and 2.5 Pro's minimum is 128; later
-# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and 4 Argon reject
-# "minimal", and the Flash-Lite models already default to it. Aliases such as
-# ``gemini-flash-latest`` are left out, since the model they name changes.
-_THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
-    "gemini-2.5-flash": {"thinking_budget": 0},
-    "gemini-2.5-flash-lite": {"thinking_budget": 0},
-    "gemini-2.5-pro": {"thinking_budget": 128},
-    "gemini-3-flash-preview": {"thinking_level": "minimal"},
-    "gemini-3.1-flash-lite": {"thinking_level": "minimal"},
-    "gemini-3.1-pro-preview": {"thinking_level": "low"},
-    "gemini-3.1-pro-preview-customtools": {"thinking_level": "low"},
-    "gemini-3.5-flash": {"thinking_level": "minimal"},
-    "gemini-3.5-flash-lite": {"thinking_level": "minimal"},
-    "gemini-3.6-flash": {"thinking_level": "minimal"},
-    "gemini-3.7-flash": {"thinking_level": "low"},
-    "gemini-3.8-flash": {"thinking_level": "low"},
-    "gemini-4-argon": {"thinking_level": "low"},
-    "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
-    "gemma-4-31b-it": {"thinking_level": "minimal"},
-}
-
-
-def _model_name(model: str) -> str:
-    """The name a model id refers to, for looking the model up.
-
-    ``_THINKING_DEFAULTS`` and ``_MODELS_SUPPORTING_THINKING_LEVEL`` are keyed by
-    name. Ids can name a model by resource path (``models/gemini-3.6-flash``,
-    ``publishers/google/models/gemini-3.6-flash``) or by version
-    (``gemini-2.5-flash-001``).
-    """
-    return re.sub(r"-\d{3}$", "", model.lower().rsplit("/", 1)[-1])
-
-
-# Models that take their thinking configuration from thinking_level, keyed by
-# model name prefix. Whether one of these honors a thinking_budget set alongside
-# it varies by model and by backend, so such a budget can't be relied on.
-_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3", "gemini-4", "gemma-4")
-
-
-def _can_think(name: str) -> bool:
-    """Whether a model name belongs to a Gemini or Gemma text model that can think.
-
-    Covers Gemini 2.5 and later, Gemma 4, and aliases such as
-    ``gemini-flash-latest``. Image, speech and embedding models are excluded.
-    """
-    if any(kind in name for kind in ("image", "tts", "audio", "live", "embedding")):
-        return False
-    return bool(re.match(r"gemini-(2\.5|[3-9])|gemma-4|gemini-[a-z-]+-latest$", name))
 
 
 class GoogleThinkingConfig(BaseModel):
@@ -576,13 +529,12 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         if "thinking_config" in generation_params:
             return
         model = assert_given(self._settings.model) or ""
-        name = _model_name(model)
-        thinking = _THINKING_DEFAULTS.get(name)
+        thinking, can_think = _thinking_default(model)
         self._apply_thinking_default(
             generation_params,
             model,
             {"thinking_config": thinking} if thinking is not None else None,
-            can_think=_can_think(name),
+            can_think=can_think,
             provider="Google",
             settings_fields="`thinking`",
         )

@@ -406,6 +406,31 @@ class TestRequest(unittest.IsolatedAsyncioTestCase):
         request = await self.request_for(make_service())
         self.assertEqual(request["generation_config"]["thinking_level"], "minimal")
 
+    async def thinking_for(self, model: str) -> tuple[dict, str]:
+        """The request's generation config for a model, and the warnings logged building it."""
+        service = make_service(settings=GoogleInteractionsLLMService.Settings(model=model))
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="WARNING", format="{message}")
+        try:
+            request = await self.request_for(service)
+        finally:
+            logger.remove(handler_id)
+        return request.get("generation_config", {}), sink.getvalue()
+
+    async def test_unlisted_model_that_can_think_warned_about(self):
+        """Test an alias, which has no default, being warned about as GoogleLLMService does."""
+        config, warnings = await self.thinking_for("gemini-flash-latest")
+        self.assertNotIn("thinking_level", config)
+        self.assertIn("Pipecat has no thinking default for gemini-flash-latest", warnings)
+
+    async def test_gemini_25_runs_at_googles_default_without_warning(self):
+        """Test Gemini 2.5, whose default is a budget, getting no level and no warning."""
+        for model in ("gemini-2.5-flash", "gemini-2.5-flash-preview"):
+            with self.subTest(model=model):
+                config, warnings = await self.thinking_for(model)
+                self.assertNotIn("thinking_level", config)
+                self.assertNotIn("thinking default", warnings)
+
     async def test_thinking_settings(self):
         """Test an explicit thinking level and thought summaries replacing the default."""
         service = make_service(

@@ -34,14 +34,14 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.llm import (
-    _MODELS_SUPPORTING_THINKING_LEVEL,
-    _THINKING_DEFAULTS,
     GoogleLLMSettings,
     GoogleThinkingConfig,
-    _can_think,
-    _model_name,
 )
-from pipecat.services.google.utils import stream_with_retry, update_google_client_http_options
+from pipecat.services.google.utils import (
+    _thinking_default,
+    stream_with_retry,
+    update_google_client_http_options,
+)
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -371,9 +371,9 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
     def _maybe_apply_thinking_default(self, request: dict[str, Any]):
         """Send the model's lowest thinking level when none is configured.
 
-        Applies the model's entry in ``_THINKING_DEFAULTS`` when it is a level;
-        a model whose default is a budget runs at Google's default, since the
-        Interactions API takes no budget.
+        Applies the model's entry in ``_THINKING_DEFAULTS``. Gemini 2.5 models,
+        which take a budget, run at Google's default, since the Interactions API
+        takes no budget.
 
         Args:
             request: The request dict (modified in place).
@@ -381,13 +381,12 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
         if "thinking_level" in request.get("generation_config", {}):
             return
         model = assert_given(self._settings.model) or ""
-        name = _model_name(model)
-        level = (_THINKING_DEFAULTS.get(name) or {}).get("thinking_level")
+        thinking, can_think = _thinking_default(model, levels_only=True)
         self._apply_thinking_default(
             request,
             model,
-            {"generation_config": {"thinking_level": level}} if level else None,
-            can_think=_can_think(name) and name.startswith(_MODELS_SUPPORTING_THINKING_LEVEL),
+            {"generation_config": thinking} if thinking is not None else None,
+            can_think=can_think,
             provider="Google",
             settings_fields="`thinking`",
         )
