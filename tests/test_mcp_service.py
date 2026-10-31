@@ -277,6 +277,37 @@ class TestTools(MCPClientTestBase):
         result_callback.assert_awaited_once_with("TOOL_A-RESULT")
         await client.close()
 
+    async def test_handler_delivers_a_non_string_filter_output(self):
+        # The filter contract allows any return type, so a filter that shapes the
+        # output still owns a successful call.
+        client, server = self._make_client(
+            [_tool("tool_a")], tools_output_filters={"tool_a": lambda text: {"result": text}}
+        )
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with({"result": "tool_a-RESULT"})
+        await client.close()
+
+    async def test_handler_delivers_an_empty_filter_output(self):
+        # A filter that redacts everything away still owns a successful call, so
+        # the model reads the empty output, not a failure line.
+        client, server = self._make_client(
+            [_tool("tool_a")], tools_output_filters={"tool_a": lambda text: ""}
+        )
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with("")
+        await client.close()
+
+    async def test_a_filter_that_raises_reads_as_the_stock_line(self):
+        client, server = self._make_client(
+            [_tool("tool_a")], tools_output_filters={"tool_a": lambda text: text.missing}
+        )
+        tools_schema = await client.tools()
+        result_callback = await self._call_via_handler(tools_schema, "tool_a")
+        result_callback.assert_awaited_once_with("Sorry, could not call the mcp tool")
+        await client.close()
+
 
 class TestToolsArguments(MCPClientTestBase):
     """tools_arguments: schema stripping and call-time injection."""

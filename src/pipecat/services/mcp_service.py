@@ -599,16 +599,20 @@ class MCPClient(BaseObject):
                 logger.error(f"Error getting content from {function_name} results.")
 
         # Apply output filter if configured for this tool
+        filter_applied = False
         if function_name in self._tools_output_filters:
             try:
                 response = self._tools_output_filters[function_name](response)
+                filter_applied = True
                 logger.debug(f"Final response (after filter): {response}")
 
             except Exception:
                 logger.error(f"Error applying output filter for {function_name}")
                 response = ""
 
-        if isinstance(response, str) and response:
+        # A filter that ran without error owns the response: on a successful call
+        # its output is what the model reads, whatever the type.
+        if (error_msg is None and filter_applied) or (isinstance(response, str) and response):
             logger.info(f"Tool '{function_name}' completed successfully")
             logger.debug(f"Final response: {response}")
         else:
