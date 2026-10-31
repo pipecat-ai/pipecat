@@ -418,6 +418,18 @@ async def test_genai_custom_voice_uses_voice_field(mock_genai_client_class):
     assert voice_config.prebuilt_voice_config is None
 
 
+def test_custom_voice_requires_the_voice_field():
+    """A voice_ id raises when the installed SDK has no VoiceConfig.voice field."""
+    fields = {
+        name: field
+        for name, field in genai.types.VoiceConfig.model_fields.items()
+        if name != "voice"
+    }
+    with patch.object(genai.types.VoiceConfig, "model_fields", fields):
+        with pytest.raises(RuntimeError, match="google-genai >= 2.25.0"):
+            GeminiTTSService._genai_voice_config("voice_custom123")
+
+
 @requires_speech_metadata
 @pytest.mark.asyncio
 @patch("google.genai.Client")
