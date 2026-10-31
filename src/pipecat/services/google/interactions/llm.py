@@ -208,6 +208,61 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
         """
         return True
 
+    async def run_inference(
+        self,
+        context: LLMContext,
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
+            response_schema: Optional JSON schema the reply must follow. The
+                service asks the provider to enforce it, so the reply is JSON
+                text matching the schema.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        params = await self.get_llm_adapter().get_llm_invocation_params(
+            context,
+            system_instruction=system_instruction
+            or assert_given(self._settings.system_instruction),
+        )
+        request = self._build_request(params)
+        if max_tokens is not None:
+            request.setdefault("generation_config", {})["max_output_tokens"] = max_tokens
+
+        response_schema = self._check_response_schema(response_schema)
+        if response_schema is not None:
+            request["response_format"] = {
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": response_schema,
+            }
+
+        assert self._client is not None
+        interaction = await self._client.aio.interactions.create(**request)
+
+        status = getattr(interaction, "status", None)
+        if status not in ("completed", "requires_action"):
+            logger.warning(f"{self}: response incomplete, the interaction ended {status}")
+
+        text = "".join(
+            item.text
+            for step in getattr(interaction, "steps", None) or []
+            if step.type == "model_output"
+            for item in step.content or []
+            if getattr(item, "text", None)
+        )
+        return text or None
+
     @traced_llm
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle different frame types.
