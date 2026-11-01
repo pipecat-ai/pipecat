@@ -76,7 +76,7 @@ class YoobSTTService(WebsocketSTTService):
             ttfs_p99_latency: P99 time from speech end to final transcript, in seconds.
             **kwargs: Passed to ``WebsocketSTTService``.
         """
-        default_settings = self.Settings(model="yoob-asr-1", language=Language.EN.value)
+        default_settings = self.Settings(model="yoob-asr-turbo-v1", language=Language.EN.value)
         if settings is not None:
             default_settings.apply_update(settings)
         super().__init__(
