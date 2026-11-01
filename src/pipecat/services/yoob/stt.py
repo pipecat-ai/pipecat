@@ -12,6 +12,7 @@ without waiting for the server's own end-of-speech. Each final's ``result`` carr
 tagged caption (sound tags such as ``[laughing]``), ``emotion`` and ``emotion_probs``, and word times.
 """
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncGenerator
@@ -41,6 +42,8 @@ YOOB_BASE_URL = "https://tts-api.yoob.com/v1"
 YOOB_STT_SAMPLE_RATE = 16000
 # Measured 2026-11-01: a final arrives ~0.3 s after the utterance is closed.
 YOOB_TTFS_P99 = 0.6
+# How long a graceful end waits for the last results after asking for them.
+_FINISH_TIMEOUT_S = 3.0
 # Fields the stream carries for Yoob's own monitoring; left out of the frames' result.
 _INTERNAL_KEYS = ("encoder", "timing", "commit_ms")
 
@@ -96,6 +99,9 @@ class YoobSTTService(WebsocketSTTService):
         )
         self._receive_task = None
         self._resampler = create_stream_resampler()
+        # the newest partial not yet covered by a final
+        self._last_partial: dict[str, Any] | None = None
+        self._done: asyncio.Event | None = None
 
     def can_generate_metrics(self) -> bool:
         """Yoob STT reports TTFB and usage metrics."""
@@ -107,9 +113,24 @@ class YoobSTTService(WebsocketSTTService):
         await self._connect()
 
     async def stop(self, frame: EndFrame):
-        """Disconnect on a graceful end."""
+        """Ask for the last results, then disconnect on a graceful end."""
+        await self._finish()
         await super().stop(frame)
         await self._disconnect()
+
+    async def _finish(self):
+        ws = self._websocket
+        if not ws or ws.state is not State.OPEN or not self._receive_task:
+            return
+        # The server closes the socket after "done"; that close must not trigger a reconnect.
+        self._disconnecting = True
+        self._done = asyncio.Event()
+        try:
+            await ws.send(json.dumps({"type": "stop"}))
+            await asyncio.wait_for(self._done.wait(), _FINISH_TIMEOUT_S)
+        except Exception as e:
+            logger.debug(f"{self}: no end of stream from Yoob ({type(e).__name__})")
+        await self._flush_partial()
 
     async def cancel(self, frame: CancelFrame):
         """Disconnect on cancel."""
@@ -189,18 +210,31 @@ class YoobSTTService(WebsocketSTTService):
         raise Exception("Websocket not connected")
 
     async def _receive_messages(self):
-        async for message in self._get_websocket():
-            if isinstance(message, bytes):
-                continue
-            try:
-                data = json.loads(message)
-            except json.JSONDecodeError:
-                logger.warning(f"Received non-JSON message: {message}")
-                continue
-            try:
-                await self._process_response(data)
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
+        try:
+            async for message in self._get_websocket():
+                if isinstance(message, bytes):
+                    continue
+                try:
+                    data = json.loads(message)
+                except json.JSONDecodeError:
+                    logger.warning(f"{self}: non-JSON message from Yoob ({len(message)} chars)")
+                    continue
+                try:
+                    await self._process_response(data)
+                except Exception as e:
+                    logger.error(f"{self}: error processing a Yoob message: {type(e).__name__}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await self._flush_partial()
+            raise
+        # The socket closed: keep the words heard so far instead of dropping them with the connection.
+        await self._flush_partial()
+
+    async def _flush_partial(self):
+        data, self._last_partial = self._last_partial, None
+        if data:
+            await self._on_transcript(data, is_final=True)
 
     async def _process_response(self, data: dict[str, Any]):
         kind = data.get("type")
@@ -210,11 +244,21 @@ class YoobSTTService(WebsocketSTTService):
                 logger.debug(f"{self}: Yoob closed an idle session; reconnecting")
                 return
             await self.push_error(error_msg=f"Yoob: {data.get('message') or data.get('code')}")
-        elif kind in ("partial", "final"):
-            await self._on_transcript(data, is_final=kind == "final")
+        elif kind == "partial":
+            if data.get("text"):
+                self._last_partial = data
+            await self._on_transcript(data, is_final=False)
+        elif kind == "final":
+            self._last_partial = None
+            await self._on_transcript(data, is_final=True)
+        elif kind == "done":
+            if self._done:
+                self._done.set()
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, is_final: bool, language: Language | None = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
         pass
 
     async def _on_transcript(self, data: dict[str, Any], *, is_final: bool):
@@ -225,10 +269,14 @@ class YoobSTTService(WebsocketSTTService):
         if is_final:
             await self.emit_stt_usage_metrics()
             await self.push_frame(
-                TranscriptionFrame(transcript, self._user_id, time_now_iso8601(), Language.EN, result=result)
+                TranscriptionFrame(
+                    transcript, self._user_id, time_now_iso8601(), Language.EN, result=result
+                )
             )
             await self._handle_transcription(transcript, True, Language.EN)
         else:
             await self.push_frame(
-                InterimTranscriptionFrame(transcript, self._user_id, time_now_iso8601(), Language.EN, result=result)
+                InterimTranscriptionFrame(
+                    transcript, self._user_id, time_now_iso8601(), Language.EN, result=result
+                )
             )

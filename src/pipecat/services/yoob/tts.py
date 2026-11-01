@@ -10,6 +10,7 @@ Each sentence Pipecat hands over is rendered with one streaming request to ``POS
 (raw 48 kHz PCM), and the audio is resampled to the pipeline's output rate as it arrives.
 """
 
+import json
 import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -148,7 +149,7 @@ class YoobTTSService(TTSService):
                 timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=30),
             ) as r:
                 if r.status != 200:
-                    error = await r.text()
+                    error = _error_message(await r.text())
                     logger.error(f"{self} error getting audio (status: {r.status}, error: {error})")
                     yield ErrorFrame(error=f"Yoob TTS error (status: {r.status}, error: {error})")
                     return
@@ -163,3 +164,12 @@ class YoobTTSService(TTSService):
                     yield frame
         except aiohttp.ClientError as e:
             yield ErrorFrame(error=f"Yoob TTS request failed: {e}")
+
+
+def _error_message(body: str) -> str:
+    # Only the API's error message and code, never the raw body, so logs and error frames don't carry the input text.
+    try:
+        err = json.loads(body).get("error") or {}
+        return str(err.get("message") or err.get("code") or "unknown error")
+    except (ValueError, AttributeError):
+        return "unreadable error response"
