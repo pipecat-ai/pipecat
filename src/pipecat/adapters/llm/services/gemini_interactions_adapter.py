@@ -413,6 +413,18 @@ class GeminiInteractionsLLMAdapter(BaseLLMAdapter[GeminiInteractionsLLMInvocatio
         )
 
 
+class GeminiInteractionsVertexLLMAdapter(GeminiInteractionsLLMAdapter):
+    """Gemini Interactions API adapter for Vertex AI.
+
+    Identical to :class:`GeminiInteractionsLLMAdapter` except for file URL
+    support: Vertex reads ``gs://`` URIs directly through its own IAM.
+    """
+
+    def supports_file_url(self, url: str, mime_type: str) -> bool:
+        """Vertex additionally consumes ``gs://`` URIs directly."""
+        return url.startswith("gs://") or super().supports_file_url(url, mime_type)
+
+
 _MODEL_STEP_TYPES = ("model_output", "function_call", "thought")
 
 _STEP_TYPES = ("user_input", "function_result", *_MODEL_STEP_TYPES)
