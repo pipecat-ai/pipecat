@@ -72,6 +72,7 @@ THIN_WRAPPER_BASES = {
     "OpenAIRealtimeLLMService",
     "BaseWhisperSTTService",
     "GoogleLLMService",
+    "GoogleInteractionsLLMService",
     "GeminiLiveLLMService",
 }
 

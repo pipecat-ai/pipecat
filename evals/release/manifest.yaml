@@ -224,6 +224,10 @@ suite:
       - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-google-vertex.py
     scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-google-interactions-vertex.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-grok.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-groq.py

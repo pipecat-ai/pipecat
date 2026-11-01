@@ -102,6 +102,9 @@ IMPORTS = {
     "google_interactions_llm": [
         "from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService"
     ],
+    "google_interactions_vertex_llm": [
+        "from pipecat.services.google.interactions.vertex.llm import GoogleInteractionsVertexLLMService"
+    ],
     "google_vertex_llm": ["from pipecat.services.google.vertex.llm import GoogleVertexLLMService"],
     "xai_llm": ["from pipecat.services.xai.llm import GrokLLMService"],
     "groq_llm": ["from pipecat.services.groq.llm import GroqLLMService"],

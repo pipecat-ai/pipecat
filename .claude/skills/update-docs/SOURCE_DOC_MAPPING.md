@@ -25,34 +25,35 @@ trigger doc updates on their own.
 
 These source paths don't follow the standard `services/{provider}/{type}.py` → `api-reference/server/services/{type}/{provider}.mdx` pattern. Use the doc page below as the candidate path.
 
-| Source path                                 | Doc page                                                                                           |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `services/google/vertex/llm.py`             | `api-reference/server/services/llm/google-vertex.mdx`                                              |
-| `services/google/llm.py`                    | `api-reference/server/services/llm/google.mdx` (shared base; also affects `llm/google-vertex.mdx`) |
-| `services/google/interactions/llm.py`       | `api-reference/server/services/llm/google-interactions.mdx`                                        |
-| `services/google/gemini_live/**`            | `api-reference/server/services/s2s/gemini-live.mdx`                                                |
-| `services/google/gemini_live/vertex/llm.py` | `api-reference/server/services/s2s/gemini-live-vertex.mdx`                                         |
-| `services/aws/nova_sonic/**`                | `api-reference/server/services/s2s/aws.mdx`                                                        |
-| `services/ultravox/**`                      | `api-reference/server/services/s2s/ultravox.mdx`                                                   |
-| `services/grok/realtime/**`                 | `api-reference/server/services/s2s/grok.mdx`                                                       |
-| `services/openai/realtime/**`               | `api-reference/server/services/s2s/openai.mdx`                                                     |
-| `services/openai/responses/llm.py`          | `api-reference/server/services/llm/openai-responses.mdx`                                           |
-| `processors/frameworks/rtvi/processor.py`   | `api-reference/server/rtvi/rtvi-processor.mdx`                                                     |
-| `processors/frameworks/rtvi/observer.py`    | `api-reference/server/rtvi/rtvi-observer.mdx`                                                      |
-| `processors/frameworks/rtvi/models.py`      | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)               |
-| `processors/frameworks/rtvi/frames.py`      | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx` |
-| `processors/idle_frame_processor.py`        | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                        |
-| `pipeline/worker.py`                        | `api-reference/server/pipeline/pipeline-worker.mdx`                                                |
-| `pipeline/runner.py`                        | `api-reference/server/utilities/runner/guide.mdx`                                                  |
-| `pipeline/llm_with_backend/**`              | `api-reference/server/composite-services/llm-with-backend.mdx` and `pipecat/learn/llm-with-backend.mdx` |
-| `pipeline/service_switcher.py`              | `api-reference/server/composite-services/service-switcher.mdx`                                    |
-| `pipeline/llm_switcher.py`                  | `api-reference/server/composite-services/llm-switcher.mdx`                                         |
-| `transports/base_transport.py`              | `api-reference/server/services/transport/transport-params.mdx`                                     |
-| `flows/types.py`                            | `api-reference/pipecat-flows/types.mdx`                                                          |
-| `flows/manager.py`                          | `api-reference/pipecat-flows/flow-manager.mdx`                                                   |
-| `flows/actions.py`                          | `api-reference/pipecat-flows/flow-manager.mdx` and `api-reference/pipecat-flows/types.mdx`       |
-| `flows/adapters.py`                         | `api-reference/pipecat-flows/overview.mdx`                                                       |
-| `flows/exceptions.py`                       | `api-reference/pipecat-flows/exceptions.mdx`                                                     |
+| Source path                                  | Doc page                                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `services/google/vertex/llm.py`              | `api-reference/server/services/llm/google-vertex.mdx`                                                                        |
+| `services/google/llm.py`                     | `api-reference/server/services/llm/google.mdx` (shared base; also affects `llm/google-vertex.mdx`)                           |
+| `services/google/interactions/llm.py`        | `api-reference/server/services/llm/google-interactions.mdx` (shared base; also affects `llm/google-interactions-vertex.mdx`) |
+| `services/google/interactions/vertex/llm.py` | `api-reference/server/services/llm/google-interactions-vertex.mdx`                                                           |
+| `services/google/gemini_live/**`             | `api-reference/server/services/s2s/gemini-live.mdx`                                                                          |
+| `services/google/gemini_live/vertex/llm.py`  | `api-reference/server/services/s2s/gemini-live-vertex.mdx`                                                                   |
+| `services/aws/nova_sonic/**`                 | `api-reference/server/services/s2s/aws.mdx`                                                                                  |
+| `services/ultravox/**`                       | `api-reference/server/services/s2s/ultravox.mdx`                                                                             |
+| `services/grok/realtime/**`                  | `api-reference/server/services/s2s/grok.mdx`                                                                                 |
+| `services/openai/realtime/**`                | `api-reference/server/services/s2s/openai.mdx`                                                                               |
+| `services/openai/responses/llm.py`           | `api-reference/server/services/llm/openai-responses.mdx`                                                                     |
+| `processors/frameworks/rtvi/processor.py`    | `api-reference/server/rtvi/rtvi-processor.mdx`                                                                               |
+| `processors/frameworks/rtvi/observer.py`     | `api-reference/server/rtvi/rtvi-observer.mdx`                                                                                |
+| `processors/frameworks/rtvi/models.py`       | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)                                         |
+| `processors/frameworks/rtvi/frames.py`       | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx`                           |
+| `processors/idle_frame_processor.py`         | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                                                  |
+| `pipeline/worker.py`                         | `api-reference/server/pipeline/pipeline-worker.mdx`                                                                          |
+| `pipeline/runner.py`                         | `api-reference/server/utilities/runner/guide.mdx`                                                                            |
+| `pipeline/llm_with_backend/**`               | `api-reference/server/composite-services/llm-with-backend.mdx` and `pipecat/learn/llm-with-backend.mdx`                      |
+| `pipeline/service_switcher.py`               | `api-reference/server/composite-services/service-switcher.mdx`                                                               |
+| `pipeline/llm_switcher.py`                   | `api-reference/server/composite-services/llm-switcher.mdx`                                                                   |
+| `transports/base_transport.py`               | `api-reference/server/services/transport/transport-params.mdx`                                                               |
+| `flows/types.py`                             | `api-reference/pipecat-flows/types.mdx`                                                                                      |
+| `flows/manager.py`                           | `api-reference/pipecat-flows/flow-manager.mdx`                                                                               |
+| `flows/actions.py`                           | `api-reference/pipecat-flows/flow-manager.mdx` and `api-reference/pipecat-flows/types.mdx`                                   |
+| `flows/adapters.py`                          | `api-reference/pipecat-flows/overview.mdx`                                                                                   |
+| `flows/exceptions.py`                        | `api-reference/pipecat-flows/exceptions.mdx`                                                                                 |
 
 ## Base classes
 

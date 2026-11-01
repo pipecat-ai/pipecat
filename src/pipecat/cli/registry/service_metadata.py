@@ -608,6 +608,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="google_interactions_vertex_llm",
+            label="Google Vertex AI Interactions",
+            package="pipecat-ai[google]",
+            class_name=["GoogleInteractionsVertexLLMService"],
+            env_prefix="GOOGLE",
+            include_params=["credentials", "location", "project_id"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="google_vertex_llm",
             label="Google Vertex AI",
             package="pipecat-ai[google]",

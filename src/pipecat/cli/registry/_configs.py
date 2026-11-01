@@ -187,6 +187,17 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "google_interactions_vertex_llm": (
+        "GoogleInteractionsVertexLLMService(\n"
+        '        project_id=os.getenv("GOOGLE_PROJECT_ID"),\n'
+        '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
+        '        location=os.getenv("GOOGLE_LOCATION"),\n'
+        "        settings=GoogleInteractionsVertexLLMService.Settings(\n"
+        '            model=os.getenv("GOOGLE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "google_vertex_llm": (
         "GoogleVertexLLMService(\n"
         '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
