@@ -340,3 +340,66 @@ async def test_streaming_applies_the_thinking_default_and_effort():
     assert "output_config" not in requests[0]
     assert "thinking" not in requests[1]
     assert requests[1]["output_config"] == {"effort": "low"}
+
+
+def test_mid_conversation_system_supported_models():
+    """Models documented to support mid-conversation system messages are recognized."""
+    from pipecat.services.anthropic.llm import _supports_mid_conversation_system
+
+    for model in (
+        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-mythos-5",
+        "claude-mythos-5-1",
+        # Dated snapshots and wrapped ids name the same model
+        "claude-haiku-5-5-20260630",
+        "us.anthropic.claude-sonnet-5-5-20260630-v1:0",
+        "claude-opus-5-5@20260630",
+    ):
+        assert _supports_mid_conversation_system(model), model
+
+
+def test_mid_conversation_system_unsupported_models():
+    """Older, unknown, and non-Claude models keep the user-role conversion."""
+    from pipecat.services.anthropic.llm import _supports_mid_conversation_system
+
+    for model in (
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-opus-4-5",
+        "claude-haiku-4-5",
+        "claude-3-5-sonnet-20241022",
+        "some-future-model",
+        "",
+    ):
+        assert not _supports_mid_conversation_system(model), model
+
+
+@pytest.mark.asyncio
+async def test_service_threads_mid_conversation_system_flag():
+    """AnthropicLLMService passes the model's mid-conversation support to the adapter."""
+    from pipecat.services.anthropic.llm import AnthropicLLMService
+
+    async def flag_for(model: str) -> bool:
+        service = AnthropicLLMService(
+            api_key="test-key", settings=AnthropicLLMService.Settings(model=model)
+        )
+        captured = {}
+
+        async def fake_get_llm_invocation_params(context, **kwargs):
+            captured.update(kwargs)
+            return {"system": None, "messages": [], "tools": []}
+
+        service._adapter.get_llm_invocation_params = fake_get_llm_invocation_params
+        await service._get_llm_invocation_params(
+            LLMContext(messages=[{"role": "user", "content": "hi"}])
+        )
+        return captured["mid_conversation_system"]
+
+    assert await flag_for("claude-haiku-5-5") is True
+    assert await flag_for("claude-sonnet-5") is False
