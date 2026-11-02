@@ -9,7 +9,67 @@ import struct
 import unittest
 import wave
 
-from pipecat.audio.utils import pcm_to_wav
+import numpy as np
+
+from pipecat.audio.utils import apply_half_hann_fade_out, pcm_to_wav
+
+
+class TestHalfHannFadeOut(unittest.TestCase):
+    def test_matches_descending_half_hann_and_pins_endpoints(self):
+        samples = np.array([32767, -32768, 12000, -7000, 2000], dtype=np.int16)
+
+        faded_bytes = apply_half_hann_fade_out(samples.tobytes())
+        faded = np.frombuffer(faded_bytes, dtype=np.int16)
+
+        phase = np.linspace(0.0, np.pi, num=len(samples), dtype=np.float64)
+        gains = 0.5 * (1.0 + np.cos(phase))
+        expected = np.rint(samples.astype(np.float64) * gains).astype(np.int16)
+        expected[0] = samples[0]
+        expected[-1] = 0
+
+        np.testing.assert_array_equal(faded, expected)
+        self.assertEqual(faded[0], samples[0])
+        self.assertEqual(faded[-1], 0)
+
+    def test_constant_signal_descends_monotonically_without_changing_length(self):
+        samples = np.full(640, -32768, dtype=np.int16)
+
+        faded_bytes = apply_half_hann_fade_out(samples.tobytes())
+        faded = np.frombuffer(faded_bytes, dtype=np.int16)
+
+        self.assertEqual(len(faded_bytes), len(samples.tobytes()))
+        self.assertTrue(np.all(np.diff(np.abs(faded.astype(np.int32))) <= 0))
+        self.assertEqual(faded[0], samples[0])
+        self.assertEqual(faded[-1], 0)
+
+    def test_handles_empty_and_single_frame_inputs(self):
+        self.assertEqual(apply_half_hann_fade_out(b""), b"")
+        self.assertEqual(
+            apply_half_hann_fade_out(np.array([123], dtype=np.int16).tobytes()), b"\0\0"
+        )
+
+    def test_stereo_fade(self):
+        # Stereo: 2 channels
+        left = np.array([20000, 15000, 10000, 5000], dtype=np.int16)
+        right = np.array([-20000, -15000, -10000, -5000], dtype=np.int16)
+        interleaved = np.empty(8, dtype=np.int16)
+        interleaved[0::2] = left
+        interleaved[1::2] = right
+
+        faded_bytes = apply_half_hann_fade_out(interleaved.tobytes(), num_channels=2)
+        faded = np.frombuffer(faded_bytes, dtype=np.int16)
+
+        # Check endpoints
+        self.assertEqual(faded[0], left[0])
+        self.assertEqual(faded[1], right[0])
+        self.assertEqual(faded[-2], 0)
+        self.assertEqual(faded[-1], 0)
+
+    def test_rejects_partial_sample(self):
+        with self.assertRaisesRegex(ValueError, "complete 1-channel 16-bit samples"):
+            apply_half_hann_fade_out(b"\x01")
+        with self.assertRaisesRegex(ValueError, "complete 2-channel 16-bit samples"):
+            apply_half_hann_fade_out(b"\x01\x00\x02", num_channels=2)
 
 
 class TestPcmToWav(unittest.TestCase):
