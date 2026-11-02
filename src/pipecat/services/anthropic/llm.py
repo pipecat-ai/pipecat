@@ -88,6 +88,33 @@ _THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
 }
 
 
+# Models that accept mid-conversation ``{"role": "system"}`` messages, with no
+# beta header, keyed by normalized model name (see ``_model_name``). Per
+# https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
+_MID_CONVERSATION_SYSTEM_MODELS = frozenset(
+    {
+        "claude-fable-5-1",
+        "claude-mythos-5-1",
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+    }
+)
+
+
+def _supports_mid_conversation_system(model: str) -> bool:
+    """Whether the model accepts mid-conversation system messages.
+
+    Unknown and older models return False, so they keep the previous
+    user-role conversion for later system/developer messages.
+    """
+    return _model_name(model) in _MID_CONVERSATION_SYSTEM_MODELS
+
+
 def _model_name(model: str) -> str:
     """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
 
@@ -497,6 +524,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             system_instruction=effective_instruction,
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
             system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
+            mid_conversation_system=_supports_mid_conversation_system(self._settings.model or ""),
         )
         messages = invocation_params["messages"]
         system = invocation_params["system"]
@@ -567,6 +595,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             system_instruction=assert_given(self._settings.system_instruction),
             ensure_last_message_is_user=self._should_inject_trailing_user_message(),
             system_prompt_cache_ttl=assert_given(self._settings.system_prompt_cache_ttl),
+            mid_conversation_system=_supports_mid_conversation_system(self._settings.model or ""),
         )
         return params
 
