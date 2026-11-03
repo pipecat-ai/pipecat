@@ -68,6 +68,7 @@ class FrameSerializer(BaseObject):
         if (
             self._params.ignore_rtvi_messages
             and isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame))
+            and isinstance(frame.message, dict)
             and frame.message.get("label") == RTVI.MESSAGE_LABEL
         ):
             return True
