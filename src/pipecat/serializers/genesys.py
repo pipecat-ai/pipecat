@@ -558,7 +558,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             parameters={"entities": [{"type": "barge_in", "data": {}}]},
         )
 
-        logger.debug("🔇 Barge-in event sent to Genesys")
+        logger.debug("Barge-in event sent to Genesys")
 
         return msg
 
@@ -743,7 +743,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return None
 
         audio_data = data
-        original_len = len(data)
 
         # If Genesys sends stereo audio (BOTH channels), extract only the external channel (left)
         # Stereo audio comes interleaved: [L0, R0, L1, R1, ...]
@@ -751,9 +750,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
             # For PCMU, each sample is 1 byte
             # Extract only bytes at even positions (left channel = external)
             audio_data = bytes(data[i] for i in range(0, len(data), 2))
-            logger.debug(
-                f"🔊 Stereo audio: {original_len} bytes → {len(audio_data)} bytes (external channel)"
-            )
 
         if self._params.media_format == AudioHookMediaFormat.PCMU:
             # Convert μ-law at 8kHz to PCM at pipeline rate
@@ -873,19 +869,19 @@ class GenesysAudioHookSerializer(FrameSerializer):
             audio_media: dict[str, Any] = media_list[0]  # Get first media entry
             channels = audio_media.get("channels", [])
             logger.debug(
-                f"📡 Genesys audio config: format={audio_media.get('format')}, channels={channels}, rate={audio_media.get('rate')}"
+                f"Genesys audio config: format={audio_media.get('format')}, channels={channels}, rate={audio_media.get('rate')}"
             )
             # channels is a list like ["external"] or ["external", "internal"]
             if isinstance(channels, list):
                 if "external" in channels and "internal" in channels:
                     self._params.channel = AudioHookChannel.BOTH
-                    logger.debug("📡 Stereo mode: extracting external channel")
+                    logger.debug("Stereo mode: extracting external channel")
                 elif "external" in channels:
                     self._params.channel = AudioHookChannel.EXTERNAL
-                    logger.debug("📡 Mono mode: external channel")
+                    logger.debug("Mono mode: external channel")
                 elif "internal" in channels:
                     self._params.channel = AudioHookChannel.INTERNAL
-                    logger.debug("📡 Mono mode: internal channel")
+                    logger.debug("Mono mode: internal channel")
 
         # Log participant info for debugging
         ani = self._participant.get("ani", "unknown") if self._participant else "unknown"
@@ -921,11 +917,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
         params = message.get("parameters", {})
         reason = params.get("reason", "unknown")
 
-        logger.info(f"🔴 Genesys closed the connection: {reason}")
+        logger.info(f"Genesys closed the connection: {reason}")
 
         self._is_open = False
 
-        logger.info("Sending closed response to Genesys...")
+        logger.debug("Sending closed response to Genesys")
 
         await self._call_event_handler("on_close", message)
 
@@ -946,7 +942,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             OutputTransportMessageUrgentFrame with pong response.
         """
-        logger.info("Sending pong response to Genesys...")
+        logger.trace("Sending pong response to Genesys")
 
         await self._call_event_handler("on_ping", message)
 
