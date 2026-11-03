@@ -46,7 +46,7 @@ _ERROR_HINTS = (
     (
         ("rtp", "no audio", "media", "one-way", "ice", "stun"),
         "likely cause: NAT — media is not crossing; see the Symmetric RTP and "
-        "medianat notes in TESTING.md",
+        "medianat notes in README.md",
     ),
 )
 
