@@ -221,16 +221,17 @@ class TwilioAPI:
         domain_name: str,
         *,
         secure: bool = False,
-        symmetric_rtp: bool = True,
     ) -> dict[str, Any]:
         """Create an Elastic SIP trunk.
+
+        The response's ``symmetric_rtp_enabled`` is read-only — Trunk
+        create/update accept no field for it, so media latching is a Console
+        setting.
 
         Args:
             friendly_name: Name the harness finds the trunk by.
             domain_name: Termination domain, ``<name>.pstn.twilio.com``.
             secure: Require TLS and SRTP on the termination side.
-            symmetric_rtp: Send media back to the address media arrived from —
-                what makes audio two-way behind NAT.
 
         Returns:
             Created trunk.
@@ -242,7 +243,6 @@ class TwilioAPI:
                 "FriendlyName": friendly_name,
                 "DomainName": domain_name,
                 "Secure": secure,
-                "SymmetricRtp": symmetric_rtp,
             },
         )
 
@@ -251,7 +251,7 @@ class TwilioAPI:
 
         Args:
             trunk_sid: Trunk to update.
-            **fields: Twilio field names, e.g. ``Secure``, ``SymmetricRtp``.
+            **fields: Twilio field names, e.g. ``Secure``, ``TransferMode``.
 
         Returns:
             Updated trunk.

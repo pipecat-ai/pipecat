@@ -14,7 +14,7 @@ Two tiers, each self-contained:
 | Tier | Needs | Costs | Call clients | Proves |
 |---|---|---|---|---|
 | 0 | `DAILY_API_KEY` + Deepgram/OpenAI/Cartesia keys | nothing | macOS Telephone.app (or Linphone/Zoiper) registered as a Daily SIP client | REGISTER, INVITE, two-way RTP, DTMF, dial-in and dial-out — pure SIP, no PSTN |
-| 1 | Tier 0 plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, Symmetric RTP, termination auth |
+| 1 | Tier 0 plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, termination auth, IP ACL |
 
 Files here:
 
@@ -70,7 +70,7 @@ path:
 A path that works tells you its hops are sound; a path that fails next to a
 path that works localizes the fault to the hops they differ on. One-way audio
 on A+B+C+D while F+C+D is clean, for instance, points at B — the trunk's
-Symmetric RTP setting.
+media path.
 
 ## Tier 0 quickstart
 
@@ -166,7 +166,7 @@ convention:
 
 - a **trunk** `pipecat-harness` at `pipecat-harness-<8 hex>.pstn.twilio.com`
   (termination domains are globally unique, hence the suffix), with
-  `Secure=false` and `SymmetricRtp=true`
+  `Secure=false`
 - an **origination URI** pointing at the bot client's SIP URI with
   `;transport=tls`, priority 10, weight 10 — this is what makes a call to the
   trunk land on the registered bot
@@ -237,6 +237,12 @@ domain, `SIP_REG_INTERVAL=0` so the bot registers nowhere, and
 INVITE. The body carries a `P-Asserted-Identity` header naming the trunk
 number, so the call presents a caller ID the PSTN accepts.
 
+The command also sets `SIP_STUN_SERVER=off` — a registration-less account
+cannot run `medianat=stun` (the dial fails instantly; see troubleshooting).
+With STUN off the bot advertises its LAN address, so **turn on the trunk's
+Symmetric RTP first** (Console > Elastic SIP Trunking > Trunks >
+`pipecat-harness` > General) or the bot will not hear the callee.
+
 ## What you should see
 
 Every milestone is one grep-able INFO line, `[N/6]`, emitted by
@@ -258,7 +264,7 @@ What each one means about the SIP machinery underneath:
 | Line | What just happened |
 |---|---|
 | `[1/6] REGISTER ok` | The bot's REGISTER was accepted and the registrar now maps its AOR to this host's contact. Until this lands nothing can reach the bot by name. In trunk mode (`SIP_REG_INTERVAL=0`) there is no registration at all and the line reads `trunk mode, skipping REGISTER` — the peer reaches the bot directly instead. |
-| `[2/6] INVITE — call ringing` | An INVITE arrived (or went out) and the call is in its provisional 180 Ringing state. Signaling works; media has not started. |
+| `[2/6] INVITE — call ringing` | An INVITE arrived (or went out) and the call is in its provisional 180 Ringing state. Signaling works; media has not started. An auto-answered dial-in can jump straight to established, skipping this line. |
 | `[3/6] answered, media flowing` | 200 OK, SDP negotiated, and the first RTP packet actually arrived. In this transport "connected" means answered *and* receiving audio, so this line is the one that rules out a NAT media failure. |
 | `[4/6] pipeline started` | `on_client_connected` fired; the pipeline is running and the greeting `LLMRunFrame` is queued. Audio frames now reach STT. |
 | `DTMF <tone>` | A dial-pad digit arrived as RFC 4733 telephone-event (or as SIP INFO, with `dtmf_mode="info"`). |
@@ -280,13 +286,44 @@ uv run python examples/sip/milestones.py
 
 ## Troubleshooting
 
-**The call connects but audio flows only one way.** The usual cause on Tier 1
-is Symmetric RTP: the bot advertises the address STUN reported, and behind a
-symmetric NAT that address is not where its media actually comes from. With
-`SymmetricRtp=true` the trunk latches onto the bot's real RTP source address
-instead. `status` checks the flag; `provision --tier 1` sets it. On a network
-where STUN itself is the wrong answer, set `SIP_STUN_SERVER=off`, or go
-through a TURN relay with `SIP_EXTRA_PARAMS=medianat=turn,...`.
+**The bot greets you, then greets you again a few seconds later.** The bot is
+hearing its own voice. Watch the `heard:` lines in the bot terminal: the bot's
+own words showing up there about a second after it spoke them means the far
+end is feeding its audio back. On the softphone that is acoustic echo —
+Telephone.app playing through the Mac's speakers while the built-in mic picks
+them up, with no echo cancellation anywhere on the SIP leg (a WebRTC browser
+would cancel this; a plain SIP client does not). The bot's VAD then treats the
+echo as the user talking, interrupts the greeting, and the LLM greets again.
+Fix: wear headphones on the softphone machine. To tell acoustic echo from
+echo in the media path itself, mute the softphone's microphone — if the
+repeats continue with the mic muted, the echo is upstream of you and worth a
+bug report with the `heard:` lines.
+
+**No ringing before the bot answers.** Expected on dial-in: the bot runs with
+`auto_answer`, so it accepts the INVITE as soon as it arrives and the call can
+jump straight to established — the caller hears no ringback and the `[2/6]`
+milestone may never print. Ringing is a dial-out thing, where the far end
+decides when to pick up.
+
+**Dial-out through the trunk fails instantly with `dial failed: Address
+family not supported by protocol family`.** `medianat=stun` cannot run on a
+registration-less account (`SIP_REG_INTERVAL=0`): the STUN server lookup runs
+at dial time, before any DNS has fixed the account's address family, and the
+media session aborts before an INVITE is sent. Registered accounts (Tier 0,
+softphone dial-out) are unaffected. `call dial-out` therefore puts
+`SIP_STUN_SERVER=off` in the command it prints; with STUN off, return media
+needs the trunk's Symmetric RTP (next entry).
+
+**The call connects but audio flows only one way.** The far end is sending
+RTP to an address the bot is not reachable at: its LAN address when STUN is
+off (every trunk dial-out), or the STUN-reported address when the bot sits
+behind a symmetric NAT. Symmetric RTP makes the trunk latch onto the bot's
+real RTP source address instead. It is off by default and the Twilio REST API
+cannot set it — `symmetric_rtp_enabled` is a read-only Trunk property, so
+turn it on by hand at Console > Elastic SIP Trunking > Trunks >
+`pipecat-harness` > General > Symmetric RTP. `status` reports which way it is
+set. A TURN relay (`SIP_EXTRA_PARAMS=medianat=turn,...`) is the alternative
+when the far end cannot latch.
 
 **Nothing registers, or the INVITE goes unanswered.** Trace the signaling:
 
@@ -378,10 +415,10 @@ SIP transport env vars the harness touches (the full surface is documented in
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | unset | the account to register or authenticate as; unset means the runner provisions a temporary Daily client |
+| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | `.state.json`'s `pipecat-harness-bot`, else unset | the account to register or authenticate as; `bot.py` exports the provisioned harness account when these are unset, and the runner provisions a temporary Daily client when there is no state either |
 | `SIP_AUTH_USER` | the user part of the AOR | digest username when it differs — the credential-list trunk path |
 | `SIP_REG_INTERVAL` | 600 | seconds between registration refreshes; `0` is trunk mode, no registration |
-| `SIP_TRANSPORT` | `udp` for an env account, `tls` for a provisioned client | SIP signaling transport |
+| `SIP_TRANSPORT` | `tls` for the harness account or a provisioned client, `udp` for any other env account | SIP signaling transport |
 | `SIP_DIALOUT_URI` | unset | dial this URI on start; the alternative to a `dialout_settings` runner body |
 | `SIP_INSTANCE_ID` | unset | stable RFC 5626 `+sip.instance`, so a restart replaces its own binding |
 | `SIP_STUN_SERVER` | `stun:stun.l.google.com:19302` | STUN server for `medianat=stun`; `off` disables media-NAT traversal |

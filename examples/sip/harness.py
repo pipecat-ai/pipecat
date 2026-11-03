@@ -267,15 +267,14 @@ def plan_provision_tier1(args: argparse.Namespace) -> None:
             "DomainName": f"{NAME_PREFIX}-<8 hex>.pstn.twilio.com",
             "FriendlyName": TRUNK_NAME,
             "Secure": "false",
-            "SymmetricRtp": "true",
         },
         when="when missing; a new suffix is drawn if the domain collides",
     )
     plan(
         "POST",
         f"{TWILIO_TRUNKING}/Trunks/<trunk>",
-        {"Secure": "false", "SymmetricRtp": "true"},
-        when="when either field drifted",
+        {"Secure": "false"},
+        when="when Secure drifted on",
     )
     plan("GET", f"{TWILIO_TRUNKING}/Trunks/<trunk>/OriginationUrls")
     plan(
@@ -463,8 +462,6 @@ async def ensure_trunk(api: TwilioAPI, state: dict[str, Any]) -> dict[str, Any]:
         fixes = {}
         if trunk.get("secure"):
             fixes["Secure"] = False
-        if not trunk.get("symmetric_rtp"):
-            fixes["SymmetricRtp"] = True
         if fixes:
             trunk = await api.update_trunk(trunk["sid"], **fixes)
             print(f"[set]  trunk {TRUNK_NAME} updated: {', '.join(sorted(fixes))}")
@@ -754,6 +751,18 @@ async def cmd_provision(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------- status
 
 
+def note(text: str, detail: str = "") -> None:
+    """Print one advisory checklist line, outside the pass/fail tally.
+
+    Args:
+        text: What the line reports.
+        detail: Follow-up line, indented under it.
+    """
+    print(f"  [WARNING] {text}")
+    if detail:
+        print(f"         {detail}")
+
+
 def row(ok: bool, text: str, fix: str = "") -> bool:
     """Print one checklist row.
 
@@ -799,11 +808,12 @@ async def status_tier1(state: dict[str, Any]) -> bool:
 
         tw.setdefault("trunk", {}).update(sid=trunk["sid"], domain_name=trunk.get("domain_name"))
         passed &= row(True, f"trunk {TRUNK_NAME} exists at {trunk.get('domain_name')}")
-        passed &= row(
-            bool(trunk.get("symmetric_rtp")),
-            "SymmetricRtp enabled (one-way audio without it)",
-            hint,
-        )
+        if not trunk.get("symmetric_rtp_enabled"):
+            note(
+                "Symmetric RTP off (Twilio's default; the REST API cannot set it)",
+                f"turn on only for one-way audio: Console > Elastic SIP Trunking > "
+                f"{TRUNK_NAME} > General > Symmetric RTP",
+            )
         passed &= row(not trunk.get("secure"), "Secure off (the harness terminates over UDP)", hint)
 
         want = cached_clients(state).get(BOT_USER, {}).get("sip_uri")
@@ -870,7 +880,7 @@ async def status_tier1(state: dict[str, Any]) -> bool:
             bool(numbers),
             "number routed to the trunk: "
             + (", ".join(n.get("phone_number", "?") for n in numbers) or "(none)"),
-            f"{hint} --number +1XXXXXXXXXX   (buying one costs money — see TESTING.md)",
+            f"{hint} --number +1XXXXXXXXXX   (buying one costs money — see README.md)",
         )
 
     return passed
@@ -1365,10 +1375,13 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
         }
     }
     # Twilio termination authenticates each INVITE against the trunk's
-    # credential list, so the bot registers nowhere.
+    # credential list, so the bot registers nowhere. A registration-less
+    # account breaks medianat=stun (STUN lookup runs before any DNS fixes an
+    # address family), so STUN is off; the trunk's Symmetric RTP setting
+    # carries return media instead — see README.md troubleshooting.
     env = (
         f"SIP_USER={user} SIP_PASS={password} SIP_DOMAIN={domain} "
-        f"SIP_REG_INTERVAL=0 SIP_AUTH_USER={user}"
+        f"SIP_REG_INTERVAL=0 SIP_AUTH_USER={user} SIP_STUN_SERVER=off"
     )
     return body, f"{env} {run}"
 

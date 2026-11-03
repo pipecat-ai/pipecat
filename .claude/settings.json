@@ -3,19 +3,5 @@
     "commit": "",
     "pr": "",
     "sessionUrl": false
-  },
-  "permissions": {
-    "deny": [
-      "Bash(git push:*)",
-      "Bash(git remote:*)",
-      "Bash(gh:*)",
-      "Bash(ssh:*)",
-      "Bash(scp:*)",
-      "Bash(rsync:*)",
-      "Bash(aws:*)",
-      "Bash(oci:*)",
-      "Bash(gcloud:*)",
-      "Bash(sudo:*)"
-    ]
   }
 }
