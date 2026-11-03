@@ -20,6 +20,12 @@ number you already own to the trunk::
 
     uv run python examples/sip/harness.py provision --tier 1 --number +15551234567
 
+Have Twilio read a sentence to a running bot, or write the body the bot dials
+out with::
+
+    uv run python examples/sip/harness.py call dial-in --via sip --duration 30
+    uv run python examples/sip/harness.py call dial-out --to softphone
+
 ``--dry-run`` prints the REST calls a command would make and touches nothing.
 
 Credentials live in ``.env`` next to this file; provisioned resources are
@@ -36,6 +42,7 @@ import json
 import os
 import secrets
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1093,9 +1100,182 @@ async def cmd_teardown(args: argparse.Namespace) -> int:
 
 # ----------------------------------------------------------------------- call
 
+DIALOUT_BODY_PATH = HERE / "dialout-body.json"
 
-async def cmd_call(args: argparse.Namespace) -> int:
-    """Place a test call through the provisioned resources.
+# Two seconds of silence for the bot's greeting, one sentence its STT should
+# transcribe, then silence to answer into.
+TEST_TWIML = (
+    "<Response>"
+    '<Pause length="2"/>'
+    "<Say>This is the pipecat SIP harness test call. Please say something back.</Say>"
+    '<Pause length="25"/>'
+    "</Response>"
+)
+
+# Twilio statuses that mean the call is over.
+FINAL_STATUSES = frozenset({"completed", "busy", "failed", "no-answer", "canceled"})
+
+# The milestone the bot terminal reaches as each status arrives.
+STATUS_HINTS = {
+    "ringing": "watch the bot terminal for [2/6] INVITE — call ringing",
+    "in-progress": "then [3/6] media flowing and [4/6] pipeline started",
+}
+
+# Dry runs print these where a provisioned value belongs.
+PLACEHOLDER_BOT_URI = f"sip:{BOT_USER}@<your-daily-domain>.sip.daily.co"
+PLACEHOLDER_DEV_URI = f"sip:{DEV_USER}@<your-daily-domain>.sip.daily.co"
+PLACEHOLDER_NUMBER = "+1XXXXXXXXXX"
+PLACEHOLDER_DOMAIN = f"{NAME_PREFIX}-<8 hex>.pstn.twilio.com"
+PLACEHOLDER_PASSWORD = "<run provision --tier 1>"
+
+
+def resolve(value: str | None, placeholder: str, missing: str, *, strict: bool) -> str:
+    """One provisioned value, or the placeholder a dry run stands in with.
+
+    Args:
+        value: Cached value, when the resource is provisioned.
+        placeholder: What a dry run prints instead.
+        missing: What to tell the developer when the value is needed for real.
+        strict: Raise instead of falling back to the placeholder.
+
+    Returns:
+        The value, or the placeholder.
+    """
+    if value:
+        return value
+    if strict:
+        raise HarnessError(missing)
+    return placeholder
+
+
+def trunk_number(state: dict[str, Any]) -> str | None:
+    """The number routed to the harness trunk.
+
+    Args:
+        state: State to read.
+
+    Returns:
+        Number in E.164, or None when none is attached.
+    """
+    return twilio_state(state).get("number", {}).get("phone_number")
+
+
+def trunk_domain(state: dict[str, Any]) -> str | None:
+    """The trunk's termination domain.
+
+    Args:
+        state: State to read.
+
+    Returns:
+        Domain name, or None when no trunk is provisioned.
+    """
+    return twilio_state(state).get("trunk", {}).get("domain_name")
+
+
+def dialin_target(state: dict[str, Any], via: str, *, strict: bool) -> str:
+    """Where the test call rings.
+
+    Args:
+        state: State to read.
+        via: ``sip`` for the bot's Daily SIP URI, ``pstn`` for the trunk number.
+        strict: Raise on a missing value instead of using a placeholder.
+
+    Returns:
+        Twilio ``To`` value.
+    """
+    if via == "pstn":
+        return resolve(
+            trunk_number(state),
+            PLACEHOLDER_NUMBER,
+            "no number is routed to the trunk, so the PSTN has nothing to ring. Run: "
+            "uv run python examples/sip/harness.py provision --tier 1 --number +1XXXXXXXXXX",
+            strict=strict,
+        )
+    uri = cached_clients(state).get(BOT_USER, {}).get("sip_uri")
+    return resolve(
+        sip_scheme(uri) if uri else None,
+        PLACEHOLDER_BOT_URI,
+        f"{BOT_USER} is not provisioned, so there is no SIP URI to dial. Run: "
+        "uv run python examples/sip/harness.py provision",
+        strict=strict,
+    )
+
+
+def dialin_caller_id(state: dict[str, Any], *, strict: bool) -> str:
+    """Caller ID the test call comes from.
+
+    Args:
+        state: State to read.
+        strict: Raise on a missing value instead of using a placeholder.
+
+    Returns:
+        Twilio ``From`` value.
+    """
+    return resolve(
+        trunk_number(state) or os.getenv("TWILIO_CALLER_ID"),
+        PLACEHOLDER_NUMBER,
+        "no caller ID to call from. Either route a number to the trunk "
+        "(provision --tier 1 --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
+        "examples/sip/.env to another number this Twilio account owns.",
+        strict=strict,
+    )
+
+
+async def place_test_call(api: TwilioAPI, to: str, from_: str, duration: int) -> int:
+    """Call the bot, follow the status, and hang up after ``duration``.
+
+    Args:
+        api: Twilio client.
+        to: Destination to ring.
+        from_: Caller ID to call from.
+        duration: Seconds to stay on the call.
+
+    Returns:
+        Process exit code — 0 when the call was answered and held 5 s.
+    """
+    call = await api.create_call(to=to, from_=from_, twiml=TEST_TWIML)
+    sid = call["sid"]
+    status = call.get("status") or "queued"
+    chain = [status]
+    print(f"[new]  call {sid}: {from_} -> {to}")
+    print(f"  {status}")
+
+    started = time.monotonic()
+    answered_at: float | None = None
+    while time.monotonic() - started < duration:
+        await asyncio.sleep(1)
+        current = (await api.fetch_call(sid)).get("status") or status
+        if current == status:
+            continue
+        status = current
+        chain.append(status)
+        hint = STATUS_HINTS.get(status, "")
+        print(f"  → {status}" + (f"   {hint}" if hint else ""))
+        if status == "in-progress":
+            answered_at = time.monotonic()
+        if status in FINAL_STATUSES:
+            break
+
+    if status not in FINAL_STATUSES:
+        print(f"  hanging up after {duration}s")
+        await api.complete_call(sid)
+        chain.append("completed")
+    print(f"  {' → '.join(chain)}")
+
+    if answered_at is None:
+        print(f"error: the call never reached in-progress (ended {status}).", file=sys.stderr)
+        return 1
+    print("  the bot terminal ends with [5/6] call ended and [6/6] quality")
+    held = time.monotonic() - answered_at
+    if held < 5:
+        print(f"error: the call was answered but held only {held:.1f}s.", file=sys.stderr)
+        return 1
+    print(f"answered and held {held:.0f}s.")
+    return 0
+
+
+async def cmd_call_dialin(args: argparse.Namespace) -> int:
+    """Have Twilio call the running bot and read a sentence to it.
 
     Args:
         args: Parsed arguments.
@@ -1103,7 +1283,123 @@ async def cmd_call(args: argparse.Namespace) -> int:
     Returns:
         Process exit code.
     """
-    raise HarnessError(f"call {args.direction} needs a provisioned Twilio trunk.")
+    state = read_state()
+    to = dialin_target(state, args.via, strict=not args.dry_run)
+    from_ = dialin_caller_id(state, strict=not args.dry_run)
+
+    if args.dry_run:
+        print(f"Dial-in test call via {args.via}, hanging up after {args.duration}s:")
+        plan("POST", f"{TWILIO_API}/Calls.json", {"From": from_, "To": to, "Twiml": TEST_TWIML})
+        plan("GET", f"{TWILIO_API}/Calls/<call>.json", when="every second, to follow the status")
+        plan(
+            "POST",
+            f"{TWILIO_API}/Calls/<call>.json",
+            {"Status": "completed"},
+            when=f"after {args.duration}s, unless the call already ended",
+        )
+        print()
+        print("--dry-run: no requests sent; unprovisioned values print as placeholders.")
+        return 0
+
+    if to == from_:
+        print(f"warning: Twilio rejects a call whose From and To are both {to}.")
+    async with TwilioAPI.from_env() as api:
+        return await place_test_call(api, to, from_, args.duration)
+
+
+def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict, str]:
+    """The runner body that dials ``to`` and the command that runs the bot with it.
+
+    Args:
+        state: State to read.
+        to: ``softphone`` or a number in E.164.
+        strict: Raise on a missing value instead of using a placeholder.
+
+    Returns:
+        Runner body, and the shell command that starts the bot with it.
+    """
+    body_file = f"examples/sip/{DIALOUT_BODY_PATH.name}"
+    run = f"uv run python examples/sip/bot.py -t sip -d --runner-body {body_file}"
+
+    if to == "softphone":
+        # Both clients sit on the same Daily domain, so the bot's own
+        # registration carries the call.
+        uri = cached_clients(state).get(DEV_USER, {}).get("sip_uri")
+        sip_uri = resolve(
+            sip_scheme(uri) if uri else None,
+            PLACEHOLDER_DEV_URI,
+            f"{DEV_USER} is not provisioned, so the softphone has no SIP URI. Run: "
+            "uv run python examples/sip/harness.py provision",
+            strict=strict,
+        )
+        return {"dialout_settings": {"sipUri": sip_uri}}, run
+
+    domain = resolve(
+        trunk_domain(state),
+        PLACEHOLDER_DOMAIN,
+        "no Twilio trunk to dial through. Run: "
+        "uv run python examples/sip/harness.py provision --tier 1",
+        strict=strict,
+    )
+    caller = resolve(
+        trunk_number(state) or os.getenv("TWILIO_CALLER_ID"),
+        PLACEHOLDER_NUMBER,
+        "no caller ID to present to the trunk. Either route a number to it "
+        "(provision --tier 1 --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
+        "examples/sip/.env.",
+        strict=strict,
+    )
+    cred = twilio_state(state).get("credential", {})
+    user = cred.get("username") or CRED_USER
+    password = resolve(
+        cred.get("password"),
+        PLACEHOLDER_PASSWORD,
+        "the trunk's SIP password is not cached. Run: "
+        "uv run python examples/sip/harness.py provision --tier 1",
+        strict=strict,
+    )
+    body = {
+        "dialout_settings": {
+            "sipUri": f"sip:{to}@{domain}",
+            "headers": {"P-Asserted-Identity": f"<sip:{caller}@sip.twilio.com>"},
+        }
+    }
+    # Twilio termination authenticates each INVITE against the trunk's
+    # credential list, so the bot registers nowhere.
+    env = (
+        f"SIP_USER={user} SIP_PASS={password} SIP_DOMAIN={domain} "
+        f"SIP_REG_INTERVAL=0 SIP_AUTH_USER={user}"
+    )
+    return body, f"{env} {run}"
+
+
+async def cmd_call_dialout(args: argparse.Namespace) -> int:
+    """Write the runner body the bot dials out with, and print how to run it.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Process exit code.
+    """
+    if args.to != "softphone" and not (args.to.startswith("+") and args.to[1:].isdigit()):
+        raise HarnessError(f"--to takes 'softphone' or a number in E.164 form, not {args.to!r}.")
+
+    state = read_state()
+    body, command = dialout_plan(state, args.to, strict=not args.dry_run)
+    text = json.dumps(body, indent=2, sort_keys=True) + "\n"
+
+    print(f"Runner body for dialing {args.to}:")
+    print(text, end="")
+    if args.dry_run:
+        print(f"--dry-run: {DIALOUT_BODY_PATH.name} not written; values may be placeholders.")
+    else:
+        DIALOUT_BODY_PATH.write_text(text)
+        print(f"written to {DIALOUT_BODY_PATH}")
+    print()
+    print("Start the bot with it — it dials as soon as it is ready:")
+    print(f"  {command}")
+    return 0
 
 
 # ----------------------------------------------------------------------- main
@@ -1170,13 +1466,33 @@ def build_parser() -> argparse.ArgumentParser:
     teardown.set_defaults(func=cmd_teardown)
 
     call = subparsers.add_parser("call", help="place a test call")
-    call.add_argument(
-        "direction",
-        choices=("dial-in", "dial-out"),
-        help="dial-in calls the bot; dial-out has the bot call out",
+    directions = call.add_subparsers(dest="direction", required=True)
+
+    dialin = directions.add_parser("dial-in", help="have Twilio call the running bot")
+    dialin.add_argument(
+        "--via",
+        choices=("sip", "pstn"),
+        default="sip",
+        help="sip = ring the bot's Daily SIP URI (default); pstn = ring the trunk's "
+        "number, best-effort — Twilio rejects a call whose From and To match",
     )
-    call.add_argument("--dry-run", action="store_true", help="print the request and change nothing")
-    call.set_defaults(func=cmd_call)
+    dialin.add_argument(
+        "--duration", type=int, default=30, help="seconds to stay on the call (default 30)"
+    )
+    dialin.add_argument(
+        "--dry-run", action="store_true", help="print the request and change nothing"
+    )
+    dialin.set_defaults(func=cmd_call_dialin)
+
+    dialout = directions.add_parser("dial-out", help="write the runner body the bot calls out with")
+    dialout.add_argument(
+        "--to",
+        required=True,
+        metavar="+1XXXXXXXXXX|softphone",
+        help=f"a number to reach through the trunk, or 'softphone' for the {DEV_USER} client",
+    )
+    dialout.add_argument("--dry-run", action="store_true", help="print the body and write nothing")
+    dialout.set_defaults(func=cmd_call_dialout)
 
     return parser
 
