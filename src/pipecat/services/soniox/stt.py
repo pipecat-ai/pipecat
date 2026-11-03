@@ -122,7 +122,7 @@ class SonioxInputParams(BaseModel):
         client_reference_id: Client reference ID to use for transcription.
     """
 
-    model: str = "stt-rt-v5"
+    model: str = "stt-rt-v6"
 
     audio_format: str | None = "pcm_s16le"
     num_channels: int | None = 1
@@ -396,7 +396,7 @@ class SonioxSTTService(WebsocketSTTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="stt-rt-v5",
+            model="stt-rt-v6",
             language=None,
             language_hints=None,
             language_hints_strict=None,

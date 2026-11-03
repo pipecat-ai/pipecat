@@ -94,7 +94,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = SonioxSTTService(
         api_key=os.environ["SONIOX_API_KEY"],
         settings=SonioxSTTService.Settings(
-            model="stt-rt-v6",  # Agent text input needs stt-rt-v6
             language_hints=[Language.EN],
             enable_echo_cancellation=True,  # Implies enable_agent_text_input
             # Or, for the whole reply once it has been spoken, with any TTS:
