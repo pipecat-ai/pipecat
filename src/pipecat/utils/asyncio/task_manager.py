@@ -198,8 +198,7 @@ class TaskManager(BaseTaskManager):
                 last = tb[-1]
                 logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
-        # An explicitly passed Context() is empty and falsy; only a missing
-        # argument falls back to the manager's default context (#6495).
+        # An empty Context() is falsy, so check for None.
         task = self._loop.create_task(
             run_coroutine(),
             context=context if context is not None else self._context,

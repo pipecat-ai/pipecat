@@ -17,9 +17,7 @@ class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
     """Tests for TaskManager.create_task() cancellation handling."""
 
     async def test_explicit_empty_context_is_honored(self):
-        """An explicitly passed empty Context must not fall back to the
-        caller's or the manager's default context (issue #6495): Context()
-        is falsy, so the old `context or self._context` swallowed it."""
+        """An explicitly passed empty Context is used, even though it is falsy."""
         from contextvars import Context, ContextVar
 
         marker = ContextVar("marker_tm_test", default="unset")
@@ -40,9 +38,7 @@ class TestTaskManagerCreateTask(unittest.IsolatedAsyncioTestCase):
         populated_default = Context()
         populated_default.run(marker.set, "manager-default")
         manager_with_default = TaskManager(context=populated_default)
-        task2 = manager_with_default.create_task(
-            read(), "empty-override-2", context=Context()
-        )
+        task2 = manager_with_default.create_task(read(), "empty-override-2", context=Context())
         self.assertEqual(await task2, "unset")
 
         # Unchanged behavior: a populated manager default applies when no
