@@ -316,13 +316,14 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The bot-stopped frame.
 
         Returns:
-            STOP if a user turn was triggered, otherwise CONTINUE.
+            Always CONTINUE, so strategies after this one still see the frame and
+            can update their own bot state.
         """
         self._bot_speaking = False
         if self._speech_active and not self._decision_made:
             self._decision_made = True
             await self.trigger_user_turn_started()
-            return ProcessFrameResult.STOP
+            return ProcessFrameResult.CONTINUE
         return await self._handle_reset(frame)
 
     async def _handle_reset(

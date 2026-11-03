@@ -47,9 +47,15 @@ with patch("importlib.metadata.version", return_value="0.0.0-dev"):
         VADUserStoppedSpeakingFrame,
     )
     from pipecat.turns.types import ProcessFrameResult
+    from pipecat.turns.user_start import BaseUserTurnStartStrategy
     from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
         KrispVivaIPUserTurnStartStrategy,
     )
+    from pipecat.turns.user_stop import ExternalUserTurnCompletionStopStrategy
+    from pipecat.turns.user_turn_controller import UserTurnController
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
+    from pipecat.utils.asyncio.task_manager import TaskManager
+    from tests.frame_processor_helpers import frame_processor_setup
 
 STRATEGY_MODULE = "pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy"
 
@@ -369,9 +375,45 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             result = await strategy.process_frame(BotStoppedSpeakingFrame())
 
             self.assertEqual(count, 1)
-            self.assertEqual(result, ProcessFrameResult.STOP)
+            self.assertEqual(result, ProcessFrameResult.CONTINUE)
         finally:
             await strategy.cleanup()
+
+    async def test_bot_stopped_reaches_strategies_after_it(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+        seen = []
+
+        class RecordingStrategy(BaseUserTurnStartStrategy):
+            async def process_frame(self, frame):
+                seen.append(frame)
+                return ProcessFrameResult.CONTINUE
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[self._make_strategy(), RecordingStrategy()],
+                stop=[ExternalUserTurnCompletionStopStrategy()],
+            )
+        )
+        await controller.setup(frame_processor_setup(TaskManager()))
+        await controller.start()
+        try:
+            turns = 0
+
+            @controller.event_handler("on_user_turn_started")
+            async def on_user_turn_started(controller, strategy, params):
+                nonlocal turns
+                turns += 1
+
+            await controller.process_frame(BotStartedSpeakingFrame())
+            await controller.process_frame(VADUserStartedSpeakingFrame())
+            await controller.process_frame(self._audio_frame())
+            bot_stopped = BotStoppedSpeakingFrame()
+            await controller.process_frame(bot_stopped)
+
+            self.assertEqual(turns, 1)
+            self.assertIn(bot_stopped, seen)
+        finally:
+            await controller.cleanup()
 
     async def test_bot_stops_after_interruption_does_not_trigger_twice(self):
         self.mock_ip_session.process = MagicMock(return_value=0.9)
