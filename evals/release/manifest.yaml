@@ -281,6 +281,12 @@ suite:
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
+  - bot: function-calling/function-calling-google-interactions-async.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/async_tool
+      - scripted/async_tool_cancellation
+      - scripted/function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
       - scripted/weather_function_call
