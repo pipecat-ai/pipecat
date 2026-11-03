@@ -142,7 +142,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 serializer=serializer,
-                audio_out_fixed_packet_size=1600,  # Important: prevents 429 rate limiting from Genesys
+                # Send audio in 200 ms packets; Genesys rate-limits incoming messages
+                audio_out_10ms_chunks=20,
             ),
         )
 
