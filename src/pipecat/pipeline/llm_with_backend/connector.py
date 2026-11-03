@@ -285,11 +285,13 @@ class BackendConnector:
         session = await self._open_session()
         status = await session.send(request)
         await self._trace(params.llm, event="request", text=request, backend=status)
-        await self._start_work(params.llm)
         await params.result_callback(
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
         )
+        # Announced once the call has settled, so a frontend that stays quiet
+        # (``respond_on_delegate=False``) is seen as waiting from here on.
+        await self._start_work(params.llm)
 
     async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
         """Deliver one thing the backend produced to the frontend.

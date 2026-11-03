@@ -159,6 +159,10 @@ class LLMUserAggregatorParams:
             The aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
+        user_waiting_timeout: Seconds of quiet, while work is in flight (an
+            asynchronous function call, a backend's delegated task), before
+            the aggregator emits an `on_user_waiting` event. Set to 0 to
+            disable waiting detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         empty_user_turn: How to respond to a user turn that ends with no
             transcript. By default, the bot answers such a turn when it
@@ -195,6 +199,7 @@ class LLMUserAggregatorParams:
     user_mute_strategies: list[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
+    user_waiting_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
     empty_user_turn: EmptyUserTurnConfig | None = field(default_factory=EmptyUserTurnConfig)
     filter_incomplete_user_turns: bool = False
@@ -649,6 +654,8 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stop_timeout: Called when the stop timeout ends a user turn its
       stop strategies didn't end.
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
+    - on_user_waiting: Called when the user has waited quietly on work in flight
+      for the configured timeout
     - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is
       triggered by the assistant response start rather than the
@@ -730,6 +737,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_waiting")
         self._register_event_handler("on_user_turn_inference_triggered")
         self._register_event_handler("on_user_turn_message_added")
         self._register_event_handler("on_user_mute_started")
@@ -850,9 +858,11 @@ class LLMUserAggregator(LLMContextAggregator):
         )
 
         self._user_idle_controller = UserIdleController(
-            user_idle_timeout=self._params.user_idle_timeout
+            user_idle_timeout=self._params.user_idle_timeout,
+            user_waiting_timeout=self._params.user_waiting_timeout,
         )
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
+        self._user_idle_controller.add_event_handler("on_user_waiting", self._on_user_waiting)
 
         # VAD controller
         self._vad_controller: VADController | None = None
@@ -1646,6 +1656,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _on_user_turn_idle(self, controller):
         await self._call_event_handler("on_user_turn_idle")
+
+    async def _on_user_waiting(self, controller):
+        await self._call_event_handler("on_user_waiting")
 
     async def _maybe_emit_user_turn_stopped(
         self,

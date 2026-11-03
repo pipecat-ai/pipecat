@@ -55,6 +55,8 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
+    - on_user_waiting: Emitted when the user has waited quietly on work in
+      flight for the configured timeout.
 
     Example::
 
@@ -91,6 +93,7 @@ class UserTurnProcessor(FrameProcessor):
         user_turn_strategies_params: UserTurnStrategiesParams | None = None,
         user_turn_stop_timeout: float = 5.0,
         user_idle_timeout: float = 0,
+        user_waiting_timeout: float = 0,
         **kwargs,
     ):
         """Initialize the user turn processor.
@@ -105,6 +108,10 @@ class UserTurnProcessor(FrameProcessor):
                 The processor will emit an `on_user_turn_idle` event when the user
                 has been idle (not speaking) for this duration. Set to 0 to disable
                 idle detection.
+            user_waiting_timeout: Seconds of quiet, while work is in flight (an
+                asynchronous function call, a backend's delegated task), before
+                the processor emits an `on_user_waiting` event. Set to 0 to
+                disable waiting detection.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
@@ -114,6 +121,7 @@ class UserTurnProcessor(FrameProcessor):
         self._register_event_handler("on_user_turn_resumed")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_waiting")
         self._register_event_handler("on_user_turn_inference_triggered")
 
         self._user_turn_controller = UserTurnController(
@@ -142,8 +150,11 @@ class UserTurnProcessor(FrameProcessor):
             "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
         )
 
-        self._user_idle_controller = UserIdleController(user_idle_timeout=user_idle_timeout)
+        self._user_idle_controller = UserIdleController(
+            user_idle_timeout=user_idle_timeout, user_waiting_timeout=user_waiting_timeout
+        )
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
+        self._user_idle_controller.add_event_handler("on_user_waiting", self._on_user_waiting)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor.
@@ -269,6 +280,9 @@ class UserTurnProcessor(FrameProcessor):
 
     async def _on_user_turn_idle(self, controller):
         await self._call_event_handler("on_user_turn_idle")
+
+    async def _on_user_waiting(self, controller):
+        await self._call_event_handler("on_user_waiting")
 
     async def _on_user_turn_inference_triggered(
         self,
