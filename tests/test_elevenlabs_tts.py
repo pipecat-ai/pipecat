@@ -586,10 +586,10 @@ async def test_wordless_alignment_still_advances_the_clock():
 
 
 def test_pause_frame_processing_is_configurable():
-    """Holding frames per turn is the default; turning it off lets contexts overlap."""
-    assert _make_service()._pause_frame_processing is True
-    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=False)
-    assert service._pause_frame_processing is False
+    """Contexts overlap by default; turning the pause on holds frames per turn."""
+    assert _make_service()._pause_frame_processing is False
+    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=True)
+    assert service._pause_frame_processing is True
 
 
 @pytest.mark.asyncio
