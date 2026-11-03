@@ -21,11 +21,15 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     OutputAudioRawFrame,
     StartFrame,
+    TextType,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.tests.utils import SleepFrame, run_test
@@ -207,3 +211,50 @@ async def test_speech_to_speech_reply_ends_with_its_last_sentence():
         if isinstance(call.args[0], RTVI.BotOutputMessage)
     ]
     assert sent == ["Hello there.", "It's provider-agnostic."]
+
+
+def _out_of_context_text(text: str) -> LLMTextFrame:
+    frame = LLMTextFrame(text)
+    frame.append_to_context = False
+    return frame
+
+
+@pytest.mark.asyncio
+async def test_aggregations_keep_append_to_context():
+    """Aggregations, including the one flushed at the end, keep the input's flag."""
+    down_frames, _ = await run_test(
+        LLMTextProcessor(),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            _out_of_context_text("Hello there. "),
+            _out_of_context_text("How can I help?"),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+    aggregated = _aggregated(down_frames)
+    assert [f.text for f in aggregated] == ["Hello there.", "How can I help?"]
+    assert [f.append_to_context for f in aggregated] == [False, False]
+
+    aggregated, _ = await _aggregations(LLMTextProcessor(), "Hello there. ", "How can I help?")
+    assert [f.append_to_context for f in aggregated] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_speech_to_speech_reply_is_added_to_the_context_once():
+    """A speech-to-speech service adds its spoken text, not its LLM text, to the context."""
+    frames: list[Frame] = [LLMFullResponseStartFrame()]
+    for text in ["Hello there. ", "How can I help?"]:
+        spoken = TTSTextFrame(text, text_type=TextType.SENTENCE)
+        spoken.includes_inter_frame_spaces = True
+        frames += [_out_of_context_text(text), spoken]
+    frames.append(LLMFullResponseEndFrame())
+
+    context = LLMContext()
+    await run_test(
+        Pipeline([LLMTextProcessor(), LLMAssistantAggregator(context)]),
+        frames_to_send=frames,
+    )
+
+    assert context.get_messages() == [
+        {"role": "assistant", "content": "Hello there. How can I help?"}
+    ]

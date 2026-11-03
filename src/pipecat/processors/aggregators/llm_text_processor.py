@@ -82,6 +82,7 @@ class LLMTextProcessor(FrameProcessor):
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         self._text_transforms: list[tuple[TextType | str, TextTransform]] = text_transforms or []
         self._skip_tts: bool | None = None
+        self._append_to_context = True
 
     def add_text_transformer(
         self, transform_function: TextTransform, text_type: TextType | str = "*"
@@ -151,10 +152,13 @@ class LLMTextProcessor(FrameProcessor):
 
     async def _handle_llm_text(self, in_frame: LLMTextFrame):
         self._skip_tts = in_frame.skip_tts
+        # Speech-to-speech services keep their LLMTextFrames out of the context
+        # and add the spoken text instead, so the aggregations follow the input.
+        self._append_to_context = in_frame.append_to_context
         async for aggregation in self._text_aggregator.aggregate(in_frame.text):
             out_frame = await self._aggregated_text_frame(aggregation)
             if out_frame:
-                out_frame.append_to_context = True
+                out_frame.append_to_context = self._append_to_context
                 out_frame.skip_tts = in_frame.skip_tts
                 await self.push_frame(out_frame)
 
@@ -164,6 +168,7 @@ class LLMTextProcessor(FrameProcessor):
         if remaining:
             out_frame = await self._aggregated_text_frame(remaining)
             if out_frame:
+                out_frame.append_to_context = self._append_to_context
                 out_frame.skip_tts = skip_tts
                 await self.push_frame(out_frame)
 
