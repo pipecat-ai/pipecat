@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.wait_reassurance import WaitReassurance
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
@@ -169,6 +170,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,
             llm,
+            # While an async call runs and nothing has been said for a while,
+            # the bot says a brief word so the user knows it is still on it.
+            WaitReassurance(),
             tts,
             transport.output(),
             assistant_aggregator,

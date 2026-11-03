@@ -1,0 +1,32 @@
+# While the backend runs the integration tests, nobody speaks. The bot says a
+# brief word on its own so the user knows it is still on it, and the result
+# follows. The remark has to be brief and unspecific: the user asked for no
+# detail.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+- user: "Run the integration tests for the HTTP client and tell me what you find."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+    - event: response
+      within_ms: 25000
+      eval: "acknowledges that it is starting on the tests, without reporting any result; speaks as itself, without mentioning a backend or handing work off"
+      text_excludes: "backend"
+      check_from: turn_start  # some models say it before the delegate call
+
+# No user turn: the bot's own word while the tests run.
+- expect:
+    - event: response
+      within_ms: 20000
+      eval: "says, unprompted, that it is still working on the task, in one or two short sentences; may name the step under way or one just done, but no file names, commands or code; reports no finding or result and does not say the work is done; asks nothing and promises nothing; speaks as itself, without mentioning a backend"
+      allow_continue: false
+      text_excludes: "backend"
+
+# No user turn: the result, on its own.
+- expect:
+    - event: response
+      within_ms: 60000
+      eval: "reports the outcome of the integration tests (if the bot only says it is still working or the tests are still running, answer continue, not no: the report has not come yet)"

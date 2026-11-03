@@ -52,6 +52,7 @@ from pipecat.processors.frameworks.rtvi import (
     RTVIFunctionCallReportLevel,
     RTVIObserverParams,
 )
+from pipecat.processors.wait_reassurance import WaitReassurance
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -128,6 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             aggregators.user(),
             llm,
+            # While the backend works and nothing has been said for a while,
+            # the frontend says a brief word so the user knows it is still on
+            # it, or stays quiet if the user asked not to be kept posted.
+            WaitReassurance(),
             tts,
             transport.output(),
             aggregators.assistant(),
