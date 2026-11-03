@@ -26,32 +26,37 @@ from pipecat.utils.base_object import BaseObject
 
 
 class UserIdleController(BaseObject):
-    """Controller for detecting a conversation that has gone quiet, and whose silence it is.
+    """Controller for detecting a conversation that has gone quiet: the user idle, or waiting.
 
     The controller times the silence after the bot finishes speaking and
-    reports it as one of two events, told apart by whether work is in flight.
-    Work in flight is what a ``BackgroundWorkStartedFrame`` announced and no
-    ``BackgroundWorkFinishedFrame`` has ended yet: an asynchronous function
-    call, a backend's delegated task.
+    reports it as one of two events, told apart by whether background work is
+    in progress. Background work is what a ``BackgroundWorkStartedFrame``
+    announced and no ``BackgroundWorkFinishedFrame`` has ended yet, e.g. an
+    asynchronous function call or a task delegated to an ``LLMWithBackend``
+    backend.
 
-    - With nothing in flight, the silence is the user's: their turn, left
-      unanswered. After ``user_idle_timeout`` seconds, ``on_user_turn_idle``.
-    - With work in flight, the silence is the bot's: it holds the turn while
-      its work runs. After ``user_waiting_timeout`` seconds, ``on_user_waiting``.
+    - With no background work, the user is idle: it is their turn, and they
+      have said nothing. After ``user_idle_timeout`` seconds,
+      ``on_user_turn_idle``.
+    - With background work in progress, the user is waiting on it. After
+      ``user_waiting_timeout`` seconds, ``on_user_waiting``.
+
+    A synchronous function call is not background work: it is part of the
+    bot's turn, whose result the LLM waits for before it can say anything,
+    so the idle timer does not run while one is pending.
 
     Either timer starts when BotStoppedSpeakingFrame is received and is
     cancelled when someone starts speaking again (UserStartedSpeakingFrame or
     BotStartedSpeakingFrame). Each fires once per start; the bot speaking
     again, the usual answer to either event, starts it over. A handler that
     stays silent starts it over by hand, with :meth:`wait_for_user` or
-    :meth:`wait_for_work`. Work starting while the conversation is already
-    quiet starts the waiting timer, and the last work finishing hands over to
-    the idle one.
+    :meth:`wait_for_work`. Background work starting while the conversation is
+    already quiet starts the waiting timer, and the last of it finishing hands
+    over to the idle one.
 
     The timers are suppressed while a user turn is in progress to avoid false
     triggers during interruptions (where BotStoppedSpeakingFrame arrives while
-    the user is still speaking). The idle timer is also suppressed while a
-    function call is pending, since its result will run the bot again.
+    the user is still speaking).
 
     A UserIdleTimeoutUpdateFrame applies immediately: it restarts a running
     idle timer with the new duration and, while waiting for the user, arms
@@ -60,8 +65,8 @@ class UserIdleController(BaseObject):
     Event handlers available:
 
     - on_user_turn_idle: Emitted when the user has been idle for the timeout period.
-    - on_user_waiting: Emitted when the user has waited quietly on work in
-      flight for the timeout period.
+    - on_user_waiting: Emitted when the user has waited quietly on background
+      work for the timeout period.
 
     Example::
 
@@ -87,9 +92,9 @@ class UserIdleController(BaseObject):
         Args:
             user_idle_timeout: Timeout in seconds before considering the user idle.
                 0 disables idle detection.
-            user_waiting_timeout: Timeout in seconds of quiet, with work in
-                flight, before the user counts as waiting. 0 disables waiting
-                detection.
+            user_waiting_timeout: Timeout in seconds of quiet, with background
+                work in progress, before the user counts as waiting. 0 disables
+                waiting detection.
         """
         super().__init__()
 
@@ -205,15 +210,16 @@ class UserIdleController(BaseObject):
         elif isinstance(frame, BackgroundWorkStartedFrame):
             first = not self._background_work
             self._background_work.add(frame.work_id)
-            # Work starting in a quiet conversation is waited on from now; an
-            # idle timer running at that point was timing the wrong silence.
+            # Background work starting in a quiet conversation: the user is
+            # waiting from now on, so an idle timer running at this point is
+            # replaced.
             if first and self._quiet:
                 await self._cancel_timer()
                 await self._start_waiting_timer()
         elif isinstance(frame, BackgroundWorkFinishedFrame):
             self._background_work.discard(frame.work_id)
             if not self._background_work and self._quiet:
-                # Nothing left to wait on: the silence is the user's again.
+                # Nothing left to wait on: the user is idle from here.
                 if self._function_calls_in_progress == 0:
                     self._waiting_for_user = True
                 await self._start_timer()
@@ -235,12 +241,13 @@ class UserIdleController(BaseObject):
         await self._start_timer()
 
     async def wait_for_work(self):
-        """Start waiting on the work in flight again, after a silent answer to ``on_user_waiting``.
+        """Start waiting on the background work again, after a silent answer to ``on_user_waiting``.
 
         The waiting timer normally starts over when the bot stops speaking. A
         handler that decided to say nothing re-arms it here, so the next
         interval gets a fresh decision. Does nothing while the bot is
-        speaking, a user turn is in progress, or no work is in flight.
+        speaking, a user turn is in progress, or no background work is in
+        progress.
         """
         if not self._quiet or not self._background_work:
             return
@@ -254,8 +261,9 @@ class UserIdleController(BaseObject):
     async def _start_timer(self):
         """Start the timer for the kind of silence this is.
 
-        The waiting timer when work is in flight; the idle timer otherwise,
-        unless a function call is pending, whose result will run the bot.
+        The waiting timer when background work is in progress; the idle timer
+        otherwise, unless a function call is pending, whose result will run
+        the bot.
         A timer of the other kind that is still running is cancelled either
         way, since it was timing a silence that is over.
         """

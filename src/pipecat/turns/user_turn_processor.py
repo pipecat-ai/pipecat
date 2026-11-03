@@ -55,8 +55,8 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
-    - on_user_waiting: Emitted when the user has waited quietly on work in
-      flight for the configured timeout.
+    - on_user_waiting: Emitted when the user has waited quietly on background
+      work for the configured timeout.
 
     Example::
 
@@ -108,10 +108,10 @@ class UserTurnProcessor(FrameProcessor):
                 The processor will emit an `on_user_turn_idle` event when the user
                 has been idle (not speaking) for this duration. Set to 0 to disable
                 idle detection.
-            user_waiting_timeout: Seconds of quiet, while work is in flight (an
-                asynchronous function call, a backend's delegated task), before
-                the processor emits an `on_user_waiting` event. Set to 0 to
-                disable waiting detection.
+            user_waiting_timeout: Seconds of quiet, while background work is in
+                progress (e.g. an asynchronous function call, or a task delegated
+                to an `LLMWithBackend` backend), before the processor emits an
+                `on_user_waiting` event. Set to 0 to disable waiting detection.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)

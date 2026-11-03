@@ -289,8 +289,6 @@ class BackendConnector:
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
         )
-        # Announced once the call has settled, so a frontend that stays quiet
-        # (``respond_on_delegate=False``) is seen as waiting from here on.
         await self._start_work(params.llm)
 
     async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
@@ -368,7 +366,7 @@ class BackendConnector:
             await self._finish_work(frontend)
 
     async def _start_work(self, frontend: LLMService[Any]) -> None:
-        """Tell the pipeline the backend has work in flight, once per lull."""
+        """Tell the pipeline the backend's background work has started, once per lull."""
         assert self._context is not None, "connector not bound"
         if self._backend_working:
             return
@@ -378,7 +376,7 @@ class BackendConnector:
         )
 
     async def _finish_work(self, frontend: LLMService[Any]) -> None:
-        """Tell the pipeline the backend's work is over, if it had any in flight."""
+        """Tell the pipeline the backend's background work is over, if any was in progress."""
         assert self._context is not None, "connector not bound"
         if not self._backend_working:
             return

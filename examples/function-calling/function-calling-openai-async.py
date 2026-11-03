@@ -170,9 +170,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,
             llm,
-            # While an async call runs and nothing has been said for a while,
-            # the bot says a brief word so the user knows it is still on it.
-            WaitReassurance(),
+            WaitReassurance(),  # a brief word from the LLM while background work runs
             tts,
             transport.output(),
             assistant_aggregator,

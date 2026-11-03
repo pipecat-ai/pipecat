@@ -57,9 +57,10 @@ The harness asks three kinds of question, and each is one classifier call:
   suite whose judged replies are all final answers, with nothing for the bot
   to fetch first, sets ``allow_continue: false``, and a reply is then yes or
   no; a reply that is still arriving is still judged again as more of it
-  comes. An expectation whose reply is final by nature, such as a word the
-  bot says on its own while its work runs, sets ``allow_continue: false`` on
-  itself alone (see :mod:`pipecat.evals.script`).
+  comes. An expectation can set ``allow_continue: false`` on itself alone,
+  which forces the judge to consider its reply as final, the thing to be
+  judged, rather than skipping it: a wait reassurance ("still working on
+  it...") is judged that way (see :mod:`pipecat.evals.script`).
 - A function call, for an ``eval:`` on a ``function_call``. The state holds
   the call's name and arguments and the conversation as context. The
   answer is yes or no.

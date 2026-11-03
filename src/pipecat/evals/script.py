@@ -172,9 +172,10 @@ Supported expectation fields (per event):
 ``allow_continue: false``
     with ``eval:`` — judge the reply yes or no, never ``continue``. The judge
     answers ``continue`` for a reply on the way to its answer, a "let me check"
-    before the result, and the harness then waits for more of the reply. A
-    reply that is final by nature, such as the word a bot says on its own
-    while its work runs, is judged as it stands::
+    before the result, and the harness then waits for more of the reply.
+    Setting ``allow_continue: false`` forces the judge to consider the reply
+    as final, the thing to be judged, rather than skipping it: a wait
+    reassurance ("still working on it...") is judged that way::
 
         - event: response
           eval: "says it is still working on the task, reporting no result"
@@ -446,8 +447,9 @@ class EvalExpectation:
             expectations above it did not use.
         allow_continue: With ``eval``, whether the judge may answer
             ``continue`` and have the harness wait for more of the reply;
-            ``None`` leaves it to the judge's own setting. ``False`` judges a
-            reply that is final by nature yes or no as it stands.
+            ``None`` leaves it to the judge's own setting. ``False`` forces
+            the judge to consider the reply as final, the thing to be judged,
+            rather than skipping it.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;

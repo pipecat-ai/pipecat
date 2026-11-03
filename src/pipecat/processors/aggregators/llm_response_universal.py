@@ -159,10 +159,10 @@ class LLMUserAggregatorParams:
             The aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
-        user_waiting_timeout: Seconds of quiet, while work is in flight (an
-            asynchronous function call, a backend's delegated task), before
-            the aggregator emits an `on_user_waiting` event. Set to 0 to
-            disable waiting detection.
+        user_waiting_timeout: Seconds of quiet, while background work is in
+            progress (e.g. an asynchronous function call, or a task delegated
+            to an `LLMWithBackend` backend), before the aggregator emits an
+            `on_user_waiting` event. Set to 0 to disable waiting detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         empty_user_turn: How to respond to a user turn that ends with no
             transcript. By default, the bot answers such a turn when it
@@ -654,8 +654,8 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stop_timeout: Called when the stop timeout ends a user turn its
       stop strategies didn't end.
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
-    - on_user_waiting: Called when the user has waited quietly on work in flight
-      for the configured timeout
+    - on_user_waiting: Called when the user has waited quietly on background
+      work for the configured timeout
     - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is
       triggered by the assistant response start rather than the

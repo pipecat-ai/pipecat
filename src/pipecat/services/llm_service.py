@@ -2010,8 +2010,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             cancel_on_interruption=item.cancel_on_interruption,
             group_id=runner_item.group_id,
         )
-        # An async call runs while the conversation goes on, so the pipeline
-        # is told it has work to wait on until the call settles.
+        # An async call is background work: the pipeline is told when it
+        # starts and when it settles.
         async_call = not item.cancel_on_interruption
         if async_call:
             await self.broadcast_frame(BackgroundWorkStartedFrame, work_id=runner_item.tool_call_id)

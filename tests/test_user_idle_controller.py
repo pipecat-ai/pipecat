@@ -641,7 +641,7 @@ if __name__ == "__main__":
 
 
 class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
-    """The waiting timer: the same silence as idle, with work in flight."""
+    """The waiting timer: the same silence as idle, with background work in progress."""
 
     async def asyncSetUp(self):
         self.task_manager = TaskManager()

@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""A brief remark from the LLM while the user waits on work in flight.
+"""A brief remark from the LLM while the user waits on background work.
 
 The prompt below is what the model reads each time the conversation has gone
-quiet with work in flight. A small change in wording can change what a model
+quiet with background work in progress. A small change in wording can change what a model
 says, or whether it stays silent, in ways no unit test catches. Before and
 after changing it, run the checks in ``scripts/llm-with-backend/tuning/README.md``
 and record their results in ``RESULTS.md`` beside it.
@@ -40,7 +40,7 @@ from pipecat.turns.user_idle_controller import UserIdleController
 WAIT_REASSURANCE_SILENT_MARK = "∅"
 
 #: The developer message appended to the conversation each time the user has
-#: waited quietly on work in flight. ``{quiet_secs}`` is how long nothing has
+#: waited quietly on background work. ``{quiet_secs}`` is how long nothing has
 #: been said; ``{mark}`` is the silent mark.
 WAIT_REASSURANCE_PROMPT = (
     "The user is waiting on work you started on their behalf, and nothing has been said for "
@@ -60,13 +60,14 @@ WAIT_REASSURANCE_PROMPT = (
 
 
 class WaitReassurance(FrameProcessor):
-    """A brief remark from the LLM, in its own words, while the user waits on work in flight.
+    """A brief remark from the LLM, in its own words, while the user waits on background work.
 
     Placed after the LLM: any text :class:`~pipecat.services.llm_service.LLMService`,
-    or an :class:`~pipecat.pipeline.llm_with_backend.LLMWithBackend`. Work in
-    flight is what a ``BackgroundWorkStartedFrame`` announced: an asynchronous
-    function call, a backend's delegated task. Once nothing has been said for
-    ``interval_secs`` with such work in flight, the processor appends
+    or an :class:`~pipecat.pipeline.llm_with_backend.LLMWithBackend`.
+    Background work is what a ``BackgroundWorkStartedFrame`` announced, e.g.
+    an asynchronous function call or a task delegated to an ``LLMWithBackend``
+    backend. Once nothing has been said for ``interval_secs`` with such work
+    in progress, the processor appends
     ``prompt`` to the conversation as a developer message and runs the LLM.
     The model decides what to say, with the user's wishes and what it knows of
     the work in view, or that nothing should be said: a reply that opens with
@@ -112,8 +113,8 @@ class WaitReassurance(FrameProcessor):
         """Initialize the processor.
 
         Args:
-            interval_secs: Seconds the conversation stays quiet, with work in
-                flight, before the LLM is asked whether to say something.
+            interval_secs: Seconds the conversation stays quiet, with background
+                work in progress, before the LLM is asked whether to say something.
             prompt: The developer message appended each time, a template with
                 ``{quiet_secs}`` and ``{mark}`` (so any other brace in it is
                 doubled). :data:`WAIT_REASSURANCE_PROMPT` unless given.
