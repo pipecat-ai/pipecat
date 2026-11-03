@@ -250,6 +250,7 @@ class _SharedRuntime:
         self._settings: _RuntimeSettings | None = None
         self._owners = 0
         self._uas: dict = {}
+        self._ua_accounts: dict = {}
         self._ua_users: dict = {}
         self._bindings: dict = {}
         self._pending_tasks: set = set()
@@ -301,6 +302,8 @@ class _SharedRuntime:
             self._runtime = None
             self._settings = None
             self._uas.clear()
+            self._ua_accounts.clear()
+            self._ua_users.clear()
             self._bindings.clear()
         if runtime is not None:
             await runtime.close()
@@ -319,9 +322,17 @@ class _SharedRuntime:
         aor = f"sip:{account.user}@{account.domain}"
         async with self._lock:
             connections = self._bindings.setdefault(aor, [])
+            if aor in self._uas and connection._account_kwargs != self._ua_accounts.get(aor):
+                raise ValueError(
+                    f"a user agent for {aor} is already up with different account "
+                    "parameters; connections sharing an address-of-record must agree "
+                    "on transport, registrar, auth_user, audio_codecs, dtmf_mode, and "
+                    "extra_params (only reg_interval may differ)"
+                )
             if aor not in self._uas:
                 ua = await UserAgent.create(self._runtime, account)
                 self._uas[aor] = ua
+                self._ua_accounts[aor] = dict(connection._account_kwargs)
                 pending = self._pending_tasks
 
                 def route_incoming(call: Call):
@@ -357,6 +368,7 @@ class _SharedRuntime:
                 return
             self._ua_users.pop(aor, None)
             ua = self._uas.pop(aor, None)
+            self._ua_accounts.pop(aor, None)
         if ua is None:
             return
         try:
@@ -617,9 +629,9 @@ class SIPConnection(BaseObject):
             auth_user=auth_user,
             transport=transport,
             registrar=registrar,
-            audio_codecs=audio_codecs,
+            audio_codecs=tuple(audio_codecs) if audio_codecs is not None else None,
             dtmf_mode=dtmf_mode,
-            extra_params=extra_params,
+            extra_params=tuple(extra_params) if extra_params is not None else None,
         )
         jitter_buffer_mode, jitter_buffer_ms = _normalize_jitter_buffer(
             jitter_buffer_mode, jitter_buffer_ms
@@ -646,6 +658,11 @@ class SIPConnection(BaseObject):
         self._connected = False
         self._call: Call | None = None
         self._call_incoming = False
+        # Claims the connection while dial() awaits the stack, so
+        # take_incoming() can't hand an inbound INVITE to it mid-dial.
+        self._dialing = False
+        # Set by hangup(); a close it caused is not a call failure.
+        self._hangup_requested = False
         # "Connect" for the transport means media is up — the call is answered
         # AND audio RTP flows — not merely the SIP handshake. These track that,
         # per call (reset in _attach_call).
@@ -745,9 +762,17 @@ class SIPConnection(BaseObject):
         connection to retry.
         """
         self._runtime = await _SHARED.acquire(self._settings)
+        # bind_ua refuses (account mismatch, UA creation failure) before counting
+        # this connection as a user, so it is undone with release() alone; from
+        # registration onward the binding exists and unbind() must undo it too.
         try:
             ua = await _SHARED.bind_ua(self._account, self)
-            self._ua = ua
+        except BaseException:
+            await _SHARED.release()
+            self._runtime = None
+            raise
+        self._ua = ua
+        try:
             if self._account.reg_interval != 0:
                 await ua.register()
                 await self._call_event_handler("registered", self.aor)
@@ -813,10 +838,14 @@ class SIPConnection(BaseObject):
         """
         if not self._connected or self._ua is None:
             raise RuntimeError("SIPConnection is not connected")
-        if self._call is not None:
+        if self._call is not None or self._dialing:
             raise RuntimeError("SIPConnection already has an active call")
-        call = await self._ua.dial(uri, headers=headers, video=video)
-        self._attach_call(call, incoming=False)
+        self._dialing = True
+        try:
+            call = await self._ua.dial(uri, headers=headers, video=video)
+            self._attach_call(call, incoming=False)
+        finally:
+            self._dialing = False
         self._establish_task = asyncio.create_task(self._watch_established(call))
         return str(call.handle)
 
@@ -830,7 +859,7 @@ class SIPConnection(BaseObject):
         Returns:
             True when this connection claimed the call.
         """
-        if not self._connected or self._call is not None:
+        if not self._connected or self._call is not None or self._dialing:
             return False
         self._attach_call(call, incoming=True)
         self._emit("incoming", self._call_payload())
@@ -880,6 +909,9 @@ class SIPConnection(BaseObject):
     async def hangup(self):
         """Hang up the active call; valid in any state."""
         call = self._require_call()
+        # Local hangup of a still-ringing dial is a stop, not a failure;
+        # the establishment watcher stays quiet on the close it causes.
+        self._hangup_requested = True
         await call.hangup()
 
     async def send_dtmf(self, digits: str):
@@ -1122,6 +1154,7 @@ class SIPConnection(BaseObject):
         self._call_established = False
         self._answered = False
         self._audio_rtp = False
+        self._hangup_requested = False
 
         def on_event(event: StackEvent):
             self._on_call_event(call, event)
@@ -1228,6 +1261,8 @@ class SIPConnection(BaseObject):
         try:
             await call.wait_established()
         except BaresipError as e:
+            if self._hangup_requested:
+                return
             await self._call_event_handler(
                 "call_failed",
                 {
