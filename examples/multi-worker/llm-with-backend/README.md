@@ -35,7 +35,7 @@ Run one the usual way, then connect a client and try "fix the flaky retry test i
 python openai-responses-frontend.py
 ```
 
-Each frontend has a commented-out `connector=BackendConnector(client_trace=True)`: with it, every exchange with the backend is sent to the client as an RTVI server message and shows in the prebuilt UI's Events panel.
+Each frontend passes `connector=BackendConnector(client_trace=True)`, so every exchange with the backend is sent to the client as an RTVI `server-message` (its data has `"type": "llm-with-backend"`) and shows in the prebuilt UI's Events panel. Tracing is off by default; comment out the connector to leave it off.
 
 [`openai-responses-frontend-predictive-delegation.py`](openai-responses-frontend-predictive-delegation.py) is `openai-responses-frontend.py` with predictive delegation turned on (`predictive_delegation=PredictiveDelegation(...)`), an optimization that can speed up responses that need backend involvement. It uses a fast yes/no classifier to determine, after each user request, whether it needs to wait for the frontend's inference or can go ahead and trigger an early backend delegation. The cost is money, not time: the classifier runs in parallel with the frontend, but on every turn, and an early delegation abandons a frontend request already under way. It needs `TYPESAFE_API_KEY`.
 

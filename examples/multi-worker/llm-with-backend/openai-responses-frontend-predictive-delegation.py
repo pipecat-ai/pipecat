@@ -44,7 +44,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.llm_with_backend import LLMWithBackend, PredictiveDelegation
+from pipecat.pipeline.llm_with_backend import BackendConnector, LLMWithBackend, PredictiveDelegation
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -111,12 +111,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             settings=OpenAIResponsesLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
         ),
         backend=build_backend(),
-        # To watch every exchange with the backend in a client's event log,
-        # such as the prebuilt UI's Events panel, pass a connector with
-        # client tracing on: each request, output, tool-call phase and
-        # cancellation is then sent to the client as an RTVI server message.
-        # from pipecat.pipeline.llm_with_backend import BackendConnector
-        # connector=BackendConnector(client_trace=True),
+        # Every exchange with the backend (each request, output, tool-call
+        # phase, error and idle) is sent to the client as an RTVI
+        # "server-message" whose data has "type": "llm-with-backend", so the
+        # prebuilt UI's Events panel shows the backend at work. Tracing is off
+        # by default; comment out the connector to leave it off.
+        connector=BackendConnector(client_trace=True),
         predictive_delegation=PredictiveDelegation(
             JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])
         ),
