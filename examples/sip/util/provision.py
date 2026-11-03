@@ -4,31 +4,38 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Provision the accounts and trunks the SIP test harness calls through.
+"""Provision the accounts and trunks the SIP examples call through.
 
-Tier 0 is Daily only: two SIP clients on your Daily domain, one for the bot
-and one for a softphone, so a call never leaves Daily's SIP service. Tier 1
-adds a Twilio Elastic SIP trunk for real phones.
+Two call types, each with its own resources. Softphone calls stay on your
+Daily domain: two SIP clients, one for the bot and one for a softphone, so a
+call never leaves Daily's SIP service. PSTN calls add a Twilio Elastic SIP
+trunk for real phones.
 
-Provision Tier 0, then read back what a softphone needs::
+Provision the Daily clients, then read back what a softphone needs::
 
-    uv run python examples/sip/harness.py provision
-    uv run python examples/sip/harness.py status
+    uv run python examples/sip/util/provision.py provision
+    uv run python examples/sip/util/provision.py status
 
-Tier 1 adds the trunk, authorizes this machine's public IP, and routes a
+``softphone`` skips the manual softphone setup entirely: it writes a baresip
+config for the dev client and launches it (``brew install baresip`` /
+``apt install baresip`` first)::
+
+    uv run python examples/sip/util/provision.py softphone
+
+``--pstn`` adds the trunk, authorizes this machine's public IP, and routes a
 number you already own to the trunk::
 
-    uv run python examples/sip/harness.py provision --tier 1 --number +15551234567
+    uv run python examples/sip/util/provision.py provision --pstn --number +15551234567
 
 Have Twilio read a sentence to a running bot, or write the body the bot dials
 out with::
 
-    uv run python examples/sip/harness.py call dial-in --via sip --duration 30
-    uv run python examples/sip/harness.py call dial-out --to softphone
+    uv run python examples/sip/util/provision.py call dial-in --via sip --duration 30
+    uv run python examples/sip/util/provision.py call dial-out --to softphone
 
 ``--dry-run`` prints the REST calls a command would make and touches nothing.
 
-Credentials live in ``.env`` next to this file; provisioned resources are
+Credentials live in ``examples/sip/.env``; provisioned resources are
 cached in ``.state.json`` beside it. Both are gitignored — the cache holds
 SIP passwords, which Daily returns only once and can otherwise only be
 rotated. ``status`` always re-reads the live resources, so deleting the cache
@@ -41,6 +48,7 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -56,23 +64,24 @@ from pipecat.transports.daily.utils import (
     DailySIPClientParams,
 )
 
-load_dotenv(Path(__file__).parent / ".env", override=True)
+SIP_DIR = Path(__file__).parent.parent
 
-HERE = Path(__file__).parent
-STATE_PATH = HERE / ".state.json"
+load_dotenv(SIP_DIR / ".env", override=True)
+
+STATE_PATH = SIP_DIR / ".state.json"
 
 DAILY_API_URL = "https://api.daily.co/v1"
 
-# Every resource the harness owns carries this prefix, so status can find them
+# Every resource provisioned here carries this prefix, so status can find them
 # live and teardown never touches anything else.
 NAME_PREFIX = "pipecat-harness"
 BOT_USER = f"{NAME_PREFIX}-bot"
 DEV_USER = f"{NAME_PREFIX}-dev"
 
 # Creation order. Teardown walks it backwards.
-TIER0_USERS = (BOT_USER, DEV_USER)
+DAILY_USERS = (BOT_USER, DEV_USER)
 
-# Tier 1 resource names. Twilio scopes FriendlyName per account, so the prefix
+# Twilio resource names. Twilio scopes FriendlyName per account, so the prefix
 # alone is enough to find a resource again and safe to reuse across runs.
 TRUNK_NAME = NAME_PREFIX
 ORIGINATION_NAME = f"{NAME_PREFIX}-origination"
@@ -85,7 +94,7 @@ TWILIO_API = "https://api.twilio.com/2010-04-01/Accounts/<sid>"
 TWILIO_TRUNKING = "https://trunking.twilio.com/v1"
 
 
-class HarnessError(Exception):
+class ProvisionError(Exception):
     """A problem the developer can fix — printed without a traceback."""
 
 
@@ -103,7 +112,7 @@ def read_state() -> dict[str, Any]:
     try:
         return json.loads(STATE_PATH.read_text())
     except json.JSONDecodeError as e:
-        raise HarnessError(f"{STATE_PATH} is not valid JSON ({e}). Delete it and re-provision.")
+        raise ProvisionError(f"{STATE_PATH} is not valid JSON ({e}). Delete it and re-provision.")
 
 
 def write_state(state: dict[str, Any]) -> None:
@@ -197,9 +206,9 @@ def bot_sip_target(state: dict[str, Any]) -> str:
     """
     uri = cached_clients(state).get(BOT_USER, {}).get("sip_uri")
     if not uri:
-        raise HarnessError(
+        raise ProvisionError(
             f"{BOT_USER} is not provisioned, so the trunk has nowhere to send calls. "
-            "Run: uv run python examples/sip/harness.py provision"
+            "Run: uv run python examples/sip/util/provision.py provision"
         )
     return sip_scheme(uri)
 
@@ -237,11 +246,11 @@ def plan(method: str, path: str, payload: dict | None = None, when: str = "") ->
     print(line)
 
 
-def plan_provision_tier0() -> None:
-    """Print the Daily REST calls Tier 0 provisioning would make."""
-    print("Tier 0 — Daily SIP clients:")
+def plan_provision_daily() -> None:
+    """Print the Daily REST calls softphone provisioning would make."""
+    print("Daily SIP clients (softphone):")
     plan("GET", f"{DAILY_API_URL}/sip-clients", {"limit": 100}, when="to find existing clients")
-    for username in TIER0_USERS:
+    for username in DAILY_USERS:
         plan("POST", f"{DAILY_API_URL}/sip-clients", {"username": username}, when="when missing")
         plan(
             "POST",
@@ -250,14 +259,14 @@ def plan_provision_tier0() -> None:
         )
 
 
-def plan_provision_tier1(args: argparse.Namespace) -> None:
-    """Print the Twilio REST calls Tier 1 provisioning would make.
+def plan_provision_pstn(args: argparse.Namespace) -> None:
+    """Print the Twilio REST calls PSTN provisioning would make.
 
     Args:
         args: Parsed arguments, for the number flags.
     """
     print()
-    print("Tier 1 — Twilio Elastic SIP trunk:")
+    print("Twilio Elastic SIP trunk (PSTN):")
     plan("GET", "https://api.ipify.org", when="to authorize this machine's public IP")
     plan("GET", f"{TWILIO_TRUNKING}/Trunks", when=f"to find the {TRUNK_NAME} trunk")
     plan(
@@ -374,15 +383,15 @@ def make_helper(session: aiohttp.ClientSession) -> DailyRESTHelper:
     """
     key = os.getenv("DAILY_API_KEY")
     if not key:
-        raise HarnessError(
+        raise ProvisionError(
             "DAILY_API_KEY is not set. Copy examples/sip/env.example to "
             "examples/sip/.env and fill it in."
         )
     return DailyRESTHelper(daily_api_key=key, daily_api_url=DAILY_API_URL, aiohttp_session=session)
 
 
-async def live_harness_clients(helper: DailyRESTHelper) -> dict[str, DailySIPClientObject]:
-    """Every SIP client on the domain whose name the harness owns.
+async def live_provisioned_clients(helper: DailyRESTHelper) -> dict[str, DailySIPClientObject]:
+    """Every SIP client on the domain whose name these examples own.
 
     Args:
         helper: Daily REST helper.
@@ -405,15 +414,15 @@ async def live_harness_clients(helper: DailyRESTHelper) -> dict[str, DailySIPCli
 # ------------------------------------------------------------------ provision
 
 
-async def provision_tier0(helper: DailyRESTHelper, state: dict[str, Any]) -> None:
-    """Bring the two Tier 0 SIP clients up to date.
+async def provision_daily(helper: DailyRESTHelper, state: dict[str, Any]) -> None:
+    """Bring the two Daily SIP clients up to date.
 
     Args:
         helper: Daily REST helper.
         state: State to update in place.
     """
-    live = await live_harness_clients(helper)
-    for username in TIER0_USERS:
+    live = await live_provisioned_clients(helper)
+    for username in DAILY_USERS:
         cached = cached_clients(state).get(username, {})
         if username not in live:
             client = await helper.create_sip_client(DailySIPClientParams(username=username))
@@ -429,7 +438,7 @@ async def provision_tier0(helper: DailyRESTHelper, state: dict[str, Any]) -> Non
 
 
 async def ensure_trunk(api: TwilioAPI, state: dict[str, Any]) -> dict[str, Any]:
-    """Find or create the harness trunk, with Symmetric RTP on and TLS off.
+    """Find or create the trunk, with Symmetric RTP on and TLS off.
 
     Args:
         api: Twilio client.
@@ -607,7 +616,7 @@ async def buy_number(api: TwilioAPI, area_code: str | None, assume_yes: bool) ->
     """
     available = await api.list_available_local_numbers(area_code=area_code, limit=5)
     if not available:
-        raise HarnessError(
+        raise ProvisionError(
             f"Twilio has no local numbers available in area code {area_code or '(any)'}."
         )
     chosen = available[0]["phone_number"]
@@ -616,7 +625,7 @@ async def buy_number(api: TwilioAPI, area_code: str | None, assume_yes: bool) ->
     if not assume_yes:
         answer = await asyncio.to_thread(input, "Type y to buy it: ")
         if answer.strip().lower() != "y":
-            raise HarnessError("purchase declined; nothing was bought.")
+            raise ProvisionError("purchase declined; nothing was bought.")
     number = await api.buy_phone_number(chosen, NAME_PREFIX)
     print(f"[new]  bought {number['phone_number']}")
     return number
@@ -638,7 +647,7 @@ async def ensure_number(api: TwilioAPI, state: dict[str, Any], args: argparse.Na
     elif args.number:
         owned = await api.list_incoming_phone_numbers(args.number)
         if not owned:
-            raise HarnessError(
+            raise ProvisionError(
                 f"{args.number} is not on this Twilio account. Buy it in the Twilio "
                 "console, or run provision with --buy-number."
             )
@@ -649,7 +658,7 @@ async def ensure_number(api: TwilioAPI, state: dict[str, Any], args: argparse.Na
             print(f"[keep] number {cached['phone_number']} stays routed to the trunk")
         else:
             print("no number attached; dial-in from PSTN unavailable")
-            print("  attach one: provision --tier 1 --number +1XXXXXXXXXX")
+            print("  attach one: provision --pstn --number +1XXXXXXXXXX")
         return
 
     attached = await api.list_trunk_phone_numbers(trunk_sid)
@@ -663,7 +672,7 @@ async def ensure_number(api: TwilioAPI, state: dict[str, Any], args: argparse.Na
     write_state(state)
 
 
-async def provision_tier1(api: TwilioAPI, state: dict[str, Any], args: argparse.Namespace) -> None:
+async def provision_pstn(api: TwilioAPI, state: dict[str, Any], args: argparse.Namespace) -> None:
     """Bring the Twilio trunk and everything it points at up to date.
 
     Args:
@@ -678,7 +687,7 @@ async def provision_tier1(api: TwilioAPI, state: dict[str, Any], args: argparse.
     await ensure_number(api, state, args)
 
 
-def print_tier1_summary(state: dict[str, Any]) -> None:
+def print_trunk_summary(state: dict[str, Any]) -> None:
     """Print what the trunk routes and what the bot registers with.
 
     Args:
@@ -695,10 +704,10 @@ def print_tier1_summary(state: dict[str, Any]) -> None:
     print(f"  Origination:{' ' + tw.get('origination', {}).get('sip_url', '?')}")
     print(f"  Authorized: {tw.get('acl', {}).get('ip_address', '?')} (this machine)")
     print(f"  SIP user:   {cred.get('username', '?')}")
-    print(f"  SIP pass:   {cred.get('password') or '(not cached — re-run provision --tier 1)'}")
+    print(f"  SIP pass:   {cred.get('password') or '(not cached — re-run provision --pstn)'}")
 
 
-def print_tier0_credentials(state: dict[str, Any]) -> None:
+def print_softphone_credentials(state: dict[str, Any]) -> None:
     """Print what a softphone needs and what to dial.
 
     Args:
@@ -720,7 +729,7 @@ def print_tier0_credentials(state: dict[str, Any]) -> None:
 
 
 async def cmd_provision(args: argparse.Namespace) -> int:
-    """Create or refresh the resources the harness calls through.
+    """Create or refresh the resources the examples call through.
 
     Args:
         args: Parsed arguments.
@@ -729,9 +738,9 @@ async def cmd_provision(args: argparse.Namespace) -> int:
         Process exit code.
     """
     if args.dry_run:
-        plan_provision_tier0()
-        if args.tier == "1":
-            plan_provision_tier1(args)
+        plan_provision_daily()
+        if args.pstn:
+            plan_provision_pstn(args)
         print()
         print(f"--dry-run: no requests sent, {STATE_PATH.name} not written.")
         return 0
@@ -739,12 +748,12 @@ async def cmd_provision(args: argparse.Namespace) -> int:
     state = read_state()
     async with aiohttp.ClientSession() as session:
         helper = make_helper(session)
-        await provision_tier0(helper, state)
-    if args.tier == "1":
+        await provision_daily(helper, state)
+    if args.pstn:
         async with TwilioAPI.from_env() as api:
-            await provision_tier1(api, state, args)
-    print_tier0_credentials(state)
-    print_tier1_summary(state)
+            await provision_pstn(api, state, args)
+    print_softphone_credentials(state)
+    print_trunk_summary(state)
     return 0
 
 
@@ -780,7 +789,7 @@ def row(ok: bool, text: str, fix: str = "") -> bool:
     return ok
 
 
-async def status_tier1(state: dict[str, Any]) -> bool:
+async def status_pstn(state: dict[str, Any]) -> bool:
     """Check the live trunk against what PSTN calls need.
 
     Args:
@@ -791,17 +800,19 @@ async def status_tier1(state: dict[str, Any]) -> bool:
     """
     print()
     if not os.getenv("TWILIO_ACCOUNT_SID"):
-        print("Tier 1 — skipped, TWILIO_ACCOUNT_SID is not set (Tier 0 needs no Twilio).")
+        print(
+            "Twilio trunk — skipped, TWILIO_ACCOUNT_SID is not set (softphone calls need no Twilio)."
+        )
         return True
 
-    hint = "run: uv run python examples/sip/harness.py provision --tier 1"
+    hint = "run: uv run python examples/sip/util/provision.py provision --pstn"
     tw = twilio_state(state)
     passed = True
 
     async with TwilioAPI.from_env() as api:
         trunks = await api.list_trunks()
         trunk = next((t for t in trunks if t.get("friendly_name") == TRUNK_NAME), None)
-        print("Tier 1 — Twilio Elastic SIP trunk:")
+        print("Twilio Elastic SIP trunk (PSTN):")
         if trunk is None:
             print(f"  (not provisioned — {hint})")
             return True
@@ -814,7 +825,7 @@ async def status_tier1(state: dict[str, Any]) -> bool:
                 f"turn on only for one-way audio: Console > Elastic SIP Trunking > "
                 f"{TRUNK_NAME} > General > Symmetric RTP",
             )
-        passed &= row(not trunk.get("secure"), "Secure off (the harness terminates over UDP)", hint)
+        passed &= row(not trunk.get("secure"), "Secure off (termination goes over UDP)", hint)
 
         want = cached_clients(state).get(BOT_USER, {}).get("sip_uri")
         want_url = f"{sip_scheme(want)};transport=tls" if want else None
@@ -887,7 +898,7 @@ async def status_tier1(state: dict[str, Any]) -> bool:
 
 
 async def cmd_status(args: argparse.Namespace) -> int:
-    """Check the live resources against what the harness needs.
+    """Check the live resources against what the examples need.
 
     Args:
         args: Parsed arguments.
@@ -896,15 +907,15 @@ async def cmd_status(args: argparse.Namespace) -> int:
         Process exit code — 0 when every check passed.
     """
     state = read_state()
-    provision_hint = "run: uv run python examples/sip/harness.py provision"
+    provision_hint = "run: uv run python examples/sip/util/provision.py provision"
     passed = True
 
     async with aiohttp.ClientSession() as session:
         helper = make_helper(session)
-        live = await live_harness_clients(helper)
+        live = await live_provisioned_clients(helper)
 
-    print("Tier 0 — Daily SIP clients:")
-    for username in TIER0_USERS:
+    print("Daily SIP clients (softphone):")
+    for username in DAILY_USERS:
         client = live.get(username)
         passed &= row(
             client is not None,
@@ -919,21 +930,21 @@ async def cmd_status(args: argparse.Namespace) -> int:
                 f"{provision_hint}  (rotates a password Daily won't return again)",
             )
 
-    passed &= await status_tier1(state)
+    passed &= await status_pstn(state)
 
     write_state(state)
-    print_tier0_credentials(state)
-    print_tier1_summary(state)
+    print_softphone_credentials(state)
+    print_trunk_summary(state)
     return 0 if passed else 1
 
 
 # ------------------------------------------------------------------- teardown
 
 
-async def teardown_tier0(
+async def teardown_daily(
     helper: DailyRESTHelper | None, state: dict[str, Any], dry_run: bool
 ) -> int:
-    """Delete the Tier 0 SIP clients, newest first.
+    """Delete the Daily SIP clients, newest first.
 
     Args:
         helper: Daily REST helper, or ``None`` on a dry run.
@@ -945,7 +956,7 @@ async def teardown_tier0(
     """
     clients = cached_clients(state)
     count = 0
-    for username in reversed(TIER0_USERS):
+    for username in reversed(DAILY_USERS):
         if username not in clients:
             continue
         count += 1
@@ -960,7 +971,7 @@ async def teardown_tier0(
     return count
 
 
-async def teardown_tier1(api: TwilioAPI | None, state: dict[str, Any], args) -> int:
+async def teardown_pstn(api: TwilioAPI | None, state: dict[str, Any], args) -> int:
     """Delete the Twilio resources, newest first.
 
     The number is only detached from the trunk — releasing it is what ends the
@@ -1069,7 +1080,7 @@ async def teardown_tier1(api: TwilioAPI | None, state: dict[str, Any], args) -> 
 
 
 async def cmd_teardown(args: argparse.Namespace) -> int:
-    """Delete what the harness provisioned, in reverse creation order.
+    """Delete what provision created, in reverse creation order.
 
     Args:
         args: Parsed arguments.
@@ -1078,18 +1089,18 @@ async def cmd_teardown(args: argparse.Namespace) -> int:
         Process exit code.
     """
     state = read_state()
-    tiers = {"0": {"0"}, "1": {"1"}, "all": {"0", "1"}}[args.tier]
+    scopes = {"daily": {"daily"}, "pstn": {"pstn"}, "all": {"daily", "pstn"}}[args.scope]
 
-    if "0" in tiers and state.get("twilio"):
-        print("note: Tier 1 origination points at the bot's SIP client; tear down Tier 1 too.")
+    if "daily" in scopes and state.get("twilio"):
+        print("note: trunk origination points at the bot's SIP client; tear down pstn too.")
 
     async def run(helper: DailyRESTHelper | None, api: TwilioAPI | None) -> int:
         count = 0
-        # Tier 1 first: its origination points at the Tier 0 bot client.
-        if "1" in tiers:
-            count += await teardown_tier1(api, state, args)
-        if "0" in tiers:
-            count += await teardown_tier0(helper, state, args.dry_run)
+        # Twilio first: trunk origination points at the Daily bot client.
+        if "pstn" in scopes:
+            count += await teardown_pstn(api, state, args)
+        if "daily" in scopes:
+            count += await teardown_daily(helper, state, args.dry_run)
         return count
 
     if args.dry_run:
@@ -1098,7 +1109,7 @@ async def cmd_teardown(args: argparse.Namespace) -> int:
         return 0
 
     async with aiohttp.ClientSession() as session:
-        api = TwilioAPI.from_env() if "1" in tiers and state.get("twilio") else None
+        api = TwilioAPI.from_env() if "pstn" in scopes and state.get("twilio") else None
         try:
             count = await run(make_helper(session), api)
         finally:
@@ -1108,16 +1119,99 @@ async def cmd_teardown(args: argparse.Namespace) -> int:
     return 0
 
 
+# -------------------------------------------------------------------- softphone
+
+SOFTPHONE_DIR = SIP_DIR / ".softphone"
+
+SOFTPHONE_KEYS = (
+    ("d <uri>", "dial (the bot's URI is printed above)"),
+    ("a", "answer an incoming call"),
+    ("b", "hang up"),
+    ("0-9", "send DTMF during a call"),
+    ("q", "quit"),
+)
+
+
+def softphone_account_line(state: dict[str, Any]) -> str:
+    """The baresip ``accounts`` line registering the dev client over UDP.
+
+    Args:
+        state: State to read.
+
+    Returns:
+        One-line baresip account definition.
+
+    Raises:
+        ProvisionError: The dev client or its password is not cached.
+    """
+    dev = cached_clients(state).get(DEV_USER, {})
+    if not (dev.get("domain") and dev.get("password")):
+        raise ProvisionError(
+            f"{DEV_USER} is not provisioned or its password is not cached. "
+            "Run: uv run python examples/sip/util/provision.py provision"
+        )
+    # answermode=manual: a human answers dial-out calls, like a real phone.
+    return (
+        f"<sip:{dev['username']}@{dev['domain']};transport=udp>"
+        f";auth_pass={dev['password']};regint=600;answermode=manual"
+    )
+
+
+async def cmd_softphone(args: argparse.Namespace) -> int:
+    """Write a baresip config for the dev client and launch it.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Process exit code (on the dry run; otherwise baresip replaces this
+        process).
+    """
+    state = read_state()
+    account = softphone_account_line(state)
+    command = ["baresip", "-f", str(SOFTPHONE_DIR)]
+
+    if args.dry_run:
+        print(f"Would write {SOFTPHONE_DIR / 'accounts'}:")
+        print(f"  {account}")
+        print(f"Would run: {' '.join(command)}")
+        return 0
+
+    if shutil.which("baresip") is None:
+        raise ProvisionError(
+            "baresip is not installed. Get it with `brew install baresip` "
+            "(macOS) or `apt install baresip` (Debian/Ubuntu), or use a GUI "
+            "softphone instead — see examples/sip/README.md."
+        )
+
+    # baresip generates the rest of its config on first launch; only the
+    # account is ours. The file carries a SIP password, hence 0600.
+    SOFTPHONE_DIR.mkdir(mode=0o700, exist_ok=True)
+    accounts = SOFTPHONE_DIR / "accounts"
+    accounts.write_text(account + "\n")
+    accounts.chmod(0o600)
+
+    print(f"Registering as {DEV_USER}. Wear headphones — no echo cancellation on SIP.")
+    try:
+        print(f"Bot's URI, once its own REGISTER lands: {bot_sip_target(state)}")
+    except ProvisionError:
+        pass
+    for key, meaning in SOFTPHONE_KEYS:
+        print(f"  {key:8} {meaning}")
+    sys.stdout.flush()
+    os.execvp(command[0], command)
+
+
 # ----------------------------------------------------------------------- call
 
-DIALOUT_BODY_PATH = HERE / "dialout-body.json"
+DIALOUT_BODY_PATH = SIP_DIR / "dial-out" / "dialout-body.json"
 
 # Two seconds of silence for the bot's greeting, one sentence its STT should
 # transcribe, then silence to answer into.
 TEST_TWIML = (
     "<Response>"
     '<Pause length="2"/>'
-    "<Say>This is the pipecat SIP harness test call. Please say something back.</Say>"
+    "<Say>This is the pipecat SIP test call. Please say something back.</Say>"
     '<Pause length="25"/>'
     "</Response>"
 )
@@ -1136,7 +1230,7 @@ PLACEHOLDER_BOT_URI = f"sip:{BOT_USER}@<your-daily-domain>.sip.daily.co"
 PLACEHOLDER_DEV_URI = f"sip:{DEV_USER}@<your-daily-domain>.sip.daily.co"
 PLACEHOLDER_NUMBER = "+1XXXXXXXXXX"
 PLACEHOLDER_DOMAIN = f"{NAME_PREFIX}-<8 hex>.pstn.twilio.com"
-PLACEHOLDER_PASSWORD = "<run provision --tier 1>"
+PLACEHOLDER_PASSWORD = "<run provision --pstn>"
 
 
 def resolve(value: str | None, placeholder: str, missing: str, *, strict: bool) -> str:
@@ -1154,12 +1248,12 @@ def resolve(value: str | None, placeholder: str, missing: str, *, strict: bool) 
     if value:
         return value
     if strict:
-        raise HarnessError(missing)
+        raise ProvisionError(missing)
     return placeholder
 
 
 def trunk_number(state: dict[str, Any]) -> str | None:
-    """The number routed to the harness trunk.
+    """The number routed to the provisioned trunk.
 
     Args:
         state: State to read.
@@ -1198,7 +1292,7 @@ def dialin_target(state: dict[str, Any], via: str, *, strict: bool) -> str:
             trunk_number(state),
             PLACEHOLDER_NUMBER,
             "no number is routed to the trunk, so the PSTN has nothing to ring. Run: "
-            "uv run python examples/sip/harness.py provision --tier 1 --number +1XXXXXXXXXX",
+            "uv run python examples/sip/util/provision.py provision --pstn --number +1XXXXXXXXXX",
             strict=strict,
         )
     uri = cached_clients(state).get(BOT_USER, {}).get("sip_uri")
@@ -1206,7 +1300,7 @@ def dialin_target(state: dict[str, Any], via: str, *, strict: bool) -> str:
         sip_scheme(uri) if uri else None,
         PLACEHOLDER_BOT_URI,
         f"{BOT_USER} is not provisioned, so there is no SIP URI to dial. Run: "
-        "uv run python examples/sip/harness.py provision",
+        "uv run python examples/sip/util/provision.py provision",
         strict=strict,
     )
 
@@ -1225,7 +1319,7 @@ def dialin_caller_id(state: dict[str, Any], *, strict: bool) -> str:
         trunk_number(state) or os.getenv("TWILIO_CALLER_ID"),
         PLACEHOLDER_NUMBER,
         "no caller ID to call from. Either route a number to the trunk "
-        "(provision --tier 1 --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
+        "(provision --pstn --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
         "examples/sip/.env to another number this Twilio account owns.",
         strict=strict,
     )
@@ -1328,8 +1422,8 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
     Returns:
         Runner body, and the shell command that starts the bot with it.
     """
-    body_file = f"examples/sip/{DIALOUT_BODY_PATH.name}"
-    run = f"uv run python examples/sip/bot.py -t sip -d --runner-body {body_file}"
+    body_file = f"examples/sip/dial-out/{DIALOUT_BODY_PATH.name}"
+    run = f"uv run python examples/sip/dial-out/bot.py -t sip -d --runner-body {body_file}"
 
     if to == "softphone":
         # Both clients sit on the same Daily domain, so the bot's own
@@ -1339,7 +1433,7 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
             sip_scheme(uri) if uri else None,
             PLACEHOLDER_DEV_URI,
             f"{DEV_USER} is not provisioned, so the softphone has no SIP URI. Run: "
-            "uv run python examples/sip/harness.py provision",
+            "uv run python examples/sip/util/provision.py provision",
             strict=strict,
         )
         return {"dialout_settings": {"sipUri": sip_uri}}, run
@@ -1348,14 +1442,14 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
         trunk_domain(state),
         PLACEHOLDER_DOMAIN,
         "no Twilio trunk to dial through. Run: "
-        "uv run python examples/sip/harness.py provision --tier 1",
+        "uv run python examples/sip/util/provision.py provision --pstn",
         strict=strict,
     )
     caller = resolve(
         trunk_number(state) or os.getenv("TWILIO_CALLER_ID"),
         PLACEHOLDER_NUMBER,
         "no caller ID to present to the trunk. Either route a number to it "
-        "(provision --tier 1 --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
+        "(provision --pstn --number +1XXXXXXXXXX), or set TWILIO_CALLER_ID in "
         "examples/sip/.env.",
         strict=strict,
     )
@@ -1365,7 +1459,7 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
         cred.get("password"),
         PLACEHOLDER_PASSWORD,
         "the trunk's SIP password is not cached. Run: "
-        "uv run python examples/sip/harness.py provision --tier 1",
+        "uv run python examples/sip/util/provision.py provision --pstn",
         strict=strict,
     )
     body = {
@@ -1396,7 +1490,7 @@ async def cmd_call_dialout(args: argparse.Namespace) -> int:
         Process exit code.
     """
     if args.to != "softphone" and not (args.to.startswith("+") and args.to[1:].isdigit()):
-        raise HarnessError(f"--to takes 'softphone' or a number in E.164 form, not {args.to!r}.")
+        raise ProvisionError(f"--to takes 'softphone' or a number in E.164 form, not {args.to!r}.")
 
     state = read_state()
     body, command = dialout_plan(state, args.to, strict=not args.dry_run)
@@ -1425,31 +1519,28 @@ def build_parser() -> argparse.ArgumentParser:
         Parser covering every subcommand.
     """
     parser = argparse.ArgumentParser(
-        prog="harness.py",
-        description="Provision the accounts and trunks the SIP test harness calls through.",
+        prog="provision.py",
+        description="Provision the accounts and trunks the SIP examples call through.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    provision = subparsers.add_parser("provision", help="create or refresh harness resources")
+    provision = subparsers.add_parser("provision", help="create or refresh provisioned resources")
     provision.add_argument(
-        "--tier",
-        choices=("0", "1"),
-        default="0",
-        help="0 = Daily SIP clients only; 1 = also a Twilio trunk for real phones",
+        "--pstn",
+        action="store_true",
+        help="also provision a Twilio trunk for real phones (Daily SIP clients always are)",
     )
     provision.add_argument(
         "--number",
         metavar="+1XXXXXXXXXX",
-        help="route a number this Twilio account already owns to the trunk (tier 1)",
+        help="route a number this Twilio account already owns to the trunk (PSTN)",
     )
     provision.add_argument(
         "--buy-number",
         action="store_true",
-        help="buy a number and route it to the trunk — COSTS MONEY, asks first (tier 1)",
+        help="buy a number and route it to the trunk — COSTS MONEY, asks first (PSTN)",
     )
-    provision.add_argument(
-        "--area-code", help="area code to search in when buying a number (tier 1)"
-    )
+    provision.add_argument("--area-code", help="area code to search in when buying a number (PSTN)")
     provision.add_argument(
         "--yes", action="store_true", help="skip the purchase confirmation for --buy-number"
     )
@@ -1461,17 +1552,25 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="check live resources against what's needed")
     status.set_defaults(func=cmd_status)
 
-    teardown = subparsers.add_parser("teardown", help="delete harness resources")
+    softphone = subparsers.add_parser(
+        "softphone", help="launch baresip registered as the dev client"
+    )
+    softphone.add_argument(
+        "--dry-run", action="store_true", help="print the config and command, run nothing"
+    )
+    softphone.set_defaults(func=cmd_softphone)
+
+    teardown = subparsers.add_parser("teardown", help="delete provisioned resources")
     teardown.add_argument(
-        "--tier",
-        choices=("0", "1", "all"),
-        default="0",
-        help="which tier's resources to delete (default 0); 'all' deletes both",
+        "--scope",
+        choices=("daily", "pstn", "all"),
+        default="daily",
+        help="daily = the two SIP clients (default); pstn = the Twilio resources; all = both",
     )
     teardown.add_argument(
         "--release-number",
         action="store_true",
-        help="give the trunk's number back to Twilio instead of keeping it (tier 1)",
+        help="give the trunk's number back to Twilio instead of keeping it (PSTN)",
     )
     teardown.add_argument(
         "--dry-run", action="store_true", help="print the deletions and change nothing"
@@ -1519,7 +1618,7 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         return asyncio.run(args.func(args))
-    except HarnessError as e:
+    except ProvisionError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

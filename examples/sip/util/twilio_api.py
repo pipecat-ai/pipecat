@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Async Twilio REST client covering what the SIP harness provisions.
+"""Async Twilio REST client covering what the SIP examples provision.
 
 Thin wrapper over ``httpx`` — no Twilio SDK. Two API hosts are involved:
 ``trunking.twilio.com/v1`` owns Elastic SIP trunks, their origination URLs,
@@ -57,7 +57,7 @@ async def get_public_ip(client: httpx.AsyncClient | None = None) -> str:
     """Look up this machine's public IP.
 
     Twilio's IP ACL authorizes the address Twilio sees traffic arrive from, so
-    the harness refreshes the entry with this value on every provision.
+    provision.py refreshes the entry with this value on every provision.
 
     Args:
         client: Client to issue the request on; one is created when omitted.
@@ -78,7 +78,7 @@ async def get_public_ip(client: httpx.AsyncClient | None = None) -> str:
 
 
 class TwilioAPI:
-    """Twilio REST calls the harness needs, under one authenticated client."""
+    """Twilio REST calls the SIP examples need, under one authenticated client."""
 
     def __init__(self, account_sid: str, auth_token: str, timeout: float = 30.0):
         """Initialize the client.
@@ -106,7 +106,7 @@ class TwilioAPI:
         if not sid or not token:
             raise TwilioError(
                 "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must both be set. "
-                "Copy examples/sip/env.example to examples/sip/.env and fill the Tier 1 block."
+                "Copy examples/sip/env.example to examples/sip/.env and fill the Twilio block."
             )
         return cls(sid, token, **kwargs)
 
@@ -229,7 +229,7 @@ class TwilioAPI:
         setting.
 
         Args:
-            friendly_name: Name the harness finds the trunk by.
+            friendly_name: Name provision.py finds the trunk by.
             domain_name: Termination domain, ``<name>.pstn.twilio.com``.
             secure: Require TLS and SRTP on the termination side.
 
@@ -295,7 +295,7 @@ class TwilioAPI:
 
         Args:
             trunk_sid: Trunk to add the URL to.
-            friendly_name: Name the harness finds the URL by.
+            friendly_name: Name provision.py finds the URL by.
             sip_url: Destination, e.g. ``sip:user@domain;transport=tls``.
             priority: Lower is tried first.
             weight: Share of traffic among equal priorities.
@@ -362,7 +362,7 @@ class TwilioAPI:
         """Create an IP access control list.
 
         Args:
-            friendly_name: Name the harness finds the list by.
+            friendly_name: Name provision.py finds the list by.
 
         Returns:
             Created ACL.
@@ -409,7 +409,7 @@ class TwilioAPI:
 
         Args:
             acl_sid: ACL to add to.
-            friendly_name: Name the harness finds the entry by.
+            friendly_name: Name provision.py finds the entry by.
             ip_address: Address to authorize.
             cidr_prefix_length: Prefix length; 32 is a single address.
 
@@ -474,7 +474,7 @@ class TwilioAPI:
         """Create a SIP credential list.
 
         Args:
-            friendly_name: Name the harness finds the list by.
+            friendly_name: Name provision.py finds the list by.
 
         Returns:
             Created credential list.

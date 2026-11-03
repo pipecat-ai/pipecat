@@ -1,38 +1,186 @@
-# Testing the SIP transport
+# Pipecat SIP Examples
 
-## What this is
+Voice bots on a phone call, over the baresip-backed `SIPTransport`. Each
+example is a complete, runnable bot; a shared `provision.py` CLI creates
+everything a SIP call needs over REST, and numbered call-progress milestones
+at INFO make a working call visible rather than silent. Run them to hear the
+transport work, and to learn the telephony topology it sits in.
 
-A dev-facing test harness for the baresip-backed `SIPTransport`. It provisions
-everything a SIP call needs over REST, runs one bot that works in both
-directions, and prints numbered call-progress milestones at INFO so a working
-call is visible rather than silent. Run it to hear the transport work, and to
-learn the telephony topology it sits in — SIP clients, a registrar, a trunk,
-the PSTN.
+No telephony background is assumed. The five terms these documents lean on:
 
-Two tiers, each self-contained:
-
-| Tier | Needs | Costs | Call clients | Proves |
-|---|---|---|---|---|
-| 0 | `DAILY_API_KEY` + Deepgram/OpenAI/Cartesia keys | nothing | macOS Telephone.app (or Linphone/Zoiper) registered as a Daily SIP client | REGISTER, INVITE, two-way RTP, DTMF, dial-in and dial-out — pure SIP, no PSTN |
-| 1 | Tier 0 plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, termination auth, IP ACL |
-
-Files here:
-
-| File | What it is |
+| Term | Meaning |
 |---|---|
-| `bot.py` | the harness bot, dial-in and dial-out in one file |
-| `milestones.py` | the numbered milestone event handlers, reusable in your own bot |
-| `harness.py` | `provision` / `status` / `call` / `teardown`, owns `.state.json` |
-| `twilio_api.py` | thin async httpx wrapper over the Twilio REST endpoints used here |
-| `env.example` | the env surface, per tier |
+| **SIP** | the protocol phone systems use to set up and end calls — who is calling whom, ringing, answer, hangup; the audio itself flows separately (as RTP) |
+| **softphone** | a desktop app that acts as a phone: mic, speakers, dial pad — but the network instead of a phone line |
+| **registrar** | the server a SIP client signs in to (a SIP `REGISTER`), so that calls to its name can find it |
+| **PSTN** | the public switched telephone network — the thing that makes real phones ring |
+| **SIP trunk** | a bridge between SIP and the PSTN: it holds phone numbers on one side and converts calls in both directions |
+
+## Examples
+
+| Example                  | What it shows                                                          |
+| ------------------------ | ---------------------------------------------------------------------- |
+| [`dial-in/`](dial-in/)   | The bot registers and answers calls — from a softphone, or a real phone. |
+| [`dial-out/`](dial-out/) | The bot places a call — to a softphone, or a real phone.               |
+
+Both run over either of two call types, each self-contained:
+
+| Call type | Needs | Costs | Call clients | Proves |
+|---|---|---|---|---|
+| **💻 Softphone** on the same Daily domain | `DAILY_API_KEY` + Deepgram/OpenAI/Cartesia keys | nothing | a softphone registered as a Daily SIP client — baresip via `provision.py softphone`, or Telephone.app/Linphone/Zoiper | REGISTER, INVITE, two-way RTP, DTMF, dial-in and dial-out — pure SIP, no PSTN |
+| **📞 PSTN** via a Twilio SIP trunk | the softphone row plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, termination auth, IP ACL |
+
+Start with the softphone call type: it costs nothing and needs nothing
+beyond the `.env` keys. Add PSTN when you want real phones.
 
 Deploying these bots to Pipecat Cloud is out of scope here; this document
 covers running them locally.
 
+## Setup
+
+From the repo root:
+
+```bash
+uv sync --all-extras
+```
+
+Copy the env template and fill in your API keys:
+
+```bash
+cp examples/sip/env.example examples/sip/.env
+```
+
+## Environment variables
+
+| Variable | Required by |
+|---|---|
+| `DAILY_API_KEY` | both call types: SIP-client CRUD, and the runner's temporary client when no account is set |
+| `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY` | the bots' STT → LLM → TTS cascade |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | PSTN: Twilio REST basic auth |
+| `TWILIO_CALLER_ID` | `call dial-in`: the `From` number, when no number is attached to the trunk |
+
+The SIP transport's own env vars (`SIP_USER`, `SIP_TRANSPORT`, …) are listed
+under [SIP env reference](#sip-env-reference); the full surface is documented
+in `pipecat.runner.sip`.
+
+## Provisioning
+
+`provision.py` owns the auxiliary infrastructure. Every resource it creates
+carries the `pipecat-harness` name prefix, so `status` can find them live and
+`teardown` never touches anything else. See the planned REST calls without
+sending them with `--dry-run` on any command.
+
+### Softphone calls: two Daily SIP clients
+
+```bash
+uv run python examples/sip/util/provision.py provision
+```
+
+This creates two persistent Daily SIP clients — `pipecat-harness-bot`, which
+the bots register as, and `pipecat-harness-dev`, which your softphone
+registers as — and prints the softphone's account block plus the bot's
+dialable URI. Re-run it any time: an existing client is left alone, and a
+client whose password is no longer in `.state.json` gets its password
+rotated, so deleting the state file is recoverable.
+
+```bash
+uv run python examples/sip/util/provision.py status
+```
+
+prints the same values again as an OK/FIX checklist, fetched live.
+
+```bash
+uv run python examples/sip/util/provision.py softphone
+```
+
+skips manual softphone setup entirely: it writes a
+[baresip](https://github.com/baresip/baresip) config registered as the dev
+client and launches it (`brew install baresip` / `apt install baresip`
+first). In baresip: `d <uri>` dials, `a` answers, `b` hangs up, digits send
+DTMF, `q` quits.
+
+Prefer a phone-shaped app instead? In Telephone.app on macOS
+(**Settings → Accounts → +**), or Linphone/Zoiper on any OS, enter the four
+values `provision` printed:
+
+- **Username**: `pipecat-harness-dev`
+- **Domain**: your Daily SIP domain, `<something>.sip.daily.co`
+- **Password**: the printed password
+- **Transport**: UDP
+
+Daily accepts UDP for these accounts; Telephone.app's TLS support is not
+something to rely on.
+
+The softphone is deliberately a separate install rather than the
+`baresip-python` package the transport itself runs on (whose wheels do ship
+hardware audio drivers). Two copies of one stack can cancel out their own
+bugs; keeping the far end an independently built client — a system
+`baresip`, or a different SIP implementation entirely in Telephone.app,
+Linphone, or Zoiper — means a fault on a call points at one side.
+
+### PSTN calls: a Twilio Elastic SIP trunk
+
+Adds a fully REST-provisioned trunk, so calls reach the bot from the PSTN and
+the bot can call a real phone.
+
+```bash
+uv run python examples/sip/util/provision.py provision --pstn
+```
+
+`--pstn` provisions the Daily clients first, then upserts, all by the
+`pipecat-harness` naming convention:
+
+- a **trunk** `pipecat-harness` at `pipecat-harness-<8 hex>.pstn.twilio.com`
+  (termination domains are globally unique, hence the suffix), with
+  `Secure=false`
+- an **origination URI** pointing at the bot client's SIP URI with
+  `;transport=tls`, priority 10, weight 10 — this is what makes a call to the
+  trunk land on the registered bot
+- an **IP ACL** `pipecat-harness` holding this machine's current public IP,
+  refreshed on every run because developer IPs churn
+- a **credential list** `pipecat-harness` with a generated password, the
+  primary dial-out auth path
+
+Without a number flag it finishes and says `no number attached; dial-in from
+PSTN unavailable` — the SIP-direct auto-caller still works.
+
+### A phone number (this is the part that costs money)
+
+Attach one your account already owns:
+
+```bash
+uv run python examples/sip/util/provision.py provision --pstn --number +1XXXXXXXXXX
+```
+
+Or buy one. **This spends money** — roughly $1.15 per month until the number
+is released. The command prints the price and asks for a `y` before
+purchasing:
+
+```bash
+uv run python examples/sip/util/provision.py provision --pstn --buy-number --area-code 415
+```
+
+Teardown keeps the number by default; only `--release-number` gives it back.
+
+### Teardown
+
+Delete what provisioning created, in reverse order, treating anything already
+gone as done:
+
+```bash
+uv run python examples/sip/util/provision.py teardown --scope all
+```
+
+`--scope daily` deletes only the two Daily SIP clients; `--scope pstn` only
+the Twilio resources (and warns if the Daily clients are left behind, since
+origination points at the bot client). The phone number is detached and kept unless you pass
+`--release-number`, which is what ends the monthly charge. `--dry-run` lists
+the deletions first.
+
 ## The topology
 
 ```
-                 TIER 1 (PSTN)                              TIER 0 (SIP only)
+              PSTN (TWILIO TRUNK)                       SOFTPHONE (DAILY ONLY)
 ┌───────────┐        ┌─────────────────┐        ┌───────────────┐
 │ your cell │        │  Twilio Elastic │        │   Daily SIP   │   REGISTER/INVITE (UDP)
 │   phone   │──PSTN──│   SIP trunk     │──SIP───│   registrar   │◄───── Telephone.app
@@ -60,206 +208,23 @@ path:
 
 | Path | Hops |
 |---|---|
-| Cell phone dials the trunk number (Tier 1) | A+B+C+D |
-| Auto-caller `call dial-in --via sip` (Tier 1) | E+C+D |
-| Auto-caller `call dial-in --via pstn` (Tier 1) | E+B+C+D |
-| Softphone dials the bot (Tier 0) | F+C+D |
-| Bot dials the softphone (Tier 0) | D+C+F |
-| Bot dials a cell phone (Tier 1) | D+C+B+A |
+| Cell phone dials the trunk number (PSTN) | A+B+C+D |
+| Auto-caller `call dial-in --via sip` (PSTN) | E+C+D |
+| Auto-caller `call dial-in --via pstn` (PSTN) | E+B+C+D |
+| Softphone dials the bot (softphone) | F+C+D |
+| Bot dials the softphone (softphone) | D+C+F |
+| Bot dials a cell phone (PSTN) | D+C+B+A |
 
 A path that works tells you its hops are sound; a path that fails next to a
 path that works localizes the fault to the hops they differ on. One-way audio
 on A+B+C+D while F+C+D is clean, for instance, points at B — the trunk's
 media path.
 
-## Tier 0 quickstart
-
-Softphone ↔ bot, Daily only. Fifteen minutes from a checkout, no money, no
-ngrok.
-
-### 1. Credentials
-
-```bash
-cp examples/sip/env.example examples/sip/.env
-```
-
-Fill `DAILY_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY`.
-Leave the Twilio block empty — Tier 0 never reads it.
-
-### 2. Provision
-
-```bash
-uv run python examples/sip/harness.py provision
-```
-
-This creates two persistent Daily SIP clients — `pipecat-harness-bot`, which
-the bot registers as, and `pipecat-harness-dev`, which your softphone
-registers as — and prints the softphone's account block plus the bot's
-dialable URI. Re-run it any time: an existing client is left alone, and a
-client whose password is no longer in `.state.json` gets its password
-rotated, so deleting the state file is recoverable. See the planned REST calls
-without sending them with `--dry-run`.
-
-```bash
-uv run python examples/sip/harness.py status
-```
-
-prints the same values again as an OK/FIX checklist, fetched live.
-
-### 3. Register the softphone
-
-In Telephone.app: **Settings → Accounts → +**, then the four values
-`provision` printed —
-
-- **Username**: `pipecat-harness-dev`
-- **Domain**: your Daily SIP domain, `<something>.sip.daily.co`
-- **Password**: the printed password
-- **Transport**: UDP
-
-Daily accepts UDP for these accounts; Telephone.app's TLS support is not
-something to rely on. If it will not register, use
-[Linphone](https://www.linphone.org/) or
-[Zoiper](https://www.zoiper.com/) instead — same four fields, same result.
-
-### 4. Run the bot and call it
-
-```bash
-uv run python examples/sip/bot.py -t sip -d
-```
-
-Wait for `[1/6] REGISTER ok`, then dial the bot's URI from the softphone
-exactly as `provision` printed it — `pipecat-harness-bot@<domain>.sip.daily.co`.
-Expect ringing, a greeting, and a conversation. Press a dial-pad digit to
-exercise DTMF; the bot logs `DTMF <tone>`. Hang up and the bot logs `[5/6]`
-and `[6/6]`.
-
-### 5. The other direction
-
-Keep the softphone registered and generate the dial-out body:
-
-```bash
-uv run python examples/sip/harness.py call dial-out --to softphone
-```
-
-It writes `examples/sip/dialout-body.json` and prints the exact command to
-run. The bot dials as soon as it is ready; answer in Telephone.app.
-
-## Tier 1: real phones via Twilio
-
-Adds a fully REST-provisioned Twilio Elastic SIP trunk, so calls reach the
-bot from the PSTN and the bot can call a real phone.
-
-### 1. Credentials
-
-Add `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` to `examples/sip/.env`. Set
-`TWILIO_CALLER_ID` as well if you want the auto-caller to use a number of
-yours that is not the one attached to the trunk.
-
-### 2. Provision the trunk
-
-```bash
-uv run python examples/sip/harness.py provision --tier 1
-```
-
-Tier 1 runs Tier 0 first, then upserts, all by the `pipecat-harness` naming
-convention:
-
-- a **trunk** `pipecat-harness` at `pipecat-harness-<8 hex>.pstn.twilio.com`
-  (termination domains are globally unique, hence the suffix), with
-  `Secure=false`
-- an **origination URI** pointing at the bot client's SIP URI with
-  `;transport=tls`, priority 10, weight 10 — this is what makes a call to the
-  trunk land on the registered bot
-- an **IP ACL** `pipecat-harness` holding this machine's current public IP,
-  refreshed on every run because developer IPs churn
-- a **credential list** `pipecat-harness` with a generated password, the
-  primary dial-out auth path
-
-Without a number flag it finishes and says `no number attached; dial-in from
-PSTN unavailable` — the SIP-direct auto-caller still works.
-
-### 3. A phone number (this is the part that costs money)
-
-Attach one your account already owns:
-
-```bash
-uv run python examples/sip/harness.py provision --tier 1 --number +1XXXXXXXXXX
-```
-
-Or buy one. **This spends money** — roughly $1.15 per month until the number
-is released. The command prints the price and asks for a `y` before
-purchasing:
-
-```bash
-uv run python examples/sip/harness.py provision --tier 1 --buy-number --area-code 415
-```
-
-Teardown keeps the number by default; only `--release-number` gives it back.
-
-### 4. Cell-phone dial-in
-
-```bash
-uv run python examples/sip/bot.py -t sip -d
-```
-
-Call the trunk's number (`status` prints it) from your phone. Hops A+B+C+D.
-
-### 5. The auto-caller
-
-No phone, no ears. Twilio places a call that reads one sentence to the bot:
-
-```bash
-uv run python examples/sip/harness.py call dial-in --via sip --duration 30
-```
-
-The call carries inline TwiML — `<Pause>`, then `<Say>This is the pipecat SIP
-harness test call. Please say something back.</Say>` — so no webhook is
-involved. The harness polls the call once a second, prints each status
-transition with the matching bot milestone as a hint, hangs up at
-`--duration`, and exits 0 only if the call reached `in-progress` and held at
-least 5 seconds. The bot's own log should show that sentence transcribed.
-
-`--via pstn` dials the trunk's number instead, exercising origination end to
-end (hops E+B+C+D). It is best-effort: with a single number the `From` and
-`To` are the same and Twilio rejects the call, which the harness warns about
-before trying.
-
-### 6. Cell-phone dial-out
-
-```bash
-uv run python examples/sip/harness.py call dial-out --to +1XXXXXXXXXX
-```
-
-Run the printed command. Dial-out goes direct to Twilio over the credential
-list: the generated command sets `SIP_DOMAIN` to the trunk's termination
-domain, `SIP_REG_INTERVAL=0` so the bot registers nowhere, and
-`SIP_USER`/`SIP_PASS`/`SIP_AUTH_USER` to the credential, authenticating per
-INVITE. The body carries a `P-Asserted-Identity` header naming the trunk
-number, so the call presents a caller ID the PSTN accepts.
-
-The command also sets `SIP_STUN_SERVER=off` — a registration-less account
-cannot run `medianat=stun` (the dial fails instantly; see troubleshooting).
-With STUN off the bot advertises its LAN address, so **turn on the trunk's
-Symmetric RTP first** (Console > Elastic SIP Trunking > Trunks >
-`pipecat-harness` > General) or the bot will not hear the callee.
-
-## What you should see
+## Call milestones
 
 Every milestone is one grep-able INFO line, `[N/6]`, emitted by
-`milestones.py` except `[4/6]`, which `bot.py` logs where it queues the
-greeting. A Tier 0 dial-in run reads:
-
-```
-[1/6] REGISTER ok — reachable at sip:pipecat-harness-bot@<domain>.sip.daily.co
-[2/6] INVITE — call ringing
-[3/6] answered, media flowing (first RTP received)
-[4/6] pipeline started — bot is listening
-DTMF 5
-[5/6] call ended
-[6/6] quality: duration=12s loss=0.0% jitter=3ms rtt=41ms
-```
-
-What each one means about the SIP machinery underneath:
+`milestones.py` except `[4/6]`, which each bot logs where it queues the
+greeting. What each one means about the SIP machinery underneath:
 
 | Line | What just happened |
 |---|---|
@@ -274,14 +239,15 @@ What each one means about the SIP machinery underneath:
 Dial-out reads the same, with `[2/6]` naming the dialed target and `[3/6]`
 coming from the answer instead of the INVITE.
 
-Lines that are not milestones: `SIP audio warning: ...` for a stalling or
-degraded stream, and `SIP error: ... — likely cause: ...`, which names the
-most likely of bad credentials, an unreachable registrar, and NAT.
+Lines that are not milestones: `heard: "..."` for every final transcription
+that reached the LLM, `SIP audio warning: ...` for a stalling or degraded
+stream, and `SIP error: ... — likely cause: ...`, which names the most likely
+of bad credentials, an unreachable registrar, and NAT.
 
 To see this list without any credentials at all:
 
 ```bash
-uv run python examples/sip/milestones.py
+uv run python examples/sip/util/milestones.py
 ```
 
 ## Troubleshooting
@@ -305,12 +271,21 @@ jump straight to established — the caller hears no ringback and the `[2/6]`
 milestone may never print. Ringing is a dial-out thing, where the far end
 decides when to pick up.
 
+**A captured log ends at `[4/6]` — no `[5/6]` or `[6/6]`.** The bot never got
+to process the hangup: Ctrl-C arrived while the call was still up (or within
+the moment it takes to process the BYE), and in a `bot | tee` pipeline the
+same Ctrl-C kills `tee`, so the lines the bot logs while shutting down never
+reach the file. The bot ends its run by itself once the call ends — hang up,
+watch for `[5/6]`/`[6/6]`, and skip Ctrl-C entirely. When teeing, use
+`tee -i`, which ignores the interrupt and keeps the shutdown lines even if
+Ctrl-C comes early.
+
 **Dial-out through the trunk fails instantly with `dial failed: Address
 family not supported by protocol family`.** `medianat=stun` cannot run on a
 registration-less account (`SIP_REG_INTERVAL=0`): the STUN server lookup runs
 at dial time, before any DNS has fixed the account's address family, and the
-media session aborts before an INVITE is sent. Registered accounts (Tier 0,
-softphone dial-out) are unaffected. `call dial-out` therefore puts
+media session aborts before an INVITE is sent. Registered accounts (softphone
+dial-out) are unaffected. `call dial-out` therefore puts
 `SIP_STUN_SERVER=off` in the command it prints; with STUN off, return media
 needs the trunk's Symmetric RTP (next entry).
 
@@ -328,7 +303,7 @@ when the far end cannot latch.
 **Nothing registers, or the INVITE goes unanswered.** Trace the signaling:
 
 ```bash
-SIP_TRACE=1 SIP_NATIVE_LOG_LEVEL=debug uv run python examples/sip/bot.py -t sip -d
+SIP_TRACE=1 SIP_NATIVE_LOG_LEVEL=debug uv run python examples/sip/dial-in/bot.py -t sip -d
 ```
 
 `SIP_TRACE=1` logs every SIP message verbatim, SDP included. **Those messages
@@ -342,9 +317,9 @@ bot. Set a stable `SIP_INSTANCE_ID` (any fixed UUID) so a restarted bot
 *replaces* its own binding (RFC 5626) instead of stacking a stale one, or
 shut the other process down.
 
-**Tier 1 dial-out fails with a 403 after it worked yesterday.** Your public IP
+**Trunk dial-out fails with a 403 after it worked yesterday.** Your public IP
 moved and the trunk's IP ACL no longer lists it. `status` prints the address
-it sees next to the authorized one; `provision --tier 1` refreshes the entry.
+it sees next to the authorized one; `provision --pstn` refreshes the entry.
 The credential list is why dial-out usually survives this — it authenticates
 per INVITE and does not care about addresses.
 
@@ -355,12 +330,12 @@ account to force a fresh REGISTER. Linphone and Zoiper are the fallbacks and
 both show the raw SIP exchange, which makes them better for debugging.
 
 **`status` says a credential password is not cached.** Twilio never returns a
-credential password after creation. `provision --tier 1` resets it to a fresh
+credential password after creation. `provision --pstn` resets it to a fresh
 one and caches that.
 
 ## Advanced: the webhook trunk path
 
-The harness uses two *persistent* Daily SIP clients because that needs no
+Provisioning uses two *persistent* Daily SIP clients because that needs no
 public URL. Production works the other way: a Daily SIP trunk of type
 `sip_client` provisions a SIP client *per inbound call* and POSTs its
 credentials to the trunk's `webhook_url`, which keeps no long-lived
@@ -372,10 +347,10 @@ The dev runner stands in for the cloud handler at
 1. Create a Daily SIP trunk of type `sip_client` via the Daily REST API, with
    its `webhook_url` pointing at a public tunnel to your machine (ngrok, say)
    and the path `/daily-sip-trunk-webhook`. `DailyRESTHelper` has no trunk
-   methods — this is a plain REST call, and it is why the automated tiers do
-   not use this path.
-2. Run the bot with the runner's server mode: `uv run python
-   examples/sip/bot.py -t sip` (no `-d`).
+   methods — this is a plain REST call, and it is why `provision.py` does not
+   use this path.
+2. Run the dial-in bot with the runner's server mode: `uv run python
+   examples/sip/dial-in/bot.py -t sip` (no `-d`).
 3. Point a phone number at the trunk and call it.
 
 Daily acknowledges trunk creation with a `sip_trunk.test` probe, which the
@@ -386,39 +361,17 @@ notification reaches the bot as `runner_args.body`, and
 `create_transport` picks the account out of `body["sip_client"]` with no code
 change in the bot.
 
-## Teardown and env reference
+## SIP env reference
 
-Delete what the harness created, in reverse order, treating anything already
-gone as done:
-
-```bash
-uv run python examples/sip/harness.py teardown --tier all
-```
-
-`--tier 0` deletes only the two Daily SIP clients; `--tier 1` only the Twilio
-resources (and warns if Tier 0 is left behind, since origination points at
-the bot client). The phone number is detached and kept unless you pass
-`--release-number`, which is what ends the monthly charge. `--dry-run` lists
-the deletions first.
-
-Harness env vars:
-
-| Variable | Used by | Meaning |
-|---|---|---|
-| `DAILY_API_KEY` | both tiers | SIP-client CRUD, and the runner's temporary client when no account is set |
-| `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY` | `bot.py` | the STT → LLM → TTS cascade |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Tier 1 | Twilio REST basic auth |
-| `TWILIO_CALLER_ID` | `call dial-in` | the `From` number, when no number is attached to the trunk |
-
-SIP transport env vars the harness touches (the full surface is documented in
-`pipecat.runner.sip`):
+SIP transport env vars these examples touch (the full surface is documented
+in `pipecat.runner.sip`):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | `.state.json`'s `pipecat-harness-bot`, else unset | the account to register or authenticate as; `bot.py` exports the provisioned harness account when these are unset, and the runner provisions a temporary Daily client when there is no state either |
+| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | `.state.json`'s `pipecat-harness-bot`, else unset | the account to register or authenticate as; the bots export the provisioned account when these are unset, and the runner provisions a temporary Daily client when there is no state either |
 | `SIP_AUTH_USER` | the user part of the AOR | digest username when it differs — the credential-list trunk path |
 | `SIP_REG_INTERVAL` | 600 | seconds between registration refreshes; `0` is trunk mode, no registration |
-| `SIP_TRANSPORT` | `tls` for the harness account or a provisioned client, `udp` for any other env account | SIP signaling transport |
+| `SIP_TRANSPORT` | `tls` for the provisioned account or a runner-provisioned client, `udp` for any other env account | SIP signaling transport |
 | `SIP_DIALOUT_URI` | unset | dial this URI on start; the alternative to a `dialout_settings` runner body |
 | `SIP_INSTANCE_ID` | unset | stable RFC 5626 `+sip.instance`, so a restart replaces its own binding |
 | `SIP_STUN_SERVER` | `stun:stun.l.google.com:19302` | STUN server for `medianat=stun`; `off` disables media-NAT traversal |

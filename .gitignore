@@ -85,5 +85,6 @@ evals/llm-with-backend/test-runs/
 
 # SIP test harness local state (secrets, call bodies, run logs)
 examples/sip/.state.json
+examples/sip/.softphone/
 examples/sip/.tier0-run.log
-examples/sip/dialout-body.json
+examples/sip/dial-out/dialout-body.json
