@@ -322,9 +322,13 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif kind == PERSONA_TURN_EVENT:
                 self._conversation.add_user_message(event.get("text") or "")
             elif kind == "function_call":
-                self._conversation.add_tool_call(name, event.get("args") or {})
+                self._conversation.add_tool_call(
+                    name, event.get("args") or {}, tool_call_id=event.get("tool_call_id")
+                )
             elif kind == "function_call_stopped" and (event.get("args") or {}).get("cancelled"):
-                self._conversation.cancel_tool_call(name)
+                self._conversation.cancel_tool_call(
+                    name, tool_call_id=event["args"].get("tool_call_id")
+                )
 
     async def _judge_conversation(self) -> list[EvalAssertionFailure]:
         """Score the measured metrics, then ask the judge once about the goal and every judged criterion.

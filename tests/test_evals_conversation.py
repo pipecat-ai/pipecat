@@ -10,6 +10,33 @@ from pipecat.evals.conversation import EvalConversation
 
 
 class TestEvalConversation(unittest.TestCase):
+    def test_identified_cancellation_does_not_consume_other_calls(self):
+        conversation = EvalConversation()
+        conversation.add_tool_call("book", {"time": "6"}, tool_call_id="first")
+        conversation.add_tool_call("book", {"time": "7"}, tool_call_id="second")
+        conversation.cancel_tool_call("other", tool_call_id="second")
+        conversation.cancel_tool_call("book", tool_call_id="missing")
+        self.assertEqual([m["cancelled"] for m in conversation.messages], [False, False])
+        conversation.cancel_tool_call("book", tool_call_id="first")
+        conversation.cancel_tool_call("book", tool_call_id="first")
+        self.assertEqual(
+            conversation.messages,
+            [
+                {
+                    "role": "tool_call",
+                    "name": "book",
+                    "arguments": {"time": "6"},
+                    "cancelled": True,
+                },
+                {
+                    "role": "tool_call",
+                    "name": "book",
+                    "arguments": {"time": "7"},
+                    "cancelled": False,
+                },
+            ],
+        )
+
     def test_a_bot_turn_is_what_it_said_between_user_turns_with_its_calls_before_it(self):
         conversation = EvalConversation()
         conversation.add_assistant_message("Hello!")

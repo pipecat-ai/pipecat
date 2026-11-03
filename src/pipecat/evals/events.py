@@ -496,6 +496,7 @@ class EvalEventStream:
         elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
+                "tool_call_id": frame.tool_call_id,
                 "name": frame.function_name or None,
                 "args": dict(frame.arguments or {}),
             }

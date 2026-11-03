@@ -101,9 +101,13 @@ class EvalConversationObserver(BaseObserver):
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             self._conversation.add_assistant_message(frame.text)
         elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
-            self._conversation.add_tool_call(frame.function_name, frame.arguments or {})
+            self._conversation.add_tool_call(
+                frame.function_name, frame.arguments or {}, tool_call_id=frame.tool_call_id
+            )
         elif isinstance(frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)):
-            self._conversation.cancel_tool_call(frame.function_name)
+            self._conversation.cancel_tool_call(
+                frame.function_name, tool_call_id=frame.tool_call_id
+            )
 
     async def cleanup(self):
         """Report the conversation: the pipeline is done, and so is the bot's last turn."""
