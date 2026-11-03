@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.utils.text.word_count import count_spoken_words
 
 
 class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -24,6 +25,10 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
     This strategy signals the start of a user turn once the user has spoken at
     least a specified number of words, as determined from transcription frames.
     Optionally, interim transcriptions can be used for earlier detection.
+
+    A word is a whitespace-separated token. Chinese and Japanese text has no
+    spaces between words, so each of those characters counts as a word. See
+    :func:`pipecat.utils.text.word_count.count_spoken_words`.
 
     """
 
@@ -96,7 +101,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         min_words = self._min_words if self._bot_speaking else 1
 
-        word_count = len(frame.text.split())
+        word_count = count_spoken_words(frame.text)
         should_trigger = word_count >= min_words
         is_interim = isinstance(frame, InterimTranscriptionFrame)
 
