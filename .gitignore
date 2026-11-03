@@ -82,3 +82,8 @@ whisker_setup.py
 evals/release/test-runs/
 evals/turn-completion/test-runs/
 evals/llm-with-backend/test-runs/
+
+# SIP test harness local state (secrets, call bodies, run logs)
+examples/sip/.state.json
+examples/sip/.tier0-run.log
+examples/sip/dialout-body.json
