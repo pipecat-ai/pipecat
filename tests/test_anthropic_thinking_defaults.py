@@ -171,6 +171,21 @@ async def test_a_configured_effort_replaces_the_thinking_default():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-sonnet-5-5"])
+async def test_low_effort_on_current_claude_models_prevents_thinking_default(model: str):
+    """Setting effort='low' on current Claude models overrides default thinking."""
+    service = AnthropicLLMService(
+        api_key="test-key",
+        settings=AnthropicLLMService.Settings(model=model, effort="low"),
+    )
+
+    request = await _request(service)
+
+    assert "thinking" not in request
+    assert request["output_config"] == {"effort": "low"}
+
+
+@pytest.mark.asyncio
 async def test_effort_passed_through_extra_replaces_the_thinking_default():
     """An effort in extra wins too."""
     service = AnthropicLLMService(

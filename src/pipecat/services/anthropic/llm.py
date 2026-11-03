@@ -8,6 +8,20 @@
 
 This module provides LLM services and context management for Anthropic's Claude models,
 including support for function calling, vision, and prompt caching features.
+
+Thinking and Function Calling:
+    When using Claude models with tools or function calling, leaving ``thinking`` and
+    ``effort`` unset sends the lowest documented thinking setting (such as
+    ``thinking: disabled`` on ``claude-haiku-5-5`` or ``between_tools`` on
+    ``claude-sonnet-5-5``). On reasoning-capable models, disabling thinking or
+    limiting it to between tools can cause the model to output its internal chain
+    of thought as response text before making a tool call, which TTS speaks to the
+    caller.
+
+    To keep reasoning confined to non-spoken thought frames when tools are used,
+    configure adaptive thinking with low effort in settings:
+    ``AnthropicLLMService.Settings(effort="low")``. This enables adaptive thinking
+    at minimal latency and token cost (~0.7s TTFB on Haiku 5.5).
 """
 
 import asyncio
@@ -139,7 +153,11 @@ class AnthropicThinkingConfig(BaseModel):
             earlier accept only it. "disabled" turns thinking off on the models
             that allow it. "between_tools" is how Claude Sonnet 5.5, which
             rejects "disabled", runs without up-front thinking; no other model
-            accepts it.
+            accepts it. Note that when using tools, running with "disabled" or
+            "between_tools" on current models can cause the model to output its
+            reasoning as response text before calling a tool. To prevent reasoning
+            from leaking into spoken replies, set ``effort="low"`` (adaptive
+            thinking) in settings instead.
         budget_tokens: Maximum number of tokens for thinking.
             With today's models, the minimum is 1024.
             Required when type is "enabled", not allowed otherwise.
@@ -179,11 +197,20 @@ class AnthropicLLMSettings(LLMSettings):
             for the model, for the fastest responses, and logs what it sent.
             Models Pipecat doesn't list, and any model when
             ``use_provider_thinking_default`` is set, run at Anthropic's default.
+            Note: On current Claude models (such as ``claude-haiku-5-5`` or
+            ``claude-sonnet-5-5``), disabling thinking or using ``between_tools``
+            can cause the model to output reasoning directly into the response
+            text before a tool call, which TTS speaks to the caller. To prevent
+            reasoning from leaking into spoken replies when using tools, set
+            ``effort="low"`` instead.
         effort: How much the model spends on its response, thinking included:
             "low", "medium", "high", "xhigh" or "max". Sent as
             ``output_config.effort``. ``None`` uses the model's default. Lower
             effort is Anthropic's recommended way to reduce thinking, and the
-            only one on models whose thinking can't be turned off.
+            only one on models whose thinking can't be turned off. Setting
+            ``effort="low"`` enables low-latency adaptive thinking (~0.7s TTFB on
+            Haiku 5.5) and prevents reasoning from leaking into spoken replies
+            ahead of tool calls.
     """
 
     enable_prompt_caching: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -259,7 +286,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                 It also causes this service to emit LLMThinking*Frames during response generation.
                 If this is not provided, Pipecat sends the lowest thinking setting Anthropic
                 documents for the model, for the fastest responses, and logs what it sent.
-                Models Pipecat doesn't list run at Anthropic's default.
+                Models Pipecat doesn't list run at Anthropic's default. Note: On current Claude
+                models with tools, disabling thinking can cause reasoning to leak into spoken text;
+                configure ``effort="low"`` in settings instead.
             extra: Additional parameters to pass to the API.
         """
 

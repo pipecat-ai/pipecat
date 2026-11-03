@@ -188,6 +188,7 @@ A voice agent depends on a fast first response, so LLM services send each model 
 - **`use_provider_thinking_default` turns the default off.** With `LLMSettings.use_provider_thinking_default` set, `LLMService._apply_thinking_default()` sends no default and logs at DEBUG that the model runs at the provider's default. `BackendLLMWorker` sets it on its LLM, which does the reasoning its frontend hands off.
 - **Configured settings win.** If the developer sets any reasoning control, such as `thinking` or `effort`, directly or through `extra`, the service sends exactly that and logs nothing.
 - **Log once per model.** The first request for a listed model logs at INFO the value sent, when more reasoning helps, and the setting that changes it. The first request for an unlisted model that can reason logs a WARNING that it runs at the provider's default. A model that can't reason logs nothing.
+- **Reasoning leakage with tools:** On reasoning-capable models (such as Claude 5.x), disabling thinking or restricting it to between tools can cause the model to output internal reasoning directly into the response text ahead of a tool call, which TTS then speaks. When building bots that use function calling on such models, developers should configure adaptive thinking with low effort (e.g. `effort="low"`) to keep reasoning routed to non-spoken thought frames.
 
 ## Code Style and Documentation
 
