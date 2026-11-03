@@ -14,8 +14,9 @@ from unittest.mock import AsyncMock, PropertyMock
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import Frame, OutputAudioRawFrame, TextFrame
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
@@ -79,6 +80,34 @@ class TestWebSocketMessageIterator(unittest.IsolatedAsyncioTestCase):
         messages = [msg async for msg in iterator]
 
         self.assertEqual(len(messages), 0)
+
+
+class TestProtobufReceive(unittest.IsolatedAsyncioTestCase):
+    async def test_continues_after_malformed_protobuf(self):
+        serializer = ProtobufFrameSerializer()
+        text = TextFrame(text="Still connected")
+        audio = OutputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=16000, num_channels=1)
+        mock_ws = AsyncMock()
+        mock_ws.receive.side_effect = [
+            {"type": "websocket.receive", "bytes": b"\x80"},
+            {"type": "websocket.receive", "bytes": await serializer.serialize(text)},
+            {"type": "websocket.receive", "bytes": await serializer.serialize(audio)},
+            {"type": "websocket.disconnect"},
+        ]
+        transport = FastAPIWebsocketTransport(
+            mock_ws, FastAPIWebsocketParams(serializer=serializer)
+        )
+        input_transport = transport.input()
+        input_transport.push_frame = AsyncMock()
+        input_transport.push_audio_frame = AsyncMock()
+
+        await input_transport._receive_messages()
+
+        input_transport.push_frame.assert_awaited_once()
+        self.assertEqual(input_transport.push_frame.call_args.args[0].text, text.text)
+        input_transport.push_audio_frame.assert_awaited_once()
+        self.assertEqual(input_transport.push_audio_frame.call_args.args[0].audio, audio.audio)
+        self.assertEqual(mock_ws.receive.await_count, 4)
 
 
 class TestSendDisconnectRace(unittest.IsolatedAsyncioTestCase):
