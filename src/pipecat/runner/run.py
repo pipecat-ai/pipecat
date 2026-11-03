@@ -995,7 +995,13 @@ def _setup_unified_start_route(
             # SIP: the body is what Pipecat Cloud would pass through to the bot; the account
             # is resolved from it (or the environment, or by provisioning) and the bot
             # registers at once and waits for its call.
-            from pipecat.runner.sip import configure, sip_runner_arguments
+            from pipecat.runner.sip import cleanup, configure, sip_runner_arguments
+
+            async def _delete_provisioned_client():
+                if not config.provisioned:
+                    return
+                async with aiohttp.ClientSession() as cleanup_session:
+                    await cleanup(cleanup_session, config)
 
             body = request_data.get("body", {})
             session_id = str(uuid.uuid4())
@@ -1011,10 +1017,19 @@ def _setup_unified_start_route(
             try:
                 runner_args = sip_runner_arguments(config, base)
             except ValueError as e:
+                await _delete_provisioned_client()
                 raise HTTPException(status_code=500, detail=str(e))
 
             bot_module = _get_bot_module()
-            _start_bot_session(bot_module.bot(runner_args))
+            bot_coro = bot_module.bot(runner_args)
+
+            async def _bot_then_cleanup():
+                try:
+                    await bot_coro
+                finally:
+                    await _delete_provisioned_client()
+
+            _start_bot_session(_bot_then_cleanup())
             return StartBotResult(sessionId=session_id)
 
         elif transport in TELEPHONY_TRANSPORTS:
@@ -1616,6 +1631,11 @@ def _setup_sip_routes(app: FastAPI, args: argparse.Namespace):
     if not _transport_routes_enabled("sip"):
         return
 
+    # Calls a bot was already started for, by SIP Call-ID: a re-sent
+    # notification is acked without starting a twin bot whose REGISTER
+    # would replace the first bot's binding at the registrar.
+    started_calls: set[str] = set()
+
     @app.post("/daily-sip-trunk-webhook")
     async def handle_sip_trunk_webhook(request: Request):
         try:
@@ -1647,6 +1667,10 @@ def _setup_sip_routes(app: FastAPI, args: argparse.Namespace):
             )
 
         session_id = call["sipCallIdHeader"]
+        if session_id in started_calls:
+            logger.info(f"SIP-trunk call {session_id}: bot already started, acking duplicate")
+            return {"status": "OK", "sessionId": session_id}
+        started_calls.add(session_id)
         signed = "x-siptrunk-signature" in request.headers
         logger.info(
             f"SIP-trunk call {session_id} from {call.get('From')} to {call.get('To')}"

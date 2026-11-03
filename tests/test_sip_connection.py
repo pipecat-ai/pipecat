@@ -16,7 +16,7 @@ import pytest
 # isn't installed, matching CI environments that don't pull it.
 pytest.importorskip("baresip")
 
-from baresip import BaresipError, CallBusy, CallState, Config  # noqa: E402
+from baresip import BaresipError, CallBusy, CallFailed, CallState, Config  # noqa: E402
 from baresip.events import Event, StackEvent  # noqa: E402
 
 import pipecat.transports.sip.connection as sip_connection  # noqa: E402
@@ -437,6 +437,33 @@ async def test_dial_failure_emits_call_failed(env):
     await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
     assert payloads[0]["error"] == "CallBusy"
     assert "busy" in payloads[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_local_hangup_of_ringing_dial_does_not_emit_call_failed(env):
+    # hangup() of a not-yet-established dial-out closes the call, which makes
+    # the binding's wait_established() raise; that close is a requested stop,
+    # not a failure, so the establishment watcher stays quiet.
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    hung_up = asyncio.Event()
+
+    async def wait_established(timeout=None):
+        await hung_up.wait()
+        raise CallFailed("hangup")
+
+    call.wait_established = wait_established
+    call.hangup = AsyncMock(side_effect=lambda: hung_up.set())
+    env.ua.dial.return_value = call
+    payloads, arrived = capture(connection, "call_failed")
+
+    await connection.dial("sip:9196@example.com")
+    await connection.hangup()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(arrived.wait(), 0.2)
+    assert not payloads
 
 
 @pytest.mark.asyncio
