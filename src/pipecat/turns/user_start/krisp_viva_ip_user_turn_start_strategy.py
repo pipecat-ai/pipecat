@@ -13,12 +13,13 @@ the IP model to predict whether the speech is a real interruption.
 
 Only when the IP model's probability exceeds the configured threshold is
 ``trigger_user_turn_started()`` called. This prevents the bot from being
-interrupted by brief acknowledgements or filler words. While the bot is not
-speaking there is nothing to filter, so a user turn starts as soon as VAD
-detects speech.
+interrupted by brief acknowledgements or filler words.
 
-The IP model requires ``krisp_audio`` 1.14.0 or newer, whose IP ``process()``
-accepts a bot-speaking flag as its third argument.
+With ``krisp_audio`` 1.14.0 or newer, whose IP ``process()`` accepts a
+bot-speaking flag, the strategy is bot-aware: while the bot is not speaking
+there is nothing to filter, so a user turn starts as soon as VAD detects
+speech. Earlier builds take only a VAD flag, and the strategy classifies every
+speech start with the model.
 """
 
 import os
@@ -30,6 +31,7 @@ from pipecat.audio.krisp_instance import (
     KrispVivaSDKManager,
     int_to_krisp_frame_duration,
     int_to_krisp_sample_rate,
+    krisp_sdk_ip_accepts_bot_speaking,
 )
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -58,9 +60,10 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
     When VAD detects user speech, this strategy feeds audio frames into
     the Krisp VIVA IP model. The model outputs a probability indicating
     whether the speech is a genuine interruption (as opposed to a
-    backchannel). While the bot is speaking, a user turn is triggered only
-    when this probability exceeds the configured threshold. While the bot is
-    not speaking, a user turn is triggered as soon as VAD detects speech.
+    backchannel). A user turn is triggered only when this probability exceeds
+    the configured threshold. With ``krisp_audio`` 1.14.0 or newer the strategy
+    also tracks whether the bot is speaking, and while it is not, a user turn is
+    triggered as soon as VAD detects speech.
 
     This strategy can work alongside other start strategies
     (e.g. ``TranscriptionUserTurnStartStrategy`` as a fallback) via the
@@ -132,6 +135,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         # (e.g. via ``update_strategies``) treats the bot as silent until its
         # next ``BotStartedSpeakingFrame``.
         self._bot_speaking = False
+        self._call_new_ip_api = krisp_sdk_ip_accepts_bot_speaking()
         self._audio_buffer = bytearray()
         self._decision_made = False
 
@@ -211,7 +215,9 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            return await self._handle_bot_stopped(frame)
+            if self._call_new_ip_api:
+                return await self._handle_bot_stopped(frame)
+            return await self._handle_reset(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             return await self._handle_reset(frame)
 
@@ -231,7 +237,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
             CONTINUE with the decision deferred until enough audio is processed.
         """
         self._speech_active = True
-        if not self._bot_speaking:
+        if self._call_new_ip_api and not self._bot_speaking:
             self._decision_made = True
             await self.trigger_user_turn_started()
             return ProcessFrameResult.STOP
@@ -281,16 +287,12 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            try:
+            if self._call_new_ip_api:
                 ip_prob = self._ip_session.process(
                     ip_frame, self._speech_active, self._bot_speaking
                 )
-            except TypeError as e:
-                raise RuntimeError(
-                    f"Krisp IP process() raised TypeError: {e}. If this is a signature "
-                    "mismatch, upgrade krisp_audio to 1.14.0 or newer, whose IP process() "
-                    "accepts (frame, voice_detected, bot_speaking)."
-                ) from e
+            else:
+                ip_prob = self._ip_session.process(ip_frame, self._speech_active)
 
             if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(
