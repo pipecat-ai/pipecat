@@ -1182,19 +1182,11 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
-        # Each call reads a single connection (reconnects call this again), so the
-        # request ID is logged once per connection rather than on every audio chunk.
-        logged_request_id = None
         async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
-                    request_id = msg.get("data", {}).get("request_id")
-                    if request_id and request_id != logged_request_id:
-                        logger.trace(f"{self} TTS request_id={request_id}")
-                        logged_request_id = request_id
-
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
@@ -1214,14 +1206,15 @@ class SarvamTTSService(InterruptibleTTSService):
                         await self.remove_audio_context(context_id)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
-                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
+                    error = f"TTS Error: {error_msg}"
+                    if request_id := msg["data"].get("request_id"):
+                        error += f" (request ID: {request_id})"
+                    await self.push_error(error_msg=error)
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-                    await self.append_to_audio_context(
-                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
-                    )
+                    await self.append_to_audio_context(context_id, ErrorFrame(error=error))
 
     async def _send_keepalive(self):
         """Send a ping to keep the connection open through silences."""
