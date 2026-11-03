@@ -236,6 +236,10 @@ class SonioxTTSService(WebsocketTTSService):
         # Soniox rejects duplicate config for the same stream_id.
         self._configured_contexts: set[str] = set()
 
+        # Streams cancelled on this connection. A stream can end on its own as its
+        # cancel goes out, and Soniox answers that cancel with `invalid_stream_state`.
+        self._cancelled_contexts: set[str] = set()
+
         # Per-stream word still being assembled across timestamp messages (a word's
         # characters can arrive split across messages). stream_id -> (word, start_s).
         self._partials: dict[str, tuple[str, float]] = {}
@@ -323,17 +327,19 @@ class SonioxTTSService(WebsocketTTSService):
     async def _close_stream(self, context_id: str):
         """Cancel a Soniox stream and forget local state.
 
-        Mirrors Inworld's ``_close_context``. ``cancel:true`` works on any
-        currently-open stream (Soniox replies with ``terminated``). Gated on
+        Mirrors Inworld's ``_close_context``. ``cancel:true`` works on a stream
+        in any state (Soniox replies with ``terminated``). Gated on
         ``_configured_contexts`` because ``cancel`` on a stream_id Soniox
-        never saw would error. Do not call after ``text_end:true`` — that
-        already terminates the stream.
+        never saw would error. A stream that ends on its own as the cancel goes
+        out has Soniox answer ``invalid_stream_state`` instead, which
+        ``_receive_messages`` expects for a cancelled stream.
         """
         if context_id in self._configured_contexts:
             if self._websocket and self._websocket.state is State.OPEN:
                 try:
                     msg = {"stream_id": context_id, "cancel": True}
                     await self._websocket.send(json.dumps(msg))
+                    self._cancelled_contexts.add(context_id)
                 except Exception as e:
                     logger.warning(f"{self}: failed to cancel stream {context_id}: {e}")
         self._configured_contexts.discard(context_id)
@@ -464,6 +470,7 @@ class SonioxTTSService(WebsocketTTSService):
             await self.push_error(error_msg=f"Error closing Soniox websocket: {e}", exception=e)
         finally:
             self._configured_contexts.clear()
+            self._cancelled_contexts.clear()
             self._partials.clear()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -588,13 +595,17 @@ class SonioxTTSService(WebsocketTTSService):
             if error_code is not None:
                 error_message = msg.get("error_message", "")
                 error_type = msg.get("error_type", "")
-                await self.push_error(
-                    error_msg=(
-                        f"Soniox TTS error {error_code} {error_type} "
-                        f"(stream {stream_id}): {error_message}"
-                    ),
-                    category=classify_error_code(error_code),
-                )
+                if error_type == "invalid_stream_state" and stream_id in self._cancelled_contexts:
+                    # The stream ended before its cancel arrived: it is gone, as asked.
+                    logger.debug(f"{self}: stream {stream_id} had already ended when cancelled")
+                else:
+                    await self.push_error(
+                        error_msg=(
+                            f"Soniox TTS error {error_code} {error_type} "
+                            f"(stream {stream_id}): {error_message}"
+                        ),
+                        category=classify_error_code(error_code),
+                    )
                 if stream_id and self.audio_context_available(stream_id):
                     await self.append_to_audio_context(
                         stream_id, TTSStoppedFrame(context_id=stream_id)
@@ -602,6 +613,7 @@ class SonioxTTSService(WebsocketTTSService):
                     await self.remove_audio_context(stream_id)
                 self._partials.pop(stream_id, None)
                 self._configured_contexts.discard(stream_id)
+                self._cancelled_contexts.discard(stream_id)
                 continue
 
             if msg.get("terminated"):
