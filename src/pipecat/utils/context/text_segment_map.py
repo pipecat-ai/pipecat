@@ -281,6 +281,13 @@ class TextSegmentMap:
         def tokenize(text: str) -> list[str]:
             return re.split(r"(\s+)", text)
 
+        def match_key(token: str) -> str:
+            # A word the TTS was sent in other capitals, such as "BACK" for
+            # stress, still lines up with the original. Only where lowercasing
+            # keeps its length, so one position still cuts both sides.
+            lowered = token.lower()
+            return lowered if len(lowered) == len(token) else token
+
         orig_tokens = tokenize(original_text)
         tts_tokens = tokenize(tts_text)
 
@@ -323,7 +330,12 @@ class TextSegmentMap:
         # the cursors are held while the expanded TTS text is being
         # consumed and jump to original_end only when the entire
         # transformed segment completes.
-        matcher = difflib.SequenceMatcher(None, orig_tokens, tts_tokens, autojunk=False)
+        matcher = difflib.SequenceMatcher(
+            None,
+            [match_key(token) for token in orig_tokens],
+            [match_key(token) for token in tts_tokens],
+            autojunk=False,
+        )
 
         segments: list[TextSegment] = []
         orig_pos = 0
@@ -343,10 +355,11 @@ class TextSegmentMap:
             #     "<spell>1234</spell>."   all-or-nothing, lands as one
             #
             # Only equal pieces can be split this way. Both sides hold the same
-            # text there, so a single position cuts both. Where the sides differ
-            # there is no position that means the same thing on each.
+            # text there, but for capitals, so a single position cuts both. Where
+            # the sides differ there is no position that means the same thing on
+            # each.
             parts = (
-                [(part, part) for part in split_markup_runs(orig_chunk)]
+                _split_alike(split_markup_runs(orig_chunk), tts_chunk)
                 if tag == "equal"
                 else [(orig_chunk, tts_chunk)]
             )
@@ -1041,3 +1054,17 @@ class TextSegmentMap:
     def reset(self) -> None:
         """Put every cursor back to the start of the text."""
         self._reset_state()
+
+
+def _split_alike(orig_parts: list[str], tts_chunk: str) -> list[tuple[str, str]]:
+    """Pair each run of an equal piece with the TTS text at the same offsets.
+
+    The two sides of an equal piece differ at most in capitals, so the runs the
+    original is cut into cut the TTS text at the same places.
+    """
+    pairs = []
+    pos = 0
+    for part in orig_parts:
+        pairs.append((part, tts_chunk[pos : pos + len(part)]))
+        pos += len(part)
+    return pairs

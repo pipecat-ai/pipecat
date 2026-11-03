@@ -39,14 +39,14 @@ class SpokenExpression:
     Example::
 
         spoken = SpokenExpression()
-        spoken.add("<<cheerful>> It's [[laughs]] ^^back^^ up.", spans)
+        spoken.add("<<warm>> It's [[laugh]] ^^back^^ up.", spans)
 
-        spoken.spoken("<<cheerful>> It's")
-        # (["cheerful"], [])
-        spoken.spoken("[[laughs]] ^^back")
-        # (["cheerful", "emphasis"], [(TextType.EXPRESSION_SOUND, "laughs")])
+        spoken.spoken("<<warm>> It's")
+        # (["warm"], [])
+        spoken.spoken("[[laugh]] ^^back")
+        # (["warm", "emphasis"], [(TextType.EXPRESSION_SOUND, "laugh")])
         spoken.spoken("up.")
-        # (["cheerful"], [])
+        # (["warm"], [])
     """
 
     def __init__(self):
@@ -84,11 +84,11 @@ class SpokenExpression:
         """Read the delivery of text the service reports speaking, and the sounds before it.
 
         The text's delivery is that of its first letter that falls in words,
-        so a delivery tag's own name, such as ``cheerful`` in
-        ``"<<cheerful>> It's"``, isn't taken for a word. A sound already
+        so a delivery tag's own name, such as ``warm`` in
+        ``"<<warm>> It's"``, isn't taken for a word. A sound already
         reported by :meth:`spoken_markup` isn't reported again, and one
         written after the text's last word, such as the laugh in
-        ``"back [[laughs]]!"``, is left for the service's markup or the next
+        ``"back [[laugh]]!"``, is left for the service's markup or the next
         text to report, since it is performed after the word.
 
         Args:
@@ -138,7 +138,7 @@ class SpokenExpression:
         """Read the sounds and pauses not yet reported, once the context's audio has ended.
 
         A sound after the last words, such as the laugh in ``"Bye
-        [[laughs]]"``, has no later text to report it, and a service may not
+        [[laugh]]"``, has no later text to report it, and a service may not
         report its markup.
 
         Returns:
@@ -163,15 +163,15 @@ class SpokenExpression:
         Some services include their markup in their word timestamps. It
         covers none of the LLM's text, so it has no ``raw_text``, and is
         matched by position instead: it stands for the next sound or pause
-        still to be spoken, which is reported with it, at its time. Markup
-        reached before any sound, such as a delivery's ``[cheerful]``, stands for
-        none, and isn't spoken::
+        still to be spoken, which is reported with it, at its time, as written in
+        its tag. Markup reached before any sound, such as a delivery's
+        ``[warmly]``, stands for none, and isn't spoken::
 
-            spoken.spoken("<<cheerful>> It's")
+            spoken.spoken("<<warm>> It's")
             spoken.spoken_markup()       # "[laughs]" reported as a word
-            # (TextType.EXPRESSION_SOUND, "laughs")
-            spoken.spoken("[[laughs]] ^^back")
-            # (["cheerful", "emphasis"], []): already reported
+            # (TextType.EXPRESSION_SOUND, "laugh")
+            spoken.spoken("[[laugh]] ^^back")
+            # (["warm", "emphasis"], []): already reported
 
         Returns:
             The sound or pause, with its text type, or None when the markup

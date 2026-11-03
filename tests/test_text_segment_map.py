@@ -7,6 +7,7 @@
 import unittest
 
 from pipecat.utils.context.text_segment_map import TextSegmentMap, _HopKind
+from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.text.alnum_utils import fold_for_matching
 
 
@@ -217,14 +218,28 @@ class TestTextSegmentMapTokenChangingReplacements(unittest.TestCase):
         )
 
     def test_case_only_replacement_is_not_flagged_transformed(self):
-        # "SQL" -> "sql": same alnum content, same single-token structure, only
-        # case differs. Proportional advancement already lands correctly here.
+        # "SQL" -> "sql": only case differs, so the word lines up with the
+        # original and stays in an equal segment with the words around it.
         smap = TextSegmentMap(
             "Contact sql support today.",
             "Contact SQL support today.",
         )
-        seg = next(s for s in smap._segments if s.original == "SQL")
+        seg = next(s for s in smap._segments if "SQL" in s.original)
+        self.assertEqual(seg.tts, "Contact sql support today.")
         self.assertFalse(seg.is_transformed)
+
+    def test_case_only_word_after_a_tag_lines_up_with_the_original(self):
+        # A stressed word in capitals right after a tag is matched on its own,
+        # not folded into one all-or-nothing segment with the tag.
+        tracker = WordCompletionTracker(
+            '<break time="600ms"/> REALLY good.',
+            llm_text="[[pause 600]] ^^Really^^ good.",
+            user_facing_text="Really good.",
+        )
+
+        self.assertTrue(tracker.word_belongs_here("REALLY"))
+        self.assertFalse(tracker.add_word_and_check_complete("REALLY"))
+        self.assertTrue(tracker.add_word_and_check_complete("good."))
 
     def test_hyphenated_single_token_replacement_is_not_flagged_transformed(self):
         # "BODYPUMP" -> "body-pump": still a single token on both sides.

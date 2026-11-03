@@ -1187,6 +1187,28 @@ class FrameProcessor(BaseObject):
                 category=ErrorCategory.UNKNOWN,
             )
 
+    async def _cancel_frame_in_progress(self, frame: Frame) -> bool:
+        """Stop processing a frame if it is the one in progress, leaving the queue as it is.
+
+        Unlike :meth:`_start_interruption`, this drops nothing else: the frames
+        queued behind the cancelled one, interruptible or not, are processed
+        next. The cancelled frame's callback, if any, is not called.
+
+        Call it from a system frame's processing, as interruptions are, so it
+        runs on the input task and never overlaps an interruption.
+
+        Args:
+            frame: The frame to stop processing.
+
+        Returns:
+            Whether ``frame`` was in progress and its processing was cancelled.
+        """
+        if self.__process_current_frame is not frame or not self.__process_frame_task:
+            return False
+        await self.__cancel_process_task()
+        self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
+        return True
+
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         """Internal method to push frames to adjacent processors.
 

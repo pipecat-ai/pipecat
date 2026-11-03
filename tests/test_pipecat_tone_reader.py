@@ -161,7 +161,7 @@ async def test_the_model_downloads_at_the_release_asked_for(monkeypatch):
     for reader in (PipecatToneReader(), PipecatToneReader(revision="reader-rc9")):
         await run_test(reader, frames_to_send=[])
 
-    assert [a["revision"] for a in asked] == ["reader-rc1", "reader-rc9"]
+    assert [a["revision"] for a in asked] == ["reader-rc2", "reader-rc9"]
 
 
 def test_the_model_downloads_its_files_from_the_reader_folder(monkeypatch, tmp_path):
@@ -182,7 +182,7 @@ def test_the_model_downloads_its_files_from_the_reader_folder(monkeypatch, tmp_p
 
     assert seen == {
         "repo": "pipecat-ai/tone-models",
-        "revision": "reader-rc1",
+        "revision": "reader-rc2",
         "patterns": ["reader/config.json", "reader/tokenizer.json", "reader/model_fp16.onnx"],
         "dir": tmp_path / "reader",
     }

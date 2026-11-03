@@ -24,7 +24,7 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 TONE_REPO = "pipecat-ai/tone-models"
-TONE_REVISION = "reader-rc1"
+TONE_REVISION = "reader-rc2"
 
 _FOLDER = "reader"
 

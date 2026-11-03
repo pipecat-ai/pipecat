@@ -16,6 +16,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import TTSAudioRawFrame, TTSSpeakFrame, TTSTextFrame
 from pipecat.services.smallest.tts import SmallestTTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
 
 CTX = "ctx-1"
 
@@ -89,6 +90,27 @@ def test_build_msg_enables_content_filter_with_action(action):
         api_key="test-key", settings=SmallestTTSService.Settings(content_filter=action)
     )
     assert service._build_msg("hi")["content_filter"] == {"enabled": True, "action": action}
+
+
+def test_build_msg_omits_number_pronunciation_language_by_default():
+    """Numerals are read in the synthesis language unless a language is set."""
+    service = _make_service()
+    assert "number_pronunciation_language" not in service._build_msg("hi")
+
+
+def test_build_msg_maps_number_pronunciation_language():
+    """A Language is mapped to the provider's code, a raw code is sent as-is."""
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language=Language.HI),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "hi"
+
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language="auto"),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "auto"
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware spe
 
 import base64
 import json
+import re
 import uuid
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
@@ -34,6 +35,11 @@ USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.inworld_adapter import (
+    InworldExpressionAdapter,
+    InworldFlashExpressionAdapter,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -52,6 +58,9 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
+
+# A pause tag, which Inworld reports as a word of its own.
+_BREAK_TAG = re.compile(r"<break\b[^>]*>", re.IGNORECASE)
 
 
 def language_to_inworld_language(language: Language) -> str:
@@ -101,6 +110,21 @@ def format_inworld_pronunciation(word: str, ipa: str) -> str | None:
     """
     ipa = normalize_ipa(ipa)
     return f"/{ipa}/" if ipa and " " not in ipa else None
+
+
+def _tts_2_expression_adapter(
+    model: Any,
+    tts_2: InworldExpressionAdapter,
+    tts_2_flash: InworldFlashExpressionAdapter,
+) -> BaseExpressionAdapter | None:
+    """The expression adapter for an Inworld TTS-2 model, or None for an older model."""
+    if not isinstance(model, str):
+        return None
+    if model.startswith("inworld-tts-2-flash"):
+        return tts_2_flash
+    if model.startswith("inworld-tts-2"):
+        return tts_2
+    return None
 
 
 @dataclass
@@ -276,6 +300,22 @@ class InworldHttpTTSService(TTSService):
         self._audio_sample_rate = 0  # Set in start()
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
         """Render a pronunciation as IPA between slashes.
@@ -357,7 +397,7 @@ class InworldHttpTTSService(TTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track the end time of the last word in this chunk
             if end_times and len(end_times) > 0:
@@ -784,6 +824,22 @@ class InworldTTSService(WebsocketTTSService):
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
         """Render a pronunciation as IPA between slashes.
@@ -882,7 +938,7 @@ class InworldTTSService(WebsocketTTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track cumulative end time for this generation
             if end_times and len(end_times) > 0:

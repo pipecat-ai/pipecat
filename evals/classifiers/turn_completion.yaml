@@ -1,0 +1,198 @@
+# Labeled user turns for measuring a turn-completion classifier.
+#
+# Each entry is what speech recognition would hand the bot: lower case, no
+# punctuation, sometimes cut off. `bot` is the bot's previous line, when the
+# label depends on it. `label` is the verdict the turn-completion protocol in
+# pipecat.turns.user_turn_completion_mixin asks the LLM for:
+#
+#   complete  the user has taken their turn, answer them
+#   short     cut off mid-sentence, they will continue in a few seconds
+#   long      they need time to think or asked to wait
+#
+# The examples in that protocol are included, plus more of each kind. The
+# scripted release scenarios contribute their user lines as complete turns;
+# see measure_turn_completion.py.
+
+turns:
+  # From the protocol's own examples.
+  - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+    user: "i'd go to japan because i love"
+    label: short
+  - user: "i need help with"
+    label: short
+  - bot: "What's the best phone number to reach you?"
+    user: "it's five five five"
+    label: short
+  - bot: "What would you like to order?"
+    user: "a large pepperoni pizza a garden salad and"
+    label: short
+  - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+    user: "that's a good question let me think"
+    label: long
+  - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+    user: "that's interesting"
+    label: long
+  - user: "hold on a second"
+    label: long
+  - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+    user: "japan"
+    label: complete
+  - bot: "Should I book it?"
+    user: "yes"
+    label: complete
+  - user: "can you help me book a flight to new york next week"
+    label: complete
+  - bot: "If you could travel anywhere in the world right now, where would you go and why?"
+    user: "hmm i'd go to japan for the food"
+    label: complete
+
+  # Complete: short answers, questions, corrections, requests.
+  - bot: "How many people will be joining you?"
+    user: "four"
+    label: complete
+  - bot: "What day works for you?"
+    user: "tuesday"
+    label: complete
+  - bot: "Would you like to add a drink?"
+    user: "no thanks"
+    label: complete
+  - bot: "Can I get your name?"
+    user: "it's maria lopez"
+    label: complete
+  - bot: "What's the best phone number to reach you?"
+    user: "five five five one two three four"
+    label: complete
+  - user: "what time do you close today"
+    label: complete
+  - user: "sorry can you say that again"
+    label: complete
+  - bot: "So that's a table for two at seven."
+    user: "no i said eight"
+    label: complete
+  - user: "i want to cancel my appointment"
+    label: complete
+  - bot: "What would you like to order?"
+    user: "a large pepperoni pizza and a garden salad"
+    label: complete
+  - user: "what's the weather like in san francisco"
+    label: complete
+  - bot: "Anything else I can help with?"
+    user: "that's everything goodbye"
+    label: complete
+  - bot: "Do you want the window or the aisle?"
+    user: "window please"
+    label: complete
+  - user: "actually never mind"
+    label: complete
+  - bot: "Which of these works better, morning or afternoon?"
+    user: "afternoon"
+    label: complete
+  - user: "i'm calling about my order it hasn't arrived yet"
+    label: complete
+  - bot: "Is there anything else?"
+    user: "nope that's it"
+    label: complete
+  - user: "yeah i'd like to speak to a person"
+    label: complete
+  - bot: "What's your date of birth?"
+    user: "march third nineteen ninety"
+    label: complete
+  - user: "ok thanks bye"
+    label: complete
+
+  # Short: cut off mid-phrase.
+  - bot: "How can I help you today?"
+    user: "i'd like to"
+    label: short
+  - bot: "What's your address?"
+    user: "it's one twenty three"
+    label: short
+  - user: "so the thing is"
+    label: short
+  - bot: "Why do you want to cancel?"
+    user: "because the"
+    label: short
+  - user: "can you tell me if"
+    label: short
+  - bot: "Which days are you available?"
+    user: "monday tuesday and"
+    label: short
+  - user: "i was wondering whether you"
+    label: short
+  - bot: "What's your email?"
+    user: "it's maria dot lopez at"
+    label: short
+  - user: "my name is"
+    label: short
+  - bot: "What seems to be the problem?"
+    user: "the app keeps crashing when i"
+    label: short
+  - user: "i'll take the"
+    label: short
+  - bot: "Where would you like to fly from?"
+    user: "from san francisco to"
+    label: short
+  - user: "we need it by"
+    label: short
+  - bot: "How many nights?"
+    user: "two nights but"
+    label: short
+  - user: "i think it was on the"
+    label: short
+  - bot: "What did the error say?"
+    user: "something about a"
+    label: short
+  - user: "yes and also"
+    label: short
+  - bot: "What's the reservation under?"
+    user: "it's under"
+    label: short
+  - user: "i'd prefer the one with the"
+    label: short
+  - bot: "How many people?"
+    user: "there will be"
+    label: short
+
+  # Long: needs time, or only acknowledged the question.
+  - user: "let me think about it"
+    label: long
+  - user: "give me a second"
+    label: long
+  - user: "one moment"
+    label: long
+  - bot: "What's your account number?"
+    user: "hold on let me find it"
+    label: long
+  - bot: "Which date would you like?"
+    user: "hmm"
+    label: long
+  - bot: "What's your favorite dish there?"
+    user: "oh wow okay"
+    label: long
+  - bot: "How did you hear about us?"
+    user: "well"
+    label: long
+  - bot: "What would you like to do?"
+    user: "let me check with my wife"
+    label: long
+  - bot: "What's the model number?"
+    user: "wait i need to look at the box"
+    label: long
+  - bot: "Would you like to hear our specials?"
+    user: "um let me see"
+    label: long
+  - bot: "Where would you like to go?"
+    user: "that's a tough one"
+    label: long
+  - bot: "What time works?"
+    user: "let me look at my calendar"
+    label: long
+  - bot: "Do you have your policy number?"
+    user: "just a sec"
+    label: long
+  - bot: "What did you think of the movie?"
+    user: "interesting question"
+    label: long
+  - bot: "Which color would you like?"
+    user: "hmm let me think"
+    label: long

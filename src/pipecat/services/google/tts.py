@@ -30,6 +30,8 @@ from xml.sax.saxutils import escape
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.gemini_adapter import Gemini38ExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -1443,6 +1445,19 @@ class GeminiTTSService(GoogleBaseTTSService):
             model=assert_given(default_settings.model),
         )
 
+        self._gemini_38_expression_adapter = Gemini38ExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: Gemini 3.8 on the Gemini API, otherwise none.
+
+        Returns:
+            The expression adapter for the current model and backend.
+        """
+        model = self._settings.model
+        if self._use_genai and isinstance(model, str) and self._is_gemini_38_tts(model):
+            return self._gemini_38_expression_adapter
+        return super().get_expression_adapter()
+
     def _create_client(
         self, credentials: str | None, credentials_path: str | None
     ) -> "texttospeech_v1.TextToSpeechAsyncClient | genai.Client":
@@ -1698,9 +1713,21 @@ class GeminiTTSService(GoogleBaseTTSService):
                 # request raw PCM via GenerateContentConfig), so the audio
                 # streaming below strips a RIFF header when one arrives.
                 part_kwargs: dict[str, Any] = {"text": text}
+                # In expressive conversation, the request's delivery adds to the
+                # prompt's style.
                 prompt = self._settings.prompt
-                if is_given(prompt) and prompt:
-                    part_kwargs["speech_metadata"] = genai.types.SpeechMetadata(style=prompt)
+                styles = [
+                    style
+                    for style in (
+                        prompt if is_given(prompt) else None,
+                        self.expression_settings.get("style"),
+                    )
+                    if style
+                ]
+                if styles:
+                    part_kwargs["speech_metadata"] = genai.types.SpeechMetadata(
+                        style="; ".join(styles)
+                    )
                 contents = [
                     genai.types.Content(role="user", parts=[genai.types.Part(**part_kwargs)])
                 ]

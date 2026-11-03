@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from websockets.protocol import State
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.services.meta.stt import MetaSTTService
 from pipecat.transcriptions.language import Language
@@ -27,6 +28,7 @@ class _FakeWebsocket:
         self.state = state
         self.sent = []
         self.closed = False
+        self.connect_kwargs = {}
 
     async def send(self, payload):
         self.sent.append(payload)
@@ -48,6 +50,7 @@ class _FakeWebsocket:
 
 def _patch_connect(monkeypatch, websocket: _FakeWebsocket) -> _FakeWebsocket:
     async def fake_websocket_connect(*args, **kwargs):
+        websocket.connect_kwargs = kwargs
         return websocket
 
     monkeypatch.setattr(
@@ -85,6 +88,14 @@ async def test_handshake_carries_credential_and_session_config(monkeypatch):
     assert handshake["partialMode"] == "CUMULATIVE"
     assert handshake["emitAudioProgress"] is False
     assert handshake["languageBias"] == ["English"]
+
+
+@pytest.mark.asyncio
+async def test_connect_identifies_the_pipecat_integration(monkeypatch):
+    _, websocket = await _connected(monkeypatch)
+
+    user_agent = websocket.connect_kwargs["additional_headers"]["User-Agent"]
+    assert user_agent == f"Meta/1.0 (integration=Pipecat/{pipecat_version()})"
 
 
 @pytest.mark.asyncio

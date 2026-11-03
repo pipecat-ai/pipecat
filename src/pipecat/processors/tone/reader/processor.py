@@ -73,7 +73,7 @@ class PipecatToneReader(FrameProcessor):
         """Initialize the processor.
 
         Args:
-            revision: The model's release on Hugging Face, such as ``"reader-rc1"``.
+            revision: The model's release on Hugging Face, such as ``"reader-rc2"``.
             model_dir: A folder to load the model from instead of downloading one,
                 laid out as a release's ``reader``. ``revision`` is then unused.
             precision: The weights to load: ``"fp16"`` or ``"fp32"``.

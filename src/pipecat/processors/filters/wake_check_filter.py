@@ -15,7 +15,6 @@ only allowing them through after wake phrases have been detected. Includes
 keepalive functionality to maintain conversation flow after wake detection.
 """
 
-import re
 import time
 from enum import Enum
 
@@ -24,6 +23,7 @@ from loguru import logger
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import compile_phrase_pattern
 
 
 @deprecated(
@@ -88,10 +88,7 @@ class WakeCheckFilter(FrameProcessor):
         self._keepalive_timeout = keepalive_timeout
         self._wake_patterns = []
         for name in wake_phrases:
-            pattern = re.compile(
-                r"\b" + r"\s*".join(re.escape(word) for word in name.split()) + r"\b", re.IGNORECASE
-            )
-            self._wake_patterns.append(pattern)
+            self._wake_patterns.append(compile_phrase_pattern(name))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames, filtering transcriptions based on wake detection.
