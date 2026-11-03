@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.utils.string import compile_phrase_pattern
 
 
 class _WakeState(enum.Enum):
@@ -123,13 +124,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._timeout = timeout
         self._single_activation = single_activation
 
-        self._patterns: list[re.Pattern] = []
-        for phrase in phrases:
-            pattern = re.compile(
-                r"\b" + r"\s*".join(re.escape(word) for word in phrase.split()) + r"\b",
-                re.IGNORECASE,
-            )
-            self._patterns.append(pattern)
+        self._patterns: list[re.Pattern] = [compile_phrase_pattern(phrase) for phrase in phrases]
 
         self._state = _WakeState.IDLE
         self._accumulated_text = ""
