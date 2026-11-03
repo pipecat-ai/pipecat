@@ -25,6 +25,7 @@ from pipecat.services.mistral.llm import MistralLLMService
 from pipecat.services.nebius.llm import NebiusLLMService
 from pipecat.services.novita.llm import NovitaLLMService
 from pipecat.services.nvidia.llm import NvidiaLLMService
+from pipecat.services.nvidia.omni.llm import NvidiaOmniLLMService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -34,6 +35,7 @@ from pipecat.services.perplexity.llm import PerplexityLLMService
 from pipecat.services.qwen.llm import QwenLLMService
 from pipecat.services.sambanova.llm import SambaNovaLLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
+from pipecat.services.smallest.llm import SmallestLLMService
 from pipecat.services.together.llm import TogetherLLMService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 from pipecat.services.xai.llm import GrokLLMService
@@ -56,6 +58,7 @@ PROVIDER_SERVICES = [
     QwenLLMService,
     SambaNovaLLMService,
     SarvamLLMService,
+    SmallestLLMService,
     TogetherLLMService,
 ]
 
@@ -64,6 +67,7 @@ PROVIDER_SERVICES = [
 KEY_OPTIONAL_SERVICES = {
     AzureLLMService,
     NvidiaLLMService,
+    NvidiaOmniLLMService,
     OLLamaLLMService,
     OpenAILLMService,
     OpenAISTTService,

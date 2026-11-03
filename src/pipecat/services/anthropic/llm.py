@@ -19,8 +19,8 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.anthropic_adapter import (
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.anthropic_adapter import (
     AnthropicCacheTTL,
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,

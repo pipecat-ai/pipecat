@@ -8,8 +8,8 @@
 
 from typing import Any
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.bus.adapters.base import DeserializeFunc, SerializeFunc, TypeAdapter
 
 

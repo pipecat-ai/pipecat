@@ -125,8 +125,8 @@ class TestLLMContextFrameRoundTrip(unittest.TestCase):
         self.assertEqual(restored.messages[1].message, {"custom": "data"})
 
     def test_round_trip_with_tools(self):
-        from pipecat.adapters.schemas.function_schema import FunctionSchema
-        from pipecat.adapters.schemas.tools_schema import ToolsSchema
+        from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+        from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 
         tools = ToolsSchema(
             standard_tools=[

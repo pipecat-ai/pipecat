@@ -332,7 +332,7 @@ async def test_google_llm_removes_file_message_on_context_conversion_error():
     surfaces as a ClientError, but it's just as much evidence the file was
     the problem.
     """
-    from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+    from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
 
     service = GoogleLLMService(api_key="test-key")
 

@@ -159,9 +159,9 @@ class TurnDetectionMode(StrEnum):
 
     `VAD`: the STT service runs its own VAD and closes turns itself.
 
-    `EXTERNAL`: turn boundaries are controlled by the caller — the service does not
-    endpoint on its own, and the caller drives turns by calling `finalize()` (for
-    example from Pipecat's own VAD).
+    `EXTERNAL`: turn boundaries are controlled by the pipeline — the service does not
+    endpoint on its own, and closes a turn when a `VADUserStoppedSpeakingFrame`
+    arrives (for example from Pipecat's own VAD).
 
     The values mirror the Agent STT SDK's own turn-detection modes so the two never
     drift.
@@ -302,7 +302,8 @@ class SpeechmaticsSTTService(STTService):
             language: Language code for transcription. Defaults to `Language.EN`.
 
             turn_detection_mode: How turns are closed. `TurnDetectionMode.EXTERNAL`
-                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD);
+                closes a turn when a `VADUserStoppedSpeakingFrame` arrives (e.g. from
+                Pipecat's own VAD);
                 `TurnDetectionMode.VAD` lets the STT service run its own VAD and close
                 turns itself. Defaults to `DEFAULT_TURN_DETECTION_MODE`.
 
@@ -570,10 +571,10 @@ class SpeechmaticsSTTService(STTService):
     def _service_closes_turns(self) -> bool:
         """True when Speechmatics detects turns itself and emits Start/EndOfTurn.
 
-        Every turn-detection mode except ``EXTERNAL`` (where the caller drives turns via
-        ``finalize()``) has the service close turns. This gates the turn-scoped behavior
-        — turn frames, turn-event subscriptions, and processing metrics — off in EXTERNAL
-        mode, where Pipecat owns endpointing.
+        Every turn-detection mode except ``EXTERNAL`` (where a
+        ``VADUserStoppedSpeakingFrame`` closes each turn) has the service close turns.
+        This gates the turn-scoped behavior — turn frames, turn-event subscriptions, and
+        processing metrics — off in EXTERNAL mode, where Pipecat owns endpointing.
         """
         mode = self._settings.turn_detection_mode
         return is_given(mode) and mode != TurnDetectionMode.EXTERNAL

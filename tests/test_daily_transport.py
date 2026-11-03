@@ -14,6 +14,7 @@ import pytest
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     BotConnectedFrame,
+    InputDTMFFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     STTMetadataFrame,
@@ -263,6 +264,73 @@ async def test_sip_refer_errors_without_any_session_id():
 
     assert error == "Can't perform SIP REFER if 'sessionId' is not set"
     client._client.sip_refer.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dtmf_event_pushes_input_dtmf_frame():
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    transport._call_event_handler = AsyncMock()
+
+    await transport._on_dtmf_event({"sessionId": "s", "tone": "5"})
+
+    transport._call_event_handler.assert_awaited_once_with(
+        "on_dtmf_event", {"sessionId": "s", "tone": "5"}
+    )
+    (frame,) = transport._input.push_frame.await_args.args
+    assert isinstance(frame, InputDTMFFrame)
+    assert frame.button == KeypadEntry.FIVE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tone", ["A", "D"])
+async def test_dtmf_event_ignores_tone_outside_keypad(tone):
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    transport._call_event_handler = AsyncMock()
+
+    await transport._on_dtmf_event({"sessionId": "s", "tone": tone})
+
+    transport._call_event_handler.assert_awaited_once()
+    transport._input.push_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tone_outside_keypad_keeps_daily_events_flowing():
+    transport = _make_transport()
+    transport._input = AsyncMock()
+    client = transport._client
+    client._joined_event.set()
+    queue = asyncio.Queue()
+    task = asyncio.create_task(client._callback_task_handler(queue))
+    next_event = AsyncMock()
+
+    await queue.put((transport._on_dtmf_event, {"sessionId": "s", "tone": "A"}))
+    await queue.put((next_event, {"id": "caller"}))
+    await asyncio.wait_for(queue.join(), timeout=1)
+
+    next_event.assert_awaited_once_with({"id": "caller"})
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_failing_callback_keeps_daily_events_flowing():
+    client = _make_transport()._client
+    client._joined_event.set()
+    queue = asyncio.Queue()
+    task = asyncio.create_task(client._callback_task_handler(queue))
+    next_event = AsyncMock()
+
+    async def failing_callback(data):
+        raise RuntimeError("boom")
+
+    await queue.put((failing_callback, {"id": "caller"}))
+    await queue.put((next_event, {"id": "caller"}))
+    await asyncio.wait_for(queue.join(), timeout=1)
+
+    next_event.assert_awaited_once_with({"id": "caller"})
+    assert not task.done()
+    task.cancel()
 
 
 @pytest.mark.asyncio

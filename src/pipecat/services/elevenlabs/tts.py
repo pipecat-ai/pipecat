@@ -27,6 +27,8 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -40,6 +42,7 @@ from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
+    _ends_in_audio_tag,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
@@ -293,6 +296,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
+        pause_frame_processing: bool = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -351,6 +355,10 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                     Use ``text_aggregation_mode`` instead.
                     Will be removed in 2.0.0.
 
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, contexts synthesize
+                concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
+                at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.
         """
         # By default, we aggregate sentences before sending to TTS. This adds
@@ -431,7 +439,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
@@ -451,6 +459,19 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
 
         self._auto_mode = auto_mode
         self._enable_ssml_parsing = enable_ssml_parsing
+
+        # The text-to-speech multi-stream endpoint serves no Eleven v3 or v4
+        # model: the connection is rejected with a 400 at the handshake, which
+        # surfaces as an opaque error that leaves the processor unusable. Say
+        # so up front, with a pointer to the classes that do serve them.
+        model_id = self._settings.model
+        if isinstance(model_id, str) and model_id.startswith(("eleven_v3", "eleven_v4")):
+            logger.warning(
+                f"{self}: {model_id!r} is an Eleven v3/v4 model, which the "
+                "text-to-speech WebSocket endpoint does not serve. Use "
+                "ElevenLabsDialogueTTSService for real-time synthesis, or "
+                "ElevenLabsHttpTTSService for HTTP streaming."
+            )
 
         if _pronunciation_dictionary_locators is not None:
             warn_deprecated(
@@ -596,6 +617,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
+            # An interrupted context's alignment keeps arriving after its clock
+            # was dropped; handling it would start a clock nothing removes.
+            if not self.audio_context_available(received_ctx_id):
+                continue
+
             raw_alignment = _select_alignment(
                 msg,
                 normalized_key="normalizedAlignment",
@@ -609,14 +635,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                     received_ctx_id not in self._alignment_started_context_ids,
                 )
                 self._alignment_started_context_ids.add(received_ctx_id)
-                word_times, self._partial_word, self._partial_word_start_time = (
-                    calculate_word_times(
-                        alignment,
-                        self._cumulative_time,
-                        self._partial_word,
-                        self._partial_word_start_time,
-                    )
-                )
+                word_times = self._word_times_from_alignment(received_ctx_id, alignment)
 
                 if word_times:
                     await self.add_word_timestamps(
@@ -630,22 +649,6 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                             else None
                         ),
                     )
-
-                    # Calculate the actual end time of this audio chunk
-                    char_start_times_ms = alignment.get("charStartTimesMs", [])
-                    char_durations_ms = alignment.get("charDurationsMs", [])
-
-                    if char_start_times_ms and char_durations_ms:
-                        # End time = start time of last character + duration of last character
-                        chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                        chunk_end_time_seconds = chunk_end_time_ms / 1000.0
-                        self._cumulative_time += chunk_end_time_seconds
-                    else:
-                        # Fallback: use the last word's start time (current behavior)
-                        self._cumulative_time = word_times[-1][1]
-                        logger.warning(
-                            "_receive_messages: using fallback timing method - consider investigating alignment data structure"
-                        )
 
     async def _send_keepalive(self):
         """Send a single keepalive message to keep the WebSocket connection alive.
@@ -895,6 +898,19 @@ class ElevenLabsHttpTTSService(TTSService):
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
+        self._audio_tag_expression_adapter = ElevenLabsAudioTagExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio tags on Eleven v3 and v4, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith(("eleven_v3", "eleven_v4")):
+            return self._audio_tag_expression_adapter
+        return super().get_expression_adapter()
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language to ElevenLabs language code.
 
@@ -990,13 +1006,17 @@ class ElevenLabsHttpTTSService(TTSService):
             # End of turn - reset previous text
             self._previous_text = ""
 
-    def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> list[tuple[str, float]]:
+    def calculate_word_times(
+        self, alignment_info: Mapping[str, Any], *, audio_tags: bool = False
+    ) -> list[tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
         This method handles partial words that may span across multiple alignment chunks.
 
         Args:
             alignment_info: Character timing data from ElevenLabs.
+            audio_tags: Whether a bracketed audio tag, such as ``[short pause]``,
+                is one word, spaces and all.
 
         Returns:
             List of (word, timestamp) pairs for complete words in this chunk.
@@ -1028,9 +1048,12 @@ class ElevenLabsHttpTTSService(TTSService):
         # Start with any partial word from previous chunk
         current_word = self._partial_word
         word_start_time = self._partial_word_start_time if self._partial_word else None
+        in_tag = audio_tags and _ends_in_audio_tag(current_word)
 
         for i, char in enumerate(chars):
-            if char == " ":
+            if audio_tags and char in "[]":
+                in_tag = char == "["
+            if char == " " and not in_tag:
                 if current_word:  # Only add non-empty words
                     words.append(current_word)
                     word_start_times.append(word_start_time)
@@ -1165,8 +1188,11 @@ class ElevenLabsHttpTTSService(TTSService):
                                 # Update to the longest end time seen so far
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
-                            # Calculate word timestamps
-                            word_times = self.calculate_word_times(alignment)
+                            # Calculate word timestamps. The audio tags expressive
+                            # conversation sends mark when its sounds are performed.
+                            word_times = self.calculate_word_times(
+                                alignment, audio_tags=bool(self._expression_formatter)
+                            )
                             if word_times:
                                 await self.add_word_timestamps(
                                     word_times,

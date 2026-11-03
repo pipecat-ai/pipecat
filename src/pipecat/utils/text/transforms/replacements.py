@@ -7,14 +7,14 @@
 """User-defined text replacements for TTS preprocessing."""
 
 import re
-from collections.abc import Callable
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.text.transforms.text_transform import TextTransform
 
 
 def replace_text(
     replacements: list[tuple[str, str]],
-) -> Callable[[str, str | TextType], object]:
+) -> TextTransform:
     r"""Return a transform that applies a list of find-and-replace rules.
 
     Each rule is a ``(pattern, replacement)`` tuple. Patterns are treated as

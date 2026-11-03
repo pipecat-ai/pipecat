@@ -20,9 +20,9 @@ async def _create_config(**kwargs) -> dict:
     service = InworldTTSService(
         api_key="test", settings=InworldTTSService.Settings(model=model), **kwargs
     )
-    service.send_with_retry = AsyncMock()
+    service._websocket = AsyncMock()
     await service._send_context("ctx-1")
-    return json.loads(service.send_with_retry.await_args.args[0])["create"]
+    return json.loads(service._websocket.send.await_args.args[0])["create"]
 
 
 @pytest.mark.asyncio

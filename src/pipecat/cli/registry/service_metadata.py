@@ -455,6 +455,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="smallest_stt",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestSTTService"],
+            env_prefix="SMALLEST",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="soniox_stt",
             label="Soniox",
             package="pipecat-ai[soniox]",
@@ -494,6 +502,14 @@ class ServiceRegistry:
             package="pipecat-ai[xai]",
             class_name=["XAISTTService"],
             env_prefix="XAI",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="zoom_ai_stt",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAISTTService"],
+            env_prefix="ZOOM_AI",
             include_params=["api_key"],
         ),
     ]
@@ -686,10 +702,11 @@ class ServiceRegistry:
             value="perplexity_llm",
             label="Perplexity",
             package="pipecat-ai[perplexity]",
-            class_name=["PerplexityLLMService"],
+            class_name=["PerplexityAgentHttpLLMService"],
             env_prefix="PERPLEXITY",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
+            param_defaults={"model": "openai/gpt-5.6-luna"},
         ),
         ServiceDefinition(
             value="qwen_llm",
@@ -719,6 +736,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="smallest_llm",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestLLMService"],
+            env_prefix="SMALLEST",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="together_llm",
             label="Together AI",
             package="pipecat-ai[together]",
@@ -731,6 +757,16 @@ class ServiceRegistry:
 
     # Text-to-Speech Services
     TTS_SERVICES: list[ServiceDefinition] = [
+        ServiceDefinition(
+            value="assemblyai_tts",
+            label="AssemblyAI",
+            package="pipecat-ai[assemblyai]",
+            class_name=["AssemblyAITTSService"],
+            env_prefix="ASSEMBLYAI",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"},
+        ),
         ServiceDefinition(
             value="asyncai_tts",
             label="Async",
