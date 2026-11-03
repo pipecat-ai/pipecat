@@ -61,22 +61,22 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Zoom Scribe Live speech-to-text with Scribe's own turn detection.
+    """Zoom Scribe Live speech-to-text with Pipecat's turn detection.
 
-    Scribe's voice activity detection decides when the user starts and stops
-    speaking (by default after 350 ms of silence; see
-    `ZoomAISTTService.Settings(silence_duration_ms=...)`). The service
-    proposes those turn boundaries and recommends `ExternalUserTurnStrategies`,
-    so the user aggregator resolves them into turns and interruptions without
-    any extra configuration.
+    With `vad_force_turn_endpoint=True`, Scribe's voice activity detection is
+    turned off, and Pipecat's local VAD and default user turn strategies
+    (Smart Turn) decide when the user is done speaking. At each local VAD stop
+    the service commits the audio, and Scribe returns that turn's final
+    transcript. The local VAD analyzer below is required in this mode.
 
-    The local Silero VAD below does not decide turns; it only provides STT
-    latency (TTFB) metrics, measured from the local end of speech to Scribe's
-    final transcript.
+    For Scribe's own turn detection, see `voice-zoom-ai-turn-detection.py`.
     """
     logger.info("Starting bot")
 
-    stt = ZoomAISTTService(api_key=os.environ["ZOOM_AI_API_KEY"])
+    stt = ZoomAISTTService(
+        api_key=os.environ["ZOOM_AI_API_KEY"],
+        vad_force_turn_endpoint=True,  # Use Pipecat's VAD and turn strategies
+    )
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],
@@ -95,7 +95,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        # Turns come from Scribe; local VAD is kept for metrics (see the docstring).
+        # Local VAD drives turns and the commit at each VAD stop.
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
