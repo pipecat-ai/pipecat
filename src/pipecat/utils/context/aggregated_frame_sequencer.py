@@ -647,7 +647,9 @@ class AggregatedFrameSequencer:
                 break  # spoken but not yet complete — wait
         return frames
 
-    def force_complete(self, context_id: str, last_word_pts: int) -> list[Frame]:
+    def force_complete(
+        self, context_id: str, last_word_pts: int, *, emit_remaining: bool = True
+    ) -> list[Frame]:
         """Force-complete a context's incomplete spoken slots and flush skipped frames.
 
         Called at the end of an audio context to handle TTS providers that silently drop
@@ -668,6 +670,9 @@ class AggregatedFrameSequencer:
             context_id: The audio context that has ended.
             last_word_pts: PTS of the last received word frame, used as the PTS for
                 force-completed frames and forwarded to :meth:`flush`.
+            emit_remaining: Whether to emit the remaining unspoken text. False when
+                the context produced no audio, so none of its text was spoken: the
+                slots are completed without emitting their text.
 
         Returns:
             Combined list of TTSTextFrames (for incomplete spoken slots),
@@ -696,9 +701,14 @@ class AggregatedFrameSequencer:
                             f"does not contain remaining_text {repr(remaining_text)}, discarding"
                         )
                         raw_remaining = None
+                    if remaining_text and not emit_remaining:
+                        logger.warning(
+                            f"{self._name} context {context_id} produced no audio, "
+                            f"dropping unspoken text {repr(remaining_text)}"
+                        )
                     # A slot that is only tags, such as a sound, has LLM text and
                     # nothing left to say.
-                    if remaining_text or raw_remaining:
+                    elif remaining_text or raw_remaining:
                         logger.debug(
                             f"{self._name} force-completing slot with remaining text "
                             f"{repr(remaining_text)}"

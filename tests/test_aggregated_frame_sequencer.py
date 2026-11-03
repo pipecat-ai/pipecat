@@ -497,6 +497,25 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tts_frames), 1)
         self.assertEqual(tts_frames[0].text, "hello world")
 
+    async def test_drops_remaining_text_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
+
+        result = seq.force_complete("ctx1", last_word_pts=0, emit_remaining=False)
+        self.assertEqual(result, [])
+        # The slot is complete, so a word arriving afterwards emits nothing.
+        self.assertEqual(seq.process_word("hello", pts=10, context_id="ctx1"), [])
+
+    async def test_flushes_skipped_frames_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        skipped = _skipped_frame("code")
+        await seq.register_skipped(skipped, "ctx2", None)
+
+        result = seq.force_complete("ctx1", last_word_pts=20, emit_remaining=False)
+        self.assertEqual(result, [skipped])
+        self.assertTrue(skipped.append_to_context)
+
     async def test_already_complete_slot_emits_nothing(self):
         seq = _seq()
         await seq.register_spoken(_spoken_frame("hi"), "ctx1", "hi", True)
