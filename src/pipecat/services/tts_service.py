@@ -1417,7 +1417,7 @@ class TTSService(AIService):
         # to complete its text.
         context_id = self._turn_context_id
         if context_id in self._tts_contexts and not self.audio_context_available(context_id):
-            await self._apply_force_complete(context_id)
+            await self._apply_force_complete(context_id, received_audio=False)
             del self._tts_contexts[context_id]
 
         await self._hold_frames_while_audio_contexts_open()
