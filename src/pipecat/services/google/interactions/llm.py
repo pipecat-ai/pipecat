@@ -91,10 +91,16 @@ class GoogleInteractionsLLMSettings(GoogleLLMSettings):
 class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
     """Google Gemini LLM service using the Interactions API.
 
-    Sends the full context on every turn, with ``store=False``, so Google keeps
-    no conversation state. Takes the same settings as
+    Takes the same settings as
     :class:`~pipecat.services.google.llm.GoogleLLMService`, and the two read
-    each other's thought signatures from the context.
+    each other's thought signatures from the context, so a conversation can
+    move between them.
+
+    Each request carries the full context with ``store=False``, so Google
+    keeps no copy of the conversation. Sending only the new turns, with
+    ``previous_interaction_id``, would need ``store=True``, which retains
+    every interaction on Google's servers for days; the Interactions API has
+    no connection-local alternative like the OpenAI Responses WebSocket mode.
 
     Example::
 
