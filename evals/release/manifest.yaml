@@ -312,6 +312,8 @@ suite:
     scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-google-video.py
     scenarios: [scripted/describe_image]
+  - bot: function-calling/function-calling-google-interactions-video.py
+    scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-moondream-video.py
     scenarios: [scripted/describe_image]
 
