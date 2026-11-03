@@ -27,6 +27,8 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -40,6 +42,7 @@ from pipecat.services.elevenlabs.tts_base import (
     ELEVENLABS_MODEL_LANGUAGES,
     ElevenLabsTTSBase,
     ElevenLabsTTSSettingsBase,
+    _ends_in_audio_tag,
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
@@ -891,6 +894,19 @@ class ElevenLabsHttpTTSService(TTSService):
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
+        self._audio_tag_expression_adapter = ElevenLabsAudioTagExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio tags on Eleven v3 and v4, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith(("eleven_v3", "eleven_v4")):
+            return self._audio_tag_expression_adapter
+        return super().get_expression_adapter()
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language to ElevenLabs language code.
 
@@ -986,13 +1002,17 @@ class ElevenLabsHttpTTSService(TTSService):
             # End of turn - reset previous text
             self._previous_text = ""
 
-    def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> list[tuple[str, float]]:
+    def calculate_word_times(
+        self, alignment_info: Mapping[str, Any], *, audio_tags: bool = False
+    ) -> list[tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
         This method handles partial words that may span across multiple alignment chunks.
 
         Args:
             alignment_info: Character timing data from ElevenLabs.
+            audio_tags: Whether a bracketed audio tag, such as ``[short pause]``,
+                is one word, spaces and all.
 
         Returns:
             List of (word, timestamp) pairs for complete words in this chunk.
@@ -1024,9 +1044,12 @@ class ElevenLabsHttpTTSService(TTSService):
         # Start with any partial word from previous chunk
         current_word = self._partial_word
         word_start_time = self._partial_word_start_time if self._partial_word else None
+        in_tag = audio_tags and _ends_in_audio_tag(current_word)
 
         for i, char in enumerate(chars):
-            if char == " ":
+            if audio_tags and char in "[]":
+                in_tag = char == "["
+            if char == " " and not in_tag:
                 if current_word:  # Only add non-empty words
                     words.append(current_word)
                     word_start_times.append(word_start_time)
@@ -1161,8 +1184,11 @@ class ElevenLabsHttpTTSService(TTSService):
                                 # Update to the longest end time seen so far
                                 utterance_duration = max(utterance_duration, chunk_end_time)
 
-                            # Calculate word timestamps
-                            word_times = self.calculate_word_times(alignment)
+                            # Calculate word timestamps. The audio tags expressive
+                            # conversation sends mark when its sounds are performed.
+                            word_times = self.calculate_word_times(
+                                alignment, audio_tags=bool(self._expression_formatter)
+                            )
                             if word_times:
                                 await self.add_word_timestamps(
                                     word_times,

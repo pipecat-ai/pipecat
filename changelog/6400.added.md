@@ -1,0 +1,1 @@
+- Added `framing` to `SimliVideoService` for Simli Trinity-2 faces. `SimliVideoService.Framing(...)` sets the video's size (`streaming_width`, `streaming_height`, such as 1366x768 for 16:9), where the avatar sits in it (`avatar_position_x`, `avatar_position_y`), the camera it starts with (`SimliVideoService.Camera(...)`), and an uploaded `background_id` or `foreground_id`.

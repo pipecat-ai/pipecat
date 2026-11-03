@@ -2649,6 +2649,66 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         self.assertIn("image", content[0])
         self.assertEqual(content[1]["text"], "What do you see?")
 
+    async def test_thought_converted_to_reasoning_content(self):
+        """A signed thought becomes a reasoning block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny", "tool_call_id": "t1"},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        # The thought and the tool call merge into a single assistant message,
+        # with the reasoning first.
+        self.assertEqual(len(params["messages"]), 3)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0],
+            {"reasoningContent": {"reasoningText": {"text": "Let me check.", "signature": "sig"}}},
+        )
+        self.assertEqual(content[1]["toolUse"]["toolUseId"], "t1")
+
+    async def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be passed back, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(llm="aws", message={"type": "thought", "text": "[REDACTED]"}),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][1]["content"], [{"text": "It's sunny."}])
+
+    def test_thought_signature_elided_from_logs(self):
+        """Reasoning signatures are elided from logged messages."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+            ]
+        )
+        messages = self.adapter.get_messages_for_logging(context)
+
+        reasoning = messages[1]["content"][0]["reasoningContent"]["reasoningText"]
+        self.assertEqual(reasoning, {"text": "Let me check.", "signature": "..."})
+
 
 class TestSanitizeBedrockDocumentName(unittest.TestCase):
     """Tests for bedrock_adapter._sanitize_bedrock_document_name."""

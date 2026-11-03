@@ -371,16 +371,14 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(
-            self, open_prs=None, branches=None, commits=None, fragments=None, label_prs=None
-        ):
+        def __init__(self, open_prs=None, branches=None, commits=None, label_prs=None):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
-            self.fragments = fragments or {}  # branch/ref -> [changelog paths added]
             self.label_prs = label_prs or []  # rows for `gh pr list --label`
-            self.pr_files = {}  # number -> [changed paths]
+            # number -> [path added, or (path, changeType)]
+            self.pr_files = {}
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
@@ -392,13 +390,16 @@ class TestPublish:
                 url = self.open_prs.get(head)
                 return json.dumps([{"url": url}] if url else [])
             if args[:3] == ("gh", "pr", "view") and "files" in args:
-                return json.dumps({"files": [{"path": p} for p in self.pr_files.get(args[3], [])]})
+                files = [
+                    {"path": f, "changeType": "ADDED"}
+                    if isinstance(f, str)
+                    else {"path": f[0], "changeType": f[1]}
+                    for f in self.pr_files.get(args[3], [])
+                ]
+                return json.dumps({"files": files})
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
-            if args[:2] == ("git", "diff") and "--name-only" in args:
-                branch = args[4].split("..")[-1].lstrip(".")
-                return "\n".join(self.fragments.get(branch, []))
             if args[:2] == ("git", "rev-list"):
                 branch = args[-1].split("..")[-1]
                 return "\n".join(f"{branch}@{i}" for i in range(len(self.commits.get(branch, ()))))
@@ -549,7 +550,6 @@ class TestPublish:
                     "headRepositoryOwner": {"login": "pipecat-ai"},
                 }
             ],
-            fragments={"FETCH_HEAD": frags},
         )
         sh.pr_files = {"101": frags}
         assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
@@ -563,6 +563,38 @@ class TestPublish:
         assert any(c[:2] == ("git", "commit") and "#101" in c[-1] for c in sh.calls)
         assert ("git", "push", "origin", f"HEAD:refs/heads/{branch}") in [
             c[:4] for c in sh.calls if c[:2] == ("git", "push")
+        ]
+
+    def test_renames_only_fragments_the_pr_adds(self, tmp_path):
+        import publish
+
+        branch = "provider-watch/together-llm-reasoning-effort"
+        sh = self.FakeShell(
+            label_prs=[
+                {
+                    "number": 6437,
+                    "headRefName": branch,
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                }
+            ],
+        )
+        sh.pr_files = {
+            "6437": [
+                "changelog/+together-reasoning-effort.added.md",
+                ("changelog/6385.added.md", "MODIFIED"),
+                ("changelog/6387.fixed.md", "REMOVED"),
+                "src/pipecat/services/together/llm.py",
+            ]
+        }
+        assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
+        moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
+        assert moves == [
+            (
+                "git",
+                "mv",
+                "changelog/+together-reasoning-effort.added.md",
+                "changelog/6437.added.md",
+            )
         ]
 
     def test_sweep_leaves_correct_and_non_bot_prs_alone(self, tmp_path):
@@ -586,7 +618,6 @@ class TestPublish:
                     "headRepositoryOwner": {"login": "someone"},
                 },
             ],
-            fragments={"FETCH_HEAD": ["changelog/+deepseek-thinking.added.md"]},
         )
         sh.pr_files = {
             "5528": ["changelog/+deepseek-thinking.added.md", "src/x.py"],

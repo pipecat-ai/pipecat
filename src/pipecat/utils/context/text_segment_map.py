@@ -224,6 +224,7 @@ class TextSegmentMap:
         tts_text: str,
         original_text: str,
         llm_text: str | None = None,
+        llm_markup: re.Pattern[str] | None = None,
     ):
         """Line the three texts up against each other.
 
@@ -238,10 +239,26 @@ class TextSegmentMap:
             llm_text: The same content as the LLM wrote it, which may add
                 delimiters the other two never see. Rides its own cursor rather
                 than being diffed. Defaults to *original_text*.
+            llm_markup: Tags only *llm_text* carries, beyond ``<...>`` markup,
+                which its cursor passes over without counting their letters.
         """
         self._tts_text = tts_text
         self._original_text = original_text
         self._llm_text = llm_text if llm_text is not None else original_text
+        # The LLM text as its cursor reads it: the extra tags blanked to ``<...>``
+        # of the same length, so positions in it are positions in the LLM text.
+        # A tag takes the space after it, as the service's markup for it does, so
+        # the cursor never counts a space the spoken words didn't cross.
+        self._llm_scan = (
+            re.sub(
+                f"(?:{llm_markup.pattern})[ \\t]*",
+                lambda m: "<" + " " * (len(m.group()) - 2) + ">",
+                self._llm_text,
+                flags=llm_markup.flags,
+            )
+            if llm_markup
+            else self._llm_text
+        )
         self._segments: list[TextSegment] = self._build_segments(tts_text, original_text)
         self._reset_state()
 
@@ -263,6 +280,13 @@ class TextSegmentMap:
 
         def tokenize(text: str) -> list[str]:
             return re.split(r"(\s+)", text)
+
+        def match_key(token: str) -> str:
+            # A word the TTS was sent in other capitals, such as "BACK" for
+            # stress, still lines up with the original. Only where lowercasing
+            # keeps its length, so one position still cuts both sides.
+            lowered = token.lower()
+            return lowered if len(lowered) == len(token) else token
 
         orig_tokens = tokenize(original_text)
         tts_tokens = tokenize(tts_text)
@@ -306,7 +330,12 @@ class TextSegmentMap:
         # the cursors are held while the expanded TTS text is being
         # consumed and jump to original_end only when the entire
         # transformed segment completes.
-        matcher = difflib.SequenceMatcher(None, orig_tokens, tts_tokens, autojunk=False)
+        matcher = difflib.SequenceMatcher(
+            None,
+            [match_key(token) for token in orig_tokens],
+            [match_key(token) for token in tts_tokens],
+            autojunk=False,
+        )
 
         segments: list[TextSegment] = []
         orig_pos = 0
@@ -326,10 +355,11 @@ class TextSegmentMap:
             #     "<spell>1234</spell>."   all-or-nothing, lands as one
             #
             # Only equal pieces can be split this way. Both sides hold the same
-            # text there, so a single position cuts both. Where the sides differ
-            # there is no position that means the same thing on each.
+            # text there, but for capitals, so a single position cuts both. Where
+            # the sides differ there is no position that means the same thing on
+            # each.
             parts = (
-                [(part, part) for part in split_markup_runs(orig_chunk)]
+                _split_alike(split_markup_runs(orig_chunk), tts_chunk)
                 if tag == "equal"
                 else [(orig_chunk, tts_chunk)]
             )
@@ -715,9 +745,9 @@ class TextSegmentMap:
         the source spells differently -- is still credited to the word that
         crossed it.
         """
-        self._llm_spoken_pos = advance_by_chars(self._llm_text, self._llm_spoken_pos, len(crossed))
+        self._llm_spoken_pos = advance_by_chars(self._llm_scan, self._llm_spoken_pos, len(crossed))
         self._llm_pos = max(
-            advance_by_alnums(self._llm_text, self._llm_pos, n_alnum), self._llm_spoken_pos
+            advance_by_alnums(self._llm_scan, self._llm_pos, n_alnum), self._llm_spoken_pos
         )
 
     def _commit_transformed_span(self, seg: TextSegment) -> None:
@@ -725,7 +755,7 @@ class TextSegmentMap:
         self._user_facing_pos = seg.original_end
         # The original's count, not the TTS side's: llm_text holds "$42.50"
         # (4 alnums), never the spoken "forty two dollars".
-        self._llm_pos = advance_by_alnums(self._llm_text, self._llm_pos, seg.original_alnum_count)
+        self._llm_pos = advance_by_alnums(self._llm_scan, self._llm_pos, seg.original_alnum_count)
         # The span is spoken in full or not at all, so both cursors land together.
         self._llm_spoken_pos = self._llm_pos
 
@@ -1024,3 +1054,17 @@ class TextSegmentMap:
     def reset(self) -> None:
         """Put every cursor back to the start of the text."""
         self._reset_state()
+
+
+def _split_alike(orig_parts: list[str], tts_chunk: str) -> list[tuple[str, str]]:
+    """Pair each run of an equal piece with the TTS text at the same offsets.
+
+    The two sides of an equal piece differ at most in capitals, so the runs the
+    original is cut into cut the TTS text at the same places.
+    """
+    pairs = []
+    pos = 0
+    for part in orig_parts:
+        pairs.append((part, tts_chunk[pos : pos + len(part)]))
+        pos += len(part)
+    return pairs

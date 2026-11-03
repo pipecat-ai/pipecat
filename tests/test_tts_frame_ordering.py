@@ -1062,6 +1062,51 @@ async def test_skipped_frame_flushed_when_word_timestamps_incomplete():
     assert skipped[0].append_to_context is True
 
 
+@pytest.mark.asyncio
+async def test_skipped_frame_follows_the_text_frame_spoken_before_it():
+    """A push_text_frames service queues its text behind the audio; skipped text follows it.
+
+    Sequence:
+        AggregatedTextFrame("Hello there.", SENTENCE)  — spoken; its TTSTextFrame is queued
+        AggregatedTextFrame("print(1)", "code")        — skipped; released by that sentence
+        AggregatedTextFrame("Done.", SENTENCE)         — spoken
+
+    Expected: the context reads in that order.
+    """
+    context = LLMContext()
+    await run_test(
+        Pipeline(
+            [MockHttpPushTextTTSService(skip_text_types=["code"]), LLMAssistantAggregator(context)]
+        ),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            AggregatedTextFrame("Hello there.", TextType.SENTENCE),
+            AggregatedTextFrame("print(1)", "code"),
+            AggregatedTextFrame("Done.", TextType.SENTENCE),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+
+    assert context.messages[-1]["content"] == "Hello there. print(1) Done."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", [MockHttpPushTextTTSService, _MockWordTimestampHttpTTSService])
+async def test_the_context_records_the_text_as_the_llm_wrote_it(service):
+    """A filter changes what is spoken, not what the context records, whatever the service."""
+    context = LLMContext()
+    await run_test(
+        Pipeline([service(text_filters=[MarkdownTextFilter()]), LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("It's **fixed** now."),
+            LLMFullResponseEndFrame(),
+        ],
+    )
+
+    assert context.messages[-1]["content"] == "It's **fixed** now."
+
+
 # ---------------------------------------------------------------------------
 # Tests: LLM text marked skip_tts
 # ---------------------------------------------------------------------------

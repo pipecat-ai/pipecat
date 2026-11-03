@@ -758,6 +758,16 @@ class ServiceRegistry:
     # Text-to-Speech Services
     TTS_SERVICES: list[ServiceDefinition] = [
         ServiceDefinition(
+            value="assemblyai_tts",
+            label="AssemblyAI",
+            package="pipecat-ai[assemblyai]",
+            class_name=["AssemblyAITTSService"],
+            env_prefix="ASSEMBLYAI",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"},
+        ),
+        ServiceDefinition(
             value="asyncai_tts",
             label="Async",
             package="pipecat-ai[asyncai]",

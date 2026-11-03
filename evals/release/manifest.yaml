@@ -391,6 +391,13 @@ suite:
     scenarios: [scripted/empty_user_turn]
 
   #
+  # Turn completion decided by a classifier (Jev) instead of LLM markers: the
+  # LLM runs only once the classifier says the user's turn is complete.
+  #
+  - bot: turn-management/turn-management-classifier-turn-completion.py
+    scenarios: [scripted/classifier_turn_completion]
+
+  #
   # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of
   # speech. The bot's DTMFAggregator turns each keypress into a transcription the
   # LLM responds to, so the harness can assert on the resulting transcription and
@@ -405,6 +412,36 @@ suite:
   #
   - bot: features/features-voicemail-detection.py
     scenarios: [scripted/voicemail_detection]
+
+  #
+  # Expressive conversation: the LLM writes expression tags, and the TTS
+  # performs them rather than speaking them. The Tone bot reads how each user
+  # turn was meant; Tone reads a flat transcript as neutral, which holds back
+  # the tags expressive_conversation asks for, so it runs perception alone.
+  # The Tone tagger bot's LLM writes plain words and a tagger writes the tags.
+  #
+  - bot: expressive-conversation/expressive-conversation-azure.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-cartesia.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-elevenlabs.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-fish.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-gemini.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-inworld.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-minimax.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-mistral.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-soniox.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-tone.py
+    scenarios: [scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-tone-tagger.py
+    scenarios: [scripted/expression_tagger, scripted/perception]
 
   #
   # Video avatar services

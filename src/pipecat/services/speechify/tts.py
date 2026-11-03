@@ -262,11 +262,25 @@ class SpeechifyTTSSettings(TTSSettings):
             the whole workspace. 1 to 64 characters of letters, digits and
             ``. _ - : | + / =`` — a keyed hash of an internal user id, never personal
             data such as an email address, which Speechify rejects.
+        pronunciations: How specific words in the text should be spoken, up to 200
+            entries. Each entry gives the ``text`` to match and exactly one of ``ipa``
+            (phones from the model's set, for a single word) or ``alias`` (replacement
+            text), plus an optional ``case_sensitive``::
+
+                [{"text": "Pipecat", "ipa": "p ˈaɪ p k æ t"},
+                 {"text": "TTS", "alias": "text to speech"}]
+
+            Speechify applies these on ``simba-3.5`` in every language it lists under
+            ``pronunciation_languages`` in ``GET /v1/audio/models``, which excludes
+            English; any other model or language returns ``pronunciations_unsupported``.
     """
 
     loudness_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     safety_identifier: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciations: list[dict[str, Any]] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class SpeechifyHttpTTSService(TTSService):
@@ -314,6 +328,7 @@ class SpeechifyHttpTTSService(TTSService):
             loudness_normalization=None,
             text_normalization=None,
             safety_identifier=None,
+            pronunciations=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -417,6 +432,10 @@ class SpeechifyHttpTTSService(TTSService):
         safety_identifier = assert_given(self._settings.safety_identifier)
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
+
+        pronunciations = assert_given(self._settings.pronunciations)
+        if pronunciations:
+            payload["pronunciations"] = pronunciations
 
         options: dict[str, Any] = {}
         loudness_normalization = assert_given(self._settings.loudness_normalization)

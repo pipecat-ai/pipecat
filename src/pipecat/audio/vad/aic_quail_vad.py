@@ -23,7 +23,7 @@ from aic_sdk import (
     ProcessorConfig,
     Vad,
     VadContext,
-    # Exported at runtime but absent from aic-sdk 3.0.0's type stub.
+    # Exported at runtime but absent from aic-sdk's type stub.
     set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger

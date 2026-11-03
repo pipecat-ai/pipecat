@@ -9,23 +9,38 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, MagicMock
 
+from loguru import logger
+
 from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    Frame,
+    LLMContextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnCompletionFrame,
     UserTurnInferenceCompletedFrame,
+    UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.turns.types import (
+    ProcessFrameResult,
+    UserTurnResumedParams,
+    UserTurnSpeculation,
 )
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
+    TranscriptionUserTurnStartStrategy,
+    UserTurnStartedParams,
     VADUserTurnStartStrategy,
+    WakePhraseUserTurnStartStrategy,
 )
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
@@ -34,12 +49,21 @@ from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnCompletionStopStrategy,
     ExternalUserTurnStopStrategy,
+    LLMTurnCompletionUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
+    UserTurnStoppedParams,
     deferred,
 )
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
+    StrategyMode,
+    UserTurnStrategies,
+    UserTurnStrategiesParams,
+)
+from pipecat.utils import deprecation
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -182,11 +206,14 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, ["inference_triggered", "stopped"])
 
     async def test_deferred_wrapper_skips_stopped(self):
-        """A deferred() wrapper drops the inner strategy's on_user_turn_stopped event."""
+        """With the first decision winning, deferred() drops the inner strategy's stop."""
         wrapped = deferred(
             SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
         )
-        controller = UserTurnController(user_turn_strategies=UserTurnStrategies(stop=[wrapped]))
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[wrapped]),
+            user_turn_strategies_params=UserTurnStrategiesParams(stop_mode=StrategyMode.FIRST),
+        )
 
         await controller.setup(frame_processor_setup(self.task_manager))
         await controller.start()
@@ -293,6 +320,145 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
+
+    async def test_a_turn_ended_by_the_timeout_keeps_a_confirmation(self):
+        """The stop timeout ends the turn with what the decisions said, a confirmation included."""
+        confirming, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[confirming, on_inference]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops = []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(params)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await confirming.speculate()
+        await confirming.confirm()
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+
+        self.assertEqual(len(stops), 1)
+        self.assertTrue(stops[0].confirms_speculation)
+
+    async def test_the_stop_timeout_waits_for_a_scheduled_decision(self):
+        scheduled = ScheduledDecisionStopStrategy()
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[scheduled]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops = []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2 + 0.1)
+        self.assertEqual(stops, [])
+
+        scheduled.scheduled = False
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(stops, [None])
+
+    async def _start_with_the_marker(self) -> tuple[list, list]:
+        user = DecidingStopStrategy()
+        marker = LLMTurnCompletionUserTurnStopStrategy(
+            config=UserTurnCompletionConfig(incomplete_long_timeout=USER_TURN_STOP_TIMEOUT * 3)
+        )
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(stop=[user, marker]),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops, timeouts = [], []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            timeouts.append(None)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await user.decide()
+        self.controller, self.marker = controller, marker
+        return stops, timeouts
+
+    async def test_a_turn_the_llm_needs_more_time_on_waits_for_the_marker(self):
+        """After ○, the turn stays open until the marker strategy's own timeout decides."""
+        stops, timeouts = await self._start_with_the_marker()
+        inference = LLMContextFrame(context=LLMContext())
+        await self.controller.process_frame(inference)
+        await self.controller.process_frame(
+            UserTurnCompletionFrame(kind="long", context_frame_id=inference.id)
+        )
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2)
+        self.assertEqual(stops, [])
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT * 2)
+        self.assertEqual(stops, [self.marker])
+        self.assertEqual(timeouts, [])
+
+    async def test_a_marker_that_never_comes_still_times_out(self):
+        stops, timeouts = await self._start_with_the_marker()
+        await self.controller.process_frame(LLMContextFrame(context=LLMContext()))
+
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertEqual(stops, [None])
+        self.assertEqual(timeouts, [None])
+
+    async def test_external_turn_decided_while_vad_hears_speech_ends_once_vad_stops(self):
+        """The service says the user is done while local VAD still hears a breath."""
+        for stop_mode in (StrategyMode.ALL, StrategyMode.FIRST):
+            with self.subTest(stop_mode=stop_mode):
+                await self._decide_external_turn_while_vad_hears_speech(stop_mode)
+
+    async def _decide_external_turn_while_vad_hears_speech(self, stop_mode: StrategyMode):
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_strategies_params=UserTurnStrategiesParams(stop_mode=stop_mode),
+            user_turn_stop_timeout=3.0,
+        )
+        await controller.setup(frame_processor_setup(self.task_manager))
+        await controller.start()
+        stops, timeouts = [], []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stops.append(strategy)
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            timeouts.append(None)
+
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello", user_id="", timestamp="now")
+        )
+        # The transcription settles, and the strategy decides while VAD still
+        # hears speech.
+        await asyncio.sleep(0.7)
+        self.assertEqual(stops, [])
+
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(timeouts, [])
+        await controller.cleanup()
 
     async def test_external_user_turn_strategies_no_timeout_while_speaking(self):
         """Test that timeout does not trigger when user is still speaking with external strategies."""
@@ -627,7 +793,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """handle_user_turn_stopped() also runs when the stop watchdog ends the turn."""
         finalized = 0
 
-        class SpyNeverStopStrategy(ExternalUserTurnCompletionStopStrategy):
+        class SpyNeverStopStrategy(BaseUserTurnStopStrategy):
             async def handle_user_turn_stopped(self):
                 nonlocal finalized
                 await super().handle_user_turn_stopped()
@@ -685,7 +851,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):  # the deprecated hook
                     nonlocal resets
                     resets += 1
@@ -699,7 +865,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         """Overriding the deprecated reset() warns when the class is defined."""
         with self.assertWarns(DeprecationWarning):
 
-            class LegacyStop(ExternalUserTurnCompletionStopStrategy):
+            class LegacyStop(BaseUserTurnStopStrategy):
                 async def reset(self):
                     pass
 
@@ -745,7 +911,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
 
-            class Migrated(ExternalUserTurnCompletionStopStrategy):
+            class Migrated(BaseUserTurnStopStrategy):
                 async def handle_user_turn_stopped(self):
                     pass
 
@@ -894,6 +1060,574 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(released.wait(), timeout=1.0)
 
         await strategy.cleanup()
+
+
+class ScheduledDecisionStopStrategy(BaseUserTurnStopStrategy):
+    """A stop strategy with a decision of its own scheduled while ``scheduled``."""
+
+    def __init__(self):
+        super().__init__()
+        self.scheduled = True
+
+    @property
+    def decision_scheduled(self) -> bool:
+        return self.scheduled
+
+
+class DecidingStopStrategy(BaseUserTurnStopStrategy):
+    """A stop strategy that decides the user is done when a test says so."""
+
+    def __init__(
+        self,
+        result: ProcessFrameResult = ProcessFrameResult.CONTINUE,
+        *,
+        on_inference: bool = False,
+    ):
+        super().__init__()
+        self.frames: list[Frame] = []
+        self._result = result
+        self._on_inference = on_inference
+
+    @property
+    def waits_for_inference(self) -> bool:
+        return self._on_inference
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        self.frames.append(frame)
+        return self._result
+
+    async def decide(self, **kwargs):
+        await self.report_user_turn_stopped(**kwargs)
+
+    async def speculate(self):
+        await self.start_user_turn_speculation(UserTurnSpeculation("Hi"))
+
+    async def confirm(self):
+        await self.report_user_turn_stopped(confirms_speculation=True)
+
+
+class TestStopModeAll(unittest.IsolatedAsyncioTestCase):
+    """By default the turn ends once every stop strategy has decided."""
+
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+        self.stops: list[tuple[BaseUserTurnStopStrategy | None, UserTurnStoppedParams]] = []
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _start(
+        self,
+        stop: list[BaseUserTurnStopStrategy],
+        *,
+        start: list[BaseUserTurnStartStrategy] | None = None,
+        stop_mode: StrategyMode = StrategyMode.ALL,
+    ):
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=start or [VADUserTurnStartStrategy()], stop=stop
+            ),
+            user_turn_strategies_params=UserTurnStrategiesParams(stop_mode=stop_mode),
+        )
+        await self.controller.setup(frame_processor_setup(self.task_manager))
+
+        @self.controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            self.stops.append((strategy, params))
+
+    async def _speak(self):
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+    async def test_the_turn_ends_once_every_strategy_decides(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self._speak()
+
+        await first.decide()
+        self.assertEqual(self.stops, [])
+
+        await last.decide()
+        self.assertEqual([s for s, _ in self.stops], [last])
+
+    async def test_the_first_decision_ends_the_turn_in_first_mode(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last], stop_mode=StrategyMode.FIRST)
+        await self._speak()
+
+        await first.decide()
+        await last.decide()
+
+        self.assertEqual([s for s, _ in self.stops], [first])
+
+    async def test_a_first_list_waits_for_the_decision_on_the_inference(self):
+        first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([first, on_inference], stop_mode=StrategyMode.FIRST)
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await first.decide()
+        self.assertEqual(len(inferences), 1)
+        self.assertEqual(self.stops, [])
+
+        await on_inference.decide()
+        self.assertEqual([s for s, _ in self.stops], [on_inference])
+
+    async def test_a_first_list_keeps_a_confirmation_until_the_turn_ends(self):
+        first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([first, on_inference], stop_mode=StrategyMode.FIRST)
+        await self._speak()
+
+        await first.speculate()
+        await first.confirm()
+        await on_inference.decide()
+
+        _, params = self.stops[0]
+        self.assertTrue(params.confirms_speculation)
+
+    async def test_new_speech_clears_the_decisions(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self._speak()
+        await first.decide()
+
+        await self._speak()
+        await last.decide()
+        self.assertEqual(self.stops, [])
+
+        await first.decide()
+        self.assertEqual([s for s, _ in self.stops], [first])
+
+    async def test_a_decision_made_while_the_user_speaks_counts(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await first.decide()
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        await last.decide()
+
+        self.assertEqual([s for s, _ in self.stops], [last])
+
+    async def test_the_turn_does_not_end_while_the_user_speaks(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+        await first.decide()
+        await last.decide()
+
+        self.assertEqual(self.stops, [])
+
+    async def test_a_turn_decided_while_the_user_speaks_ends_once_they_stop(self):
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last])
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await first.decide()
+        await last.decide()
+
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([s for s, _ in self.stops], [last])
+
+    async def test_a_first_list_ends_a_turn_decided_while_the_user_speaks_once_they_stop(self):
+        strategy = DecidingStopStrategy()
+        await self._start([strategy], stop_mode=StrategyMode.FIRST)
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.decide()
+        self.assertEqual(self.stops, [])
+
+        await self.controller.process_frame(VADUserStoppedSpeakingFrame())
+
+        self.assertEqual([s for s, _ in self.stops], [strategy])
+
+    async def test_a_cancelled_answer_voids_the_decisions_made_on_it(self):
+        """A decision on the inference is about the answer, so it goes with it."""
+        user, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([user, on_inference])
+        await self._speak()
+        await user.speculate()
+        await on_inference.decide()
+
+        await self.controller.process_frame(UserTurnResponseCancelFrame())
+        await user.decide()
+
+        self.assertEqual(self.stops, [])
+
+    async def test_a_cancelled_answer_keeps_the_decisions_on_the_user(self):
+        """A decision on the user says nothing about the answer, so it outlives it."""
+        user, eager, on_inference = (
+            DecidingStopStrategy(),
+            DecidingStopStrategy(),
+            DecidingStopStrategy(on_inference=True),
+        )
+        await self._start([user, eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+        await eager.speculate()
+        await user.decide()
+
+        await self.controller.process_frame(UserTurnResponseCancelFrame())
+        await eager.decide()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
+
+    async def test_a_confirmation_outlives_the_answer_it_confirmed(self):
+        """The turn's answer runs again for a decision that confirmed a cancelled one."""
+        confirming, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([confirming, on_inference])
+        inferences = []
+
+        @self.controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
+            inferences.append(strategy)
+
+        await self._speak()
+        await confirming.speculate()
+        await confirming.confirm()
+        await self.controller.process_frame(UserTurnResponseCancelFrame())
+        self.assertEqual(inferences, [confirming, confirming])
+
+        await on_inference.decide()
+        _, params = self.stops[0]
+        self.assertFalse(params.confirms_speculation)
+
+    async def test_a_withdrawn_speculation_reaches_every_stop_strategy(self):
+        withdrawing, other = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([withdrawing, other])
+        await self._speak()
+
+        await withdrawing.cancel_user_turn_speculation()
+
+        self.assertIsInstance(other.frames[-1], UserTurnResponseCancelFrame)
+
+    async def test_each_turn_needs_its_own_decisions(self):
+        """Decisions don't carry over into a turn that starts without speech frames."""
+        first, last = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([first, last], start=[TranscriptionUserTurnStartStrategy()])
+        await self.controller.process_frame(TranscriptionFrame(text="Hi", user_id="", timestamp=""))
+        await first.decide()
+        await last.decide()
+
+        await self.controller.process_frame(TranscriptionFrame(text="Hi", user_id="", timestamp=""))
+        await last.decide()
+
+        self.assertEqual(len(self.stops), 1)
+
+    async def test_a_deferred_strategy_decides_as_the_one_it_wraps(self):
+        inner, other = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([deferred(inner), other])
+        await self._speak()
+
+        await other.decide()
+        self.assertEqual(self.stops, [])
+
+        await inner.decide()
+        self.assertEqual([s for s, _ in self.stops], [inner])
+
+    async def test_every_strategy_sees_every_frame(self):
+        blocking, other = DecidingStopStrategy(ProcessFrameResult.STOP), DecidingStopStrategy()
+        await self._start([blocking, other])
+
+        await self._speak()
+
+        self.assertEqual(len(other.frames), 2)
+
+    def _record_inferences(self) -> list[tuple[BaseUserTurnStopStrategy | None, object]]:
+        inferences: list[tuple[BaseUserTurnStopStrategy | None, object]] = []
+
+        @self.controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
+            inferences.append((strategy, speculation))
+
+        return inferences
+
+    async def test_the_inference_waits_for_every_strategy_that_listens_to_the_user(self):
+        first, second = DecidingStopStrategy(), DecidingStopStrategy()
+        on_inference = DecidingStopStrategy(on_inference=True)
+        await self._start([first, second, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await first.decide()
+        self.assertEqual(inferences, [])
+
+        await second.decide()
+        self.assertEqual([s for s, _ in inferences], [second])
+        self.assertEqual(self.stops, [])
+
+        await on_inference.decide()
+        self.assertEqual([s for s, _ in self.stops], [on_inference])
+
+    async def test_a_list_that_only_waits_for_the_inference_warns(self):
+        """With no stop strategy listening to the user, only the stop timeout runs the inference."""
+        messages = []
+        sink = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+        try:
+            await self._start([DecidingStopStrategy(on_inference=True)])
+            await self.controller.update_strategies(
+                UserTurnStrategies(
+                    stop=[DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)]
+                )
+            )
+        finally:
+            logger.remove(sink)
+
+        warned = [m for m in messages if "waits for the turn's inference" in m]
+        self.assertEqual(len(warned), 1)
+
+    async def test_the_inference_runs_once_per_round_of_decisions(self):
+        first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([first, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await first.decide()
+        await first.decide()
+        self.assertEqual(len(inferences), 1)
+
+        await self._speak()
+        await first.decide()
+        self.assertEqual(len(inferences), 2)
+
+    async def test_a_speculation_is_the_turns_answer(self):
+        eager, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await eager.speculate()
+        await eager.confirm()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False])
+
+    async def test_a_withdrawn_speculation_lets_the_inference_run(self):
+        eager, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([eager, on_inference])
+        inferences = self._record_inferences()
+        await self._speak()
+
+        await eager.speculate()
+        await eager.cancel_user_turn_speculation()
+        await eager.decide()
+
+        self.assertEqual([speculation is None for _, speculation in inferences], [False, True])
+
+    def _record_resumes(self) -> list[UserTurnResumedParams]:
+        resumes: list[UserTurnResumedParams] = []
+
+        @self.controller.event_handler("on_user_turn_resumed")
+        async def on_user_turn_resumed(controller, params):
+            resumes.append(params)
+
+        return resumes
+
+    async def test_speaking_again_in_an_open_turn_resumes_it(self):
+        await self._start([DecidingStopStrategy(), DecidingStopStrategy()])
+        resumes = self._record_resumes()
+        await self._speak()
+
+        await self._speak()
+
+        self.assertEqual(
+            resumes,
+            [UserTurnResumedParams(enable_interruptions=True, inference_triggered=False)],
+        )
+
+    async def test_a_resume_after_the_inference_was_triggered_says_so(self):
+        first, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([first, on_inference])
+        resumes = self._record_resumes()
+        await self._speak()
+        await first.decide()
+
+        await self._speak()
+
+        self.assertEqual([p.inference_triggered for p in resumes], [True])
+
+    async def test_one_speech_reported_twice_resumes_the_turn_once(self):
+        await self._start([DecidingStopStrategy(), DecidingStopStrategy()])
+        resumes = self._record_resumes()
+        await self._speak()
+
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+
+        self.assertEqual(len(resumes), 1)
+
+    async def test_the_deprecated_finalized_trigger_still_decides(self):
+        strategy = DecidingStopStrategy()
+        await self._start([strategy])
+        await self._speak()
+
+        with self.assertWarns(DeprecationWarning):
+            await strategy.trigger_user_turn_finalized()
+
+        self.assertEqual([s for s, _ in self.stops], [strategy])
+
+    async def test_the_turn_end_combines_the_decisions(self):
+        """A turn end announced elsewhere, or confirming a speculation, applies to the whole turn."""
+        announced, confirming = DecidingStopStrategy(), DecidingStopStrategy()
+        await self._start([announced, confirming])
+        await self._speak()
+
+        await confirming.speculate()
+        await announced.report_user_turn_stopped(enable_user_speaking_frames=False)
+        await confirming.confirm()
+
+        _, params = self.stops[0]
+        self.assertFalse(params.enable_user_speaking_frames)
+        self.assertTrue(params.confirms_speculation)
+
+    async def test_confirming_a_withdrawn_speculation_runs_the_turns_answer(self):
+        """A confirmation that crosses its speculation's withdrawal confirms nothing."""
+        confirming, on_inference = DecidingStopStrategy(), DecidingStopStrategy(on_inference=True)
+        await self._start([confirming, on_inference])
+        inferences = []
+
+        @self.controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy, speculation):
+            inferences.append(speculation)
+
+        await self._speak()
+        await confirming.speculate()
+        await self.controller.process_frame(UserTurnResponseCancelFrame())
+        await confirming.confirm()
+        self.assertEqual([s is None for s in inferences], [False, True])
+
+        await on_inference.decide()
+        _, params = self.stops[0]
+        self.assertFalse(params.confirms_speculation)
+
+
+class DecidingStartStrategy(BaseUserTurnStartStrategy):
+    """A start strategy that decides the user started when a test says so."""
+
+    def __init__(self, result: ProcessFrameResult = ProcessFrameResult.CONTINUE, **kwargs):
+        super().__init__(**kwargs)
+        self.frames: list[Frame] = []
+        self._result = result
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        self.frames.append(frame)
+        return self._result
+
+    async def decide(self, **kwargs):
+        await self.report_user_turn_started(**kwargs)
+
+
+class TestStartModeAll(unittest.IsolatedAsyncioTestCase):
+    """With StrategyMode.ALL the turn starts once every start strategy has decided."""
+
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+        self.starts: list[tuple[BaseUserTurnStartStrategy | None, UserTurnStartedParams]] = []
+        self.stop = DecidingStopStrategy()
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _start(
+        self,
+        start: list[BaseUserTurnStartStrategy],
+        *,
+        start_mode: StrategyMode = StrategyMode.ALL,
+    ):
+        self.controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(start=start, stop=[self.stop]),
+            user_turn_strategies_params=UserTurnStrategiesParams(start_mode=start_mode),
+        )
+        await self.controller.setup(frame_processor_setup(self.task_manager))
+
+        @self.controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            self.starts.append((strategy, params))
+
+    async def test_the_turn_starts_once_every_strategy_decides(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last])
+
+        await first.decide()
+        self.assertEqual(self.starts, [])
+
+        await last.decide()
+        self.assertEqual([s for s, _ in self.starts], [last])
+
+    async def test_the_first_decision_starts_the_turn_in_first_mode(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last], start_mode=StrategyMode.FIRST)
+
+        await first.decide()
+
+        self.assertEqual([s for s, _ in self.starts], [first])
+
+    async def test_every_strategy_sees_every_frame(self):
+        blocking, other = DecidingStartStrategy(ProcessFrameResult.STOP), DecidingStartStrategy()
+        await self._start([blocking, other])
+
+        await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+        self.assertEqual(len(other.frames), 1)
+
+    async def test_the_turn_start_combines_the_decisions(self):
+        quiet, other = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([quiet, other])
+
+        await quiet.decide(enable_interruptions=False)
+        await other.decide()
+
+        _, params = self.starts[0]
+        self.assertFalse(params.enable_interruptions)
+
+    async def test_a_first_list_still_honors_a_stop_with_a_warning(self):
+        blocking, other = DecidingStartStrategy(ProcessFrameResult.STOP), DecidingStartStrategy()
+        await self._start([blocking, other], start_mode=StrategyMode.FIRST)
+        deprecation._warned_sites.clear()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+        self.assertEqual(other.frames, [])
+        self.assertEqual(
+            [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)],
+            [
+                "`ProcessFrameResult` is deprecated since 1.15.0 and will be removed in "
+                "2.0.0. Use `StrategyMode` instead."
+            ],
+        )
+
+    async def test_a_wake_phrase_alone_in_a_first_list_does_not_warn(self):
+        await self._start(
+            [WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])],
+            start_mode=StrategyMode.FIRST,
+        )
+        deprecation._warned_sites.clear()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+    async def test_a_wake_phrase_in_an_all_list_does_not_warn(self):
+        await self._start(
+            [VADUserTurnStartStrategy(), WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])]
+        )
+        deprecation._warned_sites.clear()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await self.controller.process_frame(VADUserStartedSpeakingFrame())
+
+    async def test_each_turn_needs_its_own_decisions(self):
+        first, last = DecidingStartStrategy(), DecidingStartStrategy()
+        await self._start([first, last])
+        await first.decide()
+        await last.decide()
+        await self.stop.decide()
+
+        await last.decide()
+
+        self.assertEqual(len(self.starts), 1)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from pipecat.expressive.perception import PerceptionSignal
+
 
 class ProcessFrameResult(Enum):
     """Result of processing a frame in a user turn strategy.
@@ -19,6 +21,12 @@ class ProcessFrameResult(Enum):
     Parameters:
         CONTINUE: Continue to the next strategy in the loop.
         STOP: Stop evaluating further strategies for this frame.
+
+    .. deprecated:: 1.15.0
+        Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead.
+        Every strategy sees every frame, and a list whose strategies all have
+        to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``.
+        Will be removed in 2.0.0.
     """
 
     CONTINUE = "continue"
@@ -35,6 +43,24 @@ class UserTurnSpeculation:
 
     Parameters:
         text: The user turn text the inference was run against.
+        perception: How the user said it, as read at the eager end of turn,
+            or None. Part of expressive conversation (alpha).
     """
 
     text: str
+    perception: list[PerceptionSignal] | None = None
+
+
+@dataclass
+class UserTurnResumedParams:
+    """Parameters emitted when the user speaks again in an open turn.
+
+    Parameters:
+        enable_interruptions: Whether the turn interrupts the bot, as decided
+            when it started.
+        inference_triggered: Whether the turn's inference was already
+            triggered. The new speech voids the answer it started.
+    """
+
+    enable_interruptions: bool
+    inference_triggered: bool
