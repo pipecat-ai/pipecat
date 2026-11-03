@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Numbered call-progress milestones for the SIP test harness.
+"""Numbered call-progress milestones for the SIP examples.
 
 :func:`attach_milestones` registers event handlers on a
 :class:`~pipecat.transports.sip.transport.SIPTransport` that log one INFO
@@ -23,7 +23,7 @@ milestones never displaces bot behavior.
 
 Run this module directly to print every milestone against a fake transport::
 
-    uv run python examples/sip/milestones.py
+    uv run python examples/sip/util/milestones.py
 """
 
 import asyncio

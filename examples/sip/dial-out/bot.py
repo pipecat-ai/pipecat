@@ -4,35 +4,27 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Voice agent for the SIP test harness — answers calls and places them.
+"""Voice agent that places an outbound SIP call.
 
-One bot covers both directions. With no dial-out destination it registers
-and answers whatever calls in; give it a destination and it places the call
-instead, leaving inbound INVITEs ringing.
+The bot dials one destination as soon as its transport is ready — a softphone
+on the same Daily domain, or a real phone through a Twilio trunk (see
+``../util/provision.py``) — and runs the conversation when the far end answers.
+Inbound INVITEs are left ringing.
 
-Copy ``env.example`` to ``.env`` next to this file, then dial in::
-
-    uv run python examples/sip/bot.py -t sip -d
-
-Once ``harness.py provision`` has run, the bot registers as that stable
-``pipecat-harness-bot`` account, so the URI ``harness.py status`` prints is the
-one a softphone can dial. With only ``DAILY_API_KEY`` set it falls back to a
-temporary Daily SIP client the runner provisions, prints its dialable URI, and
-deletes when the bot exits.
-
-Dial out either from the environment::
+Copy ``env.example`` to ``.env`` in ``examples/sip``, then dial from the
+environment::
 
     SIP_DIALOUT_URI=sip:pipecat-harness-dev@example.sip.daily.co \\
-        uv run python examples/sip/bot.py -t sip -d
+        uv run python examples/sip/dial-out/bot.py -t sip -d
 
-or from a runner body file, which ``harness.py call dial-out`` writes::
+or from a runner body file, which ``provision.py call dial-out`` writes::
 
-    uv run python examples/sip/bot.py -t sip -d \\
-        --runner-body examples/sip/dialout-body.json
+    uv run python examples/sip/dial-out/bot.py -t sip -d \\
+        --runner-body examples/sip/dial-out/dialout-body.json
 
 Progress through a call shows as numbered INFO lines, ``[1/6]`` to
-``[6/6]`` — see ``milestones.py`` for what each one means and ``README.md``
-for the topology they trace.
+``[6/6]`` — see ``../util/milestones.py`` for what each one means and
+``../README.md`` for the topology they trace.
 """
 
 import json
@@ -62,14 +54,15 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.sip.transport import SIPParams
 from pipecat.workers.runner import WorkerRunner
 
-sys.path.insert(0, str(Path(__file__).parent))
+SIP_EXAMPLES_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(SIP_EXAMPLES_DIR / "util"))
 
 from milestones import attach_milestones  # noqa: E402
 
-load_dotenv(Path(__file__).parent / ".env", override=True)
+load_dotenv(SIP_EXAMPLES_DIR / ".env", override=True)
 
-STATE_PATH = Path(__file__).parent / ".state.json"
-HARNESS_BOT_USER = "pipecat-harness-bot"
+STATE_PATH = SIP_EXAMPLES_DIR / ".state.json"
+PROVISIONED_BOT_USER = "pipecat-harness-bot"
 
 SYSTEM_INSTRUCTION = (
     "You are a helpful assistant on a phone call. Your responses will be spoken "
@@ -85,8 +78,8 @@ def get_dialout_settings(runner_args: RunnerArguments) -> dict | None:
         runner_args: Arguments the runner started this session with.
 
     Returns:
-        Dial-out settings to pass to ``start_dialout``, or ``None`` when the
-        bot should answer calls instead of placing one.
+        Dial-out settings to pass to ``start_dialout``, or ``None`` when
+        neither source names a destination.
     """
     body = runner_args.body or {}
     if isinstance(body, dict) and body.get("dialout_settings"):
@@ -95,14 +88,14 @@ def get_dialout_settings(runner_args: RunnerArguments) -> dict | None:
     return {"sipUri": uri} if uri else None
 
 
-def use_harness_account() -> None:
-    """Register as the provisioned harness client by exporting its credentials.
+def use_provisioned_account() -> None:
+    """Dial as the provisioned bot client by exporting its credentials.
 
-    Fills ``SIP_USER``/``SIP_PASS``/``SIP_DOMAIN`` from ``.state.json`` so the
-    bot answers at the URI ``harness.py status`` prints. Runs at import, since
-    the runner resolves the account before it calls :func:`bot`. An account the
-    environment already names stays as it is, and a ``sip_client`` block in a
-    request body still wins — the runner reads that first.
+    Fills ``SIP_USER``/``SIP_PASS``/``SIP_DOMAIN`` from ``.state.json``, the
+    account ``provision.py`` created. Runs at import, since the runner
+    resolves the account before it calls :func:`bot`. An account the
+    environment already names stays as it is — ``provision.py call dial-out``
+    uses that to dial through a Twilio trunk's credential list instead.
     """
     if os.getenv("SIP_USER") or not STATE_PATH.exists():
         return
@@ -112,7 +105,7 @@ def use_harness_account() -> None:
         logger.warning(f"Ignoring {STATE_PATH.name}: not valid JSON ({e})")
         return
 
-    client = state.get("daily", {}).get("sip_clients", {}).get(HARNESS_BOT_USER, {})
+    client = state.get("daily", {}).get("sip_clients", {}).get(PROVISIONED_BOT_USER, {})
     if not (client.get("domain") and client.get("password")):
         return
 
@@ -122,10 +115,10 @@ def use_harness_account() -> None:
     # Daily's registrar takes TLS, the transport the runner picks for a client
     # it provisions itself.
     os.environ.setdefault("SIP_TRANSPORT", "tls")
-    logger.info(f"Using provisioned harness account: sip:{client['username']}@{client['domain']}")
+    logger.info(f"Using provisioned account: sip:{client['username']}@{client['domain']}")
 
 
-use_harness_account()
+use_provisioned_account()
 
 
 class HeardLogger(FrameProcessor):
@@ -149,18 +142,15 @@ class HeardLogger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def run_bot(
-    transport: BaseTransport, runner_args: RunnerArguments, dialout_settings: dict | None
-):
-    """Run the conversation pipeline over a SIP call.
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, dialout_settings: dict):
+    """Run the conversation pipeline over an outbound SIP call.
 
     Args:
         transport: Transport the runner built.
         runner_args: Arguments the runner started this session with.
-        dialout_settings: Destination to dial, or ``None`` to answer calls.
+        dialout_settings: Destination to dial.
     """
-    direction = "dialout" if dialout_settings else "dialin"
-    logger.info(f"Starting bot ({direction})")
+    logger.info("Starting bot (dial-out)")
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
@@ -209,24 +199,22 @@ async def run_bot(
 
     await runner.add_workers(worker)
 
-    attach_milestones(transport, direction=direction)
+    attach_milestones(transport, direction="dialout")
 
-    if dialout_settings:
-
-        @transport.event_handler("on_connected")
-        async def on_connected(transport, data=None):
-            logger.info(f"Dialing {dialout_settings}")
-            _, error = await transport.start_dialout(dialout_settings)
-            if error:
-                logger.error(f"Dial-out failed: {error}")
-                if "Address family" in str(error):
-                    logger.info(
-                        "Hint: medianat=stun cannot run on a registration-less account. "
-                        "Rerun with SIP_STUN_SERVER=off (harness.py call dial-out prints "
-                        "it) and turn on the trunk's Symmetric RTP — see README.md "
-                        "troubleshooting."
-                    )
-                await runner.cancel()
+    @transport.event_handler("on_connected")
+    async def on_connected(transport, data=None):
+        logger.info(f"Dialing {dialout_settings}")
+        _, error = await transport.start_dialout(dialout_settings)
+        if error:
+            logger.error(f"Dial-out failed: {error}")
+            if "Address family" in str(error):
+                logger.info(
+                    "Hint: medianat=stun cannot run on a registration-less account. "
+                    "Rerun with SIP_STUN_SERVER=off (provision.py call dial-out "
+                    "prints it) and turn on the trunk's Symmetric RTP — see "
+                    "README.md troubleshooting."
+                )
+            await runner.cancel()
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -244,7 +232,6 @@ async def run_bot(
     async def on_call_stopped(transport, data=None):
         await runner.cancel()
 
-    transport.add_event_handler("on_dialin_stopped", on_call_stopped)
     transport.add_event_handler("on_dialout_stopped", on_call_stopped)
     transport.add_event_handler("on_error", on_call_stopped)
 
@@ -258,14 +245,20 @@ async def bot(runner_args: RunnerArguments):
         runner_args: Arguments the runner started this session with.
     """
     dialout_settings = get_dialout_settings(runner_args)
+    if not dialout_settings:
+        logger.error(
+            "No dial-out destination. Set SIP_DIALOUT_URI, or pass "
+            "--runner-body examples/sip/dial-out/dialout-body.json "
+            "(provision.py call dial-out writes it)."
+        )
+        return
 
-    # Dial-out leaves inbound INVITEs ringing; dial-in answers them.
     transport_params = {
         "sip": lambda: SIPParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             audio_out_sample_rate=8000,
-            auto_answer=not dialout_settings,
+            auto_answer=False,
         ),
     }
 
