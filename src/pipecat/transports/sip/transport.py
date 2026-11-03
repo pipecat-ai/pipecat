@@ -951,6 +951,8 @@ class SIPTransport(BaseTransport):
 
     async def _on_call_closed(self, connection, data: dict):
         await self._call_event_handler("on_call_state_updated", "closed")
+        # Next call on this transport gets its own on_first_participant_joined.
+        self._other_participant_has_joined = False
         stats = connection.final_stats
         if stats is not None:
             await self._call_event_handler("on_call_quality_stats", stats)
