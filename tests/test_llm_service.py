@@ -28,19 +28,28 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
 )
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import (
+    LLM_SILENT_MARK,
     FunctionCallParams,
     FunctionCallRunnerItem,
     LLMService,
 )
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion_mixin import (
+    USER_TURN_COMPLETE_MARKER,
+    UserTurnCompletionConfig,
+)
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
@@ -578,6 +587,96 @@ class TestBackgroundWorkFrames(unittest.IsolatedAsyncioTestCase):
             [type(frame) for frame in frames],
             [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
         )
+
+
+class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
+    """A reply opening with the silent mark is dropped at the source and reported."""
+
+    def _recording(self, service: MockLLMService):
+        """Patch the push below the service's own, collecting what goes out."""
+        pushed: list = []
+
+        async def record(_self, frame, direction=FrameDirection.DOWNSTREAM):
+            pushed.append(frame)
+
+        return pushed, patch.object(AIService, "push_frame", new=record)
+
+    async def _reply(self, service: MockLLMService, *texts: str) -> list:
+        pushed, recording = self._recording(service)
+        with recording:
+            await service.push_frame(LLMFullResponseStartFrame())
+            for text in texts:
+                await service.push_frame(LLMTextFrame(text))
+            await service.push_frame(LLMFullResponseEndFrame())
+        return pushed
+
+    @staticmethod
+    def _texts(pushed: list) -> list[str]:
+        return [f.text for f in pushed if isinstance(f, LLMTextFrame)]
+
+    async def test_a_reply_opening_with_the_mark_is_dropped_whole_and_reported(self):
+        pushed = await self._reply(MockLLMService(), " ", LLM_SILENT_MARK, " and more")
+
+        self.assertEqual(
+            [type(f) for f in pushed],
+            [LLMFullResponseStartFrame, LLMMarkerResponseFrame, LLMFullResponseEndFrame],
+        )
+        report = pushed[1]
+        self.assertEqual(report.marker, LLM_SILENT_MARK)
+        self.assertEqual(report.kind, "silent")
+        self.assertEqual(report.raw, f" {LLM_SILENT_MARK} and more")
+        self.assertEqual(report.markers, [LLM_SILENT_MARK])
+
+    async def test_any_other_reply_goes_out_as_written(self):
+        pushed = await self._reply(MockLLMService(), "Still ", "on it.")
+
+        self.assertEqual(self._texts(pushed), ["Still ", "on it."])
+        self.assertFalse(any(isinstance(f, LLMMarkerResponseFrame) for f in pushed))
+
+    async def test_held_whitespace_goes_out_with_the_text_that_decided_it(self):
+        pushed = await self._reply(MockLLMService(), " ", "\n", "Nearly there.")
+
+        self.assertEqual(self._texts(pushed), [" \nNearly there."])
+
+    async def test_a_turn_marker_before_the_mark_is_read_as_silent_too(self):
+        service = MockLLMService()
+        service._filter_incomplete_user_turns = True
+        pushed, recording = self._recording(service)
+        with recording:
+            await service.push_frame(LLMFullResponseStartFrame())
+            await service._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} {LLM_SILENT_MARK}")
+            await service.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(self._texts(pushed), [])
+        kinds = [f.kind for f in pushed if isinstance(f, LLMMarkerResponseFrame)]
+        self.assertIn("silent", kinds)
+
+    async def test_the_mark_is_ordinary_text_when_no_mark_is_read(self):
+        pushed = await self._reply(MockLLMService(read_silent_mark=None), LLM_SILENT_MARK)
+
+        self.assertEqual(self._texts(pushed), [LLM_SILENT_MARK])
+        self.assertFalse(any(isinstance(f, LLMMarkerResponseFrame) for f in pushed))
+
+    async def test_a_silent_reply_does_not_shadow_the_next(self):
+        service = MockLLMService()
+        await self._reply(service, LLM_SILENT_MARK)
+
+        pushed = await self._reply(service, "Hello.")
+
+        self.assertEqual(self._texts(pushed), ["Hello."])
+
+    async def test_an_interruption_forgets_a_held_opening(self):
+        service = MockLLMService()
+        pushed, recording = self._recording(service)
+        with recording:
+            await service.push_frame(LLMFullResponseStartFrame())
+            await service.push_frame(LLMTextFrame(" "))
+            await service.push_frame(InterruptionFrame())
+            await service.push_frame(LLMFullResponseStartFrame())
+            await service.push_frame(LLMTextFrame("Hello."))
+            await service.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(self._texts(pushed), ["Hello."])
 
 
 class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):

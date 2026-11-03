@@ -583,6 +583,19 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
             self.assertIn(message, str(ctx.exception))
 
+    def test_llm_marker_silent_kind_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: silent_marker
+                turns:
+                  - user: "x"
+                    expect: [{event: llm_marker, marker: silent}]
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].marker, "silent")
+
     def test_llm_marker_unknown_kind_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             EvalScriptScenario.load(

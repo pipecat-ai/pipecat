@@ -30,19 +30,15 @@
 - user: "No need to keep me posted, just tell me when you're done."
   send_after: { delay_ms: 8000 }
   expect:
-    # On the LLM's text, like the silent decision below, so the one is not read
-    # into the other.
-    - event: llm_response
+    - event: response
       within_ms: 25000
       eval: "agrees to report when the work is done, briefly, without reporting a result; speaks as itself, without mentioning a backend"
       allow_continue: false
       text_excludes: "backend"
     # The bot's next decision, once the wait has run again: the silent mark,
-    # dropped unspoken, at the end of the LLM's text. The LLM's text carries
-    # the mark, so this is what the harness sees of silence.
-    - event: llm_response
-      text_contains: "∅"
-      text_matches: "(^\\s*|[.!?]\\s*)∅\\s*$"
+    # which the LLM service reports as it drops the reply unspoken.
+    - event: llm_marker
+      marker: silent
       within_ms: 25000
 
 - expect:

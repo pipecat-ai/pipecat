@@ -110,6 +110,24 @@ Three earlier wordings, measured the same way, shaped the prompt. With the first
 
 The same runs with the turn-completion instructions appended to the system instruction, as `filter_incomplete_user_turns` appends them: every remark opens with `●` on all three frontends, every declined reply is silent (30 of 30), Gemini's as `● ∅` in 10 of 10, gpt-4.1's as `● ∅` in 2 and `∅` in 8, Claude's as `∅` alone. A bare `∅` reaches the processor through the turn-completion filter's fallback, which passes a response that ended without a marker, so the reply is dropped either way. Claude's filter judged the user's decline itself incomplete (`○`) in 5 of 5, the turn-completion feature's reading of a short utterance with no audio behind it, not the prompt's doing.
 
+The prompt was reworded on 2026-11-03 (the wording now in `WAIT_REASSURANCE_PROMPT`: a shorter message that names the user's preferences as the thing to weigh, "answer with exactly ∅ to respond with silence", and "make no offers or promises, not even to keep the user posted"), and replayed the same way in nine contexts: the seven above, plus the user's decline sent before any of the remark was spoken, and the decline after the backend's reasoning notes (several hundred words of `Backend (thinking):`) sit between the remark and it. Five runs each.
+
+| context                                  | expected                                      | anthropic-frontend | google-frontend | openai-responses-frontend |
+| ---------------------------------------- | --------------------------------------------- | ------------------ | --------------- | ------------------------- |
+| as is                                    | a brief remark, no promise                    | 5/5                | 5/5             | 5/5                       |
+| declined up front                        | silent                                        | 5/5                | 5/5             | 5/5                       |
+| declined after one                       | silent                                        | 5/5                | 5/5             | 5/5                       |
+| detail asked for                         | a remark naming the step                      | 5/5                | 5/5             | 5/5                       |
+| second remark, finding in the notes      | a remark naming the step, not the finding     | 0/5                | 4/5             | 5/5                       |
+| the user declines after a remark         | answered                                      | 5/5                | 5/5             | 5/5                       |
+| the decline before the remark was spoken | answered                                      | 0/5                | 5/5             | 5/5                       |
+| the decline after the reasoning notes    | answered                                      | 5/5                | 5/5             | 5/5                       |
+| the user asks an aside after a remark    | answered                                      | 5/5                | 5/5             | 5/5                       |
+
+Claude's second remark passes the finding on in 3 of 5 ("The fix is in and the tests are running now") and is silent in 2; Gemini's names the patch once ("applied a patch to implement exponential backoff"). Claude closes four plain remarks with "won't be long". gpt-4.1 promises to keep the user posted in 3 of 5 detail remarks, where the user asked to be kept posted. The wording "not even to keep the user posted" is what removed gpt-4.1's promises from the plain remark: without it (the same prompt otherwise), 2 of 5 and 3 of 10 ended with one; a version that restated the earlier prompt's content clause instead made Claude silent in 5 of 5 plain contexts.
+
+With the turn-completion instructions appended, as `filter_incomplete_user_turns` appends them: gpt-4.1 and Gemini answer every declined context with `● ∅` or `∅` (20 of 20); Claude answers the up-front decline with a bare `○` in 4 of 5, the turn-completion filter's "the user needs more time" marker, which the filter drops unspoken but also reports upstream as an incomplete turn. The filtering bot in the manifest runs gpt-4.1.
+
 ## Wait reassurance evals
 
 The five `wait_reassurance*` text scenarios on the three cascade bots, the predictive-delegation bot and the filtering bot (`openai-responses-frontend-filter-incomplete-turns.py`), five runs each (2026-11-02, the prompt as recorded above), the judge the release suite's text judge with `allow_continue: false` on the remark expectations:

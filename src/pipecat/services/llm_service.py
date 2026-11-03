@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
     LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -302,6 +303,16 @@ class FunctionCallRunnerItem:
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
 
 
+#: What a reply opens with, and nothing else, when the model decides to say
+#: nothing. A prompt that offers the model silence, such as
+#: :class:`~pipecat.processors.wait_reassurance.WaitReassurance`'s, tells it to
+#: answer with exactly this mark, and the LLM service reads the mark
+#: (``read_silent_mark``): the reply is dropped unspoken, so nothing after the
+#: service sees it, and the decision is reported as an
+#: :class:`~pipecat.frames.frames.LLMMarkerResponseFrame` of kind ``"silent"``.
+LLM_SILENT_MARK = "∅"
+
+
 class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
     """Base class for all LLM services.
 
@@ -373,6 +384,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         enable_async_tool_cancellation: bool = False,
         settings: LLMSettings | None = None,
         file_resolver: FileResolver | None = None,
+        read_silent_mark: str | None = LLM_SILENT_MARK,
         **kwargs,
     ):
         """Initialize the LLM service.
@@ -409,6 +421,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 switched between mid-session) so downloads are reused.
                 Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
+            read_silent_mark: The mark a reply opens with when the model decides
+                to say nothing, :data:`LLM_SILENT_MARK` unless given. Such a
+                reply is dropped unspoken and an ``LLMMarkerResponseFrame`` of
+                kind ``"silent"`` is pushed in its place, so nothing after the
+                service, the TTS, the context, an observer, sees the mark. A
+                prompt that offers the model silence names the same mark.
+                ``None`` reads no mark: every reply goes out as written.
             **kwargs: Additional arguments passed to the parent AIService.
 
         Raises:
@@ -433,6 +452,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
         self._file_resolver = file_resolver or FileResolver()
+        self._silent_mark = read_silent_mark or None
+        # The reply being read for the silent mark: its text so far, held until
+        # the first character decides it, and whether the rest is dropped.
+        self._reply_opening = ""
+        self._reply_decided = False
+        self._reply_silent = False
         if enable_async_tool_cancellation:
             warn_deprecated(
                 "`enable_async_tool_cancellation` is deprecated since 1.8.0 and will be "
@@ -1056,6 +1081,27 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if self._output_gate is not None and not self._output_gate.allow_push(frame):
             return
 
+        if self._silent_mark is not None:
+            if isinstance(frame, (LLMFullResponseStartFrame, InterruptionFrame)):
+                self._reply_opening = ""
+                self._reply_decided = False
+                self._reply_silent = False
+            elif isinstance(frame, LLMTextFrame) and direction == FrameDirection.DOWNSTREAM:
+                opened = self._read_reply_opening(frame)
+                if opened is None:
+                    return
+                frame = opened
+            elif isinstance(frame, LLMFullResponseEndFrame) and self._reply_silent:
+                await self.push_frame(
+                    LLMMarkerResponseFrame(
+                        raw=self._reply_opening,
+                        marker=self._silent_mark,
+                        kind="silent",
+                        markers=[self._silent_mark],
+                    ),
+                    direction,
+                )
+
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
@@ -1069,6 +1115,36 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         emitted = self._speculation_gate.process(frame, direction)
         for gated_frame, gated_direction in emitted:
             await super().push_frame(gated_frame, gated_direction)
+
+    def _read_reply_opening(self, frame: LLMTextFrame) -> LLMTextFrame | None:
+        """Hold a reply's opening until its first character shows whether the reply is the silent mark.
+
+        Returns the frame to push, with any held whitespace folded in, or
+        ``None`` while the opening is still held or the reply is being dropped.
+        Runs after the turn-completion filter, so a reply of a turn marker
+        followed by the mark is read as silent too.
+        """
+        assert self._silent_mark is not None
+        if self._reply_silent:
+            self._reply_opening += frame.text
+            return None
+        if self._reply_decided:
+            return frame
+        held = self._reply_opening
+        self._reply_opening += frame.text
+        text = self._reply_opening.lstrip()
+        if not text:
+            return None
+        if text.startswith(self._silent_mark):
+            logger.debug(f"{self}: the model chose to say nothing")
+            self._reply_decided = True
+            self._reply_silent = True
+            return None
+        if self._silent_mark.startswith(text):
+            # The mark so far, with more of it possibly to come.
+            return None
+        self._reply_decided = True
+        return frame if not held else LLMTextFrame(self._reply_opening)
 
     async def _push_llm_text(self, text: str):
         """Push LLM text, using turn completion detection if enabled.

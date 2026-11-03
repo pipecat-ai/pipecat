@@ -445,7 +445,8 @@ class LLMMarkerResponseFrame(DataFrame):
         kind: What the marker meant, in the emitter's own vocabulary, for
             consumers that should not depend on the marker text (which is
             configurable). The turn-completion mixin uses ``"complete"``,
-            ``"short"`` and ``"long"``.
+            ``"short"`` and ``"long"``; an LLM service that dropped a reply
+            opening with its silent mark uses ``"silent"``.
         markers: Every marker the emitter recognizes, so a consumer can find
             them in ``raw`` without knowing the emitter's configuration.
     """

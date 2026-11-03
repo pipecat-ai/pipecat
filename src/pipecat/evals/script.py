@@ -49,8 +49,10 @@ images only to a scenario that expects one::
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
 when the response ends. ``marker:`` says which one: ``complete`` (the turn was
 finished and the bot answers), ``short`` (the user was cut off and the bot
-waits), ``long`` (the user asked for time), or ``incomplete`` (either of the
-last two). A bare ``llm_marker`` asserts only that the bot read a response.
+waits), ``long`` (the user asked for time), ``incomplete`` (either of the
+last two), or ``silent`` (the LLM answered with its silent mark and the bot
+dropped the reply unspoken). A bare ``llm_marker`` asserts only that the bot
+read a response.
 Markers never reach clients by default; a scenario that asserts on one asks the
 bot to report them::
 
@@ -370,8 +372,9 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 # What a ``marker:`` may name on an ``llm_marker`` expectation. The first three
 # are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
-# accepts ``short`` or ``long``.
-MARKER_KINDS = ("complete", "short", "long", "incomplete")
+# accepts ``short`` or ``long``; ``silent`` is the LLM service's kind for a
+# reply it dropped as its silent mark.
+MARKER_KINDS = ("complete", "short", "long", "incomplete", "silent")
 
 # Where an expectation checks for its event from: where the expectation above
 # it was met, or the beginning of the turn.

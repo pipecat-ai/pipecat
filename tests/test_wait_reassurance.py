@@ -12,17 +12,15 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
 )
-from pipecat.processors.wait_reassurance import (
-    WAIT_REASSURANCE_SILENT_MARK,
-    WaitReassurance,
-)
+from pipecat.processors.wait_reassurance import WaitReassurance
+from pipecat.services.llm_service import LLM_SILENT_MARK
 from pipecat.tests.utils import SleepFrame, run_test
 
 INTERVAL = 0.2
@@ -31,10 +29,6 @@ MARGIN = 0.15
 
 def _prompts(frames) -> list[str]:
     return [f.messages[0]["content"] for f in frames if isinstance(f, LLMMessagesAppendFrame)]
-
-
-def _texts(frames) -> list[str]:
-    return [f.text for f in frames if isinstance(f, LLMTextFrame)]
 
 
 def _waiting() -> list[Frame]:
@@ -71,7 +65,7 @@ async def test_the_model_is_asked_once_the_wait_has_gone_quiet():
     down = await _run([*_waiting(), SleepFrame(INTERVAL + MARGIN)])
 
     (prompt,) = _prompts(down)
-    assert WAIT_REASSURANCE_SILENT_MARK in prompt
+    assert LLM_SILENT_MARK in prompt
     assert "seconds" in prompt
     (append,) = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
     assert append.run_llm is True
@@ -124,33 +118,19 @@ async def test_the_prompt_and_mark_are_the_apps():
 
 
 # ---------------------------------------------------------------------------
-# What happens to the reply
+# After the decision
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_a_reply_opening_with_the_mark_is_dropped_whole():
-    down = await _run(_response(" ", WAIT_REASSURANCE_SILENT_MARK, " and more"))
-
-    assert _texts(down) == []
-    assert [type(f) for f in down if not isinstance(f, LLMMessagesAppendFrame)][:2] == [
-        LLMFullResponseStartFrame,
-        LLMFullResponseEndFrame,
+def _silent_decision() -> list[Frame]:
+    """A reply the LLM service dropped as the silent mark, with its report."""
+    return [
+        LLMFullResponseStartFrame(),
+        LLMMarkerResponseFrame(
+            raw=LLM_SILENT_MARK, marker=LLM_SILENT_MARK, kind="silent", markers=[LLM_SILENT_MARK]
+        ),
+        LLMFullResponseEndFrame(),
     ]
-
-
-@pytest.mark.asyncio
-async def test_any_other_reply_passes_through_unchanged():
-    down = await _run(_response("Still ", "on it."))
-
-    assert _texts(down) == ["Still ", "on it."]
-
-
-@pytest.mark.asyncio
-async def test_held_whitespace_goes_out_with_the_text_that_decided_it():
-    down = await _run(_response(" ", "\n", "Nearly there."))
-
-    assert _texts(down) == [" \nNearly there."]
 
 
 @pytest.mark.asyncio
@@ -159,12 +139,13 @@ async def test_a_silent_decision_starts_the_interval_over():
         [
             *_waiting(),
             SleepFrame(INTERVAL + MARGIN),
-            *_response(WAIT_REASSURANCE_SILENT_MARK),
+            *_silent_decision(),
             SleepFrame(INTERVAL + MARGIN),
         ]
     )
 
     assert len(_prompts(down)) == 2
+    assert any(isinstance(f, LLMMarkerResponseFrame) for f in down)
 
 
 @pytest.mark.asyncio
@@ -182,17 +163,3 @@ async def test_a_spoken_remark_starts_the_interval_over_through_the_bots_speech(
     )
 
     assert len(_prompts(down)) == 2
-
-
-@pytest.mark.asyncio
-async def test_an_interruption_forgets_a_held_opening():
-    down = await _run(
-        [
-            LLMFullResponseStartFrame(),
-            LLMTextFrame(" "),
-            InterruptionFrame(),
-            *_response("Hello."),
-        ]
-    )
-
-    assert _texts(down) == ["Hello."]

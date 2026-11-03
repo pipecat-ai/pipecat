@@ -51,6 +51,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -1987,6 +1988,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_text(frame)
         elif isinstance(frame, LLMMarkerFrame):
             await self._handle_marker_frame(frame)
+        elif isinstance(frame, LLMMarkerResponseFrame):
+            await self._handle_marker_response_frame(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMThoughtStartFrame):
             await self._handle_thought_start(frame)
         elif isinstance(frame, LLMThoughtTextFrame):
@@ -2620,6 +2624,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._aggregation.append(
             TextPartForConcatenation(frame.marker, includes_inter_part_spaces=False)
         )
+
+    async def _handle_marker_response_frame(self, frame: LLMMarkerResponseFrame):
+        # A reply the LLM service dropped as silent records nothing. What the
+        # aggregation holds by now is a turn-completion marker the service
+        # pushed before it read the silent mark after it.
+        if frame.kind == "silent":
+            self._aggregation = []
 
     async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
         await self._reset_thought_aggregation()
