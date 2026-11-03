@@ -604,6 +604,11 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
+            # An interrupted context's alignment keeps arriving after its clock
+            # was dropped; handling it would start a clock nothing removes.
+            if not self.audio_context_available(received_ctx_id):
+                continue
+
             raw_alignment = _select_alignment(
                 msg,
                 normalized_key="normalizedAlignment",

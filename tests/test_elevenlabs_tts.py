@@ -539,6 +539,7 @@ async def test_wordless_alignment_still_advances_the_clock():
         reported.extend(word_times)
 
     service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
     service._websocket = _MessagesWebSocket(
         [{"contextId": "ctx-1", "alignment": _chunk(text)} for text in ("Hi there", "!", " Bye ")]
     )
@@ -569,6 +570,8 @@ async def test_interleaved_contexts_align_words_independently():
         reported.extend((context_id, word, start) for word, start in word_times)
 
     service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
+    await service.create_audio_context("ctx-2")
     service._websocket = _MessagesWebSocket(
         [
             {"contextId": context_id, "alignment": _chunk(text)}
@@ -593,6 +596,40 @@ async def test_interleaved_contexts_align_words_independently():
     # "world" starts at "wor" in ctx-1's first chunk; "morning" at "mor" in ctx-2's.
     assert starts["world"] == pytest.approx(0.6)
     assert starts["morning"] == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_context_late_alignment_is_ignored():
+    """Alignment the server sends after an interruption must not bring back the
+    context's word clock, which nothing would remove again."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word) for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
+    service._websocket = _MessagesWebSocket([{"contextId": "ctx-1", "alignment": _chunk("Hello ")}])
+    await service._receive_messages()
+    assert "ctx-1" in service._word_clocks
+
+    # The bot is interrupted: the audio context goes away and its clock is dropped.
+    service._websocket = _FakeWebSocket()
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_interrupted("ctx-1")
+
+    service._websocket = _MessagesWebSocket(
+        [
+            {"contextId": "ctx-1", "alignment": _chunk("there wor")},
+            {"contextId": "ctx-1", "alignment": _chunk("ld ")},
+            {"contextId": "ctx-1", "isFinal": True},
+        ]
+    )
+    await service._receive_messages()
+
+    assert "ctx-1" not in service._word_clocks, "late alignment re-created the word clock"
+    assert reported == [("ctx-1", "Hello")]
 
 
 @pytest.mark.parametrize(
