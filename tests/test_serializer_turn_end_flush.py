@@ -70,7 +70,9 @@ class TestTurnEndFlush(unittest.IsolatedAsyncioTestCase):
         for serializer in _serializers():
             with self.subTest(serializer=type(serializer).__name__):
                 await serializer.setup(
-                    frame_processor_setup(audio_in_sample_rate=16000, audio_out_sample_rate=OUT_RATE)
+                    frame_processor_setup(
+                        audio_in_sample_rate=16000, audio_out_sample_rate=OUT_RATE
+                    )
                 )
                 await self._say(serializer, tone(200))
 
@@ -85,7 +87,9 @@ class TestTurnEndFlush(unittest.IsolatedAsyncioTestCase):
         for serializer in _serializers():
             with self.subTest(serializer=type(serializer).__name__):
                 await serializer.setup(
-                    frame_processor_setup(audio_in_sample_rate=16000, audio_out_sample_rate=OUT_RATE)
+                    frame_processor_setup(
+                        audio_in_sample_rate=16000, audio_out_sample_rate=OUT_RATE
+                    )
                 )
                 self.assertIsNone(await serializer.serialize(TTSStoppedFrame()))
 
