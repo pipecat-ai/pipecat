@@ -24,11 +24,11 @@ from openai.types.responses import (
     ResponseUsage,
 )
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.adapters.services.open_ai_responses_adapter import (
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMInvocationParams,
 )
-from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
+from pipecat.adapters.llm.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService

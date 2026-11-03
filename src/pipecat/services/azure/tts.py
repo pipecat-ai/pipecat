@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.azure_adapter import AzureHDExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -188,6 +190,17 @@ class AzureBaseTTSService:
         self._region = region
         self._private_endpoint = private_endpoint
         self._speech_synthesizer = None
+        self._hd_expression_adapter = AzureHDExpressionAdapter()
+
+    def _voice_expression_adapter(self) -> BaseExpressionAdapter | None:
+        """The adapter for the voice: style markers on DragonHD and DragonHD Omni voices.
+
+        DragonHD Flash voices each have styles of their own, so they perform none.
+        """
+        voice = self._settings.voice
+        if isinstance(voice, str) and ":DragonHD" in voice and ":DragonHDFlash" not in voice:
+            return self._hd_expression_adapter
+        return None
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Azure language format.
@@ -419,6 +432,16 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._last_word: str | None = None  # Track last word for punctuation merging
         self._last_timestamp: float | None = None  # Track last timestamp
         self._current_context_id: str | None = None  # Track current context_id for word timestamps
+        # An HD voice's style marker still being reported, across word boundaries.
+        self._style_marker: str | None = None
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the voice: style markers on HD voices, otherwise none.
+
+        Returns:
+            The expression adapter for the current voice.
+        """
+        return self._voice_expression_adapter() or super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -559,11 +582,46 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         if not word:
             return
 
-        # Route to language-specific handler
-        if self._is_cjk_language():
-            self._handle_cjk_word_boundary(word, absolute_seconds)
-        else:
-            self._handle_non_cjk_word_boundary(word, absolute_seconds)
+        words = self._split_style_markers(word) if self._voice_expression_adapter() else [word]
+        for word in words:
+            # Route to language-specific handler
+            if self._is_cjk_language():
+                self._handle_cjk_word_boundary(word, absolute_seconds)
+            else:
+                self._handle_non_cjk_word_boundary(word, absolute_seconds)
+
+    def _split_style_markers(self, word: str) -> list[str]:
+        """Split an HD voice's style and sound markers out of a word boundary's text.
+
+        Azure reports a marker such as ``[slow]`` across boundaries and joined to
+        the words around it, as ``"["`` then ``"slow] A"``. Each marker is
+        reported as a word of its own, ``"[slow]"`` then ``"A"``, so a marker
+        unfinished at the end of one boundary carries over to the next.
+
+        Args:
+            word: The boundary's text.
+
+        Returns:
+            The boundary's words and markers, in order.
+        """
+        pieces = []
+        text = ""
+        for char in word:
+            if char == "[" and self._style_marker is None:
+                if text.strip():
+                    pieces.append(text.strip())
+                text = ""
+                self._style_marker = "["
+            elif self._style_marker is not None:
+                self._style_marker += char
+                if char == "]":
+                    pieces.append(self._style_marker)
+                    self._style_marker = None
+            else:
+                text += char
+        if text.strip():
+            pieces.append(text.strip())
+        return pieces
 
     def _emit_pending_word(self):
         """Emit the currently buffered word if one exists."""
@@ -806,6 +864,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                 self._current_sentence_base_offset = self._cumulative_audio_offset
                 self._current_sentence_duration = 0.0
                 self._current_sentence_max_word_offset = 0.0
+                self._style_marker = None
 
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
@@ -957,6 +1016,14 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
         self._speech_config = None
         self._speech_synthesizer = None
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the voice: style markers on HD voices, otherwise none.
+
+        Returns:
+            The expression adapter for the current voice.
+        """
+        return self._voice_expression_adapter() or super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

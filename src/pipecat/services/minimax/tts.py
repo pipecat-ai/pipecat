@@ -19,6 +19,8 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -319,6 +321,19 @@ class MiniMaxHttpTTSService(TTSService):
         self._audio_channel = 1
         self._audio_sample_rate = 0  # Set in start()
 
+        self._speech_28_expression_adapter = MiniMaxExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: speech-2.8 models perform expression, others none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("speech-2.8"):
+            return self._speech_28_expression_adapter
+        return super().get_expression_adapter()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -374,6 +389,9 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.emotion is not None:
             voice_setting["emotion"] = self._settings.emotion
+        # In expressive conversation, the request's delivery chooses its emotion and
+        # its speed.
+        voice_setting.update(self.expression_settings)
         if self._settings.text_normalization is not None:
             voice_setting["text_normalization"] = self._settings.text_normalization
         if self._settings.latex_read is not None:

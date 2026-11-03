@@ -11,7 +11,6 @@ import json
 import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
 import aiohttp
@@ -19,6 +18,10 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaEmotion,
+    CartesiaExpressionAdapter,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -73,6 +76,14 @@ class GenerationConfig(BaseModel):
     volume: float | None = None
     speed: float | None = None
     emotion: str | None = None
+
+
+def _generation_config(
+    config: GenerationConfig | None, expression: dict[str, Any]
+) -> dict[str, Any] | None:
+    """A request's generation config: the settings', with what its expression asks for."""
+    values = config.model_dump(exclude_none=True) if config else {}
+    return {**values, **expression} or None
 
 
 def language_to_cartesia_language(language: Language) -> str:
@@ -226,83 +237,22 @@ def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
     return " ".join(blocks) or None
 
 
-class CartesiaEmotion(StrEnum):
-    """Predefined Emotions supported by Cartesia."""
-
-    # Primary emotions supported by Cartesia
-    NEUTRAL = "neutral"
-    ANGRY = "angry"
-    EXCITED = "excited"
-    CONTENT = "content"
-    SAD = "sad"
-    SCARED = "scared"
-    # Additional emotions supported by Cartesia
-    HAPPY = "happy"
-    ENTHUSIASTIC = "enthusiastic"
-    ELATED = "elated"
-    EUPHORIC = "euphoric"
-    TRIUMPHANT = "triumphant"
-    AMAZED = "amazed"
-    SURPRISED = "surprised"
-    FLIRTATIOUS = "flirtatious"
-    JOKING_COMEDIC = "joking/comedic"
-    CURIOUS = "curious"
-    PEACEFUL = "peaceful"
-    SERENE = "serene"
-    CALM = "calm"
-    GRATEFUL = "grateful"
-    AFFECTIONATE = "affectionate"
-    TRUST = "trust"
-    SYMPATHETIC = "sympathetic"
-    ANTICIPATION = "anticipation"
-    MYSTERIOUS = "mysterious"
-    MAD = "mad"
-    OUTRAGED = "outraged"
-    FRUSTRATED = "frustrated"
-    AGITATED = "agitated"
-    THREATENED = "threatened"
-    DISGUSTED = "disgusted"
-    CONTEMPT = "contempt"
-    ENVIOUS = "envious"
-    SARCASTIC = "sarcastic"
-    IRONIC = "ironic"
-    DEJECTED = "dejected"
-    MELANCHOLIC = "melancholic"
-    DISAPPOINTED = "disappointed"
-    HURT = "hurt"
-    GUILTY = "guilty"
-    BORED = "bored"
-    TIRED = "tired"
-    REJECTED = "rejected"
-    NOSTALGIC = "nostalgic"
-    WISTFUL = "wistful"
-    APOLOGETIC = "apologetic"
-    HESITANT = "hesitant"
-    INSECURE = "insecure"
-    CONFUSED = "confused"
-    RESIGNED = "resigned"
-    ANXIOUS = "anxious"
-    PANICKED = "panicked"
-    ALARMED = "alarmed"
-    PROUD = "proud"
-    CONFIDENT = "confident"
-    DISTANT = "distant"
-    SKEPTICAL = "skeptical"
-    CONTEMPLATIVE = "contemplative"
-    DETERMINED = "determined"
-
-
 @dataclass
 class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
+        accent: Accent a multilingual voice speaks the language with (e.g. ``british``).
+            The value must be one the voice itself supports, as listed in the ``accents``
+            field of Cartesia's Get Voice response. Unset lets Cartesia pick the closest
+            accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
     """
 
+    accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
@@ -317,6 +267,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
@@ -420,6 +371,7 @@ class CartesiaTTSService(WebsocketTTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -642,9 +594,14 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._settings.language:
             msg["language"] = self._settings.language
 
-        generation_config = assert_given(self._settings.generation_config)
+        if assert_given(self._settings.accent):
+            msg["accent"] = self._settings.accent
+
+        generation_config = _generation_config(
+            assert_given(self._settings.generation_config), self.expression_settings
+        )
         if generation_config:
-            msg["generation_config"] = generation_config.model_dump(exclude_none=True)
+            msg["generation_config"] = generation_config
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
@@ -881,6 +838,7 @@ class CartesiaHttpTTSService(TTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.
@@ -958,6 +916,7 @@ class CartesiaHttpTTSService(TTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -1096,9 +1055,14 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.language:
                 payload["language"] = self._settings.language
 
-            generation_config = assert_given(self._settings.generation_config)
+            if assert_given(self._settings.accent):
+                payload["accent"] = self._settings.accent
+
+            generation_config = _generation_config(
+                assert_given(self._settings.generation_config), self.expression_settings
+            )
             if generation_config:
-                payload["generation_config"] = generation_config.model_dump(exclude_none=True)
+                payload["generation_config"] = generation_config
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id

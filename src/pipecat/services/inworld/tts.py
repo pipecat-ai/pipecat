@@ -15,6 +15,7 @@ Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware spe
 
 import base64
 import json
+import re
 import uuid
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
@@ -34,6 +35,11 @@ USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.inworld_adapter import (
+    InworldExpressionAdapter,
+    InworldFlashExpressionAdapter,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -52,6 +58,9 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
+
+# A pause tag, which Inworld reports as a word of its own.
+_BREAK_TAG = re.compile(r"<break\b[^>]*>", re.IGNORECASE)
 
 
 def language_to_inworld_language(language: Language) -> str:
@@ -101,6 +110,21 @@ def format_inworld_pronunciation(word: str, ipa: str) -> str | None:
     """
     ipa = normalize_ipa(ipa)
     return f"/{ipa}/" if ipa and " " not in ipa else None
+
+
+def _tts_2_expression_adapter(
+    model: Any,
+    tts_2: InworldExpressionAdapter,
+    tts_2_flash: InworldFlashExpressionAdapter,
+) -> BaseExpressionAdapter | None:
+    """The expression adapter for an Inworld TTS-2 model, or None for an older model."""
+    if not isinstance(model, str):
+        return None
+    if model.startswith("inworld-tts-2-flash"):
+        return tts_2_flash
+    if model.startswith("inworld-tts-2"):
+        return tts_2
+    return None
 
 
 @dataclass
@@ -276,6 +300,22 @@ class InworldHttpTTSService(TTSService):
         self._audio_sample_rate = 0  # Set in start()
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
         """Render a pronunciation as IPA between slashes.
@@ -357,7 +397,7 @@ class InworldHttpTTSService(TTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track the end time of the last word in this chunk
             if end_times and len(end_times) > 0:
@@ -784,6 +824,22 @@ class InworldTTSService(WebsocketTTSService):
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
 
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
     @classmethod
     def format_pronunciation(cls, word: str, ipa: str) -> str | None:
         """Render a pronunciation as IPA between slashes.
@@ -838,7 +894,10 @@ class InworldTTSService(WebsocketTTSService):
         flush_id = context_id or self.get_active_audio_context_id()
         if flush_id and self._websocket:
             logger.trace(f"Flushing audio for context {flush_id}")
-            await self._send_flush(flush_id)
+            try:
+                await self._send_flush(flush_id)
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _reset_generation_timing(self):
         """Reset the cumulative time and generation end time for a new generation."""
@@ -879,7 +938,7 @@ class InworldTTSService(WebsocketTTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track cumulative end time for this generation
             if end_times and len(end_times) > 0:
@@ -953,6 +1012,11 @@ class InworldTTSService(WebsocketTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    @property
+    def _receive_loop_running(self) -> bool:
+        """Whether the receive loop is running, and so owns reconnecting."""
+        return self._receive_task is not None and not self._receive_task.done()
+
     async def _connect(self):
         """Connect to the Inworld WebSocket TTS service.
 
@@ -963,7 +1027,7 @@ class InworldTTSService(WebsocketTTSService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        if self._websocket and not self._receive_loop_running:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
         if self._websocket:
@@ -1035,10 +1099,12 @@ class InworldTTSService(WebsocketTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                audio_contexts = self.get_audio_contexts()
-                if audio_contexts:
-                    for ctx_id in audio_contexts:
+                try:
+                    for ctx_id in self.get_audio_contexts():
                         await self._send_close_context(ctx_id)
+                except Exception as e:
+                    # The connection is already gone; it still needs closing.
+                    logger.debug(f"{self}: unable to close contexts before disconnecting: {e}")
                 await self._websocket.close()
                 logger.debug("Disconnected from Inworld WebSocket TTS")
         except Exception as e:
@@ -1168,7 +1234,6 @@ class InworldTTSService(WebsocketTTSService):
         """
         if context_id in self._sent_context_ids:
             return
-        self._sent_context_ids.add(context_id)
 
         audio_config = {
             "audioEncoding": self._audio_encoding,
@@ -1205,7 +1270,8 @@ class InworldTTSService(WebsocketTTSService):
 
         msg = {"create": create_config, "contextId": context_id}
         logger.trace(f"{self}: Sending context create: {create_config}")
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
+        self._sent_context_ids.add(context_id)
 
     async def _send_text(self, context_id: str, text: str):
         """Send text to the Inworld WebSocket TTS service.
@@ -1215,7 +1281,7 @@ class InworldTTSService(WebsocketTTSService):
             text: The text to send.
         """
         msg = {"send_text": {"text": text}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_flush(self, context_id: str):
         """Send a flush to the Inworld WebSocket TTS service.
@@ -1224,7 +1290,7 @@ class InworldTTSService(WebsocketTTSService):
             context_id: The context ID.
         """
         msg = {"flush_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_close_context(self, context_id: str):
         """Send a close context to the Inworld WebSocket TTS service.
@@ -1233,7 +1299,7 @@ class InworldTTSService(WebsocketTTSService):
             context_id: The context ID.
         """
         msg = {"close_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
@@ -1249,7 +1315,14 @@ class InworldTTSService(WebsocketTTSService):
         logger.debug(f"{self}: Generating WebSocket TTS [{text}, for context: {context_id}]")
 
         try:
-            if not self._websocket or self._websocket.state is State.CLOSED:
+            if not self._websocket or self._websocket.state is not State.OPEN:
+                if self._receive_loop_running:
+                    # The receive loop reconnects. A connection opened here
+                    # would race it, leaving this turn's audio on a connection
+                    # nothing reads. Pushed rather than yielded: this turn has
+                    # no audio context to carry the error.
+                    await self.push_error(error_msg=f"{self}: websocket reconnecting, skipping TTS")
+                    return
                 await self._connect()
 
             if self._websocket is None:

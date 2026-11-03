@@ -1,0 +1,1 @@
+- Deprecated `SimliVideoService(is_trinity_avatar=...)`. No replacement: it has no effect, since the bot's audio goes to Simli as it arrives for every face.

@@ -109,6 +109,10 @@ Changing service settings at runtime, organized by service type:
 
 Turn detection, interruption handling, and user input management.
 
+### [`expressive-conversation/`](./expressive-conversation/)
+
+Expressive conversation (alpha): the LLM writes expression tags into its replies, such as emotions and laughter, and the TTS performs them.
+
 ### [`thinking/`](./thinking/)
 
 LLM thinking/reasoning modes.

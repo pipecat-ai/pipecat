@@ -121,3 +121,14 @@ async def test_quality_setting_is_forwarded():
     await _frames(service)
 
     assert service._client.images.generate.call_args.kwargs["quality"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_moderation_setting_is_forwarded():
+    """A configured moderation level reaches the Images API."""
+    b64 = base64.b64encode(_png_bytes("RGB")).decode()
+    service = _service([{"b64_json": b64}], moderation="low")
+
+    await _frames(service)
+
+    assert service._client.images.generate.call_args.kwargs["moderation"] == "low"

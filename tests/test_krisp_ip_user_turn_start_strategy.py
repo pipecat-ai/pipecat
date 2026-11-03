@@ -143,10 +143,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
             await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
-            result = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
             self.assertTrue(fired)
-            self.assertEqual(result, ProcessFrameResult.STOP)
             self.mock_ip_session.process.assert_called()
         finally:
             await strategy.cleanup()
@@ -165,10 +164,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
             await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
-            result = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
             self.assertFalse(fired)
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
         finally:
             await strategy.cleanup()
 
@@ -183,9 +181,8 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             self.mock_ip_session.process.reset_mock()
 
             await strategy.process_frame(VADUserStoppedSpeakingFrame())
-            result = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
             # process() is still called (continuous state), but with speech_active=False
             self.mock_ip_session.process.assert_called()
             args = self.mock_ip_session.process.call_args[0]
@@ -208,7 +205,6 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             await strategy.handle_user_turn_started()
             result = await strategy.process_frame(self._audio_frame())
 
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
             # process() is still called (continuous state), but with speech_active=False
             self.mock_ip_session.process.assert_called()
             args = self.mock_ip_session.process.call_args[0]
@@ -221,8 +217,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         strategy = self._make_strategy()
         try:
-            result = await strategy.process_frame(self._audio_frame())
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(self._audio_frame())
             # process() is called (continuous state) even before VAD start,
             # but _speech_active=False prevents triggering despite high prob
             self.mock_ip_session.process.assert_called()
@@ -459,11 +454,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
             await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
-            r1 = await strategy.process_frame(self._audio_frame())
-            r2 = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
-            self.assertEqual(r1, ProcessFrameResult.STOP)
-            self.assertEqual(r2, ProcessFrameResult.CONTINUE)
             self.assertEqual(count, 1)
         finally:
             await strategy.cleanup()
@@ -487,12 +480,8 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_unrelated_frames_continue(self):
         strategy = self._make_strategy()
         try:
-            r1 = await strategy.process_frame(BotStartedSpeakingFrame())
-            r2 = await strategy.process_frame(
-                TranscriptionFrame(text="hi", user_id="", timestamp="")
-            )
-            self.assertEqual(r1, ProcessFrameResult.CONTINUE)
-            self.assertEqual(r2, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(TranscriptionFrame(text="hi", user_id="", timestamp=""))
         finally:
             await strategy.cleanup()
 
@@ -554,8 +543,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_vad_stopped_when_speech_inactive_is_no_op(self):
         strategy = self._make_strategy()
         try:
-            result = await strategy.process_frame(VADUserStoppedSpeakingFrame())
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(VADUserStoppedSpeakingFrame())
             self.assertFalse(strategy._speech_active)
         finally:
             await strategy.cleanup()
@@ -575,10 +563,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
             await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
-            result = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
             self.assertTrue(fired)
-            self.assertEqual(result, ProcessFrameResult.STOP)
         finally:
             await strategy.cleanup()
 

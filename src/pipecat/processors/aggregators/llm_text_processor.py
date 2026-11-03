@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMTextFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.errors import ErrorCategory
@@ -80,6 +81,7 @@ class LLMTextProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         self._text_transforms: list[tuple[TextType | str, TextTransform]] = text_transforms or []
+        self._skip_tts: bool | None = None
 
     def add_text_transformer(
         self, transform_function: TextTransform, text_type: TextType | str = "*"
@@ -126,6 +128,13 @@ class LLMTextProcessor(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame.skip_tts)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSStoppedFrame):
+            # A speech-to-speech service stops its speech before it ends the
+            # response. The text still held was spoken, so it goes out ahead of
+            # the stop: text behind it would reach the output transport after
+            # the bot stopped speaking.
+            await self._handle_llm_end(self._skip_tts)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             await self._handle_llm_end()
             await self.push_frame(frame, direction)
@@ -141,6 +150,7 @@ class LLMTextProcessor(FrameProcessor):
         await self._text_aggregator.reset()
 
     async def _handle_llm_text(self, in_frame: LLMTextFrame):
+        self._skip_tts = in_frame.skip_tts
         async for aggregation in self._text_aggregator.aggregate(in_frame.text):
             out_frame = await self._aggregated_text_frame(aggregation)
             if out_frame:

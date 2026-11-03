@@ -23,8 +23,8 @@ from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,

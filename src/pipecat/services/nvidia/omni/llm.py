@@ -42,9 +42,9 @@ from openai import (
 )
 from openai._types import NotGiven as OpenAINotGiven
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.nvidia_omni_adapter import NvidiaOmniLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.nvidia_omni_adapter import NvidiaOmniLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,

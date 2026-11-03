@@ -202,7 +202,8 @@ class TestReconnection(unittest.IsolatedAsyncioTestCase):
         service._reconnect_on_error = False
         await service._receive_task_handler(service.report_error)
 
-        await service.send_with_retry("hello", service.report_error)
+        with self.assertWarns(DeprecationWarning):
+            await service.send_with_retry("hello", service.report_error)
 
         self.assertEqual(service.connect_attempts, 1)
         self.assertEqual(service._websocket.sent, ["hello"])

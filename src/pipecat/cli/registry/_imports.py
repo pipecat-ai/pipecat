@@ -82,6 +82,7 @@ IMPORTS = {
     "openai_stt": ["from pipecat.services.openai.stt import OpenAISTTService"],
     "openai_realtime_stt": ["from pipecat.services.openai.stt import OpenAIRealtimeSTTService"],
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
+    "smallest_stt": ["from pipecat.services.smallest.stt import SmallestSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],
     "moonshine_stt": ["from pipecat.services.moonshine.stt import MoonshineSTTService"],
@@ -115,8 +116,10 @@ IMPORTS = {
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
+    "smallest_llm": ["from pipecat.services.smallest.llm import SmallestLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],
     # TTS Services
+    "assemblyai_tts": ["from pipecat.services.assemblyai.tts import AssemblyAITTSService"],
     "asyncai_tts": ["from pipecat.services.asyncai.tts import AsyncAITTSService"],
     "aws_polly_tts": ["from pipecat.services.aws.tts import AWSPollyTTSService"],
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],

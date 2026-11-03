@@ -750,6 +750,53 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         # Filter state still updated to reflect the requested enable.
         self.assertFalse(filter_instance._bypass)
 
+    async def test_tap_receives_blocks_before_enhancement(self):
+        """The tap gets each normalized block and the sample rate before process_async."""
+        filter_instance = self._create_filter_with_mocks()
+
+        async def enhancing_process_async(audio_array):
+            return audio_array * 0.5
+
+        self.mock_processor.process_async = enhancing_process_async
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append((block.copy(), rate)))
+        await self._start_filter_with_mocks(filter_instance)
+
+        samples = np.random.randint(-32768, 32767, size=320, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual([rate for _, rate in calls], [16000, 16000])
+        expected = samples.astype(np.float32) / 32768.0
+        np.testing.assert_allclose(np.concatenate([block for block, _ in calls]), expected)
+
+    async def test_tap_removed_with_none(self):
+        """Setting the tap to None stops the calls."""
+        filter_instance = self._create_filter_with_mocks()
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append(rate))
+        await self._start_filter_with_mocks(filter_instance)
+
+        filter_instance.set_pre_process_tap(None)
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual(calls, [])
+
+    async def test_tap_kept_across_stop_and_start(self):
+        """stop() keeps the tap, because the caller that sets it also removes it."""
+        filter_instance = self._create_filter_with_mocks()
+        calls = []
+        filter_instance.set_pre_process_tap(lambda block, rate: calls.append(rate))
+        await self._start_filter_with_mocks(filter_instance)
+        await filter_instance.stop()
+
+        self.mock_processor = MockProcessor()
+        await self._start_filter_with_mocks(filter_instance)
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        await filter_instance.filter(samples.tobytes())
+
+        self.assertEqual(calls, [16000])
+
 
 if __name__ == "__main__":
     unittest.main()

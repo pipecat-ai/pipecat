@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
@@ -240,6 +241,66 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
                 function_name="test", tool_call_id="123", arguments={}, result="ok"
             )
         )
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Now the timer should start and fire
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_intermediate_result_keeps_function_call_in_progress(self):
+        """An async tool's intermediate result does not settle the call.
+
+        An async function call (``cancel_on_interruption=False``) can report
+        progress with ``is_final=False`` results while it keeps running. The
+        bot may speak each update and stop again, but the user is still
+        waiting on the tool, so the idle timer must stay off until the final
+        result arrives.
+        """
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Async tool starts; bot acknowledges it and stops speaking
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Tool reports progress while still running; bot speaks the update
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test",
+                tool_call_id="123",
+                arguments={},
+                result="halfway",
+                properties=FunctionCallResultProperties(is_final=False),
+            )
+        )
+        self.assertTrue(controller.function_calls_in_progress)
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Wait longer than timeout — should not fire (tool still running)
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(idle_triggered)
+
+        # Final result settles the call; bot speaks it
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="done"
+            )
+        )
+        self.assertFalse(controller.function_calls_in_progress)
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
 

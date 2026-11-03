@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.smallest.llm import SmallestLLMService
 from pipecat.services.smallest.stt import SmallestSTTService
 from pipecat.services.smallest.tts import SmallestTTSService
 from pipecat.transcriptions.language import Language
@@ -76,9 +76,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    llm = SmallestLLMService(
+        api_key=os.environ["SMALLEST_API_KEY"],
+        settings=SmallestLLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )
