@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
@@ -842,9 +843,7 @@ class SegmentedSTTService(STTService):
         self._trailing_silence_secs = trailing_silence_secs
         self._content = None
         self._wave = None
-        self._audio_buffer = bytearray()
-        self._audio_buffer_size_1s = 0
-        self._user_speaking = False
+        self._speech_buffer = SpeechSegmentBuffer()
         # Numbers the user's speech segments, so a transcript can tell whether
         # its segment is still the latest.
         self._segment_count = 0
@@ -861,7 +860,7 @@ class SegmentedSTTService(STTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._audio_buffer_size_1s = self.sample_rate * 2
+        self._speech_buffer.set_sample_rate(self.sample_rate)
 
     async def start(self, frame: StartFrame):
         """Start the service and its transcription task.
@@ -935,19 +934,17 @@ class SegmentedSTTService(STTService):
             await self._handle_user_stopped_speaking(frame)
 
     async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._user_speaking = True
+        self._speech_buffer.start()
         self._segment_count += 1
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        self._user_speaking = False
+        segment = self._speech_buffer.stop()
 
         # A service that can no longer work can't transcribe this segment.
         if not self.is_usable:
-            self._audio_buffer.clear()
             return
 
-        pcm = bytes(self._audio_buffer) + self._trailing_silence()
-        self._audio_buffer.clear()
+        pcm = segment + self._trailing_silence()
 
         # The padded segment is what the provider receives, so it is what
         # usage measures. Usage is reported before transcription so tracing
@@ -1006,13 +1003,7 @@ class SegmentedSTTService(STTService):
         else:
             self._user_id = ""
 
-        # If the user is speaking the audio buffer will keep growing.
-        self._audio_buffer += frame.audio
-
-        # If the user is not speaking we keep just a little bit of audio.
-        if not self._user_speaking and len(self._audio_buffer) > self._audio_buffer_size_1s:
-            discarded = len(self._audio_buffer) - self._audio_buffer_size_1s
-            self._audio_buffer = self._audio_buffer[discarded:]
+        self._speech_buffer.append(frame.audio)
 
 
 class WebsocketSTTService(STTService, WebsocketService):
