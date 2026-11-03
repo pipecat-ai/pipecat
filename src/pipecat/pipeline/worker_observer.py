@@ -82,6 +82,9 @@ class WorkerObserver(BaseObserver):
     A frame being processed is only passed to the observers that override
     :meth:`~pipecat.observers.base_observer.BaseObserver.on_process_frame`,
     on their class or on the instance.
+
+    A frame is only passed to the observers that observe its class (see
+    :meth:`~pipecat.observers.base_observer.BaseObserver.observes_frame_type`).
     """
 
     def __init__(
@@ -105,6 +108,9 @@ class WorkerObserver(BaseObserver):
         # frame, so this tracks the frames in flight, not every frame ever
         # pushed.
         self._frames_pushed: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
+        # The proxies that observe each frame class, worked out when the first
+        # frame of the class arrives and forgotten when the observers change.
+        self._frame_targets: dict[type[Frame], list[Proxy]] = {}
 
     def add_observer(self, observer: BaseObserver):
         """Add a new observer to the managed list.
@@ -119,6 +125,7 @@ class WorkerObserver(BaseObserver):
         if self._proxies is not None:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
+            self._frame_targets.clear()
 
     async def remove_observer(self, observer: BaseObserver):
         """Remove an observer and clean up its resources.
@@ -131,6 +138,7 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
+            self._frame_targets.clear()
             # Cancel the proxy worker right away. An observer removing itself
             # runs on that worker, which can't be cancelled from inside, so
             # the worker ends itself instead.
@@ -154,6 +162,7 @@ class WorkerObserver(BaseObserver):
         """
         await super().setup(task_manager)
         self._proxies = self._create_proxies(self._observers)
+        self._frame_targets.clear()
 
         for observer in self._proxies:
             await observer.setup(task_manager)
@@ -165,6 +174,7 @@ class WorkerObserver(BaseObserver):
         rest are still cleaned up.
         """
         await super().cleanup()
+        self._frame_targets.clear()
 
         if not self._proxies:
             return
@@ -183,7 +193,7 @@ class WorkerObserver(BaseObserver):
         await self._send_to_proxy(_PipelineStartedSignal())
 
     async def on_process_frame(self, data: FrameProcessed):
-        """Queue frame data for the managed observers that handle it.
+        """Queue frame data for the managed observers that handle the frame's class.
 
         Args:
             data: The frame processing event data to distribute to observers.
@@ -191,14 +201,16 @@ class WorkerObserver(BaseObserver):
         if not self._proxies:
             return
 
-        for proxy in self._proxies.values():
+        for proxy in self._targets(type(data.frame)):
             if _handles_processing(proxy.observer):
                 await proxy.queue.put(data)
 
     async def on_push_frame(self, data: FramePushed):
-        """Queue frame data for the managed observers.
+        """Queue frame data for the managed observers that observe the frame's class.
 
-        A repeated push only reaches the observers that want every push.
+        A repeated push only reaches the observers that want every push. Every
+        push counts toward telling a frame's first push from the rest, whoever
+        observes it.
 
         Args:
             data: The frame push event data to distribute to observers.
@@ -211,7 +223,7 @@ class WorkerObserver(BaseObserver):
         if data.first_push:
             self._frames_pushed[frame.id] = frame
 
-        for proxy in self._proxies.values():
+        for proxy in self._targets(type(frame)):
             if data.first_push or proxy.observer.observe_every_push:
                 await proxy.queue.put(data)
 
@@ -254,6 +266,28 @@ class WorkerObserver(BaseObserver):
             proxies[observer] = proxy
         return proxies
 
+    def _targets(self, frame_type: type[Frame]) -> list[Proxy]:
+        """The proxies whose observers observe frames of the given class."""
+        targets = self._frame_targets.get(frame_type)
+        if targets is None:
+            proxies = self._proxies.values() if self._proxies else ()
+            targets = self._frame_targets[frame_type] = [
+                proxy for proxy in proxies if self._observes(proxy.observer, frame_type)
+            ]
+        return targets
+
+    def _observes(self, observer: BaseObserver, frame_type: type[Frame]) -> bool:
+        """Whether the observer observes frames of the given class.
+
+        An observer whose check raises observes the class, as it would without
+        the check. The error is logged, once per class while the answer is kept.
+        """
+        try:
+            return observer.observes_frame_type(frame_type)
+        except Exception as e:
+            self._log_observer_error(observer, e)
+            return True
+
     async def _send_to_proxy(self, data: Any):
         if not self._proxies:
             return
@@ -273,12 +307,7 @@ class WorkerObserver(BaseObserver):
                 # Cancellation still ends the task, even when the observer turns it into an error.
                 if (task := asyncio.current_task()) and task.cancelling():
                     raise
-                tb = traceback.extract_tb(e.__traceback__)
-                last = tb[-1]
-                logger.error(
-                    f"{self}: uncaught exception in observer {observer} "
-                    f"({last.filename}:{last.lineno}): {e}"
-                )
+                self._log_observer_error(observer, e)
 
             queue.task_done()
 
@@ -286,6 +315,14 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies.get(observer) if self._proxies else None
             if not proxy or proxy.queue is not queue:
                 break
+
+    def _log_observer_error(self, observer: BaseObserver, e: Exception):
+        """Log an exception raised by an observer, with where it was raised."""
+        last = traceback.extract_tb(e.__traceback__)[-1]
+        logger.error(
+            f"{self}: uncaught exception in observer {observer} "
+            f"({last.filename}:{last.lineno}): {e}"
+        )
 
     async def _notify_observer(self, observer: BaseObserver, data: Any):
         """Call the observer callback that matches the queued data."""

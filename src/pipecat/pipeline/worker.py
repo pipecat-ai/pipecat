@@ -130,7 +130,7 @@ class IdleFrameObserver(BaseObserver):
             idle_event: The event to set if the idle timeout frames are being pushed.
             idle_timeout_frames: A tuple with the frames that should set the event when received
         """
-        super().__init__(observe_every_push=False)
+        super().__init__(observe_every_push=False, frame_types=(StartFrame, *idle_timeout_frames))
         self._idle_event = idle_event
         self._idle_timeout_frames = idle_timeout_frames
 
