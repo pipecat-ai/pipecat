@@ -1807,6 +1807,41 @@ class ExternalFunctionCallCancelFrame(SystemFrame):
 
 
 @dataclass
+class BackgroundWorkStartedFrame(SystemFrame):
+    """Work the conversation is waiting on has started.
+
+    Work the bot started on the user's behalf that runs while the conversation
+    goes on and finishes on its own: an asynchronous function call
+    (``cancel_on_interruption=False``), or a task delegated to a backend. The
+    component that starts such work broadcasts this frame, and a
+    :class:`BackgroundWorkFinishedFrame` with the same ``work_id`` once the
+    work is over, so the pipeline can tell a bot that is quiet because it is
+    waiting from one that is idle. Anything else that dispatches work the
+    conversation waits on, such as a job sent to another worker, broadcasts
+    the same pair.
+
+    Parameters:
+        work_id: Identifies the work; the finished frame carries the same one.
+    """
+
+    work_id: str
+
+
+@dataclass
+class BackgroundWorkFinishedFrame(SystemFrame):
+    """Work the conversation was waiting on is over, whether by result, error or cancellation.
+
+    A consumer tracks open work by ``work_id``, so a finish for work it never
+    saw start, or already saw finish, means nothing to it.
+
+    Parameters:
+        work_id: The work that finished, as its started frame named it.
+    """
+
+    work_id: str
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
