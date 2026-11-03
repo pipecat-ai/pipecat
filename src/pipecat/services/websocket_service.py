@@ -180,7 +180,6 @@ class WebsocketService(ABC):
                 ``None`` to wait indefinitely.
             **kwargs: Additional arguments (unused, for compatibility).
         """
-        self._websocket = None
         self._reconnect_backoff_min_wait = reconnect_backoff_min_wait
         self._reconnect_backoff_max_wait = reconnect_backoff_max_wait
         self._reconnect_on_error = reconnect_on_error
@@ -196,10 +195,9 @@ class WebsocketService(ABC):
         self._quick_failure_tracker = QuickFailureTracker()
         self._last_connect_time: float = 0.0
 
-    # Backs the _websocket property. A class attribute, so the property reads
-    # None before __init__ runs: some subclasses initialize their other bases
-    # first.
-    __websocket: ClientConnection | None = None
+    # Class-level default so `_websocket` reads None before `__init__` runs:
+    # some subclasses initialize their other bases first.
+    __websocket_connection: ClientConnection | None = None
 
     @property
     def _websocket(self) -> ClientConnection | None:
@@ -211,11 +209,11 @@ class WebsocketService(ABC):
         before its close completes still ends the connection when it clears
         the reference.
         """
-        return self.__websocket
+        return self.__websocket_connection
 
     @_websocket.setter
     def _websocket(self, websocket: ClientConnection | None):
-        previous = self.__websocket
+        previous = self.__websocket_connection
         if (
             previous is not websocket
             and isinstance(previous, ClientConnection)
@@ -223,7 +221,7 @@ class WebsocketService(ABC):
         ):
             logger.debug(f"{self}: dropping a websocket connection that is still open, aborting it")
             previous.transport.abort()
-        self.__websocket = websocket
+        self.__websocket_connection = websocket
 
     @property
     def _is_service_usable(self) -> bool:
