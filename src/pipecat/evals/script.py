@@ -169,6 +169,17 @@ Supported expectation fields (per event):
             - name: submit_session_suggestion
           eval: "a session about OpenTelemetry tracing, submitted for Jennifer Smith"
 
+``allow_continue: false``
+    with ``eval:`` — judge the reply yes or no, never ``continue``. The judge
+    answers ``continue`` for a reply on the way to its answer, a "let me check"
+    before the result, and the harness then waits for more of the reply. A
+    reply that is final by nature, such as the word a bot says on its own
+    while its work runs, is judged as it stands::
+
+        - event: response
+          eval: "says it is still working on the task, reporting no result"
+          allow_continue: false
+
 ``absent: true``
     invert the expectation: assert that NO event of this type arrives before the
     ``within_ms`` budget expires (default 60s — set ``within_ms`` explicitly to
@@ -433,6 +444,10 @@ class EvalExpectation:
             ``previous`` (the default), where the expectation above it was
             met; or ``turn_start``, the beginning of the turn, at events the
             expectations above it did not use.
+        allow_continue: With ``eval``, whether the judge may answer
+            ``continue`` and have the harness wait for more of the reply;
+            ``None`` leaves it to the judge's own setting. ``False`` judges a
+            reply that is final by nature yes or no as it stands.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -452,6 +467,7 @@ class EvalExpectation:
     markers: int | None = None
     text_after: bool | None = None
     check_from: str = "previous"
+    allow_continue: bool | None = None
     absent: bool = False
 
     @property
@@ -997,6 +1013,16 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             "Will run but is unlikely to be meaningful."
         )
 
+    allow_continue = e.get("allow_continue")
+    if allow_continue is not None and not isinstance(allow_continue, bool):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' must be a boolean"
+        )
+    if allow_continue is not None and criterion is None:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' "
+            f"only applies with 'eval:'"
+        )
     absent = e.get("absent", False)
     if not isinstance(absent, bool):
         raise ValueError(
@@ -1087,6 +1113,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         markers=e.get("markers"),
         text_after=e.get("text_after"),
         check_from=check_from,
+        allow_continue=allow_continue,
         absent=absent,
     )
 

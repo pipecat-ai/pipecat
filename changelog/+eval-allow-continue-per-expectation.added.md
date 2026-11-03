@@ -1,0 +1,1 @@
+A scripted eval expectation can set `allow_continue: false` of its own, so a reply that is final by nature, such as a word the bot says on its own while its work runs, is judged yes or no as it stands while the rest of the scenario keeps the judge's `continue`.

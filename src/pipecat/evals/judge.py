@@ -57,7 +57,9 @@ The harness asks three kinds of question, and each is one classifier call:
   suite whose judged replies are all final answers, with nothing for the bot
   to fetch first, sets ``allow_continue: false``, and a reply is then yes or
   no; a reply that is still arriving is still judged again as more of it
-  comes.
+  comes. An expectation whose reply is final by nature, such as a word the
+  bot says on its own while its work runs, sets ``allow_continue: false`` on
+  itself alone (see :mod:`pipecat.evals.script`).
 - A function call, for an ``eval:`` on a ``function_call``. The state holds
   the call's name and arguments and the conversation as context. The
   answer is yes or no.
@@ -308,6 +310,14 @@ _REPLY_OUTCOMES: dict[str, Any] = {
     ),
 }
 
+
+def _reply_outcomes(allow_continue: bool) -> dict[str, Any]:
+    """The answers a reply can get: the three, or yes and no alone."""
+    if allow_continue:
+        return _REPLY_OUTCOMES
+    return {k: v for k, v in _REPLY_OUTCOMES.items() if k != "continue"}
+
+
 # A run's per-turn outcomes. A classifier can't tell by itself whether a
 # criterion only applies in some situation ("when the time is taken,
 # apologises"), so "doesn't apply" is an outcome of its own rather than a rule
@@ -391,11 +401,7 @@ class EvalJudge:
             _Explainer(explainer, max_tokens=max_tokens) if explainer is not None else None
         )
         self._explain_below = explain_below
-        self._reply_outcomes = (
-            _REPLY_OUTCOMES
-            if allow_continue
-            else {k: v for k, v in _REPLY_OUTCOMES.items() if k != "continue"}
-        )
+        self._reply_outcomes = _reply_outcomes(allow_continue)
         # The conversation the judge evaluates against, grown by the harness over
         # the scenario: dicts with a ``role`` of ``user``, ``assistant`` (a
         # segment of a reply), or ``tool`` (a call the bot made, one line), and
@@ -488,11 +494,13 @@ class EvalJudge:
         if text and text.strip():
             self._transcript.append({"role": "tool", "content": text})
 
-    async def evaluate(self, criterion: str) -> JudgeVerdict:
+    async def evaluate(self, criterion: str, *, allow_continue: bool | None = None) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
 
         Args:
             criterion: Natural-language description of what the reply should express.
+            allow_continue: Whether this reply may be judged ``continue``;
+                the judge's own setting when ``None``.
 
         Returns:
             A ``yes``, a ``no``, or, when ``allow_continue`` is on, a
@@ -501,14 +509,17 @@ class EvalJudge:
             reason is explained, and a failed call is a ``no`` with the failure
             as its reason.
         """
+        outcomes = (
+            self._reply_outcomes if allow_continue is None else _reply_outcomes(allow_continue)
+        )
         entries = self._numbered_turns(e for e in self._transcript if e["role"] != "tool")
         latest = entries.pop()["content"] if entries and entries[-1]["role"] == "bot" else ""
         state = {"conversation": self._conversation(entries), "latest_bot_reply": latest}
-        key = _cache_key("reply", criterion, state)
+        key = _cache_key("reply", criterion, state, sorted(outcomes))
         if key not in self._cache:
             question = ChoiceQuestion(
                 instructions=self._instructions(_REPLY_QUESTION, "Criterion", criterion),
-                options=self._reply_outcomes,
+                options=outcomes,
             )
             answers = await self._choices(state, {"verdict": question})
             if answers is None:

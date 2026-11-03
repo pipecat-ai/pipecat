@@ -386,6 +386,44 @@ class TestEvalsScenarioParser(unittest.TestCase):
                     )
                 )
 
+    def test_allow_continue_false_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: final
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        eval: "says it is still working"
+                        allow_continue: false
+                      - event: llm_response
+                        eval: "gives the result"
+                """
+            )
+        )
+        self.assertIs(s.turns[0].expect[0].allow_continue, False)
+        self.assertIsNone(s.turns[0].expect[1].allow_continue)
+
+    def test_allow_continue_needs_eval_and_a_boolean(self):
+        for extra in (
+            "allow_continue: false",
+            'eval: "x"\n                                allow_continue: no way',
+        ):
+            with self.assertRaises(ValueError):
+                _script(
+                    _write(
+                        f"""
+                        name: bad_allow_continue
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                {extra}
+                        """
+                    )
+                )
+
     def test_absent_expectation_parsed(self):
         s = _script(
             _write(
