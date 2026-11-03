@@ -227,6 +227,24 @@ async def test_passthrough_mode_preserves_exact_pcm():
 
 
 @pytest.mark.asyncio
+async def test_a_segment_starts_with_the_last_second_before_speech():
+    service = _make_capturing_service(wants_wav=False, trailing_silence_secs=0)
+    earlier = bytes([1]) * (SAMPLE_RATE * 2 * 2)
+    last_second = bytes([2]) * (SAMPLE_RATE * 2)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            InputAudioRawFrame(audio=earlier, sample_rate=SAMPLE_RATE, num_channels=1),
+            InputAudioRawFrame(audio=last_second, sample_rate=SAMPLE_RATE, num_channels=1),
+            *_segment_frames(),
+        ],
+    )
+
+    assert service.captured == [last_second + PCM]
+
+
+@pytest.mark.asyncio
 async def test_segment_emits_usage_for_raw_buffer_duration():
     # WAV mode: usage must measure the PCM audio, not the WAV container.
     service = _make_capturing_service(trailing_silence_secs=0)
