@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -478,6 +479,19 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
         return True
+
+    async def write_transport_frame(self, frame: Frame):
+        """Forward a queued frame to the serializer after its audio has been sent.
+
+        A `TTSStoppedFrame` is the only signal the serializer gets that a speech
+        run ended, which is when it has to flush whatever its output resampler
+        is still holding.
+
+        Args:
+            frame: The frame taken from the audio queue.
+        """
+        if isinstance(frame, TTSStoppedFrame):
+            await self._write_frame(frame)
 
     async def _write_frame(self, frame: Frame) -> bool:
         """Serialize and send a frame to the WebSocket client.

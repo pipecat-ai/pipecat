@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -170,6 +171,28 @@ class TelnyxFrameSerializer(FrameSerializer):
             if serialized_data is None or len(serialized_data) == 0:
                 # Ignoring in case we don't have audio
                 return None
+
+            payload = base64.b64encode(serialized_data).decode("utf-8")
+            answer = {
+                "event": "media",
+                "media": {"payload": payload},
+            }
+
+            return json.dumps(answer)
+        elif isinstance(frame, TTSStoppedFrame):
+            # The output resampler holds the tail of the speech run that just
+            # ended. Emit it now; otherwise it is prepended to whatever the bot
+            # says next, which can be seconds later.
+            tail = await self._output_resampler.flush()
+            if not tail:
+                return None
+            rate = self._telnyx_sample_rate
+            if self._params.inbound_encoding == "PCMU":
+                serialized_data = await pcm_to_ulaw(tail, rate, rate, self._output_resampler)
+            elif self._params.inbound_encoding == "PCMA":
+                serialized_data = await pcm_to_alaw(tail, rate, rate, self._output_resampler)
+            else:
+                raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
 
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {

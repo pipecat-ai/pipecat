@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -104,6 +105,15 @@ class VonageFrameSerializer(FrameSerializer):
 
             # Vonage expects raw binary PCM data (not base64 encoded)
             return serialized_data
+        elif isinstance(frame, TTSStoppedFrame):
+            # The output resampler holds the tail of the speech run that just
+            # ended. Emit it now; otherwise it is prepended to whatever the bot
+            # says next, which can be seconds later.
+            tail = await self._output_resampler.flush()
+            if not tail:
+                return None
+            # Vonage expects raw binary PCM data (not base64 encoded)
+            return tail
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             if self.should_ignore_frame(frame):
                 return None

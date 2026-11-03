@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -111,6 +112,21 @@ class ExotelFrameSerializer(FrameSerializer):
 
             payload = base64.b64encode(serialized_data).decode("ascii")
 
+            answer = {
+                "event": "media",
+                "stream_sid": self._stream_sid,
+                "media": {"payload": payload},
+            }
+
+            return json.dumps(answer)
+        elif isinstance(frame, TTSStoppedFrame):
+            # The output resampler holds the tail of the speech run that just
+            # ended. Emit it now; otherwise it is prepended to whatever the bot
+            # says next, which can be seconds later.
+            tail = await self._output_resampler.flush()
+            if not tail:
+                return None
+            payload = base64.b64encode(tail).decode("ascii")
             answer = {
                 "event": "media",
                 "stream_sid": self._stream_sid,

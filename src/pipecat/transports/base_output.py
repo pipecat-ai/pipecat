@@ -916,6 +916,9 @@ class BaseOutputTransport(FrameProcessor):
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
             elif isinstance(frame, TTSStoppedFrame):
+                # Let the transport know the speech run ended, in order after its
+                # audio, so it can flush whatever its own output stage is holding.
+                await self._transport.write_transport_frame(frame)
                 # We will only trigger bot stopped speaking based on the TTSStoppedFrame,
                 # if we have received audio from TTS
                 if self._tts_audio_received:

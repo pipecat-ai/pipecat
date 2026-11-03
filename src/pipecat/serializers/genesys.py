@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -598,6 +599,20 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 return None
 
             return bytes(serialized_data)
+
+        elif isinstance(frame, TTSStoppedFrame):
+            # The output resampler holds the tail of the speech run that just
+            # ended. Emit it now; otherwise it is prepended to whatever the bot
+            # says next, which can be seconds later.
+            if not self._is_open or self._is_paused:
+                return None
+            if self._params.media_format != AudioHookMediaFormat.PCMU:
+                return None
+            tail = await self._output_resampler.flush()
+            if not tail:
+                return None
+            rate = self._genesys_sample_rate
+            return bytes(await pcm_to_ulaw(tail, rate, rate, self._output_resampler))
 
         elif isinstance(frame, InterruptionFrame):
             return json.dumps(self.create_barge_in_event())

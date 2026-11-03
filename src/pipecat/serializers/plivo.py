@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -149,6 +150,28 @@ class PlivoFrameSerializer(FrameSerializer):
                 # Ignoring in case we don't have audio
                 return None
 
+            payload = base64.b64encode(serialized_data).decode("utf-8")
+            answer = {
+                "event": "playAudio",
+                "media": {
+                    "contentType": "audio/x-mulaw",
+                    "sampleRate": self._plivo_sample_rate,
+                    "payload": payload,
+                },
+                "streamId": self._stream_id,
+            }
+
+            return json.dumps(answer)
+        elif isinstance(frame, TTSStoppedFrame):
+            # The output resampler holds the tail of the speech run that just
+            # ended. Emit it now; otherwise it is prepended to whatever the bot
+            # says next, which can be seconds later.
+            tail = await self._output_resampler.flush()
+            if not tail:
+                return None
+            serialized_data = await pcm_to_ulaw(
+                tail, self._plivo_sample_rate, self._plivo_sample_rate, self._output_resampler
+            )
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
                 "event": "playAudio",
