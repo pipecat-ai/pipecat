@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
+from pipecat.expressive.expression import ExpressionDelivery, ExpressionSound
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -80,33 +81,37 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
 
     expression_policy = ExpressionPolicy(
-        guidance=[ExpressionGuidance.MATCH_STYLE, ExpressionGuidance.SLOW_FOR_DETAILS],
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            ExpressionGuidance.BREATHE,
+        ],
         delivery=[
-            "slow",
-            "happy",
-            "excited",
-            "curious",
-            "thoughtful",
-            "warmly",
-            "sympathetic",
-            "reassuring",
-            "nervously",
-            "sad",
-            "frustrated",
-            "sarcastic",
-            "deadpan",
-            "mischievously",
-            "whispers",
+            ExpressionDelivery.SLOW,
+            ExpressionDelivery.HAPPY,
+            ExpressionDelivery.EXCITED,
+            ExpressionDelivery.CURIOUS,
+            ExpressionDelivery.THOUGHTFUL,
+            ExpressionDelivery.WARM,
+            ExpressionDelivery.SYMPATHETIC,
+            ExpressionDelivery.REASSURING,
+            ExpressionDelivery.NERVOUS,
+            ExpressionDelivery.SAD,
+            ExpressionDelivery.FRUSTRATED,
+            ExpressionDelivery.SARCASTIC,
+            ExpressionDelivery.DEADPAN,
+            ExpressionDelivery.MISCHIEVOUS,
+            ExpressionDelivery.WHISPERING,
         ],
         sounds=[
-            "laughs",
-            "chuckles",
-            "giggles",
-            "sighs",
-            "exhales",
-            "inhales deeply",
-            "clears throat",
-            "gulps",
+            ExpressionSound.LAUGH,
+            ExpressionSound.CHUCKLE,
+            ExpressionSound.GIGGLE,
+            ExpressionSound.SIGH,
+            ExpressionSound.EXHALE,
+            ExpressionSound.LIGHT_BREATH,
+            ExpressionSound.CLEAR_THROAT,
+            ExpressionSound.GULP,
         ],
     )
 

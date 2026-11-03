@@ -10,10 +10,15 @@ import unittest
 from unittest.mock import AsyncMock
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.expressive.perception import PerceptionSignal
-from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal
+from pipecat.frames.frames import (
+    Frame,
+    InterimTranscriptionFrame,
+    PerceptionMetadataFrame,
+    TranscriptionFrame,
+)
 from pipecat.observers.base_observer import FramePushed
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -77,3 +82,64 @@ class TestRTVIObserverPerception(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(data.perception)
+
+
+class TestRTVIObserverPerceptionAfterTheSTT(unittest.IsolatedAsyncioTestCase):
+    """A transcription waits for a perceiver after the STT, such as PipecatToneReader."""
+
+    async def asyncSetUp(self):
+        self.observer = RTVIObserver()
+        self.observer.send_rtvi_message = AsyncMock()
+        self.stt = FrameProcessor(name="stt")
+        self.reader = FrameProcessor(name="reader")
+        self.aggregator = FrameProcessor(name="aggregator")
+
+    async def _push(self, frame: Frame, source, destination, *, first_push: bool):
+        await self.observer.on_push_frame(
+            FramePushed(
+                source=source,
+                destination=destination,
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+                first_push=first_push,
+            )
+        )
+
+    def _user_inputs(self) -> list[RTVI.UserInputMessageData]:
+        return [
+            call.args[0].data
+            for call in self.observer.send_rtvi_message.await_args_list
+            if isinstance(call.args[0], RTVI.UserInputMessage)
+        ]
+
+    async def _announce_reader(self):
+        metadata = PerceptionMetadataFrame(
+            service_name="reader", perception=PerceptionCapabilities()
+        )
+        await self._push(metadata, self.reader, self.aggregator, first_push=True)
+        # Passed along, it doesn't make the next processor a perceiver.
+        await self._push(metadata, self.aggregator, self.stt, first_push=False)
+
+    async def test_a_transcription_is_reported_once_read(self):
+        await self._announce_reader()
+        frame = TranscriptionFrame(text="Oh great, it's late.", user_id="", timestamp="now")
+
+        await self._push(frame, self.stt, self.reader, first_push=True)
+        self.assertEqual(self._user_inputs(), [])
+
+        frame.perception = READING
+        await self._push(frame, self.reader, self.aggregator, first_push=False)
+        await self._push(frame, self.aggregator, self.stt, first_push=False)
+
+        (data,) = self._user_inputs()
+        self.assertEqual(data.text, "Oh great, it's late.")
+        self.assertEqual([signal.name for signal in data.perception or []], ["tone", "speech_rate"])
+
+    async def test_without_a_perceiver_a_transcription_is_reported_when_first_pushed(self):
+        frame = TranscriptionFrame(text="Where's my order?", user_id="", timestamp="now")
+
+        await self._push(frame, self.stt, self.reader, first_push=True)
+        await self._push(frame, self.reader, self.aggregator, first_push=False)
+
+        self.assertEqual(len(self._user_inputs()), 1)

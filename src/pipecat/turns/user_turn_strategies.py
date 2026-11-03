@@ -13,6 +13,8 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
+from pipecat.classifiers.base_classifier import BaseClassifier
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -21,6 +23,7 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
+    ClassifierUserTurnStopStrategy,
     EagerMatchPolicy,
     EagerUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
@@ -273,6 +276,73 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
         # Extending a service's stop strategies adds the LLM gate and the stop
         # strategies given, never the default ones.
         self._stop_extension = [*(self._stop_extension or []), gate]
+
+
+@dataclass
+class ClassifierUserTurnStrategies(UserTurnStrategies):
+    """Stop strategies that let a classifier decide whether the user's turn is complete.
+
+    An alternative to :class:`FilterIncompleteUserTurnStrategies` for an LLM
+    that doesn't follow the turn-completion marker instructions well. A
+    classifier decides from the user's words, and the bot's last line, whether
+    the user finished their thought, and the LLM only answers complete turns.
+
+    :class:`~pipecat.turns.user_stop.ClassifierUserTurnStopStrategy`, which asks
+    at every pause with new words, is added after the stop strategies given, or
+    after the default ones (smart turn) when none are given, and the turn ends
+    once all of them have decided. Smart turn hears from how the user sounds
+    that more is coming after words that read complete, such as "I want to go
+    to Paris", which the classifier can't tell from the words. A turn the
+    classifier found complete then waits for smart turn too, up to its silence
+    fallback when smart turn finds it incomplete. For the classifier alone,
+    build the stop list yourself::
+
+        UserTurnStrategies(stop=[ClassifierUserTurnStopStrategy(classifier=..., context=context)])
+
+    With ``UserTurnStrategiesParams(stop_merge_mode=MergeMode.EXTEND)``, the
+    classifier strategy and any stop strategies given join the ones a service
+    recommends instead.
+
+    Parameters:
+        classifier: What decides whether a turn is complete. Required.
+        context: The conversation, so the classifier sees the assistant's
+            last message along with the user's turn.
+        short_timeout: Seconds to wait after a ``short`` verdict before the
+            classifier strategy decides the user is done.
+        long_timeout: Seconds to wait after a ``long`` verdict before the
+            classifier strategy decides the user is done.
+        classification_timeout: Seconds to wait for the classifier before
+            leaving the decision to the other stop strategies.
+
+    Example::
+
+        user_turn_strategies=ClassifierUserTurnStrategies(
+            classifier=JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY")),
+            context=context,
+        )
+    """
+
+    classifier: BaseClassifier | None = None
+    context: LLMContext | None = None
+    short_timeout: float = 5.0
+    long_timeout: float = 10.0
+    classification_timeout: float = 1.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.classifier is None:
+            raise ValueError("ClassifierUserTurnStrategies needs a classifier")
+        strategy = ClassifierUserTurnStopStrategy(
+            classifier=self.classifier,
+            context=self.context,
+            short_timeout=self.short_timeout,
+            long_timeout=self.long_timeout,
+            classification_timeout=self.classification_timeout,
+        )
+        self.stop = [*(self.stop or []), strategy]
+        # Extending a service's stop strategies adds the classifier strategy and
+        # the stop strategies given, never the default ones.
+        self._stop_extension = [*(self._stop_extension or []), strategy]
 
 
 @dataclass

@@ -92,6 +92,26 @@ async def test_requests_send_the_mapped_language(service_cls, model, language, e
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, CartesiaHttpTTSService])
+@pytest.mark.parametrize("accent, expected", [("british", "british"), (None, None)])
+async def test_requests_send_the_accent_only_when_set(service_cls, accent, expected):
+    service = service_cls(
+        api_key="test",
+        settings=service_cls.Settings(voice="voice", accent=accent),
+    )
+    if service_cls is CartesiaTTSService:
+        payload = json.loads(service._build_msg(text="Hello", context_id="ctx"))
+    else:
+        response = MagicMock(status=200, read=AsyncMock(return_value=b"\x00\x00"))
+        service._session = MagicMock()
+        service._session.post.return_value.__aenter__.return_value = response
+        _ = [frame async for frame in service.run_tts("Hello", "ctx")]
+        payload = service._session.post.call_args.kwargs["json"]
+
+    assert payload.get("accent") == expected
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "language, delta, expected, rotated",
     [

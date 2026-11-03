@@ -4513,6 +4513,17 @@
       "location": "pipecat/services/simli/video.py"
     },
     {
+      "subject": "SimliVideoService.is_trinity_avatar",
+      "module": "pipecat.services.simli.video",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/services/simli/video.py"
+    },
+    {
       "subject": "SimliVideoService.params",
       "module": "pipecat.services.simli.video",
       "kind": "parameter",

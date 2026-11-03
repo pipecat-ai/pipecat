@@ -13,6 +13,8 @@ from pipecat.expressive.expression import (
     SLOW_DELIVERY,
     SPEED_DELIVERY,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
 )
 
@@ -76,10 +78,29 @@ class FishAudioS2ExpressionAdapter(BaseExpressionAdapter):
         return ExpressionCapabilities(
             sounds=list(_S2_SOUNDS),
             delivery=[*_S2_DELIVERY, *SPEED_DELIVERY],
-            free_text_sounds=True,
-            free_text_delivery=True,
+            allows_free_text_sounds=True,
+            allows_free_text_delivery=True,
             pause_range_ms=(100, 1500),
             emphasis=True,
+            service_vocabulary={
+                ExpressionDelivery.CALM: ["calm", "relaxed"],
+                ExpressionDelivery.SYMPATHETIC: ["sympathetic", "empathetic", "compassionate"],
+                ExpressionDelivery.APOLOGETIC: ["regretful"],
+                ExpressionDelivery.WARM: ["happy", "relaxed"],
+                ExpressionDelivery.EXCITED: ["excited", "delighted"],
+                ExpressionSound.LAUGH: ["laughing"],
+                ExpressionSound.CHUCKLE: ["chuckling"],
+                ExpressionSound.SIGH: ["sighing"],
+                ExpressionSound.BREATH: ["inhaling"],
+                ExpressionSound.LIGHT_BREATH: ["inhaling"],
+                ExpressionSound.EXHALE: ["exhaling"],
+                ExpressionSound.SOB: ["sobbing", "crying loudly"],
+                ExpressionSound.GROAN: ["groaning"],
+                ExpressionSound.PANT: ["panting"],
+                ExpressionSound.GASP: ["gasping"],
+                ExpressionSound.YAWN: ["yawning"],
+                ExpressionSound.SNORE: ["snoring"],
+            },
         )
 
     def format_text(

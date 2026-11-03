@@ -24,6 +24,8 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.soniox_adapter import SonioxExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -239,6 +241,19 @@ class SonioxTTSService(WebsocketTTSService):
         self._partials: dict[str, tuple[str, float]] = {}
 
         self._receive_task: asyncio.Task | None = None
+
+        self._v2_expression_adapter = SonioxExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio tags on tts-rt-v2, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("tts-rt-v2"):
+            return self._v2_expression_adapter
+        return super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -523,6 +538,9 @@ class SonioxTTSService(WebsocketTTSService):
         which this turns into::
 
             [("Hi", 0.1), ("you", 0.4)]
+
+        An audio tag is one word, spaces and all, such as ``[long pause]``, and
+        the asterisks that stress a word, as in ``*really*``, are left out of it.
         """
         chars = timestamps.get("characters", [])
         starts = timestamps.get("character_start_times_seconds", [])
@@ -536,7 +554,10 @@ class SonioxTTSService(WebsocketTTSService):
         current_word, word_start_time = self._partials.get(stream_id, ("", 0.0))
         words_with_start_times: list[tuple[str, float]] = []
         for char, start in zip(chars, starts):
-            if char == " ":
+            if char == "*":
+                continue
+            in_tag = current_word.rfind("[") > current_word.rfind("]")
+            if char == " " and not in_tag:
                 if current_word:
                     words_with_start_times.append((current_word, word_start_time))
                     current_word = ""

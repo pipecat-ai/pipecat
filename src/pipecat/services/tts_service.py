@@ -1284,7 +1284,7 @@ class TTSService(AIService):
         if frame.raw_text is None or spoken is None:
             frame.append_to_context = False
             return [], True
-        # Markup can cover the LLM's text, as "[laughs]" covers "[[laughs]]!"
+        # Markup can cover the LLM's text, as "[laughs]" covers "[[laugh]]!"
         # when the punctuation was written after the tag. The context records
         # that text with the sound.
         _, sounds = spoken.spoken(frame.raw_text)

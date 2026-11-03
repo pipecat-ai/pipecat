@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EagerTranscriptionFrame,
     EndFrame,
+    ExpressionMetadataFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -814,6 +815,11 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
 
+        # Whether the user speaking again voided the answer to words already in
+        # the context. Without new words, the turn's next inference recovers it
+        # like an empty user turn that interrupted the bot.
+        self._user_turn_answer_voided = False
+
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_strategies_params=self._params.user_turn_strategies_params,
@@ -998,6 +1004,10 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _push_aggregation(self, *, run_llm: bool = True) -> str:
         """Write the aggregated user turn to the context.
 
+        With nothing new to write after the user speaking again voided the
+        answer to the words already written, it recovers that answer like an
+        empty user turn that interrupted the bot.
+
         Args:
             run_llm: Whether to emit the :class:`LLMContextFrame` that runs
                 inference. False when the response is already generated — an
@@ -1008,6 +1018,9 @@ class LLMUserAggregator(LLMContextAggregator):
             The text written, or "" when there was nothing to write.
         """
         if len(self._aggregation) == 0:
+            if run_llm and self._user_turn_answer_voided:
+                self._user_turn_answer_voided = False
+                await self._maybe_recover_empty_user_turn(interrupted_bot=True, turn_inference=True)
             return ""
 
         aggregation = self.aggregation_string()
@@ -1022,10 +1035,7 @@ class LLMUserAggregator(LLMContextAggregator):
             perception=perception,
         )
         if run_llm:
-            frame = await self.push_context_frame()
-            # A stop strategy that waits for the inference, such as
-            # LLMTurnCompletionUserTurnStopStrategy, waits for this one.
-            await self._user_turn_controller.process_frame(frame)
+            await self._run_llm()
 
         message = UserTurnMessageAddedMessage(
             content=aggregation, timestamp=self._user_turn_start_timestamp
@@ -1033,6 +1043,13 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._call_event_handler("on_user_turn_message_added", message)
 
         return aggregation
+
+    async def _run_llm(self):
+        self._user_turn_answer_voided = False
+        frame = await self.push_context_frame()
+        # A stop strategy that waits for the inference, such as
+        # LLMTurnCompletionUserTurnStopStrategy, waits for this one.
+        await self._user_turn_controller.process_frame(frame)
 
     async def _start(self, frame: StartFrame):
         await self._start_controllers()
@@ -1445,6 +1462,8 @@ class LLMUserAggregator(LLMContextAggregator):
         # doesn't interrupt the bot only withdraws a speculation.
         if params.enable_interruptions:
             await self.broadcast_interruption()
+            # An answer ran only if the turn's words were written for it.
+            self._user_turn_answer_voided = bool(self._full_user_turn_aggregation)
         else:
             await self.broadcast_frame(UserTurnResponseCancelFrame)
 
@@ -1479,6 +1498,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
+        self._user_turn_answer_voided = False
 
         # Unless the bot is waiting for the user, it's thinking, speaking or
         # running a function call, and the interruption below cancels that.
@@ -1550,6 +1570,10 @@ class LLMUserAggregator(LLMContextAggregator):
         accumulating for whenever the turn does end. The response is held
         downstream until the turn is confirmed, and discarded if it isn't.
 
+        The turn is broadcast as a speculation first. Queued ahead of the
+        inference, it passes the LLM before the response is held, while the
+        turn written once it ends waits for the inference to finish.
+
         Args:
             speculation: The speculation to run, from the stop strategy that
                 started it.
@@ -1559,6 +1583,13 @@ class LLMUserAggregator(LLMContextAggregator):
             f"{format_perception(perception)} {speculation.text}"
             if perception
             else speculation.text
+        )
+        await self.broadcast_frame(
+            LLMContextUserTurnFrame,
+            text=speculation.text,
+            timestamp=self._user_turn_start_timestamp,
+            perception=perception,
+            speculation=True,
         )
         provisional = LLMContext(
             messages=[
@@ -1636,6 +1667,9 @@ class LLMUserAggregator(LLMContextAggregator):
                 (avoids duplicate events when session ends).
             run_llm: Whether the context write should run inference.
         """
+        # Like an empty turn, a voided answer isn't recovered when the session ends.
+        if on_session_end:
+            self._user_turn_answer_voided = False
         segment = await self._push_aggregation(run_llm=run_llm)
         full_aggregation = self._full_user_turn_aggregation
         self._full_user_turn_aggregation = None
@@ -1667,11 +1701,19 @@ class LLMUserAggregator(LLMContextAggregator):
             if not await self._maybe_recover_empty_user_turn(interrupted_bot):
                 await self._user_idle_controller.wait_for_user()
 
-    async def _maybe_recover_empty_user_turn(self, interrupted_bot: bool) -> bool:
-        """Run the LLM for a user turn that ended with no transcript.
+    async def _maybe_recover_empty_user_turn(
+        self, interrupted_bot: bool, *, turn_inference: bool = False
+    ) -> bool:
+        """Run the LLM for a user turn with no transcript.
+
+        It also covers the part of a turn after its answer was voided, when
+        the user said nothing new.
 
         Args:
             interrupted_bot: Whether the turn interrupted a response in progress.
+            turn_inference: Whether the run is the turn's own inference, which
+                a stop strategy such as ``LLMTurnCompletionUserTurnStopStrategy``
+                waits for.
 
         Returns:
             Whether the LLM was asked to respond.
@@ -1698,7 +1740,10 @@ class LLMUserAggregator(LLMContextAggregator):
         )
         self._consecutive_empty_user_turn_recoveries += 1
         self._context.add_message(cast(LLMContextMessage, {"role": "developer", "content": prompt}))
-        await self.push_context_frame()
+        if turn_inference:
+            await self._run_llm()
+        else:
+            await self.push_context_frame()
         return True
 
 
@@ -1833,6 +1878,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._summarizer.add_event_handler("on_summary_applied", self._on_summary_applied)
 
         self._expressive = False
+        # Whether a tagger after the LLM writes the replies' expression tags.
+        self._tagged_after_llm = False
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
@@ -1950,6 +1997,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self.set_tools(normalized_tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, ExpressionMetadataFrame):
+            self._tagged_after_llm = True
+            await self.push_frame(frame, direction)
         elif isinstance(frame, FunctionCallsStartedFrame):
             await self._handle_function_calls_started(frame)
         elif isinstance(frame, FunctionCallInProgressFrame):
@@ -2067,6 +2117,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         aggregation = self.aggregation_string()
         await self.reset()
 
+        # The LLM writes its own replies' tags, or a tagger writes them and
+        # the LLM, never taught them, reads its replies as plain words.
+        if self._expressive and self._tagged_after_llm:
+            aggregation = strip_expression_tags(aggregation)
+            if not aggregation:
+                return ""
         self._context.add_message({"role": "assistant", "content": aggregation})
 
         return aggregation

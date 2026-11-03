@@ -146,6 +146,15 @@ class RawAudioTrack(AudioStreamTrack):
 
         return future
 
+    def stop(self):
+        """Stop the track, and end the writes waiting on audio it will never send."""
+        for _chunk, future in self._chunk_queue:
+            if future is not None and not future.done():
+                future.set_result(False)
+
+        self._chunk_queue.clear()
+        super().stop()
+
     async def recv(self):
         """Return the next audio frame for WebRTC transmission.
 
@@ -604,6 +613,8 @@ class SmallWebRTCClient:
         self._audio_input_track = None
         self._video_input_track = None
         self._screen_video_track = None
+        if self._audio_output_track:
+            self._audio_output_track.stop()
         self._audio_output_track = None
         self._video_output_track = None
 
@@ -612,6 +623,8 @@ class SmallWebRTCClient:
         self._audio_input_track = None
         self._video_input_track = None
         self._screen_video_track = None
+        if self._audio_output_track:
+            self._audio_output_track.stop()
         self._audio_output_track = None
         self._video_output_track = None
 

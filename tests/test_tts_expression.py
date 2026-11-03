@@ -14,10 +14,17 @@ import pytest
 from loguru import logger
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
-from pipecat.expressive.expression import DeliveryScope, ExpressionCapabilities, ExpressionTerm
+from pipecat.expressive.expression import (
+    DeliveryScope,
+    ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
+    ExpressionTerm,
+)
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    ExpressionMetadataFrame,
     Frame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
@@ -31,6 +38,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
@@ -156,6 +164,26 @@ async def test_apps_get_the_words_while_the_context_keeps_the_tags():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("switched", [False, True], ids=["tts", "tts switcher"])
+async def test_the_context_keeps_only_the_words_when_a_tagger_wrote_the_tags(switched):
+    context = LLMContext()
+    tts = WordTimestampTTSService()
+    if switched:
+        tts = ServiceSwitcher([tts, WordTimestampTTSService()])
+
+    await run_test(
+        Pipeline([tts, LLMAssistantAggregator(context)]),
+        frames_to_send=[
+            ExpressionMetadataFrame(service_name="tagger"),
+            *response(*REPLY),
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert context.messages[-1]["content"] == "It's back up now. Bye!"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("service", SERVICES)
 async def test_the_context_keeps_the_reply_as_written(service):
     assert await context_after(service(), response(*REPLY)) == WRITTEN
@@ -194,6 +222,41 @@ async def test_word_timestamps_report_each_words_delivery_and_the_sounds_between
         (TextType.WORD, "now.", ["cheerful"]),
         (TextType.EXPRESSION_PAUSE, "400", None),
         (TextType.WORD, "Bye!", ["cheerful"]),
+    ]
+
+
+class VocabularyAdapter(BracketAdapter):
+    """Performs the universal warm and laugh by names of its own."""
+
+    def capabilities(self):
+        return ExpressionCapabilities(
+            sounds=[ExpressionTerm("laughs")],
+            delivery=[ExpressionTerm("warmly")],
+            service_vocabulary={
+                ExpressionDelivery.WARM: ["warmly"],
+                ExpressionSound.LAUGH: ["laughs"],
+            },
+        )
+
+
+class VocabularyTTSService(WordTimestampTTSService):
+    expression_adapter_class = VocabularyAdapter
+
+
+@pytest.mark.asyncio
+async def test_universal_names_are_sent_by_the_services_names_and_reported_as_written():
+    tts = VocabularyTTSService()
+    requests = record_requests(tts)
+    down, _ = await run_test(
+        tts, frames_to_send=response("<<warm>> Hi [[laugh]] there."), pipeline_params=EXPRESSIVE
+    )
+
+    assert requests == ["<warmly> Hi <laughs> there."]
+    words = [(f.text_type, f.text, f.delivery) for f in down if isinstance(f, TTSTextFrame)]
+    assert words == [
+        (TextType.WORD, "Hi", ["warm"]),
+        (TextType.EXPRESSION_SOUND, "laugh", None),
+        (TextType.WORD, "there.", ["warm"]),
     ]
 
 

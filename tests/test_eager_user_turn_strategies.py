@@ -11,6 +11,7 @@ from pipecat.frames.frames import (
     EagerTranscriptionFrame,
     FunctionCallFromLLM,
     LLMContextFrame,
+    LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -82,6 +83,11 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         # The real context is untouched: the turn hasn't ended.
         assert context.messages == [{"role": "system", "content": "Be brief."}]
 
+        # The turn the inference answers goes ahead of it, as a speculation.
+        turn = next(f for f in down if isinstance(f, LLMContextUserTurnFrame))
+        assert (turn.text, turn.speculation) == ("book a flight", True)
+        assert down.index(turn) < down.index(provisional)
+
     async def test_matching_transcript_ends_the_turn_and_keeps_the_response(self):
         context = LLMContext()
 
@@ -110,6 +116,12 @@ class TestEagerUserTurnStrategies(unittest.IsolatedAsyncioTestCase):
         # The turn end is what releases the held response.
         assert len(stops) == 1
         assert context.messages == [{"role": "user", "content": "book a flight"}]
+        # The turn is broadcast as a speculation, then as written once it ends.
+        turns = [f for f in down if isinstance(f, LLMContextUserTurnFrame)]
+        assert [(t.text, t.speculation) for t in turns] == [
+            ("book a flight", True),
+            ("book a flight", False),
+        ]
 
     async def test_differing_transcript_withdraws_the_speculation(self):
         context = LLMContext()
@@ -582,6 +594,33 @@ class EchoLLM(LLMService):
         await self.push_frame(LLMFullResponseStartFrame())
         await self.push_frame(LLMTextFrame(f"ANSWER[{frame.context.messages[-1]['content']}]"))
         await self.push_frame(LLMFullResponseEndFrame())
+
+
+class TestTheSpeculatedTurnPassesTheLLM(unittest.IsolatedAsyncioTestCase):
+    async def test_the_turn_reaches_processors_after_the_llm_before_its_response(self):
+        down, _ = await run_test(
+            Pipeline([aggregator(LLMContext()), EchoLLM()]),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                eager("book a flight"),
+                SleepFrame(),
+                final("book a flight"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        order = [
+            (type(f).__name__, getattr(f, "speculation", None))
+            for f in down
+            if isinstance(f, (LLMContextUserTurnFrame, LLMFullResponseStartFrame))
+        ]
+        assert order[:2] == [
+            ("LLMContextUserTurnFrame", True),
+            ("LLMFullResponseStartFrame", None),
+        ]
 
 
 class TestAWithdrawnResponseIsNeverSpoken(unittest.IsolatedAsyncioTestCase):

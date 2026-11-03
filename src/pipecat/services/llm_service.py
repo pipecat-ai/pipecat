@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
+    ExpressionMetadataFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -102,6 +103,45 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 # `~pipecat.pipeline.llm_with_backend.LLMWithBackend`: the conversational
 # frontend, or the LLM inside the backend worker.
 LLMWithBackendRole = Literal["frontend", "backend"]
+
+
+class _OutputGate(Protocol):
+    """Decides whether the service's output goes out: each frame it pushes, and its function calls.
+
+    It lets output through or drops it; it never changes it. It sees each
+    frame the service processes, to keep track of what the service is doing.
+    Used by predictive delegation (see
+    `pipecat.pipeline.llm_with_backend.predictive_delegation`) to drop what a
+    frontend's inference outputs once its turn is delegated early.
+    """
+
+    async def process_frame(self, service: LLMService[Any], frame: Frame) -> None:
+        """Called with each frame the service processes.
+
+        Args:
+            service: The service.
+            frame: The frame it is processing.
+        """
+        ...
+
+    def allow_push(self, frame: Frame) -> bool:
+        """Whether the service may push a frame.
+
+        Args:
+            frame: The frame the service is about to push.
+
+        Returns:
+            Whether the service may push it.
+        """
+        ...
+
+    def allow_function_calls(self) -> bool:
+        """Whether the service may run its inference's function calls.
+
+        Returns:
+            Whether the service may run them.
+        """
+        ...
 
 
 # Type alias for a callback function that handles the result of an LLM function call.
@@ -404,6 +444,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
+        # Can drop what this service pushes or the function calls it runs.
+        # See `_OutputGate`.
+        self._output_gate: _OutputGate | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The per-tool cancel tools currently advertised, by name.
         self._cancel_tool_names: set[str] = set()
@@ -423,8 +466,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # downstream performs, from its latest TTSMetadataFrame, and the
         # signals perceived of how the user spoke, from the latest
         # PerceptionMetadataFrame, and the pipeline's policy on which tags to
-        # offer and when.
+        # offer and when. A tagger after the LLM, announced by an
+        # ExpressionMetadataFrame, writes the tags instead, so the LLM
+        # is taught none.
         self._expressive = False
+        self._tagged_after_llm = False
         self._tts_expression: ExpressionCapabilities | None = None
         self._perception: PerceptionCapabilities | None = None
         self._expression_policy: ExpressionPolicy | None = None
@@ -826,6 +872,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Each warning is given once, until what is left out changes, so a switch
         to a service with the same gap doesn't repeat it.
         """
+        if self._tagged_after_llm:
+            return
         warning = expression_policy_warning(self._tts_expression, self._expression_policy)
         if warning and warning != self._policy_warning:
             logger.warning(f"{self}: {warning}")
@@ -876,7 +924,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         parts = [base] if base else []
         parts.extend(self._appended_system_instructions)
         expression = expression_instructions(
-            self._tts_expression, self._expression_policy, perception=self._perception
+            None if self._tagged_after_llm else self._tts_expression,
+            self._expression_policy,
+            perception=self._perception,
         )
         if expression:
             parts.append(expression)
@@ -942,6 +992,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         await super().process_frame(frame, direction)
 
+        if self._output_gate is not None:
+            await self._output_gate.process_frame(self, frame)
+
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
         elif isinstance(frame, UserTurnResponseCancelFrame):
@@ -970,6 +1023,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
             self._perception = frame.perception
             self._compose_system_instruction()
+        elif isinstance(frame, ExpressionMetadataFrame) and self._expressive:
+            self._tagged_after_llm = True
+            self._compose_system_instruction()
 
         if isinstance(frame, LLMContextFrame):
             # Runs before the subclass starts the completion, so the gate knows
@@ -995,15 +1051,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
+        if self._output_gate is not None and not self._output_gate.allow_push(frame):
+            return
+
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
 
         await self._track_pushed_frame(frame)
 
-        # The gate decides synchronously, so its verdict can't be torn by
-        # another task pushing at the same time. Everything it hands back is
-        # pushed past it — routing that back through here would re-gate it.
+        # The speculation gate decides synchronously, so its verdict can't be
+        # torn by another task pushing at the same time. Everything it hands
+        # back is pushed past it — routing that back through here would
+        # re-gate it.
         emitted = self._speculation_gate.process(frame, direction)
         for gated_frame, gated_direction in emitted:
             await super().push_frame(gated_frame, gated_direction)
@@ -1798,6 +1858,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             function_calls: The function calls to execute.
         """
         if len(function_calls) == 0:
+            return
+
+        if self._output_gate is not None and not self._output_gate.allow_function_calls():
             return
 
         if self._speculation_gate.is_speculating:
