@@ -66,11 +66,13 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.context.word_timestamp_tracker import WordTime
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.time import seconds_to_nanoseconds
 
 # ---------------------------------------------------------------------------
 # Test-only frame
@@ -897,7 +899,7 @@ class _MockPerCallWordTimestampHttpTTSService(TTSService):
 
     def __init__(
         self,
-        word_times_per_call: list[list[tuple[str, float]]],
+        word_times_per_call: list[list[WordTime]],
         **kwargs,
     ):
         super().__init__(
@@ -922,6 +924,49 @@ class _MockPerCallWordTimestampHttpTTSService(TTSService):
             num_channels=1,
             context_id=context_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_next_context_words_start_where_previous_words_end():
+    """A context whose audio arrives while the one before is still playing is
+    timed from where that context's words end, not where its last word starts."""
+    tts = _MockPerCallWordTimestampHttpTTSService(
+        word_times_per_call=[
+            [("Hello", 0.0, 0.3), ("there.", 0.3, 0.8)],
+            [("Bye", 0.0, 0.2), ("now.", 0.2, 0.5)],
+        ]
+    )
+    down, _ = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Hello there.", append_to_context=False),
+            TTSSpeakFrame(text="Bye now.", append_to_context=False),
+        ],
+    )
+
+    pts = {f.text: f.pts for f in down if isinstance(f, TTSTextFrame)}
+    assert pts["Bye"] - pts["Hello"] == seconds_to_nanoseconds(0.8)
+
+
+@pytest.mark.asyncio
+async def test_interruption_forgets_where_dropped_words_end():
+    """Words dropped by an interruption don't delay the next context's words."""
+    tts = _MockPerCallWordTimestampHttpTTSService(
+        word_times_per_call=[[("Hello.", 0.0, 30.0)], [("Bye.", 0.0, 0.2)]]
+    )
+    down, _ = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="Hello.", append_to_context=False),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            TTSSpeakFrame(text="Bye.", append_to_context=False),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    pts = {f.text: f.pts for f in down if isinstance(f, TTSTextFrame)}
+    assert pts["Bye."] - pts["Hello."] < seconds_to_nanoseconds(1)
 
 
 # ---------------------------------------------------------------------------

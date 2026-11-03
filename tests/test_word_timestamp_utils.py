@@ -85,6 +85,10 @@ class TestMergePunctTokens(unittest.TestCase):
         input = [(" ", 0.0), (",", 0.1), (".", 0.2)]
         self.assertEqual(merge_punct_tokens(input), [])
 
+    def test_merged_word_ends_where_its_punctuation_ends(self):
+        input = [("hello", 0.0, 0.4), (", ", 0.4, 0.5), ("world", 0.6, 1.0)]
+        self.assertEqual(merge_punct_tokens(input), [("hello,", 0.0, 0.5), ("world", 0.6, 1.0)])
+
 
 if __name__ == "__main__":
     unittest.main()
