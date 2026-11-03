@@ -46,12 +46,11 @@ with patch("importlib.metadata.version", return_value="0.0.0-dev"):
         VADUserStartedSpeakingFrame,
         VADUserStoppedSpeakingFrame,
     )
-    from pipecat.turns.types import ProcessFrameResult
     from pipecat.turns.user_start import BaseUserTurnStartStrategy
     from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
         KrispVivaIPUserTurnStartStrategy,
     )
-    from pipecat.turns.user_stop import ExternalUserTurnCompletionStopStrategy
+    from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
     from pipecat.turns.user_turn_controller import UserTurnController
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
     from pipecat.utils.asyncio.task_manager import TaskManager
@@ -203,7 +202,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             await strategy.process_frame(BotStoppedSpeakingFrame())
             # The user turn controller resets the strategy once the turn starts.
             await strategy.handle_user_turn_started()
-            result = await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(self._audio_frame())
 
             # process() is still called (continuous state), but with speech_active=False
             self.mock_ip_session.process.assert_called()
@@ -254,10 +253,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal fired
                 fired = True
 
-            result = await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
 
             self.assertTrue(fired)
-            self.assertEqual(result, ProcessFrameResult.STOP)
             self.mock_ip_session.process.assert_not_called()
         finally:
             await strategy.cleanup()
@@ -310,8 +308,8 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal fired
                 fired = True
 
-            result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            self.assertFalse(fired)
             await strategy.process_frame(self._audio_frame())
             self.assertFalse(fired)
 
@@ -335,8 +333,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 fired = True
 
             await strategy.process_frame(VADUserStartedSpeakingFrame())
-            result = await strategy.process_frame(BotStoppedSpeakingFrame())
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(BotStoppedSpeakingFrame())
             self.assertFalse(fired)
         finally:
             await strategy.cleanup()
@@ -367,10 +364,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             await strategy.process_frame(self._audio_frame())
             self.assertEqual(count, 0)
 
-            result = await strategy.process_frame(BotStoppedSpeakingFrame())
+            await strategy.process_frame(BotStoppedSpeakingFrame())
 
             self.assertEqual(count, 1)
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
         finally:
             await strategy.cleanup()
 
@@ -381,12 +377,11 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         class RecordingStrategy(BaseUserTurnStartStrategy):
             async def process_frame(self, frame):
                 seen.append(frame)
-                return ProcessFrameResult.CONTINUE
 
         controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
                 start=[self._make_strategy(), RecordingStrategy()],
-                stop=[ExternalUserTurnCompletionStopStrategy()],
+                stop=[ExternalUserTurnStopStrategy()],
             )
         )
         await controller.setup(frame_processor_setup(TaskManager()))
@@ -434,9 +429,16 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_bot_stops_without_user_speech_does_not_trigger(self):
         strategy = self._make_strategy()
         try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
             await strategy.process_frame(BotStartedSpeakingFrame())
-            result = await strategy.process_frame(BotStoppedSpeakingFrame())
-            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+            self.assertFalse(fired)
         finally:
             await strategy.cleanup()
 

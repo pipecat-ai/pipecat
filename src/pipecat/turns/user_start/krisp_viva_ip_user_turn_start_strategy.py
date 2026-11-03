@@ -207,15 +207,16 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_started(frame)
         elif isinstance(frame, InputAudioRawFrame):
-            return await self._handle_audio(frame)
+            await self._handle_audio(frame)
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
             if self._call_new_ip_api:
-                return await self._handle_bot_stopped(frame)
-            return await self._handle_reset(frame)
+                await self._handle_bot_stopped(frame)
+            else:
+                await self._handle_reset(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            return await self._handle_reset(frame)
+            await self._handle_reset(frame)
 
     async def _handle_vad_started(self, frame: VADUserStartedSpeakingFrame):
         """Begin collecting audio for interruption classification.
@@ -225,16 +226,12 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             frame: The VAD speech-start frame.
-
-        Returns:
-            STOP if the bot is silent and a user turn was triggered, otherwise
-            CONTINUE with the decision deferred until enough audio is processed.
         """
         self._speech_active = True
         if self._call_new_ip_api and not self._bot_speaking:
             self._decision_made = True
-            await self.trigger_user_turn_started()
-            return ProcessFrameResult.STOP
+            await self.report_user_turn_started()
+            return
 
         logger.trace("Krisp VIVA IP: VAD speech started, collecting audio for classification")
         self._decision_made = False
@@ -293,9 +290,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 await self.report_user_turn_started()
                 return
 
-        return ProcessFrameResult.CONTINUE
-
-    async def _handle_bot_stopped(self, frame: BotStoppedSpeakingFrame) -> ProcessFrameResult:
+    async def _handle_bot_stopped(self, frame: BotStoppedSpeakingFrame):
         """Handle the bot finishing its speech.
 
         VAD does not fire again for speech already in progress, so a user who is
@@ -304,21 +299,15 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             frame: The bot-stopped frame.
-
-        Returns:
-            Always CONTINUE, so strategies after this one still see the frame and
-            can update their own bot state.
         """
         self._bot_speaking = False
         if self._speech_active and not self._decision_made:
             self._decision_made = True
-            await self.trigger_user_turn_started()
-            return ProcessFrameResult.CONTINUE
-        return await self._handle_reset(frame)
+            await self.report_user_turn_started()
+            return
+        await self._handle_reset(frame)
 
-    async def _handle_reset(
-        self, frame: VADUserStoppedSpeakingFrame | BotStoppedSpeakingFrame
-    ) -> ProcessFrameResult:
+    async def _handle_reset(self, frame: VADUserStoppedSpeakingFrame | BotStoppedSpeakingFrame):
         """Reset state when the candidate interruption window ends.
 
         Args:
