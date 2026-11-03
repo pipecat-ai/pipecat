@@ -32,6 +32,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.context.word_timestamp_tracker import WordTime
 from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -535,25 +536,32 @@ class CartesiaTTSService(WebsocketTTSService):
         return text.strip()
 
     def _normalize_word_timestamps(
-        self, words: list[str], starts: list[float]
-    ) -> list[tuple[str, float]]:
+        self, words: list[str], starts: list[float], ends: list[float] | None = None
+    ) -> list[WordTime]:
         """Normalize raw word timestamps from Cartesia before further processing.
 
         Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
         and drops entries that become empty after stripping. Each entry keeps its own
-        start time, so one entry in is at most one token out, whatever the language.
+        start and end times, so one entry in is at most one token out, whatever the
+        language.
 
         Args:
             words: List of words/characters from Cartesia.
             starts: List of start timestamps for each word/character.
+            ends: List of end timestamps for each word/character, if reported.
 
         Returns:
-            List of (word, start_time) tuples.
+            List of (word, start_time, end_time) tuples, or (word, start_time)
+            tuples without ``ends``.
         """
-        result = []
-        for word, start in zip(words, starts):
+        result: list[WordTime] = []
+        for i, (word, start) in enumerate(zip(words, starts)):
             cleaned = self._strip_cartesia_tags(word)
-            if cleaned:
+            if not cleaned:
+                continue
+            if ends and i < len(ends):
+                result.append((cleaned, start, ends[i]))
+            else:
                 result.append((cleaned, start))
         return result
 
@@ -754,7 +762,9 @@ class CartesiaTTSService(WebsocketTTSService):
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
                 processed_timestamps = self._normalize_word_timestamps(
-                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
+                    msg["word_timestamps"]["words"],
+                    msg["word_timestamps"]["start"],
+                    msg["word_timestamps"].get("end"),
                 )
                 # Cartesia reports Chinese and Japanese one character at a time, with
                 # each punctuation mark as its own token. Merging attaches the mark to

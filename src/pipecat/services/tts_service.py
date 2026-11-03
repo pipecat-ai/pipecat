@@ -64,7 +64,12 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.audio_context_manager import AudioContextFrame, AudioContextManager
-from pipecat.utils.context.word_timestamp_tracker import WordTimestamp, WordTimestampTracker
+from pipecat.utils.context.word_timestamp_tracker import (
+    WordTime,
+    WordTimestamp,
+    WordTimestampTracker,
+    word_time_end,
+)
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.string import resolve_sentence_tokenizer_language
@@ -960,7 +965,7 @@ class TTSService(AIService):
         """Start tracking word timestamps from the current time."""
         for cached in self._word_timestamp_tracker.start(self.get_clock().get_time()):
             await self._add_word_timestamps(
-                [(cached.word, cached.timestamp)],
+                [(cached.word, cached.timestamp, cached.end)],
                 cached.context_id,
                 includes_inter_frame_spaces=cached.includes_inter_frame_spaces,
             )
@@ -971,7 +976,7 @@ class TTSService(AIService):
 
     async def add_word_timestamps(
         self,
-        word_times: list[tuple[str, float]],
+        word_times: Sequence[WordTime],
         context_id: str | None = None,
         includes_inter_frame_spaces: bool | None = None,
         pre_merge_tokens: bool = False,
@@ -984,7 +989,10 @@ class TTSService(AIService):
         via _add_word_timestamps.
 
         Args:
-            word_times: List of (word, timestamp) tuples where timestamp is in seconds.
+            word_times: List of (word, timestamp) tuples where timestamp is in seconds,
+                or (word, timestamp, end) tuples when the provider reports where each
+                word ends. Word ends let the next context's words start where this
+                context's words end, rather than where its last word starts.
             context_id: Unique identifier for the TTS context.
             includes_inter_frame_spaces: When True, each emitted TTSTextFrame carries
                 ``includes_inter_frame_spaces=True`` so downstream consumers do not inject
@@ -1002,14 +1010,15 @@ class TTSService(AIService):
 
         ifs = bool(includes_inter_frame_spaces)
         if context_id and self.audio_context_available(context_id):
-            for word, timestamp in word_times:
+            for word_time in word_times:
                 await self.append_to_audio_context(
                     context_id,
                     WordTimestamp(
-                        word=word,
-                        timestamp=timestamp,
+                        word=word_time[0],
+                        timestamp=word_time[1],
                         context_id=context_id,
                         includes_inter_frame_spaces=ifs,
+                        end=word_time_end(word_time),
                     ),
                 )
         elif context_id is not None:
@@ -1556,10 +1565,12 @@ class TTSService(AIService):
         if interrupt_playing:
             await self._stop_audio_context_task()
             await self.reset_word_timestamps()
-            # Next words follow the uninterruptible words still to play.
+            # Next words follow the uninterruptible words still to play, not the
+            # end of the words just dropped.
             self._word_timestamp_tracker.last_pts = (
                 self._word_timestamp_tracker.uninterruptible_last_pts
             )
+            self._word_timestamp_tracker.last_end_pts = 0
 
         self._audio_context_manager.reset()
         self._aggregated_frame_sequencer.clear(keep_contexts=preserved)
@@ -1647,7 +1658,7 @@ class TTSService(AIService):
         # sorted immediately before its first progress frame (ties broken by push order).
         # Only on the word-timestamp path (push_text_frames services have no progress frames).
         if frame.will_be_spoken and frame.pts is None and not self._push_text_frames:
-            frame.pts = max(self._word_timestamp_tracker.last_pts, self.get_clock().get_time())
+            frame.pts = self._word_timestamp_tracker.baseline(self.get_clock().get_time())
 
     #
     # Text to speech
@@ -2089,7 +2100,7 @@ class TTSService(AIService):
 
     async def _add_word_timestamps(
         self,
-        word_times: list[tuple[str, float]],
+        word_times: Sequence[WordTime],
         context_id: str | None = None,
         includes_inter_frame_spaces: bool = False,
     ):
@@ -2101,10 +2112,11 @@ class TTSService(AIService):
         before that are cached and timed once it is called (i.e. when the first
         audio chunk is received).
         """
-        for word, timestamp in word_times:
+        for word_time in word_times:
+            word, timestamp, end = word_time[0], word_time[1], word_time_end(word_time)
             if not self._word_timestamp_tracker.started:
                 self._word_timestamp_tracker.cache(
-                    WordTimestamp(word, timestamp, context_id, includes_inter_frame_spaces)
+                    WordTimestamp(word, timestamp, context_id, includes_inter_frame_spaces, end)
                 )
                 continue
             # Build TTSTextFrame(s) for this word token, advancing the active
@@ -2117,6 +2129,8 @@ class TTSService(AIService):
                     includes_inter_frame_spaces,
                 )
             )
+            if end is not None:
+                self._word_timestamp_tracker.end_word(end)
 
     async def _push_word_frames(self, frames: list[Frame]):
         """Push frames built by the sequencer, noting the PTS of the last word."""
@@ -2218,7 +2232,7 @@ class TTSService(AIService):
             # Route word timestamps through _add_word_timestamps so they are
             # processed in playback order alongside audio frames.
             await self._add_word_timestamps(
-                [(item.word, item.timestamp)],
+                [(item.word, item.timestamp, item.end)],
                 item.context_id,
                 includes_inter_frame_spaces=item.includes_inter_frame_spaces,
             )
