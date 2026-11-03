@@ -1129,6 +1129,15 @@ class ServiceRegistry:
             ],
         ),
         ServiceDefinition(
+            value="elevenlabs_realtime",
+            label="ElevenLabs Realtime",
+            package="pipecat-ai[elevenlabs]",
+            class_name=["ElevenLabsRealtimeLLMService"],
+            env_prefix="ELEVENLABS",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="gemini_live_realtime",
             label="Gemini Live",
             package="pipecat-ai[google]",
@@ -1294,6 +1303,14 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "elevenlabs_realtime": (
+        "llm = ElevenLabsRealtimeLLMService(\n"
+        '    api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
+        "    settings=ElevenLabsRealtimeLLMService.Settings(\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
         ")"

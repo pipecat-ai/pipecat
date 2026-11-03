@@ -676,6 +676,14 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
+    "elevenlabs_realtime": (
+        "llm = ElevenLabsRealtimeLLMService(\n"
+        '    api_key=os.getenv("ELEVENLABS_API_KEY"),\n'
+        "    settings=ElevenLabsRealtimeLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
     "gemini_live_realtime": (
         "llm = GeminiLiveLLMService(\n"
         '    api_key=os.getenv("GOOGLE_API_KEY"),\n'
