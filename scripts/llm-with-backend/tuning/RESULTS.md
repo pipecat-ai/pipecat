@@ -148,9 +148,52 @@ Claude's second remark is "The fix is patched in and the tests are running now" 
 
 With the turn-completion instructions appended: Gemini answers the up-front decline with `● ∅` in 5 of 5, gpt-4.1 with `∅` in 5 of 5, Claude with `∅` in 4 and `● ∅` in 1, and no bare `○`.
 
+On 2026-11-04 the prompt was split (commit `23d9be92c`): the standing guidance moved into the LLM's system instruction as `WAIT_REASSURANCE_INSTRUCTION`, which `WaitReassurance` announces at start with an `LLMInstructorMetadataFrame` along with the mark, and `WAIT_REASSURANCE_PROMPT`, the message per decision, shrank to the facts of the moment, the ask, and what to weigh in answering it. The words are the 2026-11-04 wording's, moved rather than rewritten: the instruction opens by naming the message by its quoted first words and carries the mark rule, the wording rules and the closing sentence; the message carries the first sentence, "Reassure them, if needed, that the work is still underway", and the sentence on the user's preferences. That last sentence has to stay in the message: with it in the system instruction and the message reduced to the facts and the ask, gpt-4.1 spoke through the up-front decline in 15 of 15 replays; with it in the message, silent in 15 of 15. Replayed the same way as above, with the instruction appended to the system instruction and the short message as the last turn. Five runs each.
+
+| context                                   | expected                                  | anthropic-frontend | google-frontend             | openai-responses-frontend |
+| ----------------------------------------- | ----------------------------------------- | ------------------ | --------------------------- | ------------------------- |
+| as is                                     | a brief remark, no promise                | 5/5                | 5/5                         | 4/5                       |
+| declined up front                         | silent                                    | 5/5                | 5/5                         | 5/5 (15/15)               |
+| declined after one                        | silent                                    | 5/5                | 5/5                         | 5/5                       |
+| detail asked for                          | a remark naming the step                  | 5/5                | 5/5 (names the file)        | 5/5                       |
+| second remark, finding in the notes       | a remark naming the step, not the finding | 0/5                | 5/5                         | 3/5                       |
+| the user declines after a remark          | answered                                  | 5/5                | 5/5                         | 5/5                       |
+| the decline before the remark was spoken  | answered                                  | 0/5                | 5/5                         | 5/5                       |
+| the decline after the reasoning notes     | answered                                  | 5/5                | 5/5                         | 5/5                       |
+| the report after three silences, declined after a remark | relayed                    | 5/5                | 5/5                         | 5/5                       |
+| the report after three silences, declined up front | relayed                          | 5/5                | 5/5                         | 5/5                       |
+| the user asks an aside after a remark     | answered                                  | 5/5                | 5/5                         | 5/5                       |
+
+Gemini answers the decline that lands before its remark was spoken in 5 of 5, where the message-only wording had it silent in 2; Claude still answers it with `∅` in 5 of 5. Claude's second remark is "The fix is in and the tests are running" in 5 of 5, and gpt-4.1's reports the patch as done in 2 ("I've fixed the retry logic and am running the tests"). gpt-4.1 closes one plain remark and three detail remarks with a promise to report back. With the turn-completion instructions appended: every frontend answers the up-front decline silently in 5 of 5, Gemini as `● ∅` or `∅`, gpt-4.1 and Claude as `∅`.
+
+Live, Gemini on the two declined scenarios, ten runs each: `wait_reassurance_declined_upfront` 10/10, `wait_reassurance_declined` 9/10, and the backend's report relayed in 20 of 20 (the message-only wording lost it in 3 of 10). The one miss answers the decline with a `delegate` call and no words, so the scenario's spoken reply never comes.
+
 ## Wait reassurance evals
 
-The five `wait_reassurance*` text scenarios on the three cascade bots, the predictive-delegation bot and the filtering bot (`openai-responses-frontend-filter-incomplete-turns.py`), five runs each (2026-11-04, the prompt as now in `WAIT_REASSURANCE_PROMPT`, the mark read by the LLM service, the waiting timer started over when the last pending function call settles), the judge the release suite's text judge with `allow_continue: false` on the remark expectations, and the declined scenarios asserting the silent decision as `event: llm_marker` with `marker: silent`:
+The five `wait_reassurance*` text scenarios on the three cascade bots, the predictive-delegation bot and the filtering bot (`openai-responses-frontend-filter-incomplete-turns.py`), five runs each (2026-11-04, the second run of the day, with the guidance in the system instruction and the short message per decision, commit `23d9be92c`), the judge the release suite's text judge with `allow_continue: false` on the remark expectations, and the declined scenarios asserting the silent decision as `event: llm_marker` with `marker: silent`:
+
+| scenario                                | anthropic-frontend | google-frontend | openai-responses-frontend | predictive-delegation | filter-incomplete-turns |
+| --------------------------------------- | ------------------ | --------------- | ------------------------- | --------------------- | ----------------------- |
+| `wait_reassurance/text`                 | 5/5                | 5/5             | 4/5                       | 4/5                   | 5/5                     |
+| `wait_reassurance_repeats/text`         | 3/5                | 5/5             | 5/5                       | 5/5                   |                         |
+| `wait_reassurance_detail_requested/text` | 5/5               | 5/5             | 2/5                       | 5/5                   |                         |
+| `wait_reassurance_declined/text`        | 5/5                | 4/5             | 5/5                       | 5/5                   |                         |
+| `wait_reassurance_declined_upfront/text` | 5/5               | 5/5             | 5/5                       | 5/5                   | 5/5                     |
+
+102 of 110. Every decline is silent (the 25 up-front runs and the 20 after a remark, 45 of 45), the predictive-delegation bot included, and the backend's report is relayed in every declined run, 10 of 10 on Gemini, where the message-only prompt below lost 3 of 10. No decision is silent where a remark is expected. The misses:
+
+- Three acknowledgements the judge read as "continue" rather than yes, at 0.53 to 0.73 (gpt-4.1's "I'll run the integration tests for the HTTP client and report back with the results", which passed in the run below), the turn before the one these scenarios are about.
+- Claude's second remark in `wait_reassurance_repeats`, "The fix is in and the tests are running now", in 2 of 5, read as the task reported finished; the replay has it in 5 of 5.
+- gpt-4.1's `detail_requested` remarks on the plain frontend, 2 of 5 rejected: both pass the backend's finding on ("the test is expecting each retry to wait longer, but the code always waits the same amount") and close with a promise to report back, which the standing instruction forbids and the message no longer repeats. The predictive-delegation bot's five pass.
+- One Gemini `wait_reassurance_declined` run whose first remark came 4.5 seconds after the ask (the model's time to first byte) and so landed after the scenario's 20-second window; it was spoken.
+
+Live checks on the way to this run, Gemini on the two declined scenarios, ten each: `wait_reassurance_declined_upfront` 10/10, `wait_reassurance_declined` 9/10 (the miss answers the decline with a `delegate` call and no words), the report relayed in 20 of 20.
+
+The filtering bot passes `frontend_only/text` 5/5, `wait_reassurance/text` 5/5 and `wait_reassurance_declined_upfront/text` 5/5. The release scenario `async_tool_wait_reassurance/text` on `function-calling-openai-async.py`: 5/5. The twelve existing text scenarios on the three cascade bots, one run each, with the processor in the pipeline: 33/36, the three `concurrent_delegations`, which fails on every baseline. Audio, two runs per cascade bot: `wait_reassurance/audio` 6/6, `wait_reassurance_declined_upfront/audio` 6/6.
+
+### The message-only prompt (2026-11-04, earlier)
+
+The same scenarios earlier on 2026-11-04, with the whole prompt in the message per decision (commit `0e09fcd81`), the mark read by the LLM service, and the waiting timer started over when the last pending function call settles:
 
 | scenario                                | anthropic-frontend | google-frontend | openai-responses-frontend | predictive-delegation | filter-incomplete-turns |
 | --------------------------------------- | ------------------ | --------------- | ------------------------- | --------------------- | ----------------------- |
