@@ -1018,11 +1018,7 @@ class InworldTTSService(WebsocketTTSService):
         return self._receive_task is not None and not self._receive_task.done()
 
     async def _connect(self):
-        """Connect to the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Connect to the Inworld WebSocket TTS service."""
         await super()._connect()
 
         await self._connect_websocket()
@@ -1034,11 +1030,7 @@ class InworldTTSService(WebsocketTTSService):
             self._create_keepalive_task(interval=60)
 
     async def _disconnect(self):
-        """Disconnect from the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Disconnect from the Inworld WebSocket TTS service."""
         await super()._disconnect()
 
         if self._receive_task:
@@ -1065,11 +1057,7 @@ class InworldTTSService(WebsocketTTSService):
         return changed
 
     async def _connect_websocket(self):
-        """Connect to the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Connect to the Inworld WebSocket TTS service."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -1089,11 +1077,7 @@ class InworldTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
-        """Disconnect from the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Disconnect from the Inworld WebSocket TTS service."""
         try:
             await self.stop_all_metrics()
 
