@@ -4,19 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests that every LLM turn ends downstream, including the ones that say nothing.
+"""Tests that every LLM reply ends downstream, including the ones that say nothing.
 
-With ``push_text_frames=False`` the ``LLMFullResponseEndFrame`` is not forwarded
-when it arrives: ``process_frame`` holds it in
-``_pending_llm_response_end_frames`` so ``_maybe_reset_word_timestamps`` can
-re-push it, with the PTS of the last word frame, at the end of that turn's audio
-context.
-
-A tool-only or empty LLM response never reaches ``run_tts``, so it opens no audio
-context and that method never runs for it. Without the flush in
-``on_turn_context_completed`` the held frame is dropped, and any processor
-downstream of the TTS — including ``LLMAssistantAggregator``, which uses the end
-frame as a turn boundary — sees the turn start and never sees it end.
+A tool-only or empty reply reaches ``TTSService`` as an ``LLMFullResponseStartFrame``
+and an ``LLMFullResponseEndFrame`` with no text between them, so it opens no audio
+context. Its end frame must still reach downstream processors, such as
+``LLMAssistantAggregator``, which use it as the end of the bot's turn.
 """
 
 from collections.abc import AsyncGenerator
@@ -31,16 +24,19 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSSpeakFrame,
 )
-from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 
 _FAKE_AUDIO = b"\x00\x01" * 320
 _SAMPLE_RATE = 16000
 
+# Long enough for a context to be dequeued and played out, short enough to keep
+# the tests quick: a context is only complete once it times out.
+_STOP_FRAME_TIMEOUT_S = 0.1
+
 
 class MockTTSService(TTSService):
-    """HTTP-style TTS service that speaks whatever text reaches it."""
+    """HTTP-style TTS service without word timestamps that speaks whatever reaches it."""
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -48,88 +44,71 @@ class MockTTSService(TTSService):
             push_stop_frames=True,
             push_text_frames=False,
             sample_rate=_SAMPLE_RATE,
-            settings=TTSSettings(model=None, voice=None, language=None),
+            stop_frame_timeout_s=_STOP_FRAME_TIMEOUT_S,
             **kwargs,
         )
 
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
-        yield TTSAudioRawFrame(_FAKE_AUDIO, _SAMPLE_RATE, 1)
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        yield TTSAudioRawFrame(
+            audio=_FAKE_AUDIO,
+            sample_rate=_SAMPLE_RATE,
+            num_channels=1,
+            context_id=context_id,
+        )
 
 
-async def _run(frames) -> list[Frame]:
-    received_down, _ = await run_test(
-        MockTTSService(), frames_to_send=frames, expected_down_frames=None
-    )
-    return list(received_down)
+async def _run(frames: list[Frame]) -> list[Frame]:
+    down, _ = await run_test(MockTTSService(), frames_to_send=frames, expected_down_frames=None)
+    return list(down)
 
 
-def _end_frames(frames) -> list[LLMFullResponseEndFrame]:
+def _end_frames(frames: list[Frame]) -> list[LLMFullResponseEndFrame]:
     return [f for f in frames if isinstance(f, LLMFullResponseEndFrame)]
 
 
 @pytest.mark.asyncio
-async def test_audible_turn_ends_downstream():
-    """The existing path: the end frame rides out with the turn's audio."""
-    received = await _run(
-        [
-            LLMFullResponseStartFrame(),
-            TextFrame("Hello there."),
-            LLMFullResponseEndFrame(),
-            SleepFrame(1.0),
-        ]
-    )
+async def test_a_reply_without_text_ends_downstream():
+    """The reply's own end frame is pushed, so observers that track frame IDs see it."""
+    end_frame = LLMFullResponseEndFrame()
 
-    assert len(_end_frames(received)) == 1
+    down = await _run([LLMFullResponseStartFrame(), end_frame, SleepFrame(sleep=0.3)])
+
+    assert _end_frames(down) == [end_frame]
 
 
 @pytest.mark.asyncio
-async def test_tool_only_turn_ends_downstream():
-    """A turn with no text opens no audio context, so nothing else re-pushes it."""
-    received = await _run([LLMFullResponseStartFrame(), LLMFullResponseEndFrame(), SleepFrame(1.0)])
-
-    assert len(_end_frames(received)) == 1
-
-
-@pytest.mark.asyncio
-async def test_a_silent_turn_between_audible_ones_ends_exactly_once():
-    """Each turn is delivered once, and the silent one does not borrow its
-    neighbour's audio context to get out."""
-    received = await _run(
+async def test_a_reply_without_text_between_spoken_ones_ends_once():
+    """Each reply ends exactly once, whether or not it was spoken."""
+    down = await _run(
         [
             LLMFullResponseStartFrame(),
             TextFrame("First."),
             LLMFullResponseEndFrame(),
-            SleepFrame(0.5),
+            SleepFrame(sleep=0.3),
             LLMFullResponseStartFrame(),
             LLMFullResponseEndFrame(),
-            SleepFrame(0.5),
+            SleepFrame(sleep=0.3),
             LLMFullResponseStartFrame(),
             TextFrame("Third."),
             LLMFullResponseEndFrame(),
-            SleepFrame(1.0),
+            SleepFrame(sleep=0.3),
         ]
     )
 
-    assert len(_end_frames(received)) == 3
+    boundaries = (LLMFullResponseStartFrame, LLMFullResponseEndFrame)
+    assert [type(f) for f in down if isinstance(f, boundaries)] == list(boundaries) * 3
 
 
 @pytest.mark.asyncio
-async def test_a_tts_speak_frame_does_not_emit_a_turn_end():
-    """TTSSpeakFrame completes a turn context too, under a fresh context ID that
-    is never a key in the held-frame dict. It must not synthesise a turn end."""
-    received = await _run([TTSSpeakFrame("Standalone."), SleepFrame(1.0)])
+async def test_a_speak_frame_does_not_end_a_reply():
+    """A TTSSpeakFrame outside an LLM reply pushes no LLMFullResponseEndFrame."""
+    down = await _run([TTSSpeakFrame("Standalone."), SleepFrame(sleep=0.3)])
 
-    assert _end_frames(received) == []
+    assert _end_frames(down) == []
 
 
-@pytest.mark.asyncio
-async def test_the_original_end_frame_is_delivered_not_a_replacement():
-    """Observers dedup by frame id, which is why the held frame is re-pushed
-    rather than a fresh one being emitted."""
-    end_frame = LLMFullResponseEndFrame()
-
-    received = await _run([LLMFullResponseStartFrame(), end_frame, SleepFrame(1.0)])
-
-    delivered = _end_frames(received)
-    assert len(delivered) == 1
-    assert delivered[0].id == end_frame.id
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
