@@ -12,7 +12,6 @@ from typing import cast
 
 from loguru import logger
 
-from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -20,7 +19,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InputDTMFFrame,
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -41,8 +39,7 @@ class VobizFrameSerializer(FrameSerializer):
     """Serializer for Vobiz Audio Streaming WebSocket protocol.
 
     This serializer handles converting between Pipecat frames and Vobiz's WebSocket
-    audio streaming protocol. It supports audio conversion, DTMF events, and automatic
-    call termination.
+    audio streaming protocol. It supports audio conversion and automatic call termination.
 
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Vobiz call when an EndFrame or CancelFrame is processed, but requires Vobiz
@@ -284,15 +281,5 @@ class VobizFrameSerializer(FrameSerializer):
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )
             return audio_frame
-        elif message.get("event") == "dtmf":
-            dtmf_data = message.get("dtmf", {})
-            digit = dtmf_data.get("digit")
-            if digit:
-                try:
-                    return InputDTMFFrame(KeypadEntry(digit))
-                except ValueError:
-                    # Handle case where string doesn't match any enum value
-                    logger.warning(f"Invalid DTMF digit received: {digit}")
-                    return None
         else:
             return None

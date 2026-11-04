@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     InputAudioRawFrame,
-    InputDTMFFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -97,19 +96,11 @@ class TestVobizDeserialize(_SerializerTestCase):
         self.assertEqual(frame.sample_rate, SAMPLE_RATE)
         self.assertEqual(len(frame.audio), 320)
 
-    async def test_dtmf_becomes_input_dtmf(self):
-        frame = await self.serializer.deserialize(
-            json.dumps({"event": "dtmf", "dtmf": {"digit": "5"}})
-        )
-        self.assertIsInstance(frame, InputDTMFFrame)
-        self.assertEqual(frame.button.value, "5")
-
     async def test_invalid_messages_are_ignored_not_raised(self):
         for message in (
             "not json",
             json.dumps({"foo": "bar"}),
             json.dumps({"event": "media", "media": {}}),
-            json.dumps({"event": "dtmf", "dtmf": {"digit": "x"}}),
             json.dumps({"event": "clearedAudio", "streamId": STREAM_ID}),
             json.dumps({"event": "playedStream", "name": "response-1"}),
         ):
