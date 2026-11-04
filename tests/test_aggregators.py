@@ -8,6 +8,7 @@ import unittest
 
 from pipecat.frames.frames import (
     ImageRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
@@ -16,7 +17,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 
 
 class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +40,22 @@ class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         assert received_down[-3].text == "Hello, world. "
         assert received_down[-2].text == "How are you? "
         assert received_down[-1].text == "I am fine! "
+
+    async def test_interruption_drops_partial_sentence(self):
+        aggregator = SentenceAggregator()
+
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=[
+                TextFrame(text="Let me check the"),
+                SleepFrame(sleep=0.1),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.1),
+                TextFrame(text="Okay."),
+            ],
+            expected_down_frames=[InterruptionFrame, TextFrame],
+        )
+        assert received_down[-1].text == "Okay."
 
 
 class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
