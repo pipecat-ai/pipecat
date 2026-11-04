@@ -624,7 +624,7 @@ class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
         report = pushed[1]
         self.assertEqual(report.marker, LLM_SILENT_MARK)
         self.assertEqual(report.kind, "silent")
-        self.assertEqual(report.raw, f" {LLM_SILENT_MARK} and more")
+        self.assertEqual(report.raw, f" {LLM_SILENT_MARK}")
         self.assertEqual(report.markers, [LLM_SILENT_MARK])
 
     async def test_any_other_reply_goes_out_as_written(self):
@@ -649,7 +649,20 @@ class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self._texts(pushed), [])
         kinds = [f.kind for f in pushed if isinstance(f, LLMMarkerResponseFrame)]
-        self.assertIn("silent", kinds)
+        self.assertEqual(kinds, ["silent", "complete"])
+
+    async def test_a_bare_mark_under_the_filter_is_read_as_silent_when_the_reply_ends(self):
+        service = MockLLMService()
+        service._filter_incomplete_user_turns = True
+        pushed, recording = self._recording(service)
+        with recording:
+            await service.push_frame(LLMFullResponseStartFrame())
+            await service._push_turn_text(LLM_SILENT_MARK)
+            await service.push_frame(LLMFullResponseEndFrame())
+
+        self.assertEqual(self._texts(pushed), [])
+        kinds = [f.kind for f in pushed if isinstance(f, LLMMarkerResponseFrame)]
+        self.assertEqual(kinds, ["silent", None])
 
     async def test_the_mark_is_ordinary_text_when_no_mark_is_read(self):
         pushed = await self._reply(MockLLMService(read_silent_mark=None), LLM_SILENT_MARK)

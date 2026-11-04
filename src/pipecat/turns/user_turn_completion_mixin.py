@@ -356,11 +356,15 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             self._response_raw = ""
             self._response_marker = None
         elif isinstance(frame, LLMFullResponseEndFrame):
+            # Text still buffered, with no marker to release it, goes out
+            # first: the service reads a reply's opening from what the filter
+            # pushes, and has to read all of this response before it is
+            # reported.
+            await self._turn_reset()
             # A response that ends without a marker or a tool call carries no judgment.
             if self._filter_incomplete_user_turns:
                 await self._report_turn_completion(None, None)
             await self._report_response()
-            await self._turn_reset()
 
     async def _push_marker(self, marker: str, kind: str):
         """Report the marker read from the response, and push it for the context."""

@@ -1087,20 +1087,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 self._reply_decided = False
                 self._reply_silent = False
             elif isinstance(frame, LLMTextFrame) and direction == FrameDirection.DOWNSTREAM:
-                opened = self._read_reply_opening(frame)
+                opened = await self._read_reply_opening(frame)
                 if opened is None:
                     return
                 frame = opened
-            elif isinstance(frame, LLMFullResponseEndFrame) and self._reply_silent:
-                await self.push_frame(
-                    LLMMarkerResponseFrame(
-                        raw=self._reply_opening,
-                        marker=self._silent_mark,
-                        kind="silent",
-                        markers=[self._silent_mark],
-                    ),
-                    direction,
-                )
 
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
@@ -1116,17 +1106,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for gated_frame, gated_direction in emitted:
             await super().push_frame(gated_frame, gated_direction)
 
-    def _read_reply_opening(self, frame: LLMTextFrame) -> LLMTextFrame | None:
+    async def _read_reply_opening(self, frame: LLMTextFrame) -> LLMTextFrame | None:
         """Hold a reply's opening until its first character shows whether the reply is the silent mark.
 
         Returns the frame to push, with any held whitespace folded in, or
         ``None`` while the opening is still held or the reply is being dropped.
-        Runs after the turn-completion filter, so a reply of a turn marker
-        followed by the mark is read as silent too.
+        A silent reply is reported as soon as the mark is read, and the rest
+        of it is dropped unread. Runs after the turn-completion filter, so a
+        reply of a turn marker followed by the mark is read as silent too, and
+        reported before the filter reports the response.
         """
         assert self._silent_mark is not None
         if self._reply_silent:
-            self._reply_opening += frame.text
             return None
         if self._reply_decided:
             return frame
@@ -1139,6 +1130,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             logger.debug(f"{self}: the model chose to say nothing")
             self._reply_decided = True
             self._reply_silent = True
+            await self.push_frame(
+                LLMMarkerResponseFrame(
+                    raw=self._reply_opening,
+                    marker=self._silent_mark,
+                    kind="silent",
+                    markers=[self._silent_mark],
+                )
+            )
             return None
         if self._silent_mark.startswith(text):
             # The mark so far, with more of it possibly to come.
