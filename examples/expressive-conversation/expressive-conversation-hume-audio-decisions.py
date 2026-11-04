@@ -28,13 +28,18 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_turn_strategies import (
+    FilterIncompleteUserTurnStrategies,
+    MergeMode,
+    UserTurnStrategiesParams,
+)
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -68,7 +73,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = DeepgramFluxSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     # Hume hears how each turn sounded: the user's tone of voice and whether
     # they sound unsure. The LLM reads it at the head of the user's message.
@@ -153,15 +158,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            model="gpt-5.6-luna", system_instruction=system_instruction
-        ),
+        settings=OpenAILLMService.Settings(model="gpt-4.1", system_instruction=system_instruction),
     )
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            # The reader sends Hume a clip each time the VAD hears a pause.
+            vad_analyzer=SileroVADAnalyzer(),
+            # Flux decides when the user stopped, and the LLM also judges
+            # whether they finished, waiting for more when they trail off.
+            user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+            user_turn_strategies_params=UserTurnStrategiesParams(stop_merge_mode=MergeMode.EXTEND),
+        ),
     )
 
     pipeline = Pipeline(
