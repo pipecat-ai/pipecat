@@ -428,6 +428,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             self._call_items = {}
             self._pending_response_create = None
             self._terminal_message = None
+            self._settings_rejected = False
             self._websocket = _ZoomAIRealtimeWebSocket(
                 websocket, on_error=self._handle_server_error
             )
