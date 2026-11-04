@@ -47,10 +47,12 @@ WAIT_REASSURANCE_PROMPT = (
     "sound natural and reassuring in the conversation. Answer this message with exactly {mark} to "
     "respond with silence (after any marker your instructions require). Otherwise, say one short "
     "sentence, in your own voice and with wording that varies from previous reassurances about the "
-    "same work. Keep it general, naming at most the kind of step under way, unless the user asked "
-    "for detail. Never report a result or a finding, never say the work is done, and ask no "
-    "questions and make no offers or promises, not even to keep the user posted. {mark} is only "
-    "ever the answer to this message: whatever the user says next, answer them."
+    "same work, that makes clear the work has been going on since the user asked and is "
+    'continuing: a "still", not a start. Keep it general, naming at most the kind of step under '
+    "way, unless the user asked for detail. Never report a result or a finding, never say the work "
+    "is done, and ask no questions and make no offers or promises, not even to keep the user "
+    "posted. {mark} is only ever the answer to this message: whatever the user says next, answer "
+    "them."
 )
 
 
