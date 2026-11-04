@@ -1307,6 +1307,14 @@ MANUAL_SERVICE_CONFIGS = {
         "    ),\n"
         ")"
     ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
     "gemini_live_realtime": (
         "llm = GeminiLiveLLMService(\n"
         '    api_key=os.getenv("GOOGLE_API_KEY"),\n'
