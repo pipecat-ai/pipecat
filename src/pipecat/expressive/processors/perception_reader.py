@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMContextAssistantTurnFrame,
     MetricsFrame,
+    PerceptionFrame,
     PerceptionMetadataFrame,
     StartFrame,
     TranscriptionFrame,
@@ -67,6 +68,10 @@ class PerceptionReader(FrameProcessor):
     answers are set as its ``perception``: one signal per question, named
     after it. The signals are declared at start in a
     :class:`~pipecat.frames.frames.PerceptionMetadataFrame`.
+
+    Every reading is also broadcast as soon as it's made, in a
+    :class:`~pipecat.frames.frames.PerceptionFrame`, so processors and clients
+    can act on it before a transcription carries it.
 
     The transcription waits for its reading up to ``timeout`` seconds, and
     passes unread when the reading is late or the classifier fails. A
@@ -209,6 +214,7 @@ class PerceptionReader(FrameProcessor):
                 self._timeout,
             )
             signals = [self._signal(name, results[name], questions[name]) for name in questions]
+            await self.broadcast_frame(PerceptionFrame, perception=signals)
         except TimeoutError:
             logger.warning(f"{self}: no reading after {self._timeout}s, the turn passes unread")
         except ClassifierError as e:
