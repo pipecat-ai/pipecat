@@ -13,6 +13,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.expressive.perception import format_perception
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+from pipecat.expressive.processors.tone_reader import PipecatToneReader
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -22,7 +23,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
-from pipecat.processors.tone.reader import PipecatToneReader
 from pipecat.processors.tone.tagger import PipecatToneTagger
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport

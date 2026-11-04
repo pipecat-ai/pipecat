@@ -26,6 +26,24 @@ def _shared(key: Hashable, load: Callable[[], M]) -> M:
         return _models[key]
 
 
+async def load_shared_model(key: Hashable, load: Callable[[], M]) -> M:
+    """Load a model off the event loop, or share the one already loaded for ``key``.
+
+    A model that can't be loaded isn't kept, so the next call tries again.
+
+    Args:
+        key: What identifies the model and its settings.
+        load: Loads the model, downloading its files the first time.
+
+    Returns:
+        The model.
+
+    Raises:
+        Exception: Whatever ``load`` raised.
+    """
+    return await asyncio.to_thread(_shared, key, load)
+
+
 async def load_model(processor: FrameProcessor, key: Hashable, load: Callable[[], M]) -> M | None:
     """Load a model off the event loop, or share the one already loaded for ``key``.
 
@@ -41,7 +59,7 @@ async def load_model(processor: FrameProcessor, key: Hashable, load: Callable[[]
         The model, or None when it can't be loaded.
     """
     try:
-        return await asyncio.to_thread(_shared, key, load)
+        return await load_shared_model(key, load)
     except Exception as e:
         await processor.push_error(
             f"{processor}: couldn't load its model: {e}", e, force_treat_as_permanent=True

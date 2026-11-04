@@ -1609,6 +1609,39 @@
       "location": "pipecat/processors/frameworks/rtvi/processor.py"
     },
     {
+      "subject": "pipecat.processors.tone.reader",
+      "module": "pipecat.processors.tone.reader",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_reader",
+      "message": "Moved to :mod:`pipecat.expressive.processors.tone_reader`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/reader/__init__.py"
+    },
+    {
+      "subject": "pipecat.processors.tone.reader.model",
+      "module": "pipecat.processors.tone.reader.model",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.classifiers.tone.model",
+      "message": "Moved to :mod:`pipecat.classifiers.tone.model`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/reader/model.py"
+    },
+    {
+      "subject": "pipecat.processors.tone.reader.processor",
+      "module": "pipecat.processors.tone.reader.processor",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_reader",
+      "message": "Moved to :mod:`pipecat.expressive.processors.tone_reader`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/reader/processor.py"
+    },
+    {
       "subject": "EvalRunnerArguments",
       "module": "pipecat.runner.types",
       "kind": "class",
