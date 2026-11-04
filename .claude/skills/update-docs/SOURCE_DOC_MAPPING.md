@@ -29,6 +29,7 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `services/google/vertex/llm.py`             | `api-reference/server/services/llm/google-vertex.mdx`                                              |
 | `services/google/llm.py`                    | `api-reference/server/services/llm/google.mdx` (shared base; also affects `llm/google-vertex.mdx`) |
+| `services/google/interactions/llm.py`       | `api-reference/server/services/llm/google-interactions.mdx`                                        |
 | `services/google/gemini_live/**`            | `api-reference/server/services/s2s/gemini-live.mdx`                                                |
 | `services/google/gemini_live/vertex/llm.py` | `api-reference/server/services/s2s/gemini-live-vertex.mdx`                                         |
 | `services/aws/nova_sonic/**`                | `api-reference/server/services/s2s/aws.mdx`                                                        |

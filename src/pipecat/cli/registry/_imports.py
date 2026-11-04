@@ -99,6 +99,9 @@ IMPORTS = {
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],
     "fireworks_llm": ["from pipecat.services.fireworks.llm import FireworksLLMService"],
     "google_gemini_llm": ["from pipecat.services.google.llm import GoogleLLMService"],
+    "google_interactions_llm": [
+        "from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService"
+    ],
     "google_vertex_llm": ["from pipecat.services.google.vertex.llm import GoogleVertexLLMService"],
     "xai_llm": ["from pipecat.services.xai.llm import GrokLLMService"],
     "groq_llm": ["from pipecat.services.groq.llm import GroqLLMService"],

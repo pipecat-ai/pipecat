@@ -86,6 +86,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-google-interactions.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-gradium.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
@@ -220,6 +222,10 @@ suite:
     scenarios:
       - scripted/weather_function_call
       - scripted/weather_and_restaurant
+  - bot: function-calling/function-calling-google-interactions.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-google-vertex.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-grok.py
@@ -279,6 +285,12 @@ suite:
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
+  - bot: function-calling/function-calling-google-interactions-async.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/async_tool
+      - scripted/async_tool_cancellation
+      - scripted/function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
       - scripted/weather_function_call
@@ -310,6 +322,8 @@ suite:
     scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-google-video.py
     scenarios: [scripted/describe_image]
+  - bot: function-calling/function-calling-google-interactions-video.py
+    scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-moondream-video.py
     scenarios: [scripted/describe_image]
 
@@ -320,6 +334,15 @@ suite:
   #
   - bot: mcp/mcp-stdio.py
     scenarios: [scripted/mcp_memory]
+
+  #
+  # Thinking: a thinking model makes two tool calls in sequence, the second
+  # depending on the first's result, then answers a follow-up about them.
+  #
+  - bot: thinking/thinking-functions-google.py
+    scenarios: [scripted/flight_taxi]
+  - bot: thinking/thinking-functions-google-interactions.py
+    scenarios: [scripted/flight_taxi]
 
   #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
@@ -347,6 +370,10 @@ suite:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-gemini-flash.py
+    runner_body:
+      path: scenarios/vision-cat.yaml
+    scenarios: [scripted/vision_describe]
+  - bot: vision/vision-google-interactions.py
     runner_body:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
