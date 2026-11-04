@@ -6065,6 +6065,7 @@ heygen = [
     { name = "livekit" },
 ]
 hume = [
+    { name = "httpx", extra = ["http2"] },
     { name = "hume" },
 ]
 jev = [
@@ -6268,6 +6269,7 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.68.0,<3" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.23.0,<2" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'cloudflare'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'hume'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'openai'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'typesafe'", specifier = ">=0.27,<1" },
     { name = "huggingface-hub", marker = "extra == 'tone'", specifier = ">=0.30,<2" },
