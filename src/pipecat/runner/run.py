@@ -997,12 +997,6 @@ def _setup_unified_start_route(
             # registers at once and waits for its call.
             from pipecat.runner.sip import cleanup, configure, sip_runner_arguments
 
-            async def _delete_provisioned_client():
-                if not config.provisioned:
-                    return
-                async with aiohttp.ClientSession() as cleanup_session:
-                    await cleanup(cleanup_session, config)
-
             body = request_data.get("body", {})
             session_id = str(uuid.uuid4())
             async with aiohttp.ClientSession() as session:
@@ -1010,6 +1004,13 @@ def _setup_unified_start_route(
                     config = await configure(session, body=body)
                 except Exception as e:
                     raise HTTPException(status_code=400, detail=f"SIP account: {e}")
+
+            async def _delete_provisioned_client():
+                if not config.provisioned:
+                    return
+                async with aiohttp.ClientSession() as cleanup_session:
+                    await cleanup(cleanup_session, config)
+
             base = RunnerArguments(
                 body=body, session_id=session_id, file_storage=RUNNER_FILE_STORAGE
             )
@@ -1631,11 +1632,6 @@ def _setup_sip_routes(app: FastAPI, args: argparse.Namespace):
     if not _transport_routes_enabled("sip"):
         return
 
-    # Calls a bot was already started for, by SIP Call-ID: a re-sent
-    # notification is acked without starting a twin bot whose REGISTER
-    # would replace the first bot's binding at the registrar.
-    started_calls: set[str] = set()
-
     @app.post("/daily-sip-trunk-webhook")
     async def handle_sip_trunk_webhook(request: Request):
         try:
@@ -1667,10 +1663,6 @@ def _setup_sip_routes(app: FastAPI, args: argparse.Namespace):
             )
 
         session_id = call["sipCallIdHeader"]
-        if session_id in started_calls:
-            logger.info(f"SIP-trunk call {session_id}: bot already started, acking duplicate")
-            return {"status": "OK", "sessionId": session_id}
-        started_calls.add(session_id)
         signed = "x-siptrunk-signature" in request.headers
         logger.info(
             f"SIP-trunk call {session_id} from {call.get('From')} to {call.get('To')}"
