@@ -4,35 +4,49 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextAssistantTurnFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    TTSStartedFrame,
+    TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import FramePushed
+from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
+    DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
     FINALIZED_TOKEN,
     SonioxSTTService,
+    _AgentTextObserver,
     _language_from_tokens,
     language_to_soniox_language,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import TransportParams
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import time_now_iso8601
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -818,12 +832,23 @@ async def test_connect_config_requests_agent_text_input_by_default(monkeypatch):
     assert config["enable_agent_text_input"] is True
 
 
+@pytest.mark.asyncio
+async def test_connect_config_requests_agent_text_input_for_echo_cancellation(monkeypatch):
+    settings = SonioxSTTService.Settings(
+        enable_agent_text_input=False, enable_echo_cancellation=True
+    )
+    config = await _connect_config(monkeypatch, settings=settings)
+
+    assert config["enable_agent_text_input"] is True
+
+
 @pytest.mark.parametrize(
     "settings",
     [
         SonioxSTTService.Settings(enable_agent_text_input=False),
         SonioxSTTService.Settings(model="stt-rt-v5"),
         SonioxSTTService.Settings(model="stt-rt-v5", enable_agent_text_input=True),
+        SonioxSTTService.Settings(model="stt-rt-v5", enable_echo_cancellation=True),
     ],
 )
 @pytest.mark.asyncio
@@ -833,6 +858,43 @@ async def test_connect_config_leaves_out_agent_text_input_when_disabled_or_unsup
     config = await _connect_config(monkeypatch, settings=settings)
 
     assert "enable_agent_text_input" not in config
+
+
+@pytest.mark.parametrize(
+    ("streams_while_it_plays", "sent"),
+    [
+        (False, [{"type": "agent_text", "text": "Lekadol is in stock.", "end_of_segment": True}]),
+        (True, []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_assistant_turn_is_sent_as_agent_text_unless_it_was_sent_while_playing(
+    streams_while_it_plays, sent
+):
+    service, websocket = _connected_service()
+    service._settings.enable_agent_text_input = True
+    service._settings.enable_echo_cancellation = streams_while_it_plays
+    if streams_while_it_plays:
+        # Set up at start, and what makes the reply already sent.
+        service._agent_text_observer = _AgentTextObserver(service)
+
+    await service._process_assistant_turn("Lekadol is in stock.")
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == sent
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_is_sent_when_echo_cancellation_arrived_too_late_to_stream_it():
+    service, websocket = _connected_service()
+    service._settings.enable_agent_text_input = True
+    # A settings update turned it on after the service started, so there is no
+    # observer to send the words while they play.
+    service._settings.enable_echo_cancellation = True
+
+    await service._process_assistant_turn("Lekadol is in stock.")
+
+    # Sending it once, late, beats sending nothing at all.
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Lekadol is in stock."]
 
 
 @pytest.mark.asyncio
@@ -866,6 +928,327 @@ async def test_assistant_turn_is_not_sent_when_disabled_or_unsupported(settings)
     assert _sent_payloads(websocket) == []
 
 
+def _agent_text_service(lead_ms=0):
+    service, websocket = _connected_service()
+    service._settings.enable_echo_cancellation = True
+    service._settings.agent_text_lead_ms = lead_ms
+    # The observer schedules each word on the service's task manager.
+    service._task_manager = service._setup.task_manager
+    return _AgentTextObserver(service), websocket
+
+
+def _pushed(frame, *, source=None, direction=FrameDirection.DOWNSTREAM, first_push=True):
+    return FramePushed(
+        # The TTS service, unless a test says otherwise.
+        source=source or IdentityFilter(),
+        destination=IdentityFilter(),
+        frame=frame,
+        direction=direction,
+        timestamp=0,
+        first_push=first_push,
+    )
+
+
+def _word(text, pts=1, text_type=TextType.WORD, interruptible=True):
+    # A pts of 0 is how the rest of the framework says "untimed", so a timed
+    # word in a test needs a real one.
+    frame = TTSTextFrame(text, text_type=text_type)
+    frame.pts = pts
+    frame.interruptible = interruptible
+    return frame
+
+
+def _transport():
+    return BaseOutputTransport(TransportParams())
+
+
+# Captured before any test patches `asyncio.wait_for` to watch the observer wait.
+_real_wait_for = asyncio.wait_for
+
+
+async def _drain(observer):
+    """Let the words the observer queued reach the socket.
+
+    Bounded: a sender that died leaves the queue unjoinable, and waiting on it
+    for ever would hang the suite rather than fail it.
+    """
+    await _real_wait_for(observer._words.join(), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_agent_text_sends_the_bots_words_and_closes_the_segment_when_it_stops():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await observer.on_push_frame(_pushed(_word("there.")))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
+    await observer.on_push_frame(_pushed(_word("Again")))
+    await _drain(observer)
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Hello", "end_of_segment": False},
+        {"type": "agent_text", "text": " there.", "end_of_segment": False},
+        {"type": "agent_text", "text": "", "end_of_segment": True},
+        {"type": "agent_text", "text": "Again", "end_of_segment": False},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_is_sent_ahead_of_the_word_being_played(monkeypatch):
+    observer, websocket = _agent_text_service(lead_ms=700)
+    waited = []
+
+    async def fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        waited.append(timeout)
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    await observer.on_push_frame(_pushed(_word("Hello", pts=1_000_000_000)))
+    await _drain(observer)
+
+    assert waited == [pytest.approx(0.3)]
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Hello"]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_drops_the_words_the_caller_never_heard(monkeypatch):
+    observer, websocket = _agent_text_service()
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(_word("there.", pts=10_000_000_000)))
+    await observer.on_push_frame(_pushed(InterruptionFrame()))
+    await _drain(observer)
+
+    # The caller heard "Hello" and cut in, so the turn closes there: the word
+    # still waiting is dropped, because the transport drops its audio too.
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Hello", "end_of_segment": False},
+        {"type": "agent_text", "text": "", "end_of_segment": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_still_sends_speech_the_interruption_cannot_stop(monkeypatch):
+    observer, websocket = _agent_text_service()
+    # Uninterruptible speech waits in `asyncio.sleep`, which the far-future pts
+    # would make a real wait; the interruption has to end it instead.
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    await observer.on_push_frame(
+        _pushed(_word("Transferring you now.", pts=10_000_000_000, interruptible=False))
+    )
+    await observer.on_push_frame(_pushed(InterruptionFrame()))
+    await _drain(observer)
+
+    # Uninterruptible audio keeps playing, so the caller hears these words.
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Transferring you now."]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_closes_the_turn_on_an_interruption():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(InterruptionFrame()))
+    # The transport pushes no BotStoppedSpeakingFrame when it had not started,
+    # and closing twice would open a segment nothing ever closes.
+    await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Hello", "end_of_segment": False},
+        {"type": "agent_text", "text": "", "end_of_segment": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_leaves_out_what_the_bot_does_not_say_as_words():
+    observer, websocket = _agent_text_service()
+
+    # Interleaved with the words, as the LLM writes them, and sharing the pts of
+    # the word beside them: the words still arrive, in order and spaced.
+    await observer.on_push_frame(_pushed(_word("Hello", pts=1)))
+    await observer.on_push_frame(
+        _pushed(_word("laugh", pts=1, text_type=TextType.EXPRESSION_SOUND))
+    )
+    await observer.on_push_frame(_pushed(_word("400", pts=2, text_type=TextType.EXPRESSION_PAUSE)))
+    await observer.on_push_frame(_pushed(_word("there.", pts=2)))
+    await _drain(observer)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Hello", " there."]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_scheduled_words_are_dropped_at_teardown():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello", pts=10_000_000_000)))
+    assert observer._sender
+    await observer.cancel_scheduled()
+
+    assert not observer._sender
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_agent_text_starts_a_new_sender_when_the_old_one_is_over():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await _drain(observer)
+    observer._sender.cancel()
+    await asyncio.sleep(0.01)
+    assert observer._sender.done()
+
+    await observer.on_push_frame(_pushed(_word("there.")))
+    # Bounded: with no live sender the word is never taken off the queue, and
+    # an unbounded join would hang the suite rather than fail it.
+    await asyncio.wait_for(_drain(observer), timeout=1)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Hello", " there."]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_drops_the_words_timed_against_the_previous_connection():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello", pts=10_000_000_000)))
+    observer.reset()
+    await _drain(observer)
+
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_agent_text_drops_even_uninterruptible_words_on_a_reconnect(monkeypatch):
+    observer, websocket = _agent_text_service()
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    # Uninterruptible speech ignores the turn ending, so only dropping the queue
+    # keeps it off a connection that never carried the audio it was timed for.
+    await observer.on_push_frame(
+        _pushed(_word("Transferring you now.", pts=10_000_000_000, interruptible=False))
+    )
+    observer.reset()
+    await _drain(observer)
+
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_agent_text_sends_a_word_once_however_many_processors_pass_it_on():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await observer.on_push_frame(_pushed(_word("Hello"), first_push=False))
+    await _drain(observer)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Hello"]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_ignores_frames_going_upstream():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello"), direction=FrameDirection.UPSTREAM))
+
+    assert not observer._sender
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_agent_text_still_sends_text_from_a_tts_without_word_timestamps():
+    observer, websocket = _agent_text_service()
+
+    sentence = _word("A whole sentence.", pts=None)
+    # Sent as the TTS service pushes it, not again as it passes the transport.
+    await observer.on_push_frame(_pushed(sentence))
+    assert len(_sent_payloads(websocket)) == 1
+    await observer.on_push_frame(_pushed(BotStartedSpeakingFrame(), source=_transport()))
+    await observer.on_push_frame(_pushed(sentence, source=_transport(), first_push=False))
+    await observer.on_push_frame(_pushed(_word("And another.", pts=None)))
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == [
+        "A whole sentence.",
+        " And another.",
+    ]
+    assert observer._warned_untimed_text
+
+
+@pytest.mark.asyncio
+async def test_agent_text_closes_the_segment_of_text_the_transport_played_no_audio_for():
+    observer, websocket = _agent_text_service()
+
+    # The TTS service failed, so its text reaches the transport with no audio
+    # and the bot never starts speaking.
+    sentence = _word("A whole sentence.", pts=None)
+    await observer.on_push_frame(_pushed(sentence))
+    await observer.on_push_frame(_pushed(sentence, source=_transport(), first_push=False))
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "A whole sentence.", "end_of_segment": False},
+        {"type": "agent_text", "text": "", "end_of_segment": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_keeps_the_segment_open_when_a_timed_word_beats_the_bot_speaking():
+    observer, websocket = _agent_text_service()
+
+    # The transport's clock releases the first word before its audio task says
+    # the bot started speaking.
+    word = _word("Hello")
+    await observer.on_push_frame(_pushed(word))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(word, source=_transport(), first_push=False))
+    await observer.on_push_frame(_pushed(BotStartedSpeakingFrame(), source=_transport()))
+    await observer.on_push_frame(_pushed(_word("there.")))
+    await _drain(observer)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Hello", " there."]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_drops_words_of_the_cut_off_reply_pushed_after_the_interruption():
+    observer, websocket = _agent_text_service()
+
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(InterruptionFrame()))
+    # The TTS service had not dropped the reply yet.
+    await observer.on_push_frame(_pushed(_word("there.")))
+    await observer.on_push_frame(_pushed(_word("Still on.", interruptible=False)))
+    await _drain(observer)
+    await observer.on_push_frame(_pushed(TTSStartedFrame()))
+    await observer.on_push_frame(_pushed(_word("Next.")))
+    await _drain(observer)
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Hello", "end_of_segment": False},
+        {"type": "agent_text", "text": "", "end_of_segment": True},
+        {"type": "agent_text", "text": "Still on.", "end_of_segment": False},
+        {"type": "agent_text", "text": " Next.", "end_of_segment": False},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_text_keeps_the_order_the_words_arrived_in():
+    observer, websocket = _agent_text_service()
+
+    # The same timestamp twice, then an earlier one.
+    for text, pts in [("help", 5), ("you", 5), ("with", 5), ("today?", 4)]:
+        await observer.on_push_frame(_pushed(_word(text, pts=pts)))
+    await _drain(observer)
+
+    sent = [json.loads(p)["text"] for p in _sent_payloads(websocket)]
+    assert sent == ["help", " you", " with", " today?"]
+
+
 @pytest.mark.asyncio
 async def test_blank_assistant_turn_is_not_sent():
     service, websocket = _connected_service()
@@ -873,3 +1256,90 @@ async def test_blank_assistant_turn_is_not_sent():
     await service._process_assistant_turn("  ")
 
     assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_agent_text_starts_a_new_segment_after_a_reconnect(monkeypatch):
+    observer, _ = _agent_text_service()
+    observer._service._agent_text_observer = observer
+    await observer.on_push_frame(_pushed(_word("Hello")))
+    await _drain(observer)
+    observer._service._websocket = None
+
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    await observer._service._connect_websocket()
+    await observer.on_push_frame(_pushed(_word("there.")))
+    await _drain(observer)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)[1:]] == ["there."]
+
+
+@pytest.mark.parametrize(
+    ("words", "includes_spaces", "sent"),
+    [
+        (["こんにちは", "世界"], True, ["こんにちは", "世界"]),
+        (["你", "好"], True, ["你", "好"]),
+        (["สวัสดีครับ", "ยินดีต้อนรับ"], False, ["สวัสดีครับ", " ยินดีต้อนรับ"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_text_follows_the_tts_spacing_for_scripts_without_spaces(
+    words, includes_spaces, sent
+):
+    observer, websocket = _agent_text_service()
+
+    for text in words:
+        frame = _word(text)
+        frame.includes_inter_frame_spaces = includes_spaces
+        await observer.on_push_frame(_pushed(frame))
+        await _drain(observer)
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == sent
+
+
+@pytest.mark.asyncio
+async def test_agent_text_lead_follows_a_runtime_change(monkeypatch):
+    observer, _ = _agent_text_service(lead_ms=700)
+    waited = []
+
+    async def fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        waited.append(timeout)
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    observer._service._settings.agent_text_lead_ms = 250
+    await observer.on_push_frame(_pushed(_word("Hello", pts=1_000_000_000)))
+    await _drain(observer)
+
+    assert waited == [pytest.approx(0.75)]
+    assert SonioxSTTService(api_key="k")._settings.agent_text_lead_ms == (
+        DEFAULT_AGENT_TEXT_LEAD_MS
+    )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_setup_observes_the_pipeline_only_when_echo_cancellation_is_enabled(
+    monkeypatch, enabled
+):
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(enable_echo_cancellation=enabled),
+    )
+    monkeypatch.setattr(service, "_connect", AsyncMock())
+    worker = SimpleNamespace(add_observer=MagicMock(), remove_observer=AsyncMock())
+
+    await service.setup(frame_processor_setup(TaskManager(), pipeline_worker=worker))
+    await service.cleanup()
+
+    assert worker.add_observer.called is enabled
+    assert worker.remove_observer.await_count == int(enabled)
