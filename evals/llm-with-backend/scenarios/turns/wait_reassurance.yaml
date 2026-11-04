@@ -21,7 +21,7 @@
 - expect:
     - event: response
       within_ms: 20000
-      eval: "says, unprompted, that it is still working on the task, in one or two short sentences; may name the step under way or one just done, but no file names, commands or code; reports no finding or result and does not say the work is done; asks nothing and promises nothing; speaks as itself, without mentioning a backend"
+      eval: "says, unprompted, that it is still working on the task, in one or two short sentences; may name the step under way or one just done (a change applied, tests started), but no file names, commands or code, and not what was found; does not report the task's outcome or say the task is finished; asks nothing and promises nothing (no 'I'll let you know'); speaks as itself, without mentioning a backend"
       allow_continue: false
       text_excludes: "backend"
 
