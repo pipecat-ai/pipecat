@@ -30,6 +30,7 @@ from pipecat.classifiers.base_classifier import (
 from pipecat.classifiers.hume.audio_decisions.classifier import HumeAudioClassifier
 from pipecat.classifiers.hume.audio_decisions.client import HumeAudioDecisionsClient
 from pipecat.metrics.metrics import LLMUsageMetricsData
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 TONE = ChoiceQuestion(
     instructions="How does the speaker sound?",
@@ -350,6 +351,39 @@ async def test_a_question_left_unanswered_is_an_error():
 
     with pytest.raises(ClassifierError, match="no answer for hesitant"):
         await classifier.ask("A caller.", {"tone": TONE, "hesitant": HESITANT}, audio=_clip())
+
+
+@pytest.mark.asyncio
+async def test_setup_opens_the_connection_once_for_a_shared_client():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, dict(request.url.params)))
+        return httpx.Response(200, json={"runs": []})
+
+    client = _client(handler)
+    for classifier in (
+        HumeAudioClassifier(client=client),
+        HumeAudioClassifier(client=client),
+    ):
+        await classifier.setup(TaskManager())
+
+    assert seen == [("GET", "/v0/decisions/run", {"page_size": "1"})]
+
+
+@pytest.mark.asyncio
+async def test_a_connection_that_cant_be_opened_at_setup_is_only_a_warning():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(503)
+        return _reply({"hesitant": ANSWERS["hesitant"]})
+
+    classifier = HumeAudioClassifier(client=_client(handler))
+    await classifier.setup(TaskManager())
+
+    results = await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+
+    assert results["hesitant"] == YesNoResult(probability=0.62)
 
 
 @pytest.mark.asyncio
