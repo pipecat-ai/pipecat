@@ -916,9 +916,11 @@ class RTVIObserver(BaseObserver):
                 if is_progress_aware:
                     result = await transform(text, text_type, accumulated, remaining)
                     if isinstance(result, BotOutputTransformResult):
-                        accumulated = result.accumulated_text or accumulated
-                        remaining = result.remaining_text or remaining
-                        text = result.text or text
+                        if result.accumulated_text is not None:
+                            accumulated = result.accumulated_text
+                        if result.remaining_text is not None:
+                            remaining = result.remaining_text
+                        text = result.text
                 else:
                     # The deprecated 2-parameter signature returns the text itself.
                     accumulated = cast(str, await transform(accumulated, text_type))
@@ -926,7 +928,10 @@ class RTVIObserver(BaseObserver):
                     text = cast(str, await transform(text, text_type))
 
         if self._params.bot_output_enabled:
-            spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
+            # Whether speech is done comes from the frame: a transform may empty the text.
+            spoken_status: RTVI.SpokenStatus = (
+                "completed" if frame.remaining_text == "" else "in-progress"
+            )
             message = RTVI.BotOutputMessage(
                 data=RTVI.BotOutputMessageData(
                     text=text,

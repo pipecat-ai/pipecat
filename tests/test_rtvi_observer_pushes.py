@@ -384,6 +384,27 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
             [("laugh", TextType.EXPRESSION_SOUND, "completed", laugh.id, None)],
         )
 
+    async def test_progress_uses_the_text_a_progress_aware_transform_returns(self):
+        async def strip_laughs(text, text_type, accumulated_text=None, remaining_text=None):
+            strip = lambda t: None if t is None else t.replace("[laughs]", "").strip()
+            return RTVI.BotOutputTransformResult(
+                text=strip(text),
+                accumulated_text=strip(accumulated_text),
+                remaining_text=strip(remaining_text),
+            )
+
+        self.observer.add_bot_output_transformer(strip_laughs)
+        segment = self._segment("[laughs] Sure.", TextType.SENTENCE)
+        await self._push(segment)
+        await self._push(self._progress(segment, "[laughs]", " Sure."))
+        await self._push(self._progress(segment, "[laughs] Sure.", ""))
+
+        self.assertEqual(
+            [(d.spoken_status, d.text) for d in self._sent_outputs()],
+            [("new", "Sure."), ("in-progress", "Sure."), ("completed", "Sure.")],
+        )
+        self.assertNotIn("[laughs]", str(self._sent_messages()))
+
     async def test_text_with_no_words_to_show_is_not_sent(self):
         # A unit that is only tags, announced and then spoken.
         segment = self._segment("", TextType.SENTENCE)
