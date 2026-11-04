@@ -303,8 +303,8 @@ class FunctionCallRunnerItem:
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
 
 
-#: What a reply opens with, and nothing else, when the model decides to say
-#: nothing. A prompt that offers the model silence, such as
+#: The silent mark: a reply that is just this mark means the model decided to
+#: say nothing. A prompt that offers the model silence, such as
 #: :class:`~pipecat.processors.wait_reassurance.WaitReassurance`'s, tells it to
 #: answer with exactly this mark, and the LLM service reads the mark
 #: (``read_silent_mark``): the reply is dropped unspoken, so nothing after the
@@ -421,13 +421,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 switched between mid-session) so downloads are reused.
                 Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
-            read_silent_mark: The mark a reply opens with when the model decides
-                to say nothing, :data:`LLM_SILENT_MARK` unless given. Such a
-                reply is dropped unspoken and an ``LLMMarkerResponseFrame`` of
-                kind ``"silent"`` is pushed in its place, so nothing after the
-                service, the TTS, the context, an observer, sees the mark. A
-                prompt that offers the model silence names the same mark.
-                ``None`` reads no mark: every reply goes out as written.
+            read_silent_mark: The silent mark: a reply that starts with it means
+                the model chose to say nothing. Such a reply is dropped unspoken
+                and an ``LLMMarkerResponseFrame`` of kind ``"silent"`` is pushed
+                in its place, so nothing after the service, the TTS, the
+                context, an observer, sees the mark. A prompt that offers the
+                model silence names the same mark. Defaults to
+                :data:`LLM_SILENT_MARK`; ``None`` reads no mark, and every reply
+                goes out as written.
             **kwargs: Additional arguments passed to the parent AIService.
 
         Raises:
@@ -1087,7 +1088,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 self._reply_decided = False
                 self._reply_silent = False
             elif isinstance(frame, LLMTextFrame) and direction == FrameDirection.DOWNSTREAM:
-                opened = await self._read_reply_opening(frame)
+                opened = await self._read_opening_for_silent_mark(frame)
                 if opened is None:
                     return
                 frame = opened
@@ -1106,7 +1107,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         for gated_frame, gated_direction in emitted:
             await super().push_frame(gated_frame, gated_direction)
 
-    async def _read_reply_opening(self, frame: LLMTextFrame) -> LLMTextFrame | None:
+    async def _read_opening_for_silent_mark(self, frame: LLMTextFrame) -> LLMTextFrame | None:
         """Hold a reply's opening until its first character shows whether the reply is the silent mark.
 
         Returns the frame to push, with any held whitespace folded in, or
