@@ -435,6 +435,9 @@ class TTSService(AIService):
 
         # Whether the TTS process is currently yielding audio frames synchronously.
         self._is_yielding_frames_synchronously = False
+        # Contexts with a run_tts generator still running. A context isn't idle
+        # while its audio is still being synthesized, however long that takes.
+        self._synthesizing_context_ids: set[str] = set()
 
         self._expression_adapter = self.expression_adapter_class()
         # Formats the expression tags an LLM writes, when the pipeline has
@@ -890,11 +893,15 @@ class TTSService(AIService):
 
         """
         is_yielding_frames = False
-        async for frame in generator:
-            if frame:
-                await self.append_to_audio_context(context_id, frame)
-                if isinstance(frame, TTSAudioRawFrame):
-                    is_yielding_frames = True
+        self._synthesizing_context_ids.add(context_id)
+        try:
+            async for frame in generator:
+                if frame:
+                    await self.append_to_audio_context(context_id, frame)
+                    if isinstance(frame, TTSAudioRawFrame):
+                        is_yielding_frames = True
+        finally:
+            self._synthesizing_context_ids.discard(context_id)
 
         self._is_yielding_frames_synchronously = is_yielding_frames
 
@@ -2238,15 +2245,23 @@ class TTSService(AIService):
 
     async def _next_audio_context_item(self, context_id: str) -> Frame | WordTimestamp | None:
         """Wait for the context's next item, or None once it ends or goes quiet."""
-        item = None
-        try:
-            item = await self._audio_context_manager.get(
-                context_id, timeout=self._stop_frame_timeout_s
-            )
-        except TimeoutError:
-            # We didn't get audio, so let's consider this context finished.
-            logger.trace(f"{self} time out on audio context {context_id}")
-        return item
+        while True:
+            synthesizing = context_id in self._synthesizing_context_ids
+            try:
+                return await self._audio_context_manager.get(
+                    context_id, timeout=self._stop_frame_timeout_s
+                )
+            except TimeoutError:
+                # A slow request (e.g. a local model synthesizing a long
+                # sentence) can take longer than the timeout to produce its
+                # first audio. Ending the context then would report it silent
+                # and push its stop frame ahead of its audio. The context goes
+                # quiet only after a full timeout with no request running.
+                if synthesizing or context_id in self._synthesizing_context_ids:
+                    continue
+                # We didn't get audio, so let's consider this context finished.
+                logger.trace(f"{self} time out on audio context {context_id}")
+                return None
 
     async def _push_audio_context_item(
         self, context_id: str, item: Frame | WordTimestamp, playback: _AudioContextPlayback
