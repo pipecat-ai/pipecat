@@ -181,6 +181,26 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
+    async def test_phrase_with_punctuation_matches(self):
+        """A phrase written with punctuation matches the transcript with or without it."""
+        for phrase, text in [
+            ("let's talk", "Let's talk."),
+            ("hey wall-e", "Hey Wall-E"),
+            ("hey, pipecat", "Hey, Pipecat!"),
+            ("hey, pipecat", "hey pipecat"),
+        ]:
+            with self.subTest(phrase=phrase, text=text):
+                strategy = self._create_strategy(phrases=[phrase])
+                await self._setup_strategy(strategy)
+
+                result = await strategy.process_frame(
+                    TranscriptionFrame(text=text, user_id="user1", timestamp="")
+                )
+                self.assertEqual(result, ProcessFrameResult.STOP)
+                self.assertEqual(strategy.state, _WakeState.AWAKE)
+
+                await strategy.cleanup()
+
     async def test_turn_start_preserves_inactive_state(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)

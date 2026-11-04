@@ -124,7 +124,10 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._timeout = timeout
         self._single_activation = single_activation
 
-        self._patterns: list[re.Pattern] = [compile_phrase_pattern(phrase) for phrase in phrases]
+        # The transcript is matched with its punctuation stripped, so the phrases are too.
+        self._patterns: list[re.Pattern] = [
+            compile_phrase_pattern(self._strip_punctuation(phrase)) for phrase in phrases
+        ]
 
         self._state = _WakeState.IDLE
         self._accumulated_text = ""
