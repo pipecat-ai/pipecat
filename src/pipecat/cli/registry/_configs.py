@@ -500,6 +500,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "heygen_tts": (
+        "HeyGenHttpTTSService(\n"
+        '        api_key=os.getenv("HEYGEN_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=HeyGenHttpTTSService.Settings(\n"
+        '            voice=os.getenv("HEYGEN_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "inworld_tts": (
         "InworldTTSService(\n"
         '        api_key=os.getenv("INWORLD_API_KEY"),\n'
