@@ -90,6 +90,8 @@ class HumeAudioDecisionsClient:
             raise ValueError("HumeAudioDecisionsClient needs an API key")
         self._max_retries = max_retries
         self._usage = HumeAudioDecisionsUsage()
+        self._connected = False
+        self._connect_lock = asyncio.Lock()
         self._http = httpx.AsyncClient(
             base_url=base_url,
             headers={"X-Hume-Api-Key": api_key},
@@ -103,8 +105,33 @@ class HumeAudioDecisionsClient:
         """Input tokens billed so far, over every request."""
         return self._usage
 
+    async def connect(self):
+        """Open the connection to Hume ahead of the first question.
+
+        Lists one run, the lightest request the API serves, so the first
+        question finds the connection open. It counts toward the rate limit
+        like any request. Connects once: a client shared by several
+        classifiers is asked by each of them, and only the first call sends
+        anything.
+
+        Raises:
+            ClassifierError: If Hume could not be reached or refused the
+                request.
+        """
+        async with self._connect_lock:
+            if self._connected:
+                return
+            try:
+                response = await self._http.get("/v0/decisions/run", params={"page_size": 1})
+            except (httpx.HTTPError, OSError) as e:
+                raise ClassifierError(f"could not connect to Hume: {e!r}") from e
+            if response.status_code != 200:
+                raise ClassifierError(self._rejection(response))
+            self._connected = True
+
     async def close(self):
         """Close the connection pool."""
+        self._connected = False
         await self._http.aclose()
 
     async def ask(

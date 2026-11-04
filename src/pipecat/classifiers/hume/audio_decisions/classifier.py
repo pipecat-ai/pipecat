@@ -15,6 +15,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from loguru import logger
+
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
@@ -36,6 +38,7 @@ from pipecat.classifiers.hume.audio_decisions.client import (
     HumeAudioDecisionsClient,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 #: The longest context Hume reads, in characters.
 HUME_MAX_CONTEXT = 1000
@@ -115,6 +118,21 @@ class HumeAudioClassifier(BaseClassifier):
     def audio_sample_rate(self) -> int:
         """Hume's model hears audio at 16 kHz."""
         return 16000
+
+    async def setup(self, task_manager: BaseTaskManager):
+        """Open the connection to Hume ahead of the first question.
+
+        A connection that cannot be opened now is only a warning: the first
+        question opens it itself.
+
+        Args:
+            task_manager: The task manager of the owner.
+        """
+        await super().setup(task_manager)
+        try:
+            await self._client.connect()
+        except ClassifierError as e:
+            logger.warning(f"{self}: {e}")
 
     async def cleanup(self):
         """Close the client if this classifier created it."""
