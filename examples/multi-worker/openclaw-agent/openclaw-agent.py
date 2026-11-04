@@ -40,12 +40,13 @@ Requirements:
 import os
 import time
 from dataclasses import dataclass
+from typing import cast
 
 from dotenv import load_dotenv
 from loguru import logger
 from openclaw_worker import WORKER_NAME, build_openclaw_worker
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobResponseMessage, BusJobUpdateMessage
 from pipecat.evals.transport import EvalTransportParams
@@ -284,7 +285,8 @@ async def stop_agent(params: FunctionCallParams, reason: str):
     Args:
         reason (str): Why the user wants it stopped, briefly.
     """
-    job_id = await params.pipeline_worker.stop_active_job(reason)
+    worker = cast(VoiceLoopWorker, params.pipeline_worker)
+    job_id = await worker.stop_active_job(reason)
     if job_id is None:
         await params.result_callback(
             {"status": "nothing_running"},
@@ -305,7 +307,7 @@ async def agent_status(params: FunctionCallParams):
     Read-only and instant: it reads what the voice loop already knows and does
     not touch the agent.
     """
-    active = params.pipeline_worker.active_job
+    active = cast(VoiceLoopWorker, params.pipeline_worker).active_job
     await params.result_callback(
         {
             "status": "working" if active else "idle",

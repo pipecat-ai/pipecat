@@ -30,6 +30,8 @@ from xml.sax.saxutils import escape
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.gemini_adapter import Gemini38ExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -1219,10 +1221,10 @@ class GeminiTTSService(GoogleBaseTTSService):
     Model names differ by backend. Cloud Text-to-Speech takes
     ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
     ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``; the Gemini API
-    takes ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts``,
-    ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-preview-tts`` and
-    ``gemini-2.5-pro-preview-tts``. Defaults to ``gemini-3.1-flash-tts-preview``,
-    which both backends accept.
+    takes ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
+    ``gemini-3.1-flash-tts-preview``. Defaults to ``gemini-3.1-flash-tts-preview``,
+    which both backends accept; the Gemini API shuts that preview model down on
+    November 17, 2026 and names ``gemini-3.8-flash-lite-tts`` as its replacement.
 
     Gemini 3.8 TTS models (Gemini API backend, google-genai >= 2.25.0) treat the
     input text strictly as a verbatim transcript: the ``prompt`` setting is sent
@@ -1333,7 +1335,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         Args:
             model: Gemini TTS model to use, named as the chosen backend names it —
                    "gemini-3.1-flash-tts-preview" on either, "gemini-2.5-flash-tts" on
-                   Cloud Text-to-Speech, "gemini-2.5-flash-preview-tts" on the Gemini API.
+                   Cloud Text-to-Speech, "gemini-3.8-flash-lite-tts" on the Gemini API.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSService.Settings(model=...)`` instead.
@@ -1442,6 +1444,19 @@ class GeminiTTSService(GoogleBaseTTSService):
             prompt=assert_given(default_settings.prompt),
             model=assert_given(default_settings.model),
         )
+
+        self._gemini_38_expression_adapter = Gemini38ExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: Gemini 3.8 on the Gemini API, otherwise none.
+
+        Returns:
+            The expression adapter for the current model and backend.
+        """
+        model = self._settings.model
+        if self._use_genai and isinstance(model, str) and self._is_gemini_38_tts(model):
+            return self._gemini_38_expression_adapter
+        return super().get_expression_adapter()
 
     def _create_client(
         self, credentials: str | None, credentials_path: str | None
@@ -1698,9 +1713,21 @@ class GeminiTTSService(GoogleBaseTTSService):
                 # request raw PCM via GenerateContentConfig), so the audio
                 # streaming below strips a RIFF header when one arrives.
                 part_kwargs: dict[str, Any] = {"text": text}
+                # In expressive conversation, the request's delivery adds to the
+                # prompt's style.
                 prompt = self._settings.prompt
-                if is_given(prompt) and prompt:
-                    part_kwargs["speech_metadata"] = genai.types.SpeechMetadata(style=prompt)
+                styles = [
+                    style
+                    for style in (
+                        prompt if is_given(prompt) else None,
+                        self.expression_settings.get("style"),
+                    )
+                    if style
+                ]
+                if styles:
+                    part_kwargs["speech_metadata"] = genai.types.SpeechMetadata(
+                        style="; ".join(styles)
+                    )
                 contents = [
                     genai.types.Content(role="user", parts=[genai.types.Part(**part_kwargs)])
                 ]

@@ -5,6 +5,7 @@
 #
 
 import json
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,6 +17,7 @@ from pipecat.runner.types import (
     WebSocketRunnerArguments,
 )
 from pipecat.runner.utils import (
+    _create_telephony_transport,
     _maybe_apply_daily_dialin,
     create_transport,
     get_transport_client_id,
@@ -305,6 +307,67 @@ class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
         # Both styles work: typed attribute access and dict-style subscript.
         self.assertEqual(args.call_data.call_id, "CA9")
         self.assertEqual(args.call_data["call_id"], "CA9")
+
+
+class TestTwilioSerializerFromEnv(unittest.IsolatedAsyncioTestCase):
+    """The Twilio serializer reads credentials and region from Twilio's env var names."""
+
+    async def _serializer(self, env: dict[str, str]):
+        from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+
+        twilio_message = json.dumps(
+            {"event": "start", "start": {"streamSid": "MZ9", "callSid": "CA9"}}
+        )
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([twilio_message])
+        transport_type, call_data = await parse_telephony_websocket(ws)
+
+        with patch.dict(os.environ, env, clear=True):
+            transport = await _create_telephony_transport(
+                ws, FastAPIWebsocketParams(), transport_type, call_data
+            )
+        return transport._params.serializer
+
+    async def test_auth_token(self):
+        serializer = await self._serializer(
+            {"TWILIO_ACCOUNT_SID": "ACxxxx", "TWILIO_AUTH_TOKEN": "token"}
+        )
+        self.assertEqual(serializer._auth_token, "token")
+        self.assertIsNone(serializer._api_key_sid)
+
+    async def test_api_key(self):
+        serializer = await self._serializer(
+            {
+                "TWILIO_ACCOUNT_SID": "ACxxxx",
+                "TWILIO_API_KEY": "SKxxxx",
+                "TWILIO_API_SECRET": "secret",
+            }
+        )
+        self.assertEqual(serializer._api_key_sid, "SKxxxx")
+        self.assertEqual(serializer._api_key_secret, "secret")
+
+    async def test_region_and_edge(self):
+        serializer = await self._serializer(
+            {
+                "TWILIO_ACCOUNT_SID": "ACxxxx",
+                "TWILIO_AUTH_TOKEN": "token",
+                "TWILIO_REGION": "ie1",
+                "TWILIO_EDGE": "dublin",
+            }
+        )
+        self.assertEqual(serializer._region, "ie1")
+        self.assertEqual(serializer._edge, "dublin")
+
+    async def test_auth_token_and_api_key_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not both"):
+            await self._serializer(
+                {
+                    "TWILIO_ACCOUNT_SID": "ACxxxx",
+                    "TWILIO_AUTH_TOKEN": "token",
+                    "TWILIO_API_KEY": "SKxxxx",
+                    "TWILIO_API_SECRET": "secret",
+                }
+            )
 
 
 class TestCreateTransportEval(unittest.IsolatedAsyncioTestCase):

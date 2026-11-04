@@ -136,7 +136,8 @@ class JevClient:
                 return
             try:
                 response = await self._http.get("/v1/models")
-            except httpx.HTTPError as e:
+            except (httpx.HTTPError, OSError) as e:
+                # A broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"could not connect to Jev: {e}") from e
             if response.status_code != 200:
                 raise ClassifierError(f"Jev refused the connection: HTTP {response.status_code}")
@@ -184,8 +185,9 @@ class JevClient:
             attempt += 1
             try:
                 response = await self._http.post("/v1/systemone", json=body, headers=headers)
-            except httpx.HTTPError as e:
-                # Some httpx errors, such as a timeout, carry no message.
+            except (httpx.HTTPError, OSError) as e:
+                # Some httpx errors, such as a timeout, carry no message, and a
+                # broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"Jev request failed: {e!r}") from e
             if response.status_code in (_TOO_MANY_REQUESTS, _OVERLOADED):
                 if attempt > self._max_retries:

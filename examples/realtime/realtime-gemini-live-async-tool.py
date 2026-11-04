@@ -21,8 +21,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -83,7 +84,7 @@ weather_function = FunctionSchema(
     handler=fetch_weather_from_api,
 )
 
-tools = [weather_function]
+tools = ToolsSchema(standard_tools=[weather_function])
 
 
 system_instruction = (

@@ -47,9 +47,11 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _MarkerProcessor(UserTurnCompletionLLMServiceMixin, FrameProcessor):
-    """The smallest processor that runs the turn completion protocol."""
+    """The smallest processor that runs the turn completion protocol, as LLMService does."""
 
-    pass
+    async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+        await self._track_pushed_frame(frame)
+        await super().push_frame(frame, direction)
 
 
 class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):

@@ -21,9 +21,10 @@ from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSSer
 from pipecat.tests.utils import run_test
 
 
-def _websocket_rejection(status_code: int) -> InvalidStatus:
+def _websocket_rejection(status_code: int, reason: str | None = None) -> InvalidStatus:
     """Build the exception `websockets` raises when a handshake is rejected."""
-    return InvalidStatus(Response(status_code, "", Headers()))
+    headers = Headers({"dg-error": reason}) if reason else Headers()
+    return InvalidStatus(Response(status_code, "", headers))
 
 
 @pytest.mark.asyncio
@@ -56,6 +57,32 @@ async def test_deepgram_server_error_leaves_the_service_usable(monkeypatch):
     await service._connect_websocket()
 
     assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_deepgram_refusal_reports_deepgram_reason(monkeypatch):
+    """Deepgram's reason for refusing the handshake reaches the error and the event."""
+    reason = "'speed' must be within documented range."
+
+    async def fake_websocket_connect(*args, **kwargs):
+        raise _websocket_rejection(400, reason)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = DeepgramTTSService(api_key="test-key", sample_rate=24000)
+    connection_errors = []
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    assert connection_errors == [f"Deepgram refused the connection (HTTP 400): {reason}"]
 
 
 @pytest.mark.asyncio

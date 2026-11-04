@@ -257,9 +257,10 @@ class AssemblyAISTTSettings(STTSettings):
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
             U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
-            for a known opening line, or call
-            :meth:`AssemblyAISTTService.update_agent_context` to update it
-            mid-session. Defaults to None (not sent).
+            for a known opening line; the service sends each of the agent's replies
+            as context on its own. To replace it mid-session, push an
+            ``STTUpdateSettingsFrame`` with ``agent_context``. Defaults to None
+            (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable

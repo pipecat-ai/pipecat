@@ -6,11 +6,17 @@
 
 """Tests for the Genesys AudioHook serializer."""
 
+import asyncio
 import json
 
 import pytest
 
-from pipecat.frames.frames import InputDTMFFrame, OutputTransportMessageUrgentFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    InputDTMFFrame,
+    OutputAudioRawFrame,
+    OutputTransportMessageUrgentFrame,
+)
 from pipecat.serializers.genesys import AudioHookChannel, GenesysAudioHookSerializer
 
 
@@ -107,15 +113,37 @@ class TestGenesysAudioHookSerializer:
         assert msg["parameters"]["outputVariables"]["customer_verified"] is True
         assert msg["parameters"]["outputVariables"]["summary"] == "Customer asked about their bill"
 
-    def test_create_resumed_response(self):
-        """Test creating a resumed response message."""
+    def test_create_pause_request(self):
+        """Test creating a pause request for Genesys."""
+        serializer = GenesysAudioHookSerializer()
+
+        msg = serializer.create_pause_request()
+
+        assert msg["type"] == "pause"
+        assert msg["parameters"] == {}
+        # The session pauses when Genesys confirms with 'paused'.
+        assert serializer.is_paused is False
+
+    def test_create_resume_request(self):
+        """Test creating a resume request for Genesys."""
         serializer = GenesysAudioHookSerializer()
         serializer._is_paused = True
 
-        msg = serializer.create_resumed_response()
+        msg = serializer.create_resume_request()
 
-        assert msg["type"] == "resumed"
-        assert serializer.is_paused is False
+        assert msg["type"] == "resume"
+        assert msg["parameters"] == {}
+        # The session resumes when Genesys confirms with 'resumed'.
+        assert serializer.is_paused is True
+
+    def test_create_resumed_response_is_deprecated(self):
+        """Test that create_resumed_response() warns and builds a resume request."""
+        serializer = GenesysAudioHookSerializer()
+
+        with pytest.warns(DeprecationWarning, match="create_resume_request"):
+            msg = serializer.create_resumed_response()
+
+        assert msg["type"] == "resume"
 
     def test_create_disconnect_message(self):
         """Test creating a disconnect message."""
@@ -282,15 +310,102 @@ class TestGenesysAudioHookSerializer:
         assert serializer.output_variables["second"] == "value"
 
     @pytest.mark.asyncio
-    async def test_handle_pause_message(self, sample_pause_message):
-        """Test handling a pause message."""
+    async def test_handle_paused_message(self, sample_paused_message):
+        """Test that a paused message from Genesys pauses the session."""
         serializer = GenesysAudioHookSerializer()
         serializer._is_open = True
+        paused = []
+        serializer.add_event_handler("on_paused", lambda s, message: paused.append(message))
 
-        result = await serializer.deserialize(json.dumps(sample_pause_message))
+        result = await serializer.deserialize(json.dumps(sample_paused_message))
+        await asyncio.sleep(0)
 
-        assert result is None  # Pause is handled internally
+        assert result is None
         assert serializer.is_paused is True
+        assert paused == [sample_paused_message]
+
+    @pytest.mark.asyncio
+    async def test_handle_resumed_message(self, sample_paused_message, sample_resumed_message):
+        """Test that a resumed message from Genesys resumes the session."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        resumed = []
+        serializer.add_event_handler("on_resumed", lambda s, message: resumed.append(message))
+
+        await serializer.deserialize(json.dumps(sample_paused_message))
+        result = await serializer.deserialize(json.dumps(sample_resumed_message))
+        await asyncio.sleep(0)
+
+        assert result is None
+        assert serializer.is_paused is False
+        assert resumed == [sample_resumed_message]
+
+    @pytest.mark.asyncio
+    async def test_on_pause_is_deprecated_and_still_fires(self, sample_paused_message):
+        """Test that on_pause warns when registered and fires when Genesys pauses."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        paused = []
+
+        with pytest.warns(DeprecationWarning, match="on_paused"):
+            serializer.add_event_handler("on_pause", lambda s, message: paused.append(message))
+
+        await serializer.deserialize(json.dumps(sample_paused_message))
+        await asyncio.sleep(0)
+
+        assert paused == [sample_paused_message]
+
+    @pytest.mark.asyncio
+    async def test_handle_discarded_message(self):
+        """Test that a discarded message is accepted without changing state."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        message = {
+            "version": "2",
+            "type": "discarded",
+            "seq": 9,
+            "id": "test-session-123",
+            "parameters": {"start": "PT1.0S", "discarded": "PT0.5S"},
+        }
+
+        result = await serializer.deserialize(json.dumps(message))
+
+        assert result is None
+        assert serializer.is_paused is False
+
+    @pytest.mark.asyncio
+    async def test_open_with_start_paused_pauses_session(self, sample_open_message):
+        """Test that a session opened with start_paused stays paused until 'resumed'."""
+        serializer = GenesysAudioHookSerializer(
+            params=GenesysAudioHookSerializer.InputParams(start_paused=True)
+        )
+
+        await serializer.deserialize(json.dumps(sample_open_message))
+
+        assert serializer.is_open is True
+        assert serializer.is_paused is True
+
+    @pytest.mark.asyncio
+    async def test_audio_is_dropped_while_paused(
+        self, sample_open_message, sample_paused_message, sample_resumed_message
+    ):
+        """Test that audio stops in both directions between 'paused' and 'resumed'."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._sample_rate = 8000
+        caller_audio = b"\xff" * 160
+        bot_audio = OutputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=8000, num_channels=1)
+
+        await serializer.deserialize(json.dumps(sample_open_message))
+        assert isinstance(await serializer.deserialize(caller_audio), InputAudioRawFrame)
+        assert await serializer.serialize(bot_audio) is not None
+
+        await serializer.deserialize(json.dumps(sample_paused_message))
+        assert await serializer.deserialize(caller_audio) is None
+        assert await serializer.serialize(bot_audio) is None
+
+        await serializer.deserialize(json.dumps(sample_resumed_message))
+        assert isinstance(await serializer.deserialize(caller_audio), InputAudioRawFrame)
+        assert await serializer.serialize(bot_audio) is not None
 
     @pytest.mark.asyncio
     async def test_handle_update_message(self, sample_update_message):

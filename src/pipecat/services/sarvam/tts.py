@@ -286,6 +286,12 @@ class SarvamHttpTTSSettings(TTSSettings):
             **Note:** Supported by bulbul:v3; ignored by bulbul:v4-flash.
     """
 
+    _aliases: ClassVar[dict[str, str]] = {
+        **TTSSettings._aliases,
+        "speaker": "voice",
+        "target_language_code": "language",
+    }
+
     enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pace: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -305,8 +311,6 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
         max_chunk_length: Maximum characters processed in a single chunk.
             Controls memory usage and processing efficiency. Defaults to 150.
     """
-
-    _aliases: ClassVar[dict[str, str]] = {"target_language_code": "language"}
 
     min_buffer_size: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

@@ -12,7 +12,7 @@ on every VAD speech event, it collects audio after VAD detects speech and runs
 the IP model to predict whether the speech is a real interruption.
 
 Only when the IP model's probability exceeds the configured threshold is
-``trigger_user_turn_started()`` called. This prevents the bot from being
+``report_user_turn_started()`` called. This prevents the bot from being
 interrupted by brief acknowledgements or filler words.
 """
 
@@ -33,7 +33,6 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 try:
@@ -174,7 +173,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Ready the strategy for a new user turn."""
         self._reset_state()
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Process a frame to detect genuine user interruptions.
 
         On ``VADUserStartedSpeakingFrame``, begins collecting audio.
@@ -186,34 +185,27 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             frame: The incoming frame.
-
-        Returns:
-            STOP if a genuine interruption was detected, CONTINUE otherwise.
         """
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            return await self._handle_vad_started(frame)
+            await self._handle_vad_started(frame)
         elif isinstance(frame, InputAudioRawFrame):
-            return await self._handle_audio(frame)
+            await self._handle_audio(frame)
         elif isinstance(frame, (VADUserStoppedSpeakingFrame, BotStoppedSpeakingFrame)):
-            return await self._handle_reset(frame)
+            await self._handle_reset(frame)
 
-        return ProcessFrameResult.CONTINUE
-
-    async def _handle_vad_started(self, frame: VADUserStartedSpeakingFrame) -> ProcessFrameResult:
+    async def _handle_vad_started(self, frame: VADUserStartedSpeakingFrame):
         """Begin collecting audio for interruption classification.
+
+        The decision waits until enough audio is processed.
 
         Args:
             frame: The VAD speech-start frame.
-
-        Returns:
-            Always CONTINUE; the decision is deferred until enough audio is processed.
         """
         logger.trace("Krisp VIVA IP: VAD speech started, collecting audio for classification")
         self._speech_active = True
         self._decision_made = False
-        return ProcessFrameResult.CONTINUE
 
-    async def _handle_audio(self, frame: InputAudioRawFrame) -> ProcessFrameResult:
+    async def _handle_audio(self, frame: InputAudioRawFrame):
         """Feed audio to the IP model and check for genuine interruption.
 
         Every frame is passed to the IP model regardless of speech state so
@@ -224,15 +216,12 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             frame: Raw audio input frame.
-
-        Returns:
-            STOP if the model detects a genuine interruption, CONTINUE otherwise.
         """
         self._ensure_session(frame.sample_rate)
 
         if self._ip_session is None or self._samples_per_frame is None:
             logger.warning("IP session not ready, skipping frame")
-            return ProcessFrameResult.CONTINUE
+            return
 
         self._audio_buffer.extend(frame.audio)
 
@@ -240,7 +229,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         num_complete_frames = total_samples // self._samples_per_frame
 
         if num_complete_frames == 0:
-            return ProcessFrameResult.CONTINUE
+            return
 
         complete_samples_count = num_complete_frames * self._samples_per_frame
         bytes_to_process = complete_samples_count * 2
@@ -261,23 +250,15 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
                     f"threshold={self._threshold})"
                 )
                 self._decision_made = True
-                await self.trigger_user_turn_started()
-                return ProcessFrameResult.STOP
+                await self.report_user_turn_started()
+                return
 
-        return ProcessFrameResult.CONTINUE
-
-    async def _handle_reset(
-        self, frame: VADUserStoppedSpeakingFrame | BotStoppedSpeakingFrame
-    ) -> ProcessFrameResult:
+    async def _handle_reset(self, frame: VADUserStoppedSpeakingFrame | BotStoppedSpeakingFrame):
         """Reset state when the candidate interruption window ends.
 
         Args:
             frame: The frame signaling end of speech or bot output.
-
-        Returns:
-            Always CONTINUE.
         """
         if self._speech_active:
             logger.trace("Krisp VIVA IP: speech segment ended, resetting state")
             self._reset_state()
-        return ProcessFrameResult.CONTINUE

@@ -571,8 +571,8 @@ async def test_connect_authenticates_with_the_configured_credential(
 async def test_frames_reach_voice_live_and_pass_through():
     """Audio is streamed and a tools update is sent as a session update; every frame
     continues downstream."""
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
-    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
     from pipecat.frames.frames import (
         InputAudioRawFrame,
         LLMServiceMetadataFrame,

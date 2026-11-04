@@ -109,6 +109,32 @@ async def test_response_done_without_cached_details_reports_none():
     assert tokens.output_audio_tokens == 0
 
 
+@pytest.mark.asyncio
+async def test_response_done_without_usage_reports_no_usage():
+    service = _service_for_usage_capture()
+    evt = events.ResponseDone.model_validate(
+        {"event_id": "ev_1", "type": "response.done", "response": {"status": "completed"}}
+    )
+
+    await service._handle_evt_response_done(evt)
+
+    service.start_llm_usage_metrics.assert_not_called()
+    service.stop_processing_metrics.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_response_without_status_details_pushes_error():
+    service = _service_for_usage_capture()
+    service.push_error = AsyncMock()
+    evt = events.ResponseDone.model_validate(
+        {"event_id": "ev_1", "type": "response.done", "response": {"status": "failed"}}
+    )
+
+    await service._handle_evt_response_done(evt)
+
+    service.push_error.assert_awaited_once_with(error_msg="Response failed")
+
+
 # ---------------------------------------------------------------------------
 # _add_token_usage_to_span
 # ---------------------------------------------------------------------------

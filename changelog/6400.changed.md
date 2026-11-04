@@ -1,0 +1,1 @@
+- `pipecat-ai[simli]` now requires `simli-ai` 2.1. It fixes a leak in the SDK's frame reader, where every frame received left a task pending until the session ended, about 75 a second. A session that can't start now fails with Simli's reason, such as an invalid API key or face ID, instead of a generic `Failed To Initialize SimliClient`.

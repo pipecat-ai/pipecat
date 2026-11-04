@@ -65,6 +65,8 @@ SONIOX_TTFS_P99: float = 0.35
 SPEECHMATICS_TTFS_P99: float = 0.74
 XAI_TTFS_P99: float = 2.14
 TOGETHER_TTFS_P99: float = 1.00
+# Pipecat turn detection mode (vad_force_turn_endpoint=True), default model.
+ZOOM_AI_TTFS_P99: float = 0.53
 
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99

@@ -9,7 +9,6 @@
 from dataclasses import dataclass
 
 from loguru import logger
-from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
@@ -99,24 +98,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
                 "this service doesn't implement. Use an `/openai/v1/realtime` URL instead."
             )
 
-    async def _connect(self):
-        try:
-            if self._websocket:
-                # Here we assume that if we have a websocket, we are connected. We
-                # handle disconnections in the send/recv code paths.
-                return
-
-            if self._token_provider:
-                headers = {"Authorization": f"Bearer {await self._token_provider()}"}
-            else:
-                headers = {"api-key": self.api_key}
-
-            logger.info(f"Connecting to {self.base_url}")
-            self._websocket = await websocket_connect(
-                uri=self.base_url,
-                additional_headers=headers,
-            )
-            self._receive_task = self.create_task(self._receive_task_handler())
-        except Exception as e:
-            await self.push_error(error_msg=f"initialization error: {e}", exception=e)
-            self._websocket = None
+    async def _auth_headers(self) -> dict[str, str]:
+        if self._token_provider:
+            return {"Authorization": f"Bearer {await self._token_provider()}"}
+        return {"api-key": self.api_key}

@@ -143,7 +143,7 @@ class RTVIProcessor(FrameProcessor):
         await self._send_bot_ready(about=about)
 
     async def interrupt_bot(self):
-        """Send a bot interruption frame upstream."""
+        """Interrupt the bot, as :meth:`broadcast_interruption` does."""
         await self.broadcast_interruption()
 
     async def send_server_message(self, data: Any):

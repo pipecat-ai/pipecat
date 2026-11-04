@@ -99,16 +99,30 @@ def sample_close_message():
 
 
 @pytest.fixture
-def sample_pause_message():
-    """Sample AudioHook pause message."""
+def sample_paused_message():
+    """Sample AudioHook paused message: Genesys has paused the audio stream."""
     return {
         "version": "2",
-        "type": "pause",
+        "type": "paused",
         "seq": 7,
         "id": "test-session-123",
         "position": "PT15.0S",
+        "parameters": {},
+    }
+
+
+@pytest.fixture
+def sample_resumed_message():
+    """Sample AudioHook resumed message: Genesys has resumed the audio stream."""
+    return {
+        "version": "2",
+        "type": "resumed",
+        "seq": 8,
+        "id": "test-session-123",
+        "position": "PT15.0S",
         "parameters": {
-            "reason": "hold",
+            "start": "PT15.0S",
+            "discarded": "PT4.2S",
         },
     }
 

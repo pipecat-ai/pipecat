@@ -34,6 +34,7 @@ from pipecat.evals.simulation_judge import EvalSimulationJudge
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.word_count import count_spoken_words
 
 # The event that reports the persona's end_call, once the reply that made the
 # call has gone out to the bot.
@@ -412,7 +413,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         if measure == "words":
             longest = max(
                 (
-                    len(line["content"].split())
+                    count_spoken_words(line["content"])
                     for line in self.conversation()
                     if line["role"] == "assistant"
                 ),

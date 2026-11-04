@@ -149,7 +149,7 @@ class InputParams(BaseModel):
 
 #### Examples
 
-Validated against `examples/07-interruptible.py`:
+Validated against `examples/getting-started/06-voice-agent.py`:
 
 - Proper `create_transport()` usage
 - Correct pipeline structure

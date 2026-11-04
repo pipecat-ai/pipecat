@@ -63,7 +63,9 @@ class TwilioFrameSerializer(FrameSerializer):
 
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Twilio call when an EndFrame or CancelFrame is processed, but requires Twilio
-    credentials to be provided.
+    credentials: either auth_token or an API key (api_key_sid + api_key_secret).
+    Credentials must belong to the configured region: each Twilio region has its own
+    Auth Token and API keys.
     """
 
     class InputParams(FrameSerializer.InputParams):
@@ -90,6 +92,9 @@ class TwilioFrameSerializer(FrameSerializer):
         edge: str | None = None,
         base_url: str | None = None,
         params: InputParams | None = None,
+        *,
+        api_key_sid: str | None = None,
+        api_key_secret: str | None = None,
     ):
         """Initialize the TwilioFrameSerializer.
 
@@ -97,7 +102,11 @@ class TwilioFrameSerializer(FrameSerializer):
             stream_sid: The Twilio Media Stream SID.
             call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
             account_sid: Twilio account SID (required for auto hang-up).
-            auth_token: Twilio auth token (required for auto hang-up).
+            auth_token: Twilio Auth Token for auto hang-up. Mutually exclusive with
+                api_key_sid/api_key_secret.
+            api_key_sid: Twilio API key SID (starts with "SK"). Alternative to
+                auth_token for auto hang-up. Must be provided with api_key_secret.
+            api_key_secret: Twilio API key secret. Must be provided with api_key_sid.
             region: Twilio region (e.g., "au1", "ie1"). Must be specified with edge.
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             base_url: Optional REST API base URL (scheme + host, e.g.
@@ -118,12 +127,28 @@ class TwilioFrameSerializer(FrameSerializer):
                 missing_credentials.append("call_sid")
             if not account_sid:
                 missing_credentials.append("account_sid")
-            if not auth_token:
-                missing_credentials.append("auth_token")
+            if not auth_token and not api_key_sid and not api_key_secret:
+                missing_credentials.append("auth_token or api_key_sid + api_key_secret")
 
             if missing_credentials:
                 raise ValueError(
                     f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
+                )
+
+            # Reject an auth_token alongside any part of an API key. Accepting both
+            # would let a leftover auth_token stay deployed without anyone noticing.
+            if auth_token and (api_key_sid or api_key_secret):
+                raise ValueError(
+                    "Provide either auth_token or api_key_sid + api_key_secret, not both."
+                )
+
+            # Validate the API key pair is complete. auth_token is ruled out above,
+            # so this only sees a lone api_key_sid or api_key_secret.
+            if (api_key_sid and not api_key_secret) or (api_key_secret and not api_key_sid):
+                missing = "api_key_secret" if api_key_sid else "api_key_sid"
+                raise ValueError(
+                    "Both api_key_sid and api_key_secret parameters are required if one is set. "
+                    f"Missing: {missing}"
                 )
 
             # Validate region and edge are both provided if either is specified.
@@ -140,6 +165,8 @@ class TwilioFrameSerializer(FrameSerializer):
         self._call_sid = call_sid
         self._account_sid = account_sid
         self._auth_token = auth_token
+        self._api_key_sid = api_key_sid
+        self._api_key_secret = api_key_secret
         self._region = region
         self._edge = edge
         self._base_url = base_url
@@ -218,10 +245,10 @@ class TwilioFrameSerializer(FrameSerializer):
         try:
             import aiohttp
 
-            # __init__ guarantees these are non-None whenever auto_hang_up is True,
+            # __init__ guarantees account_sid, call_sid and exactly one credential type
+            # (auth_token or the API key pair) are set whenever auto_hang_up is True,
             # which is the only path that reaches this method.
             account_sid = cast(str, self._account_sid)
-            auth_token = cast(str, self._auth_token)
             call_sid = cast(str, self._call_sid)
             # REST endpoint for updating the call. Derived from base_url when set
             # (Twilio-API-compatible / self-hosted), else Twilio's region/edge FQDN.
@@ -233,8 +260,14 @@ class TwilioFrameSerializer(FrameSerializer):
                 edge=self._edge,
             )
 
-            # Create basic auth from account_sid and auth_token
-            auth = aiohttp.BasicAuth(account_sid, auth_token)
+            # Basic Auth pair: account_sid + auth_token, or api_key_sid + api_key_secret.
+            if self._auth_token:
+                login = account_sid
+                password = cast(str, self._auth_token)
+            else:
+                login = cast(str, self._api_key_sid)
+                password = cast(str, self._api_key_secret)
+            auth = aiohttp.BasicAuth(login, password)
 
             # Parameters to set the call status to "completed" (hang up)
             params = {"Status": "completed"}
