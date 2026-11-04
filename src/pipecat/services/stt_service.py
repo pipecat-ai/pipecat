@@ -615,9 +615,6 @@ class STTService(AIService):
         Called when the user's full turn has ended and the transcription has been
         received. Re-enables reconnection and triggers any deferred reconnect that
         was requested while the user was speaking.
-
-        Args:
-            frame: The user stopped speaking frame.
         """
         self._can_reconnect = True
         if self._need_reconnect:
