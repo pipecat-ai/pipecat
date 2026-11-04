@@ -1515,6 +1515,22 @@ class UserMuteStoppedFrame(SystemFrame):
 
 
 @dataclass
+class PerceptionFrame(SystemFrame):
+    """A reading of how the user spoke, broadcast as soon as a producer has one.
+
+    A perception producer broadcasts every reading it makes, whether or not a
+    transcription is there to carry it yet, so processors and clients can act
+    on it right away. The LLM is given the reading a transcription carries in
+    its ``perception``. Part of expressive conversation (alpha).
+
+    Parameters:
+        perception: The reading.
+    """
+
+    perception: list[PerceptionSignal]
+
+
+@dataclass
 class UserSpeakingFrame(SystemFrame):
     """Frame indicating the user is speaking.
 

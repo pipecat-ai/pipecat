@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     LLMContextAssistantTurnFrame,
     MetricsFrame,
+    PerceptionFrame,
     PerceptionMetadataFrame,
     TranscriptionFrame,
 )
@@ -119,10 +120,10 @@ async def test_each_answer_is_set_as_a_signal_on_its_transcription():
     down, _ = await run_test(
         PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS),
         frames_to_send=[_transcription("I already gave you my order number.")],
-        expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame],
+        expected_down_frames=[PerceptionMetadataFrame, PerceptionFrame, TranscriptionFrame],
     )
 
-    assert down[1].perception == [
+    assert down[2].perception == [
         PerceptionSignal("tone", labels=[("frustrated", 0.7), ("confused", 0.2)]),
         PerceptionSignal("hesitation", value=0.64),
         PerceptionSignal("energy", value=0.68),
@@ -136,10 +137,10 @@ async def test_a_choice_reports_at_most_its_max_labels():
     down, _ = await run_test(
         PerceptionReader(classifier=FakeClassifier(), questions={"tone": question}),
         frames_to_send=[_transcription("Hello.")],
-        expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame],
+        expected_down_frames=[PerceptionMetadataFrame, PerceptionFrame, TranscriptionFrame],
     )
 
-    assert down[1].perception == [PerceptionSignal("tone", labels=[("frustrated", 0.7)])]
+    assert down[2].perception == [PerceptionSignal("tone", labels=[("frustrated", 0.7)])]
 
 
 @pytest.mark.asyncio
@@ -224,3 +225,21 @@ async def test_the_classifiers_metrics_are_pushed_when_metrics_are_on():
 
     assert [f for f in with_metrics if isinstance(f, MetricsFrame)]
     assert not [f for f in without_metrics if isinstance(f, MetricsFrame)]
+
+
+def _readings(frames) -> list:
+    return [f.perception for f in frames if isinstance(f, PerceptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_a_text_reading_is_broadcast_both_ways():
+    down, up = await run_test(
+        PerceptionReader(
+            classifier=FakeClassifier(), questions={"hesitation": QUESTIONS["hesitation"]}
+        ),
+        frames_to_send=[_transcription("Hello.")],
+    )
+
+    reading = [PerceptionSignal("hesitation", value=0.64)]
+    assert _readings(down) == [reading]
+    assert _readings(up) == [reading]
