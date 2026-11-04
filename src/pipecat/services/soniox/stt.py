@@ -238,16 +238,17 @@ class SonioxSTTSettings(STTSettings):
             :class:`SonioxContextObject` or a plain string of background text.
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
-        max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
+        max_endpoint_delay_ms: Max ms after speech ends before endpoint detection returns
+            an endpoint (500-3000).
         endpoint_sensitivity: Endpoint detection sensitivity (-1.0 to 1.0); higher finalizes sooner.
         endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
             finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
 
-    The ``max_endpoint_delay_ms``, ``endpoint_sensitivity`` and
-    ``endpoint_latency_adjustment_level`` settings only take effect when
-    ``vad_force_turn_endpoint=False``; otherwise Soniox endpoint detection is
-    disabled and these settings are ignored.
+    Endpoint detection runs in both turn detection modes. With
+    ``vad_force_turn_endpoint=True`` it only ends transcripts, so
+    ``max_endpoint_delay_ms`` bounds how long the transcript of speech the
+    local VAD missed waits.
     """
 
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -334,10 +335,12 @@ class SonioxSTTService(WebsocketSTTService):
                     Will be removed in 2.0.0.
 
             vad_force_turn_endpoint: Controls turn detection mode.
-                When True (Pipecat mode, default): Soniox endpoint detection is
-                disabled and a `VADUserStoppedSpeakingFrame` sends a finalize
-                message to Soniox. When False (Soniox turn detection mode): Soniox
-                endpoint detection is enabled and controls turn endings. Proposes a
+                When True (Pipecat mode, default): Pipecat's user turn strategies
+                decide turn endings, and a `VADUserStoppedSpeakingFrame` sends a
+                finalize message to Soniox so the transcript arrives sooner. Soniox
+                endpoint detection still ends the transcript when the VAD misses
+                speech, but never the turn. When False (Soniox turn detection mode):
+                Soniox endpoint detection controls turn endings. Proposes a
                 turn start on the local VAD signal when a VAD analyzer is
                 configured (most responsive) or on the first transcript token
                 otherwise, and a turn stop when the endpoint is detected.
@@ -624,10 +627,6 @@ class SonioxSTTService(WebsocketSTTService):
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
                 raise Exception(f"Unable to connect to Soniox API at {self._url}")
 
-            # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
-            # Either one or the other is required.
-            enable_endpoint_detection = not self._vad_force_turn_endpoint
-
             s = self._settings
 
             context = s.context
@@ -639,7 +638,10 @@ class SonioxSTTService(WebsocketSTTService):
                 "model": s.model,
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,
-                "enable_endpoint_detection": enable_endpoint_detection,
+                # On in both modes. In Pipecat mode a VAD stop finalizes sooner,
+                # and the endpoint still ends the transcript of speech the VAD
+                # missed; it never ends the turn.
+                "enable_endpoint_detection": True,
                 "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
                 "endpoint_sensitivity": s.endpoint_sensitivity,
                 "endpoint_latency_adjustment_level": s.endpoint_latency_adjustment_level,

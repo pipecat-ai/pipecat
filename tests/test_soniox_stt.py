@@ -24,6 +24,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
     END_TOKEN,
+    FINALIZED_TOKEN,
     SonioxSTTService,
     _language_from_tokens,
     language_to_soniox_language,
@@ -368,6 +369,65 @@ async def test_pipecat_mode_emits_no_turn_frames(monkeypatch):
         ),
         json.dumps({"tokens": [], "finished": True}),
     ]
+    service._websocket = _FakeWebsocket(messages)
+
+    await service._receive_messages()
+
+    assert events == [
+        ("push", InterimTranscriptionFrame),
+        ("push", TranscriptionFrame),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vad_force_turn_endpoint", [True, False])
+async def test_connect_enables_endpoint_detection_in_both_modes(
+    monkeypatch, vad_force_turn_endpoint
+):
+    """Endpoint detection ends the transcript of speech the local VAD misses."""
+    websocket = _FakeWebsocket([])
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(api_key="test-key", vad_force_turn_endpoint=vad_force_turn_endpoint)
+
+    await service._connect_websocket()
+
+    config = json.loads(websocket.send.call_args.args[0])
+    assert config["enable_endpoint_detection"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer",
+    [
+        # Soniox answers a finalize with the endpoint and <fin> together...
+        [
+            [
+                {"text": "Bye bye.", "is_final": True},
+                {"text": END_TOKEN, "is_final": True},
+                {"text": FINALIZED_TOKEN, "is_final": True},
+            ]
+        ],
+        # ...or with <fin> alone when its endpoint came first.
+        [
+            [{"text": "Bye bye.", "is_final": True}, {"text": END_TOKEN, "is_final": True}],
+            [{"text": FINALIZED_TOKEN, "is_final": True}],
+        ],
+    ],
+    ids=["end-and-fin-together", "end-then-fin"],
+)
+async def test_pipecat_mode_endpoint_and_finalize_push_one_transcription(monkeypatch, answer):
+    events = []
+    service = _instrumented_service(monkeypatch, events)
+
+    messages = [json.dumps({"tokens": [{"text": "Bye", "is_final": False}]})]
+    messages += [json.dumps({"tokens": tokens}) for tokens in answer]
+    messages.append(json.dumps({"tokens": [], "finished": True}))
     service._websocket = _FakeWebsocket(messages)
 
     await service._receive_messages()
