@@ -326,8 +326,8 @@ class _SharedRuntime:
                 raise ValueError(
                     f"a user agent for {aor} is already up with different account "
                     "parameters; connections sharing an address-of-record must agree "
-                    "on transport, registrar, auth_user, audio_codecs, dtmf_mode, and "
-                    "extra_params (only reg_interval may differ)"
+                    "on transport, registrar, password, auth_user, audio_codecs, "
+                    "dtmf_mode, and extra_params (only reg_interval may differ)"
                 )
             if aor not in self._uas:
                 ua = await UserAgent.create(self._runtime, account)
