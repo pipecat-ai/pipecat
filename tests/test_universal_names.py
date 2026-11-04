@@ -29,7 +29,7 @@ from pipecat.expressive.expression import (
     ExpressionTerm,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.processors.tone.tagger._labels import LabelSpace
+from pipecat.expressive.processors.tone_tagger._labels import LabelSpace
 
 ADAPTERS = [
     AzureHDExpressionAdapter,

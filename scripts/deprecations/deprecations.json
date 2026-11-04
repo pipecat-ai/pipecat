@@ -1642,6 +1642,39 @@
       "location": "pipecat/processors/tone/reader/processor.py"
     },
     {
+      "subject": "pipecat.processors.tone.tagger",
+      "module": "pipecat.processors.tone.tagger",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_tagger",
+      "message": "Moved to :mod:`pipecat.expressive.processors.tone_tagger`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/tagger/__init__.py"
+    },
+    {
+      "subject": "pipecat.processors.tone.tagger.model",
+      "module": "pipecat.processors.tone.tagger.model",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_tagger.model",
+      "message": "Moved to :mod:`pipecat.expressive.processors.tone_tagger.model`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/tagger/model.py"
+    },
+    {
+      "subject": "pipecat.processors.tone.tagger.processor",
+      "module": "pipecat.processors.tone.tagger.processor",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_tagger.processor",
+      "message": "Moved to :mod:`pipecat.expressive.processors.tone_tagger.processor`. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/tone/tagger/processor.py"
+    },
+    {
       "subject": "EvalRunnerArguments",
       "module": "pipecat.runner.types",
       "kind": "class",

@@ -15,6 +15,11 @@ from pipecat.adapters.tts.services.cartesia_adapter import CartesiaExpressionAda
 from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+from pipecat.expressive.processors.tone_tagger import PipecatToneTagger
+from pipecat.expressive.processors.tone_tagger import model as tagger_model
+from pipecat.expressive.processors.tone_tagger._input import Layout, Message, TurnContext, encode
+from pipecat.expressive.processors.tone_tagger._labels import LabelSpace, SentenceLabels, Span
+from pipecat.expressive.processors.tone_tagger.model import PipecatToneTaggerModel
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     ErrorFrame,
@@ -31,11 +36,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
-from pipecat.processors.tone.tagger import PipecatToneTagger
-from pipecat.processors.tone.tagger import model as tagger_model
-from pipecat.processors.tone.tagger._input import Layout, Message, TurnContext, encode
-from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels, Span
-from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils import models
 
