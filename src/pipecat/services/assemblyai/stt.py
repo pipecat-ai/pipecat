@@ -590,7 +590,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._termination_event = asyncio.Event()
-        self._connected = False
 
         self._receive_task = None
 
@@ -991,43 +990,33 @@ class AssemblyAISTTService(WebsocketSTTService):
     async def _disconnect(self):
         """Disconnect from the AssemblyAI service.
 
-        Sends termination message, waits for acknowledgment, and cleans up.
+        On an open connection, sends any buffered audio and a termination
+        message and waits for the acknowledgment. Then stops the receive loop,
+        including a reconnect it has in progress, and closes the websocket.
         """
         await super()._disconnect()
 
-        if not self._connected or not self._websocket:
-            return
-
-        try:
-            self._termination_event.clear()
-
-            if self._websocket.state is State.OPEN:
-                # Send any remaining audio
-                if len(self._audio_buffer) > 0:
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                if self._audio_buffer:
                     await self._websocket.send(bytes(self._audio_buffer))
                     self._audio_buffer.clear()
 
-                # Send termination message and wait for acknowledgment
-                try:
-                    await self._websocket.send(json.dumps({"type": "Terminate"}))
+                # The receive loop sets the event on the acknowledgment, so it
+                # must still be running while we wait.
+                self._termination_event.clear()
+                await self._websocket.send(json.dumps({"type": "Terminate"}))
+                await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
+            except TimeoutError:
+                logger.warning(f"{self} timed out waiting for termination message from server")
+            except Exception as e:
+                await self.push_error(error_msg=f"Error terminating session: {e}", exception=e)
 
-                    try:
-                        await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
-                    except TimeoutError:
-                        logger.warning("Timed out waiting for termination message from server")
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
-                except Exception as e:
-                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            # Clean up tasks and connection
-            if self._receive_task:
-                await self.cancel_task(self._receive_task)
-                self._receive_task = None
-
-            await self._disconnect_websocket()
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Establish the websocket connection to AssemblyAI."""
@@ -1046,12 +1035,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 ws_url,
                 additional_headers=headers,
             )
-            self._connected = True
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} Connected to AssemblyAI WebSocket")
         except Exception as e:
             self._websocket = None
-            self._connected = False
             await self.push_error(error_msg=f"Unable to connect to AssemblyAI: {e}", exception=e)
 
     async def _disconnect_websocket(self):
@@ -1064,7 +1051,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
-            self._connected = False
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
