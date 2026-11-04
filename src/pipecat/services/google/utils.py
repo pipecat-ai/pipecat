@@ -7,14 +7,18 @@
 """Utility functions for Google services."""
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
 
 from pipecat import version as pipecat_version
+
+if TYPE_CHECKING:
+    from google.auth.credentials import Credentials
 
 T = TypeVar("T")
 
@@ -92,6 +96,51 @@ def _thinking_default(
     if levels_only and name.startswith("gemini-2.5"):
         return None, False
     return _THINKING_DEFAULTS.get(name), _can_think(name)
+
+
+def _vertex_credentials(credentials: str | None, credentials_path: str | None) -> "Credentials":
+    """Load the Google Cloud credentials a Vertex AI client authenticates with.
+
+    Tries, in order, a service account's JSON, a path to that JSON, and the
+    application default credentials (ADC). The access token is refreshed before
+    returning; it lasts an hour.
+
+    Args:
+        credentials: JSON string of service account credentials.
+        credentials_path: Path to the service account JSON file.
+
+    Returns:
+        The credentials, with a fresh access token.
+
+    Raises:
+        ValueError: If no valid credentials are provided or found.
+    """
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
+    from google.auth.transport.requests import Request
+    from google.oauth2 import service_account
+
+    scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    creds = None
+    if credentials:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(credentials), scopes=scopes
+        )
+    elif credentials_path:
+        creds = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=scopes
+        )
+    else:
+        try:
+            creds, _ = default(scopes=scopes)
+        except GoogleAuthError:
+            pass
+
+    if not creds:
+        raise ValueError("No valid credentials provided.")
+
+    creds.refresh(Request())
+    return creds
 
 
 def update_google_client_http_options(http_options: dict[str, Any] | Any | None) -> Any:

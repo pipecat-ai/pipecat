@@ -194,9 +194,12 @@ class GoogleInteractionsLLMService(LLMService[GeminiInteractionsLLMAdapter]):
         self._retry_on_timeout = retry_on_timeout
         self._warned_unsupported: set[str] = set()
 
-        self._client: genai.Client | None = genai.Client(
-            api_key=self._api_key, http_options=self._http_options
-        )
+        self._client: genai.Client | None = None
+        self.create_client()
+
+    def create_client(self):
+        """Create the Gemini client instance. Subclasses can override this."""
+        self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
