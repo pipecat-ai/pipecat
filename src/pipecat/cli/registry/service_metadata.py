@@ -1173,6 +1173,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="zoom_ai_realtime",
+            label="Zoom AI Voice Agent",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIRealtimeLLMService"],
+            env_prefix="ZOOM_AI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="ultravox",
             label="Ultravox",
             package="pipecat-ai[ultravox]",
@@ -1294,6 +1303,14 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
         ")"
