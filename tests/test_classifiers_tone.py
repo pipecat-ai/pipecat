@@ -17,7 +17,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.tone.classifier import PipecatToneClassifier
 from pipecat.classifiers.tone.model import PipecatToneReaderModel
-from pipecat.processors.tone import _models
+from pipecat.utils import models
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 TAGS = {
@@ -55,7 +55,7 @@ class FakeReaderModel:
 @pytest.fixture(autouse=True)
 def _unshared_models(monkeypatch):
     """Each test loads its own model."""
-    monkeypatch.setattr(_models, "_models", {})
+    monkeypatch.setattr(models, "_models", {})
 
 
 async def _classifier(monkeypatch, model: FakeReaderModel) -> PipecatToneClassifier:

@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
-from pipecat.processors.tone._models import load_model
 from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
 from pipecat.processors.tone.tagger._labels import (
     BREATH_KINDS,
@@ -47,6 +46,7 @@ from pipecat.processors.tone.tagger._labels import (
     SentenceLabels,
 )
 from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
+from pipecat.utils.models import load_shared_model
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 
@@ -154,11 +154,13 @@ class PipecatToneTagger(LLMTextProcessor):
                 "turn it on with PipelineParams(enable_expressive_conversation=True)"
             )
             return
-        self._model = await load_model(
-            self,
-            ("tagger", self._model_dir or (self._size, self._revision), self._threads),
-            self._open_model,
-        )
+        key = ("tagger", self._model_dir or (self._size, self._revision), self._threads)
+        try:
+            self._model = await load_shared_model(key, self._open_model)
+        except Exception as e:
+            await self.push_error(
+                f"{self}: couldn't load its model: {e}", e, force_treat_as_permanent=True
+            )
 
     def _open_model(self) -> PipecatToneTaggerModel:
         if self._model_dir:

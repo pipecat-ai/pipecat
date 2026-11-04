@@ -19,8 +19,8 @@ from pipecat.frames.frames import (
     PerceptionMetadataFrame,
     TranscriptionFrame,
 )
-from pipecat.processors.tone import _models
 from pipecat.tests.utils import run_test
+from pipecat.utils import models
 
 TAGS = {
     "emotion": {
@@ -53,7 +53,7 @@ class FakeReaderModel:
 @pytest.fixture(autouse=True)
 def _unshared_models(monkeypatch):
     """Each test loads its own model."""
-    monkeypatch.setattr(_models, "_models", {})
+    monkeypatch.setattr(models, "_models", {})
 
 
 def _reader(monkeypatch, model: FakeReaderModel) -> PipecatToneReader:
