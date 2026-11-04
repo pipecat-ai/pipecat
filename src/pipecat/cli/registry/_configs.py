@@ -501,10 +501,9 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "heygen_tts": (
-        "HeyGenHttpTTSService(\n"
+        "HeyGenTTSService(\n"
         '        api_key=os.getenv("HEYGEN_API_KEY"),\n'
-        "        aiohttp_session=session,\n"
-        "        settings=HeyGenHttpTTSService.Settings(\n"
+        "        settings=HeyGenTTSService.Settings(\n"
         '            voice=os.getenv("HEYGEN_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"

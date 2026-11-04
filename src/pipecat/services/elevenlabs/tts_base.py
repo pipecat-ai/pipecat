@@ -638,6 +638,10 @@ class ElevenLabsTTSBase(WebsocketTTSService):
     async def _close_context(self, context_id: str):
         """Close a server-side context to free its slot."""
 
+    def _websocket_headers(self) -> dict[str, str]:
+        """Build the headers that authenticate a new connection."""
+        return {"xi-api-key": self._api_key}
+
     async def _on_websocket_connected(self):
         """Run any protocol-specific setup once the connection is open."""
 
@@ -735,7 +739,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             self._websocket = await self._websocket_connect(
                 self._build_websocket_url(),
                 max_size=16 * 1024 * 1024,
-                additional_headers={"xi-api-key": self._api_key},
+                additional_headers=self._websocket_headers(),
             )
 
             await self._on_websocket_connected()

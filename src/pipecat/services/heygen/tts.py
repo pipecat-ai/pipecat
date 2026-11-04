@@ -6,22 +6,36 @@
 
 """HeyGen Voice text-to-speech service implementation.
 
-Contains :class:`HeyGenHttpTTSService`, which streams raw PCM audio from HeyGen's
-``POST /v3/models/audio/tts/stream`` endpoint.
+Provides two TTS services against HeyGen Voice:
+
+- :class:`HeyGenTTSService` streams text in and audio out over the
+  ``/v3/models/audio/tts/multi-stream-input`` WebSocket, with word timestamps.
+- :class:`HeyGenHttpTTSService` streams raw PCM audio from the
+  ``POST /v3/models/audio/tts/stream`` endpoint, one request per sentence.
 
 See https://developers.heygen.com/docs/voices/heygen-voice-speech.
 """
 
+import base64
+import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
+from urllib.parse import urlencode
 
 import aiohttp
 from loguru import logger
+from websockets.protocol import State
 
-from pipecat.frames.frames import ErrorFrame, Frame
+from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame, TTSStoppedFrame
+from pipecat.services.elevenlabs.tts_base import (
+    ElevenLabsTTSBase,
+    ElevenLabsTTSSettingsBase,
+    _strip_utterance_leading_spaces,
+    _word_timestamps_include_inter_frame_spaces,
+)
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import TTSService
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import assert_given
@@ -255,3 +269,225 @@ class HeyGenHttpTTSService(TTSService):
                     yield frame
         except Exception as e:
             yield ErrorFrame(error=f"HeyGen TTS error: {e}")
+
+
+@dataclass
+class HeyGenWebsocketTTSSettings(ElevenLabsTTSSettingsBase):
+    """Settings for HeyGenTTSService.
+
+    Parameters:
+        model: HeyGen Voice model: ``heygen-voice-1`` or ``heygen-voice-1-turbo``.
+        voice: HeyGen voice ID: a public voice or an instant clone in your workspace.
+        language: Language of the text. If ``None``, HeyGen detects it.
+    """
+
+    #: All settings are WebSocket URL parameters; changing one reconnects.
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"model", "voice", "language"})
+
+
+class HeyGenTTSService(ElevenLabsTTSBase):
+    """HeyGen Voice WebSocket text-to-speech service.
+
+    Streams text to HeyGen's ``multi-stream-input`` WebSocket and plays the audio
+    as it arrives. The socket speaks ElevenLabs' multi-context messages, so this
+    service shares :class:`ElevenLabsTTSBase` and differs only in its endpoint,
+    authentication and parameter names. HeyGen's per-character alignment drives
+    word-level ``TTSTextFrame`` objects, so an interruption commits only the
+    words actually spoken.
+
+    Defaults to ``heygen-voice-1-turbo`` and the public voice Nadine.
+    Professional voice clones are served only by :class:`HeyGenHttpTTSService`.
+    """
+
+    Settings = HeyGenWebsocketTTSSettings
+    _settings: Settings
+
+    CONNECTION_NAME: ClassVar[str] = "HeyGen"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        url: str = "wss://api.heygen.com",
+        sample_rate: int | None = None,
+        auto_mode: bool | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        settings: Settings | None = None,
+        **kwargs,
+    ):
+        """Initialize the HeyGen WebSocket TTS service.
+
+        Args:
+            api_key: HeyGen API key.
+            url: HeyGen WebSocket base URL.
+            sample_rate: Output audio sample rate in Hz. If None, uses the
+                pipeline default.
+            auto_mode: Whether HeyGen starts generating at each sentence end
+                instead of waiting for more text. Defaults to True unless
+                ``text_aggregation_mode`` is ``TOKEN``, where HeyGen's own
+                chunk schedule gathers enough text for natural speech.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+            settings: Runtime-updatable settings.
+            **kwargs: Additional arguments passed to the parent service.
+        """
+        default_settings = self.Settings(
+            model="heygen-voice-1-turbo",
+            voice=HEYGEN_DEFAULT_VOICE_ID,
+            language=None,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            api_key=api_key,
+            url=url,
+            text_aggregation_mode=text_aggregation_mode,
+            push_text_frames=False,
+            push_stop_frames=False,
+            # HeyGen joins text messages as sent, so sentences need a separating space.
+            append_trailing_space=True,
+            sample_rate=sample_rate,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        if auto_mode is None:
+            auto_mode = self._text_aggregation_mode != TextAggregationMode.TOKEN
+        self._auto_mode = auto_mode
+
+        # Contexts whose opening message has been sent, so keepalives may target them.
+        self._context_init_sent: set[str] = set()
+        # Contexts whose first alignment has arrived; only the first can carry
+        # utterance-leading spaces.
+        self._alignment_started_context_ids: set[str] = set()
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to a HeyGen Voice language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The HeyGen language code.
+        """
+        return language_to_heygen_language(language)
+
+    def _websocket_headers(self) -> dict[str, str]:
+        return {"x-api-key": self._api_key}
+
+    def _build_websocket_url(self) -> str:
+        params = {
+            "voice_id": assert_given(self._settings.voice),
+            "model": assert_given(self._settings.model),
+            "output_format": self._output_format,
+            "auto_mode": str(self._auto_mode).lower(),
+        }
+        language = assert_given(self._settings.language)
+        if language:
+            params["language"] = str(language)
+        return f"{self._url}/v3/models/audio/tts/multi-stream-input?{urlencode(params)}"
+
+    def _set_voice_settings(self) -> dict[str, Any] | None:
+        return None
+
+    def _clear_connection_state(self):
+        self._context_init_sent.clear()
+
+    def _reset_alignment_state(self, context_id: str):
+        super()._reset_alignment_state(context_id)
+        self._alignment_started_context_ids.discard(context_id)
+        self._context_init_sent.discard(context_id)
+
+    async def flush_audio(self, context_id: str | None = None):
+        """Ask HeyGen to generate any text still buffered for a context.
+
+        Args:
+            context_id: The context to flush. If None, the active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
+            return
+        await self._websocket.send(json.dumps({"context_id": flush_id, "flush": True}))
+
+    async def on_turn_context_completed(self):
+        """Close the server-side context at the end of a turn so its final message arrives."""
+        context_id = self._turn_context_id
+        await super().on_turn_context_completed()
+        if context_id:
+            await self._close_context(context_id)
+
+    async def _close_context(self, context_id: str):
+        if context_id and self._websocket:
+            try:
+                await self._websocket.send(
+                    json.dumps({"context_id": context_id, "close_context": True})
+                )
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+
+    async def _send_context_init(self, context_id: str):
+        self._context_init_sent.add(context_id)
+        await self._get_websocket().send(json.dumps({"text": " ", "context_id": context_id}))
+
+    async def _send_text(self, text: str, context_id: str):
+        if self._websocket and context_id:
+            await self._websocket.send(json.dumps({"text": text, "context_id": context_id}))
+
+    async def _send_keepalive(self):
+        if not self._websocket or self._websocket.state is not State.OPEN:
+            return
+        context_id = self.get_active_audio_context_id()
+        if context_id and context_id in self._context_init_sent:
+            message = {"text": "", "context_id": context_id}
+        else:
+            message = {"text": ""}
+        await self._websocket.send(json.dumps(message))
+
+    async def _receive_messages(self):
+        """Handle audio, alignment, final and error messages from HeyGen."""
+        async for message in self._get_websocket():
+            msg = json.loads(message)
+
+            # HeyGen sends an error message just before it closes the socket.
+            if msg.get("error"):
+                await self.push_error(error_msg=f"HeyGen TTS error: {msg.get('message')}")
+                continue
+
+            context_id = msg.get("contextId")
+
+            if msg.get("isFinal") is True:
+                if self.audio_context_available(context_id):
+                    await self.append_to_audio_context(
+                        context_id, TTSStoppedFrame(context_id=context_id)
+                    )
+                    await self.remove_audio_context(context_id)
+                continue
+
+            # An interrupted context's audio and alignment can still arrive.
+            if not self.audio_context_available(context_id):
+                continue
+
+            if msg.get("audio"):
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+                await self.append_to_audio_context(context_id, frame)
+
+            alignment = msg.get("alignment")
+            if alignment:
+                alignment = _strip_utterance_leading_spaces(
+                    alignment,
+                    ("chars", "charStartTimesMs", "charDurationsMs"),
+                    context_id not in self._alignment_started_context_ids,
+                )
+                self._alignment_started_context_ids.add(context_id)
+                word_times = self._word_times_from_alignment(context_id, alignment)
+                if word_times:
+                    language = assert_given(self._settings.language)
+                    await self.add_word_timestamps(
+                        word_times,
+                        context_id,
+                        includes_inter_frame_spaces=(
+                            True if _word_timestamps_include_inter_frame_spaces(language) else None
+                        ),
+                    )

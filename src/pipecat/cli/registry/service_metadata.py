@@ -944,7 +944,7 @@ class ServiceRegistry:
             value="heygen_tts",
             label="HeyGen TTS",
             package="pipecat-ai",
-            class_name=["HeyGenHttpTTSService"],
+            class_name=["HeyGenTTSService"],
             env_prefix="HEYGEN",
             include_params=["api_key"],
             settings_params=["voice"],
