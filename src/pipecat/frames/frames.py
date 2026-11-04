@@ -2243,6 +2243,31 @@ class ExpressionMetadataFrame(ServiceMetadataFrame):
 
 
 @dataclass
+class LLMInstructorMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast at start by a processor that instructs the LLM.
+
+    An instructor contributes standing guidance to the LLM's system
+    instruction, prompts the model itself, or both. The LLM service composes
+    the instruction onto the end of its system instruction, after the app's
+    own, and keeps it across context resets, as
+    :meth:`~pipecat.services.llm_service.LLMService.append_system_instruction`
+    does. It honors the mark once announced: a reply that opens with it is
+    dropped unspoken and reported as an :class:`LLMMarkerResponseFrame` of
+    kind ``"silent"``. Each instructor's instruction is kept; a later mark
+    replaces an earlier one.
+
+    Parameters:
+        instruction: What the instructor adds to the system instruction, or
+            None when it adds nothing.
+        silent_mark: What the instructor's prompts tell the model to answer
+            with to say nothing, or None when they offer no silence.
+    """
+
+    instruction: str | None = None
+    silent_mark: str | None = None
+
+
+@dataclass
 class ServiceSwitcherRequestMetadataFrame(ControlFrame):
     """Request a service to re-emit its metadata frames.
 

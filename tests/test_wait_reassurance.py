@@ -14,13 +14,17 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMInstructorMetadataFrame,
     LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
     UserStartedSpeakingFrame,
 )
-from pipecat.processors.wait_reassurance import WaitReassurance
-from pipecat.services.llm_service import LLM_SILENT_MARK
+from pipecat.processors.wait_reassurance import (
+    WAIT_REASSURANCE_PROMPT,
+    WAIT_REASSURANCE_SILENT_MARK,
+    WaitReassurance,
+)
 from pipecat.tests.utils import SleepFrame, run_test
 
 INTERVAL = 0.2
@@ -55,6 +59,30 @@ async def _run(frames: list[Frame], **kwargs):
     return down
 
 
+def _announcements(frames) -> list[LLMInstructorMetadataFrame]:
+    return [f for f in frames if isinstance(f, LLMInstructorMetadataFrame)]
+
+
+# ---------------------------------------------------------------------------
+# What the LLM is told at start
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_llm_is_told_at_start_how_it_will_be_prompted():
+    down, up = await run_test(WaitReassurance(interval_secs=INTERVAL), frames_to_send=[])
+
+    for frames in (down, up):
+        (announcement,) = _announcements(frames)
+        assert announcement.silent_mark == WAIT_REASSURANCE_SILENT_MARK
+        assert announcement.instruction is not None
+        assert WAIT_REASSURANCE_SILENT_MARK in announcement.instruction
+        assert "{mark}" not in announcement.instruction
+        # The instruction names the message by its opening.
+        opening = WAIT_REASSURANCE_PROMPT.split(",")[0]
+        assert f'"{opening}' in announcement.instruction
+
+
 # ---------------------------------------------------------------------------
 # When the model is asked
 # ---------------------------------------------------------------------------
@@ -65,8 +93,7 @@ async def test_the_model_is_asked_once_the_wait_has_gone_quiet():
     down = await _run([*_waiting(), SleepFrame(INTERVAL + MARGIN)])
 
     (prompt,) = _prompts(down)
-    assert LLM_SILENT_MARK in prompt
-    assert "seconds" in prompt
+    assert prompt == WAIT_REASSURANCE_PROMPT.format(quiet_secs=0)
     (append,) = [f for f in down if isinstance(f, LLMMessagesAppendFrame)]
     assert append.run_llm is True
     assert append.messages[0]["role"] == "developer"
@@ -107,13 +134,17 @@ async def test_nothing_is_asked_once_the_work_is_over():
 
 
 @pytest.mark.asyncio
-async def test_the_prompt_and_mark_are_the_apps():
+async def test_the_instruction_prompt_and_mark_are_the_apps():
     down = await _run(
         [*_waiting(), SleepFrame(INTERVAL + MARGIN)],
+        instruction="Say {mark} to pass.",
         prompt="Quiet for {quiet_secs}s; say {mark} to pass.",
         silent_mark="PASS",
     )
 
+    (announcement,) = _announcements(down)
+    assert announcement.instruction == "Say PASS to pass."
+    assert announcement.silent_mark == "PASS"
     assert _prompts(down) == ["Quiet for 0s; say PASS to pass."]
 
 
@@ -127,7 +158,10 @@ def _silent_decision() -> list[Frame]:
     return [
         LLMFullResponseStartFrame(),
         LLMMarkerResponseFrame(
-            raw=LLM_SILENT_MARK, marker=LLM_SILENT_MARK, kind="silent", markers=[LLM_SILENT_MARK]
+            raw=WAIT_REASSURANCE_SILENT_MARK,
+            marker=WAIT_REASSURANCE_SILENT_MARK,
+            kind="silent",
+            markers=[WAIT_REASSURANCE_SILENT_MARK],
         ),
         LLMFullResponseEndFrame(),
     ]

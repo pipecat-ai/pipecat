@@ -6,10 +6,11 @@
 
 """A brief remark from the LLM while the user waits on background work.
 
-The prompt below is what the model reads each time the conversation has gone
-quiet with background work in progress. A small change in wording can change
-what a model says, or whether it stays silent, in ways no unit test catches.
-Before and after changing it, run the checks in
+The instruction and the prompt below are what the model reads: the instruction
+once, in its system instruction, and the prompt each time the conversation has
+gone quiet with background work in progress. A small change in wording can
+change what a model says, or whether it stays silent, in ways no unit test
+catches. Before and after changing either, run the checks in
 ``scripts/llm-with-backend/tuning/README.md`` and record their results in
 ``RESULTS.md`` beside it.
 """
@@ -23,8 +24,10 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    LLMInstructorMetadataFrame,
     LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
+    StartFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import (
@@ -32,19 +35,19 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
     FrameProcessorSetup,
 )
-from pipecat.services.llm_service import LLM_SILENT_MARK
 from pipecat.turns.user_idle_controller import UserIdleController
 
-#: The developer message appended to the conversation each time the user has
-#: waited quietly on background work. ``{quiet_secs}`` is how long nothing has
-#: been said; ``{mark}`` is the silent mark.
-WAIT_REASSURANCE_PROMPT = (
-    "The user is waiting on background work you started on their behalf, and nothing has been said "
-    "for about {quiet_secs} seconds. This message asks one thing: to reassure the user, if needed, "
-    "that the work is still underway. When deciding what to say (or in some cases, whether to say "
-    "anything at all), consider the user's preferences (for example, they may have asked for only "
-    "the final result of the work and no progress updates along the way) as well as what would now "
-    "sound natural and reassuring in the conversation. Answer this message with exactly {mark} to "
+#: What the model answers with to say nothing.
+WAIT_REASSURANCE_SILENT_MARK = "∅"
+
+#: Standing guidance on the waiting message, composed into the LLM's system
+#: instruction at start: what the message is, how to answer it with silence,
+#: and what to say otherwise. ``{mark}`` is the silent mark.
+WAIT_REASSURANCE_INSTRUCTION = (
+    "While background work you started on the user's behalf is in flight and the conversation has "
+    'gone quiet, a developer message beginning "The user is waiting on background work you started '
+    'on their behalf" will say so. That message asks one thing: to reassure the user, if needed, '
+    "that the work is still underway. Answer that message with exactly {mark} to "
     "respond with silence (after any marker your instructions require). Otherwise, say one short "
     "sentence, in your own voice and with wording that varies from previous reassurances about the "
     "same work, that makes clear the work has been going on since the user asked and is "
@@ -52,8 +55,21 @@ WAIT_REASSURANCE_PROMPT = (
     "way, unless the user asked for detail: then name the step, drawing on the notes the work has "
     "produced. Never report a result or a finding, never say the work is done, and ask no "
     "questions and make no offers or promises, not even to keep the user posted. {mark} is only "
-    "ever the answer to this message. Whatever the user says next, answer them, and when the work "
+    "ever the answer to that message. Whatever the user says, answer them, and when the work "
     "reports back, tell the user, however often you have chosen silence before."
+)
+
+#: The developer message appended to the conversation each time the user has
+#: waited quietly on background work: the facts of the moment, the ask, and
+#: what to weigh in answering it. ``{quiet_secs}`` is how long nothing has
+#: been said. Its opening is what the instruction names it by.
+WAIT_REASSURANCE_PROMPT = (
+    "The user is waiting on background work you started on their behalf, and nothing has been said "
+    "for about {quiet_secs} seconds. Reassure them, if needed, that the work is still underway. "
+    "When deciding what to say (or in some cases, whether to say anything at all), consider the "
+    "user's preferences (for example, they may have asked for only the final result of the work "
+    "and no progress updates along the way) as well as what would now sound natural and "
+    "reassuring in the conversation."
 )
 
 
@@ -68,12 +84,18 @@ class WaitReassurance(FrameProcessor):
     in progress, the processor appends ``prompt`` to the conversation as a
     developer message and runs the LLM. The model decides what to say, with
     the user's wishes and what it knows of the work in view, or that nothing
-    should be said, by answering with ``silent_mark``. The LLM service honors
-    that mark (its ``honor_silent_mark``, which names the same one): the reply
-    is dropped unspoken, reaching neither the TTS nor the context, and the
-    decision is reported, on which the processor starts the interval over. A
-    spoken remark starts it over through the bot's speech, so a long wait
-    gets a fresh decision every interval.
+    should be said, by answering with ``silent_mark``.
+
+    The processor's convention with the model has two halves, announced to the
+    LLM service at start with an
+    :class:`~pipecat.frames.frames.LLMInstructorMetadataFrame`: what the model
+    is told, ``instruction``, which the service composes into its system
+    instruction and which explains the prompt and the mark once; and how its
+    reply is read, ``silent_mark``, which the service honors from then on: a
+    reply opening with it is dropped unspoken, reaching neither the TTS nor
+    the context, and the decision is reported, on which the processor starts
+    the interval over. A spoken remark starts it over through the bot's
+    speech, so a long wait gets a fresh decision every interval.
 
     The processor belongs after a text LLM: a speech-to-speech service's
     audio carries no mark to read. An app that wants to answer the wait in
@@ -101,8 +123,9 @@ class WaitReassurance(FrameProcessor):
         self,
         *,
         interval_secs: float = 10.0,
+        instruction: str = WAIT_REASSURANCE_INSTRUCTION,
         prompt: str = WAIT_REASSURANCE_PROMPT,
-        silent_mark: str = LLM_SILENT_MARK,
+        silent_mark: str = WAIT_REASSURANCE_SILENT_MARK,
         **kwargs,
     ):
         """Initialize the processor.
@@ -110,16 +133,20 @@ class WaitReassurance(FrameProcessor):
         Args:
             interval_secs: Seconds the conversation stays quiet, with background
                 work in progress, before the LLM is asked whether to say something.
+            instruction: The standing guidance added to the LLM's system
+                instruction at start, a template with ``{mark}`` (so any other
+                brace in it is doubled). :data:`WAIT_REASSURANCE_INSTRUCTION`
+                unless given.
             prompt: The developer message appended each time, a template with
-                ``{quiet_secs}`` and ``{mark}`` (so any other brace in it is
-                doubled). :data:`WAIT_REASSURANCE_PROMPT` unless given.
-            silent_mark: What the prompt tells the model to answer with to say
-                nothing. The LLM service's ``honor_silent_mark`` must name the
-                same mark.
+                ``{quiet_secs}`` and, if it wants it, ``{mark}``.
+                :data:`WAIT_REASSURANCE_PROMPT` unless given.
+            silent_mark: What the model answers with to say nothing.
+                :data:`WAIT_REASSURANCE_SILENT_MARK` unless given.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
         self._interval_secs = interval_secs
+        self._instruction = instruction
         self._prompt = prompt
         self._silent_mark = silent_mark
 
@@ -151,7 +178,15 @@ class WaitReassurance(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            await self.broadcast_frame(
+                LLMInstructorMetadataFrame,
+                service_name=self.name,
+                instruction=self._instruction.format(mark=self._silent_mark),
+                silent_mark=self._silent_mark,
+            )
+        elif isinstance(frame, EndFrame):
             await self.push_frame(frame, direction)
             await self._controller.stop()
         elif isinstance(frame, CancelFrame):

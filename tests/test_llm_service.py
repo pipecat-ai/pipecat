@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMInstructorMetadataFrame,
     LLMMarkerResponseFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -39,7 +40,6 @@ from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import (
-    LLM_SILENT_MARK,
     FunctionCallParams,
     FunctionCallRunnerItem,
     LLMService,
@@ -589,8 +589,20 @@ class TestBackgroundWorkFrames(unittest.IsolatedAsyncioTestCase):
         )
 
 
+MARK = "∅"
+
+
 class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
     """A reply opening with the silent mark is dropped at the source and reported."""
+
+    async def _announced(self, **kwargs) -> MockLLMService:
+        """A service a processor has told, at start, which mark means silence."""
+        service = MockLLMService(**kwargs)
+        await service.process_frame(
+            LLMInstructorMetadataFrame(service_name="wait", silent_mark=MARK),
+            FrameDirection.UPSTREAM,
+        )
+        return service
 
     def _recording(self, service: MockLLMService):
         """Patch the push below the service's own, collecting what goes out."""
@@ -615,36 +627,36 @@ class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
         return [f.text for f in pushed if isinstance(f, LLMTextFrame)]
 
     async def test_a_reply_opening_with_the_mark_is_dropped_whole_and_reported(self):
-        pushed = await self._reply(MockLLMService(), " ", LLM_SILENT_MARK, " and more")
+        pushed = await self._reply(await self._announced(), " ", MARK, " and more")
 
         self.assertEqual(
             [type(f) for f in pushed],
             [LLMFullResponseStartFrame, LLMMarkerResponseFrame, LLMFullResponseEndFrame],
         )
         report = pushed[1]
-        self.assertEqual(report.marker, LLM_SILENT_MARK)
+        self.assertEqual(report.marker, MARK)
         self.assertEqual(report.kind, "silent")
-        self.assertEqual(report.raw, f" {LLM_SILENT_MARK}")
-        self.assertEqual(report.markers, [LLM_SILENT_MARK])
+        self.assertEqual(report.raw, f" {MARK}")
+        self.assertEqual(report.markers, [MARK])
 
     async def test_any_other_reply_goes_out_as_written(self):
-        pushed = await self._reply(MockLLMService(), "Still ", "on it.")
+        pushed = await self._reply(await self._announced(), "Still ", "on it.")
 
         self.assertEqual(self._texts(pushed), ["Still ", "on it."])
         self.assertFalse(any(isinstance(f, LLMMarkerResponseFrame) for f in pushed))
 
     async def test_held_whitespace_goes_out_with_the_text_that_decided_it(self):
-        pushed = await self._reply(MockLLMService(), " ", "\n", "Nearly there.")
+        pushed = await self._reply(await self._announced(), " ", "\n", "Nearly there.")
 
         self.assertEqual(self._texts(pushed), [" \nNearly there."])
 
     async def test_a_turn_marker_before_the_mark_is_read_as_silent_too(self):
-        service = MockLLMService()
+        service = await self._announced()
         service._filter_incomplete_user_turns = True
         pushed, recording = self._recording(service)
         with recording:
             await service.push_frame(LLMFullResponseStartFrame())
-            await service._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} {LLM_SILENT_MARK}")
+            await service._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} {MARK}")
             await service.push_frame(LLMFullResponseEndFrame())
 
         self.assertEqual(self._texts(pushed), [])
@@ -652,34 +664,44 @@ class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kinds, ["silent", "complete"])
 
     async def test_a_bare_mark_under_the_filter_is_read_as_silent_when_the_reply_ends(self):
-        service = MockLLMService()
+        service = await self._announced()
         service._filter_incomplete_user_turns = True
         pushed, recording = self._recording(service)
         with recording:
             await service.push_frame(LLMFullResponseStartFrame())
-            await service._push_turn_text(LLM_SILENT_MARK)
+            await service._push_turn_text(MARK)
             await service.push_frame(LLMFullResponseEndFrame())
 
         self.assertEqual(self._texts(pushed), [])
         kinds = [f.kind for f in pushed if isinstance(f, LLMMarkerResponseFrame)]
         self.assertEqual(kinds, ["silent", None])
 
-    async def test_the_mark_is_ordinary_text_when_no_mark_is_read(self):
-        pushed = await self._reply(MockLLMService(honor_silent_mark=None), LLM_SILENT_MARK)
+    async def test_the_mark_is_ordinary_text_until_one_is_announced(self):
+        pushed = await self._reply(MockLLMService(), MARK)
 
-        self.assertEqual(self._texts(pushed), [LLM_SILENT_MARK])
+        self.assertEqual(self._texts(pushed), [MARK])
         self.assertFalse(any(isinstance(f, LLMMarkerResponseFrame) for f in pushed))
 
+    async def test_a_later_announcement_replaces_the_mark(self):
+        service = await self._announced()
+        await service.process_frame(
+            LLMInstructorMetadataFrame(service_name="other", silent_mark="PASS"),
+            FrameDirection.UPSTREAM,
+        )
+
+        self.assertEqual(self._texts(await self._reply(service, MARK)), [MARK])
+        self.assertEqual(self._texts(await self._reply(service, "PASS")), [])
+
     async def test_a_silent_reply_does_not_shadow_the_next(self):
-        service = MockLLMService()
-        await self._reply(service, LLM_SILENT_MARK)
+        service = await self._announced()
+        await self._reply(service, MARK)
 
         pushed = await self._reply(service, "Hello.")
 
         self.assertEqual(self._texts(pushed), ["Hello."])
 
     async def test_an_interruption_forgets_a_held_opening(self):
-        service = MockLLMService()
+        service = await self._announced()
         pushed, recording = self._recording(service)
         with recording:
             await service.push_frame(LLMFullResponseStartFrame())
@@ -1266,6 +1288,15 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("G1")
         service.append_system_instruction("G2")
         self.assertEqual(service._settings.system_instruction, "APP\n\nG1\n\nG2")
+
+    async def test_an_instructors_announcement_composes_its_instruction_in(self):
+        service = self._service("APP")
+        await service.process_frame(
+            LLMInstructorMetadataFrame(service_name="wait", instruction="GUIDE", silent_mark="∅"),
+            FrameDirection.UPSTREAM,
+        )
+        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+        self.assertEqual(service._silent_mark, "∅")
 
     def test_composition_is_logged_only_when_it_changes(self):
         service = self._service("APP")
