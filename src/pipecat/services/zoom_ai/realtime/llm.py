@@ -336,7 +336,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
         self,
         *,
         api_key: str,
-        url: str = "wss://api.zoom.us/v2/ws/aiservices/voice-agent/live",
+        base_url: str = "wss://api.zoom.us/v2/ws/aiservices/voice-agent/live",
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -346,7 +346,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             api_key: Zoom AI Services API key. It is sent on every
                 connection and reconnect, so it must stay valid for as long as
                 the service runs.
-            url: Voice Agent WebSocket URL.
+            base_url: Voice Agent WebSocket URL.
             settings: Session settings. Defaults to the ``gemma-4`` model and the
                 server's default voice.
             **kwargs: Additional arguments passed to the parent
@@ -361,7 +361,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
         )
         if settings is not None:
             default_settings.apply_update(settings)
-        super().__init__(api_key=api_key, base_url=url, settings=default_settings, **kwargs)
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         provider = default_settings.provider
         if (
             isinstance(provider, events.Provider)
@@ -373,7 +373,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
                 f"{self}: set `model` to a {provider.type} model; {_ZOOM_MODEL!r} is Zoom's own"
             )
         # The model is part of the session configuration, not the URL.
-        self.base_url = url
+        self.base_url = base_url
         self._input_sample_rate = 16000
         # The model and listen settings go in the first session update of a
         # connection only; they can't change after that.
