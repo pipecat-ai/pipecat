@@ -1571,29 +1571,73 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         model = assert_given(self._settings.model)
         if model is None:
             raise ValueError("Gemini Live model must be specified")
-        async with self._client.aio.live.connect(model=model, config=config) as session:
-            logger.info("Connected to Gemini service")
+        try:
+            async with self._client.aio.live.connect(model=model, config=config) as session:
+                logger.info("Connected to Gemini service")
 
-            # Mark connection start time
-            self._connection_start_time = time.time()
+                # Mark connection start time
+                self._connection_start_time = time.time()
 
-            await self._handle_session_ready(session)
+                await self._handle_session_ready(session)
 
-            while True:
-                try:
-                    turn = session.receive()
-                    async for message in turn:
-                        # Reset failure counter if connection has been stable
-                        self._check_and_reset_failure_counter()
+                while True:
+                    try:
+                        turn = session.receive()
+                        async for message in turn:
+                            # Reset failure counter if connection has been stable
+                            self._check_and_reset_failure_counter()
 
-                        await self._handle_server_message(message)
-                except Exception as e:
-                    if not self._disconnecting:
-                        should_reconnect = await self._handle_connection_error(e)
-                        if should_reconnect:
-                            await self._reconnect()
-                            return  # Exit this connection handler, _reconnect will start a new one
-                    break
+                            await self._handle_server_message(message)
+                    except Exception as e:
+                        if not self._disconnecting:
+                            await self._handle_connection_lost(e)
+                        # Exit this connection handler; a reconnect starts a new one.
+                        return
+        except Exception as e:
+            # The session failed to open (for example the server rejected the
+            # setup) or failed outside the receive loop above. Report it the same
+            # way as a dropped connection instead of only logging it from the
+            # task manager.
+            if not self._disconnecting:
+                await self._handle_connection_lost(e)
+
+    async def _handle_connection_lost(self, error: Exception):
+        """Handle a session that failed to open or dropped.
+
+        Ends any bot reply the failure cut off, then reconnects or gives up.
+
+        Args:
+            error: The exception that ended the session.
+        """
+        if await self._end_cut_off_bot_turn():
+            # The reply was holding back an EndFrame, which is now released:
+            # the pipeline is ending, so there's no point reconnecting.
+            logger.info(f"Connection lost while the pipeline is ending, not reconnecting: {error}")
+            return
+        if await self._handle_connection_error(error):
+            await self._reconnect()
+
+    async def _end_cut_off_bot_turn(self) -> bool:
+        """End a bot reply that a lost connection cut off.
+
+        The server will never send turn_complete for that reply, so close it
+        here the way turn_complete would. Otherwise ``_bot_is_responding``
+        stays set, downstream processors never see the reply end, and an
+        EndFrame is deferred until the deferral timeout runs out.
+
+        Returns:
+            True if a deferred EndFrame was released.
+        """
+        if not self._bot_is_responding:
+            return False
+
+        end_frame_deferred = self._end_frame_pending_bot_turn_finished is not None
+        if self._settings.modalities == GeminiModalities.AUDIO:
+            await self.push_frame(TTSStoppedFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
+        # Last, so a deferred EndFrame it releases follows the frames above.
+        await self._set_bot_is_responding(False)
+        return end_frame_deferred
 
     async def _handle_server_message(self, message: LiveServerMessage):
         """Dispatch a single message from the Live API receive stream."""
@@ -1767,7 +1811,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(error_msg=error_msg, exception=error)
+            await self.push_error(
+                error_msg=error_msg, exception=error, force_treat_as_permanent=True
+            )
             return False
         else:
             logger.info(
@@ -2575,4 +2621,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # state management, and that exponential backoff for retries can have
         # cost/stability implications for a service cluster, let's just treat a
         # send-side error as fatal.
-        await self.push_error(error_msg=f"Send error: {error}")
+        await self.push_error(
+            error_msg=f"Send error: {error}", exception=error, force_treat_as_permanent=True
+        )
