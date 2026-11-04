@@ -784,6 +784,38 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
         await self._let_timers_run()
         self.assertEqual(self.events, [])
 
+    async def test_a_call_settling_with_work_in_flight_starts_the_waiting_timer_over(self):
+        """The bot speaks, then calls a function, and says nothing on its result."""
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_a_call_settling_while_the_bot_speaks_starts_no_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
     async def test_speech_cancels_the_waiting_timer(self):
         await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
         await self.controller.process_frame(BotStoppedSpeakingFrame())

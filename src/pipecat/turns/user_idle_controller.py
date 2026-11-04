@@ -204,9 +204,9 @@ class UserIdleController(BaseObject):
             # while it keeps running; only its final result settles the call.
             is_final = frame.properties.is_final if frame.properties else True
             if is_final:
-                self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+                await self._settle_function_call()
         elif isinstance(frame, FunctionCallCancelFrame):
-            self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+            await self._settle_function_call()
         elif isinstance(frame, BackgroundWorkStartedFrame):
             first = not self._background_work
             self._background_work.add(frame.work_id)
@@ -252,6 +252,19 @@ class UserIdleController(BaseObject):
         if not self._quiet or not self._background_work:
             return
         await self._start_waiting_timer()
+
+    async def _settle_function_call(self):
+        """Count a function call as finished.
+
+        The call's start cancelled the timer. A reply that speaks first and
+        calls the function after, and then says nothing on its result, leaves
+        the conversation quiet with the background work still in flight, so
+        the last call settling starts the waiting timer over; the bot speaking
+        on the result restarts it as usual.
+        """
+        self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+        if self._function_calls_in_progress == 0 and self._background_work and self._quiet:
+            await self._start_waiting_timer()
 
     @property
     def _quiet(self) -> bool:
