@@ -303,11 +303,11 @@ class FunctionCallRunnerItem:
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
 
 
-#: The silent mark: a reply that is just this mark means the model decided to
-#: say nothing. A prompt that offers the model silence, such as
+#: The silent mark: a reply that starts with it means the model chose to say
+#: nothing. A prompt that offers the model silence, such as
 #: :class:`~pipecat.processors.wait_reassurance.WaitReassurance`'s, tells it to
-#: answer with exactly this mark, and the LLM service reads the mark
-#: (``read_silent_mark``): the reply is dropped unspoken, so nothing after the
+#: answer with exactly this mark, and the LLM service honors the mark
+#: (``honor_silent_mark``): the reply is dropped unspoken, so nothing after the
 #: service sees it, and the decision is reported as an
 #: :class:`~pipecat.frames.frames.LLMMarkerResponseFrame` of kind ``"silent"``.
 LLM_SILENT_MARK = "∅"
@@ -384,7 +384,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         enable_async_tool_cancellation: bool = False,
         settings: LLMSettings | None = None,
         file_resolver: FileResolver | None = None,
-        read_silent_mark: str | None = LLM_SILENT_MARK,
+        honor_silent_mark: str | None = LLM_SILENT_MARK,
         **kwargs,
     ):
         """Initialize the LLM service.
@@ -421,14 +421,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 switched between mid-session) so downloads are reused.
                 Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
-            read_silent_mark: The silent mark: a reply that starts with it means
+            honor_silent_mark: The silent mark: a reply that starts with it means
                 the model chose to say nothing. Such a reply is dropped unspoken
                 and an ``LLMMarkerResponseFrame`` of kind ``"silent"`` is pushed
                 in its place, so nothing after the service, the TTS, the
                 context, an observer, sees the mark. A prompt that offers the
                 model silence names the same mark. Defaults to
-                :data:`LLM_SILENT_MARK`; ``None`` reads no mark, and every reply
-                goes out as written.
+                :data:`LLM_SILENT_MARK`; ``None`` honors no mark, and every
+                reply goes out as written.
             **kwargs: Additional arguments passed to the parent AIService.
 
         Raises:
@@ -453,7 +453,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
         self._file_resolver = file_resolver or FileResolver()
-        self._silent_mark = read_silent_mark or None
+        self._silent_mark = honor_silent_mark or None
         # The reply being read for the silent mark: its text so far, held until
         # the first character decides it, and whether the rest is dropped.
         self._reply_opening = ""

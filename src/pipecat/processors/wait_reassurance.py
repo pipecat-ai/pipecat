@@ -66,8 +66,8 @@ class WaitReassurance(FrameProcessor):
     in progress, the processor appends ``prompt`` to the conversation as a
     developer message and runs the LLM. The model decides what to say, with
     the user's wishes and what it knows of the work in view, or that nothing
-    should be said, by answering with ``silent_mark``. The LLM service reads
-    that mark (its ``read_silent_mark``, which names the same one): the reply
+    should be said, by answering with ``silent_mark``. The LLM service honors
+    that mark (its ``honor_silent_mark``, which names the same one): the reply
     is dropped unspoken, reaching neither the TTS nor the context, and the
     decision is reported, on which the processor starts the interval over. A
     spoken remark starts it over through the bot's speech, so a long wait
@@ -112,7 +112,7 @@ class WaitReassurance(FrameProcessor):
                 ``{quiet_secs}`` and ``{mark}`` (so any other brace in it is
                 doubled). :data:`WAIT_REASSURANCE_PROMPT` unless given.
             silent_mark: What the prompt tells the model to answer with to say
-                nothing. The LLM service's ``read_silent_mark`` must name the
+                nothing. The LLM service's ``honor_silent_mark`` must name the
                 same mark.
             **kwargs: Additional arguments passed to the parent class.
         """

@@ -665,7 +665,7 @@ class TestSilentReplies(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kinds, ["silent", None])
 
     async def test_the_mark_is_ordinary_text_when_no_mark_is_read(self):
-        pushed = await self._reply(MockLLMService(read_silent_mark=None), LLM_SILENT_MARK)
+        pushed = await self._reply(MockLLMService(honor_silent_mark=None), LLM_SILENT_MARK)
 
         self.assertEqual(self._texts(pushed), [LLM_SILENT_MARK])
         self.assertFalse(any(isinstance(f, LLMMarkerResponseFrame) for f in pushed))
