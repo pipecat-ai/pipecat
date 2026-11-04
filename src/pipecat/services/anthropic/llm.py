@@ -64,12 +64,12 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The lowest thinking setting Anthropic documents for each model, sent when the
-# caller configures neither ``thinking`` nor ``effort``, keyed by model name.
-# Each entry is the request fields to send: ``thinking``, or ``output_config``
-# with an effort on models whose thinking can't be turned off. "between_tools"
-# is Sonnet 5.5's lowest setting, and "disabled" is already the default on the
-# Claude 4 models.
+# The request fields sent when the caller sets neither ``thinking`` nor
+# ``effort``, keyed by model name. Each is the model's lowest documented
+# setting, for the fastest responses, unless that setting makes the model speak
+# its reasoning: Haiku 5.5 with thinking disabled narrates its decisions before
+# tool calls, so it gets low effort. "between_tools" is Sonnet 5.5's lowest
+# setting, and "disabled" is already the default on the Claude 4 models.
 _THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
     "claude-fable-5-1": {"output_config": {"effort": "low"}},
     "claude-fable-5": {"output_config": {"effort": "low"}},
@@ -77,7 +77,7 @@ _THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
     "claude-opus-5": {"thinking": {"type": "disabled"}},
     "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
     "claude-sonnet-5": {"thinking": {"type": "disabled"}},
-    "claude-haiku-5-5": {"thinking": {"type": "disabled"}},
+    "claude-haiku-5-5": {"output_config": {"effort": "low"}},
     "claude-opus-4-8": {"thinking": {"type": "disabled"}},
     "claude-opus-4-7": {"thinking": {"type": "disabled"}},
     "claude-opus-4-6": {"thinking": {"type": "disabled"}},
@@ -421,7 +421,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         return output_config
 
     def _maybe_apply_thinking_default(self, params: dict[str, Any]):
-        """Send the model's lowest thinking setting when no reasoning is configured.
+        """Send the model's thinking default when no reasoning is configured.
 
         Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
         request that already sets ``thinking`` or an effort, from the settings

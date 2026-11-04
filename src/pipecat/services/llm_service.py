@@ -725,8 +725,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         elif default is not None:
             setting = ", ".join(f"{field}={value!r}" for field, value in default.items())
             logger.info(
-                f"{self}: sending {setting} to {model}, its lowest thinking setting, for the "
-                "fastest responses. If your bot needs multistep reasoning, set "
+                f"{self}: sending {setting} to {model}, Pipecat's low-latency thinking "
+                "default for it. If your bot needs multistep reasoning, set "
                 f"{settings_fields} in {settings_class}."
             )
         elif can_think:
