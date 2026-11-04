@@ -21,6 +21,7 @@ from typing import Any, ClassVar
 
 import websockets
 from loguru import logger
+from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -747,8 +748,12 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            await self._call_event_handler("on_connection_error", f"{e}")
+            error = f"{e}"
+            if isinstance(e, InvalidStatus) and e.response.body:
+                # The refusal's reason is in the response body, not the exception message.
+                error += f": {e.response.body.decode(errors='replace')[:500]}"
+            await self.push_error(error_msg=f"Unknown error occurred: {error}", exception=e)
+            await self._call_event_handler("on_connection_error", error)
 
     async def _disconnect_websocket(self):
         try:
@@ -767,7 +772,8 @@ class ElevenLabsTTSBase(WebsocketTTSService):
                     await asyncio.wait_for(websocket.wait_closed(), timeout=2.0)
                 except TimeoutError:
                     logger.debug(
-                        "ElevenLabs did not close the WebSocket within 2.0s; closing from our side"
+                        f"{self.CONNECTION_NAME} did not close the WebSocket within 2.0s; "
+                        "closing from our side"
                     )
                 await websocket.close()
                 logger.debug(f"Disconnected from {self.CONNECTION_NAME}")

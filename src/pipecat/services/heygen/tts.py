@@ -43,12 +43,61 @@ from pipecat.utils.types import assert_given
 # Nadine, a HeyGen public voice. Works with every HeyGen Voice model, no clone needed.
 HEYGEN_DEFAULT_VOICE_ID = "83548de556df48ba8c09c42a57c51d85"
 
-# PCM sample rates HeyGen can synthesize.
+# PCM sample rates HeyGen can synthesize over HTTP.
 HEYGEN_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
+
+# PCM sample rates HeyGen can synthesize over the WebSocket.
+HEYGEN_WEBSOCKET_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48000)
 
 # Rate requested when the pipeline runs at a rate HeyGen does not offer; the
 # audio is then resampled to the pipeline rate.
 HEYGEN_FALLBACK_SAMPLE_RATE = 24000
+
+
+HEYGEN_LANGUAGE_MAP = {
+    Language.AR: "ar",
+    Language.BE: "be",
+    Language.BG: "bg",
+    Language.CA: "ca",
+    Language.CS: "cs",
+    Language.DA: "da",
+    Language.DE: "de",
+    Language.EL: "el",
+    Language.EN: "en",
+    Language.ES: "es",
+    Language.FA: "fa",
+    Language.FI: "fi",
+    Language.FR: "fr",
+    Language.HE: "he",
+    Language.HI: "hi",
+    Language.HR: "hr",
+    Language.HU: "hu",
+    Language.ID: "id",
+    Language.IT: "it",
+    Language.JA: "ja",
+    Language.KO: "ko",
+    Language.MK: "mk",
+    Language.MS: "ms",
+    Language.NL: "nl",
+    Language.PL: "pl",
+    Language.PT: "pt",
+    Language.RO: "ro",
+    Language.RU: "ru",
+    Language.SK: "sk",
+    Language.SL: "sl",
+    Language.SR: "sr",
+    Language.SV: "sv",
+    Language.TA: "ta",
+    Language.TH: "th",
+    Language.TL: "tl",
+    Language.TR: "tr",
+    Language.UK: "uk",
+    Language.VI: "vi",
+    Language.ZH: "zh",
+}
+
+# Languages HeyGen Voice speaks, as the codes it accepts.
+HEYGEN_LANGUAGES = frozenset(HEYGEN_LANGUAGE_MAP.values())
 
 
 def language_to_heygen_language(language: Language) -> str:
@@ -63,48 +112,21 @@ def language_to_heygen_language(language: Language) -> str:
     Returns:
         The corresponding HeyGen language code.
     """
-    LANGUAGE_MAP = {
-        Language.AR: "ar",
-        Language.BE: "be",
-        Language.BG: "bg",
-        Language.CA: "ca",
-        Language.CS: "cs",
-        Language.DA: "da",
-        Language.DE: "de",
-        Language.EL: "el",
-        Language.EN: "en",
-        Language.ES: "es",
-        Language.FA: "fa",
-        Language.FI: "fi",
-        Language.FR: "fr",
-        Language.HE: "he",
-        Language.HI: "hi",
-        Language.HR: "hr",
-        Language.HU: "hu",
-        Language.ID: "id",
-        Language.IT: "it",
-        Language.JA: "ja",
-        Language.KO: "ko",
-        Language.MK: "mk",
-        Language.MS: "ms",
-        Language.NL: "nl",
-        Language.PL: "pl",
-        Language.PT: "pt",
-        Language.RO: "ro",
-        Language.RU: "ru",
-        Language.SK: "sk",
-        Language.SL: "sl",
-        Language.SR: "sr",
-        Language.SV: "sv",
-        Language.TA: "ta",
-        Language.TH: "th",
-        Language.TL: "tl",
-        Language.TR: "tr",
-        Language.UK: "uk",
-        Language.VI: "vi",
-        Language.ZH: "zh",
-    }
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+    code = resolve_language(language, HEYGEN_LANGUAGE_MAP, use_base_code=True)
+    if code not in HEYGEN_LANGUAGES:
+        logger.warning(f"HeyGen Voice does not speak {language}; HeyGen will detect the language.")
+    return code
+
+
+def _request_language(language: Any) -> str | None:
+    """The language to send to HeyGen, or None to let HeyGen detect it.
+
+    HeyGen refuses a language it does not speak, so those are left out.
+    """
+    if not language:
+        return None
+    code = str(language)
+    return code if code in HEYGEN_LANGUAGES else None
 
 
 @dataclass
@@ -221,9 +243,9 @@ class HeyGenHttpTTSService(TTSService):
                 "sample_rate_hertz": synthesis_sample_rate,
             },
         }
-        language = assert_given(self._settings.language)
+        language = _request_language(assert_given(self._settings.language))
         if language:
-            payload["language"] = str(language)
+            payload["language"] = language
         return payload
 
     @traced_tts
@@ -312,6 +334,7 @@ class HeyGenTTSService(ElevenLabsTTSBase):
         sample_rate: int | None = None,
         auto_mode: bool | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
+        pause_frame_processing: bool = True,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -327,6 +350,10 @@ class HeyGenTTSService(ElevenLabsTTSBase):
                 ``text_aggregation_mode`` is ``TOKEN``, where HeyGen's own
                 chunk schedule gathers enough text for natural speech.
             text_aggregation_mode: How to aggregate incoming text before synthesis.
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, turns synthesize
+                concurrently on the one socket, which HeyGen limits to 5
+                running contexts.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -347,10 +374,14 @@ class HeyGenTTSService(ElevenLabsTTSBase):
             push_stop_frames=False,
             # HeyGen joins text messages as sent, so sentences need a separating space.
             append_trailing_space=True,
+            pause_frame_processing=pause_frame_processing,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
         )
+
+        # The rate HeyGen synthesizes at; set when the URL is built.
+        self._audio_sample_rate = HEYGEN_FALLBACK_SAMPLE_RATE
 
         if auto_mode is None:
             auto_mode = self._text_aggregation_mode != TextAggregationMode.TOKEN
@@ -377,15 +408,21 @@ class HeyGenTTSService(ElevenLabsTTSBase):
         return {"x-api-key": self._api_key}
 
     def _build_websocket_url(self) -> str:
+        # At a rate HeyGen does not offer, synthesize at the fallback rate and
+        # resample each audio message to the pipeline rate.
+        if self.sample_rate in HEYGEN_WEBSOCKET_PCM_SAMPLE_RATES:
+            self._audio_sample_rate = self.sample_rate
+        else:
+            self._audio_sample_rate = HEYGEN_FALLBACK_SAMPLE_RATE
         params = {
             "voice_id": assert_given(self._settings.voice),
             "model": assert_given(self._settings.model),
-            "output_format": self._output_format,
+            "output_format": f"pcm_{self._audio_sample_rate}",
             "auto_mode": str(self._auto_mode).lower(),
         }
-        language = assert_given(self._settings.language)
+        language = _request_language(assert_given(self._settings.language))
         if language:
-            params["language"] = str(language)
+            params["language"] = language
         return f"{self._url}/v3/models/audio/tts/multi-stream-input?{urlencode(params)}"
 
     def _set_voice_settings(self) -> dict[str, Any] | None:
@@ -415,6 +452,8 @@ class HeyGenTTSService(ElevenLabsTTSBase):
         context_id = self._turn_context_id
         await super().on_turn_context_completed()
         if context_id:
+            # A close without a flush discards text HeyGen has not spoken yet.
+            await self.flush_audio(context_id)
             await self._close_context(context_id)
 
     async def _close_context(self, context_id: str):
@@ -470,6 +509,10 @@ class HeyGenTTSService(ElevenLabsTTSBase):
 
             if msg.get("audio"):
                 audio = base64.b64decode(msg["audio"])
+                if self._audio_sample_rate != self.sample_rate:
+                    audio = await self._resampler.resample(
+                        audio, self._audio_sample_rate, self.sample_rate
+                    )
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
                 await self.append_to_audio_context(context_id, frame)
 

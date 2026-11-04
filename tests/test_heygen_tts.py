@@ -187,8 +187,22 @@ def _alignment(text: str) -> dict:
     }
 
 
-async def _serve_heygen_ws(captured: dict, reply_with_error: bool = False):
-    """A fake multi-stream-input socket: audio for each text, isFinal on close_context."""
+async def _serve_heygen_ws(
+    captured: dict, reply_with_error: bool = False, final_delay: float = 0.0
+):
+    """A fake multi-stream-input socket: audio for each text, isFinal on close_context.
+
+    ``final_delay`` holds each isFinal back, as real synthesis takes time; the peak
+    number of contexts open at once is recorded in ``captured["peak_open"]``.
+    """
+    open_contexts: set[str] = set()
+    captured["peak_open"] = 0
+
+    async def send_final(ws, ctx):
+        await asyncio.sleep(final_delay)
+        open_contexts.discard(ctx)
+        await ws.send(json.dumps({"isFinal": True, "contextId": ctx}))
+
     audio = b"\x00\x01" * 2400
 
     async def handler(ws):
@@ -199,6 +213,9 @@ async def _serve_heygen_ws(captured: dict, reply_with_error: bool = False):
                 msg = json.loads(raw)
                 captured["messages"].append(msg)
                 ctx = msg.get("context_id")
+                if msg.get("text") == " ":
+                    open_contexts.add(ctx)
+                    captured["peak_open"] = max(captured["peak_open"], len(open_contexts))
                 if reply_with_error and msg.get("text", "").strip():
                     await ws.send(
                         json.dumps(
@@ -222,7 +239,7 @@ async def _serve_heygen_ws(captured: dict, reply_with_error: bool = False):
                         )
                     )
                 if msg.get("close_context"):
-                    await ws.send(json.dumps({"isFinal": True, "contextId": ctx}))
+                    asyncio.create_task(send_final(ws, ctx))
                 if msg.get("close_socket"):
                     await ws.close()
                     return
@@ -314,3 +331,108 @@ def test_heygen_websocket_token_mode_disables_auto_mode():
     tts = HeyGenTTSService(api_key="k", text_aggregation_mode=TextAggregationMode.TOKEN)
     assert tts._auto_mode is False
     assert HeyGenTTSService(api_key="k")._auto_mode is True
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_unsupported_sample_rate_is_resampled():
+    """At a rate HeyGen doesn't offer, the socket asks for 24 kHz and frames carry the pipeline rate."""
+    captured: dict = {"messages": []}
+    server_cm, audio = await _serve_heygen_ws(captured)
+
+    async with server_cm as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = HeyGenTTSService(api_key="test-key", url=f"ws://{host}:{port}", sample_rate=11025)
+        down_frames, _ = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hello."), SleepFrame(sleep=0.5)]
+        )
+
+    assert parse_qs(urlparse(captured["path"]).query)["output_format"] == ["pcm_24000"]
+    audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
+    assert audio_frames
+    assert all(f.sample_rate == 11025 for f in audio_frames)
+    resampled = sum(len(f.audio) for f in audio_frames)
+    assert resampled < len(audio) * 0.6  # 24 kHz -> 11.025 kHz is about 0.46x the bytes
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_turn_end_flushes_before_close():
+    """At the end of a turn the context is flushed before it is closed, so no text is dropped."""
+    tts = HeyGenTTSService(api_key="test-key", sample_rate=24000)
+    websocket = AsyncMock()
+    websocket.state = State.OPEN
+    tts._websocket = websocket
+    tts._turn_context_id = "ctx-1"
+
+    await tts.on_turn_context_completed()
+
+    sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
+    assert sent == [
+        {"context_id": "ctx-1", "flush": True},
+        {"context_id": "ctx-1", "close_context": True},
+    ]
+
+
+def test_heygen_websocket_holds_frames_until_turn_audio_plays():
+    """By default turns run one at a time, keeping under HeyGen's 5 contexts per socket."""
+    assert HeyGenTTSService(api_key="k")._pause_frame_processing is True
+
+
+@pytest.mark.asyncio
+async def test_heygen_unsupported_language_is_not_sent(aiohttp_client):
+    """A language HeyGen doesn't speak is left out, so HeyGen detects the language."""
+    requests = []
+    client = await aiohttp_client(_make_app(requests, b"\x00\x00" * 2048))
+    async with aiohttp.ClientSession() as session:
+        http_tts = HeyGenHttpTTSService(
+            api_key="test-key",
+            aiohttp_session=session,
+            base_url=str(client.make_url("/")),
+            sample_rate=24000,
+            settings=HeyGenHttpTTSService.Settings(language=Language.NO),
+        )
+        await run_test(http_tts, frames_to_send=[TTSSpeakFrame(text="Hei.")])
+    assert "language" not in requests[0]["body"]
+
+    ws_tts = HeyGenTTSService(
+        api_key="k", sample_rate=24000, settings=HeyGenTTSService.Settings(language=Language.NO)
+    )
+    assert "language=" not in ws_tts._build_websocket_url()
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_handshake_refusal_reports_reason():
+    """HeyGen's reason for refusing the handshake reaches the ErrorFrame."""
+    body = '{"error":{"code":"invalid_parameter","message":"Voice not found"}}'
+
+    def refuse(connection, request):
+        return connection.respond(400, body)
+
+    async with serve(lambda ws: None, "127.0.0.1", 0, process_request=refuse) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = HeyGenTTSService(api_key="test-key", url=f"ws://{host}:{port}", sample_rate=24000)
+        _, up_frames = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame(text="Hello."), SleepFrame(sleep=0.3)]
+        )
+
+    errors = [f.error for f in up_frames if isinstance(f, ErrorFrame)]
+    assert any("Voice not found" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_back_to_back_speech_stays_under_context_limit():
+    """Seven queued sentences never hold more than HeyGen's 5 contexts open at once."""
+    captured: dict = {"messages": []}
+    server_cm, _ = await _serve_heygen_ws(captured, final_delay=0.2)
+
+    async with server_cm as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts = HeyGenTTSService(api_key="test-key", url=f"ws://{host}:{port}", sample_rate=24000)
+        await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame(text=f"Sentence {i}.") for i in range(7)]
+            + [SleepFrame(sleep=2.5)],
+        )
+
+    opened = {m["context_id"] for m in captured["messages"] if m.get("text") == " "}
+    assert len(opened) == 7
+    assert captured["peak_open"] <= 5
