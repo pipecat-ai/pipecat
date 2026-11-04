@@ -130,7 +130,31 @@ With the turn-completion instructions appended, as `filter_incomplete_user_turns
 
 ## Wait reassurance evals
 
-The five `wait_reassurance*` text scenarios on the three cascade bots, the predictive-delegation bot and the filtering bot (`openai-responses-frontend-filter-incomplete-turns.py`), five runs each (2026-11-02, the prompt as recorded above), the judge the release suite's text judge with `allow_continue: false` on the remark expectations:
+The five `wait_reassurance*` text scenarios on the three cascade bots, the predictive-delegation bot and the filtering bot (`openai-responses-frontend-filter-incomplete-turns.py`), five runs each (2026-11-03, the prompt as now in `WAIT_REASSURANCE_PROMPT`, the mark read by the LLM service), the judge the release suite's text judge with `allow_continue: false` on the remark expectations, and the declined scenarios asserting the silent decision as `event: llm_marker` with `marker: silent`:
+
+| scenario                                | anthropic-frontend | google-frontend | openai-responses-frontend | predictive-delegation | filter-incomplete-turns |
+| --------------------------------------- | ------------------ | --------------- | ------------------------- | --------------------- | ----------------------- |
+| `wait_reassurance/text`                 | 5/5                | 3/5             | 5/5                       | 4/5                   | 5/5                     |
+| `wait_reassurance_repeats/text`         | 0/5                | 4/5             | 5/5                       | 5/5                   |                         |
+| `wait_reassurance_detail_requested/text` | 5/5               | 5/5             | 4/5                       | 5/5                   |                         |
+| `wait_reassurance_declined/text`        | 3/5                | 2/5             | 5/5                       | 5/5                   |                         |
+| `wait_reassurance_declined_upfront/text` | 5/5               | 4/5             | 5/5                       | 5/5                   | 5/5                     |
+
+On `main`, where no processor runs, the same scenarios fail in 45 of 45 runs (three per bot and scenario, 2026-11-02): the remark turn times out, and the silent decision the declined scenarios wait for never comes.
+
+The user's decline after a remark (`wait_reassurance_declined`) is answered in every run that reaches it, 12 of 12 on the three cascade bots and 5 of 5 with predictive delegation; one Claude answer repeats the backend's fix and is rejected by the judge. The misses are elsewhere. Gemini's first decision is silent, with no remark in the 20 seconds allowed, in 4 of its 15 runs of `wait_reassurance`, `wait_reassurance_repeats` and `wait_reassurance_declined`, where the replay's plain context gets a remark 5 of 5; live, the backend's working notes sit between the acknowledgement and the prompt. Claude's second decision in `wait_reassurance_repeats` is silent in 4 of 5 and passes the finding on in the fifth ("reports that the work is done and the tests are running"). The single failures: a Gemini remark naming a file, a predictive-delegation remark reporting findings, a gpt-4.1 `detail_requested` remark the judge read as general ("its general intent to begin investigating"), and two Gemini runs, one of `declined` and one of `declined_upfront`, whose backend was still working at the 150-second limit for the result, the frontend silent throughout.
+
+The filtering bot passes `frontend_only/text` 5/5, `wait_reassurance/text` 5/5 and `wait_reassurance_declined_upfront/text` 5/5. In the last, gpt-4.1 wrote every one of its 21 silent replies as `∅` alone, without the turn marker; the filter buffers an unmarked reply until the response ends, so the service's reading of it has to come before the filter reports the response, or the harness sees an unmarked-turn report first and fails (1 of 5 before that order was fixed).
+
+The release scenario `async_tool_wait_reassurance/text` on `function-calling-openai-async.py` (a 15-second weather lookup): 5/5.
+
+The twelve existing text scenarios on the three cascade bots, one run each, with the processor in the pipeline: 34/36. The two failures are ones every baseline below has: `concurrent_delegations` on the Gemini frontend and Claude's `cancel_delegation` acknowledgement in the same response as its `delegate` call.
+
+Audio, two runs per cascade bot: `wait_reassurance/audio` 6/6; `wait_reassurance_declined_upfront/audio` 6/6. In audio mode the harness waits for the bot's spoken turn to end before the next user turn, so the remark is heard out without a hold.
+
+### The earlier prompt
+
+The same scenarios on 2026-11-02, with the prompt before its 2026-11-03 rewording, the mark read by `WaitReassurance` itself, and the declined scenarios asserting the mark in the LLM's raw text:
 
 | scenario                                | anthropic-frontend | google-frontend | openai-responses-frontend | predictive-delegation | filter-incomplete-turns |
 | --------------------------------------- | ------------------ | --------------- | ------------------------- | --------------------- | ----------------------- |
@@ -140,21 +164,13 @@ The five `wait_reassurance*` text scenarios on the three cascade bots, the predi
 | `wait_reassurance_declined/text`        | 2/5                | 5/5             | 1/5                       | 5/5                   |                         |
 | `wait_reassurance_declined_upfront/text` | 5/5               | 4/5             | 5/5                       | 5/5                   | 5/5                     |
 
-On `main`, where no processor runs, the same scenarios fail in 45 of 45 runs (three per bot and scenario): the remark turn times out, and the silent decision the declined scenarios wait for never comes.
-
 Claude's second remark in `wait_reassurance_repeats` passes the backend's finding on in 4 of 5 runs ("I've found the issue and applied a fix — now running the tests to confirm everything passes"), as the replay shows, and the judge rejects it as a finding reported. The predictive-delegation bot's two `detail_requested` failures are gpt-4.1 remarks the judge read as general ("I'm digging into the HTTP client and its retry test now"). The filtering bot's one `wait_reassurance` failure is a remark closing with "I'll let you know what turns up", which the judge took as a promise. Gemini's one `declined_upfront` failure is a run whose backend was still patching at the 150-second limit for the result, with the frontend silent throughout (six `∅` decisions). The `wait_reassurance_declined` failures on the three cascade bots are one shape, six of seven: the user's decline, spoken after the remark, is answered with `∅`, and the bot says nothing; the seventh is a Claude run that acknowledged with a `delegate` call and whose next decision fell outside the window. The predictive-delegation bot answers every time, with a `delegate` call that passes the preference on.
 
 In `wait_reassurance_declined` the user's decline is sent eight seconds after the remark's text arrives. Sent at once, as the harness does by default in text mode, it reaches the bot before any of the remark has been spoken: the remark is interrupted and left out of the context, and the model sees the reassurance prompt followed directly by the decline; all three cascade frontends then went silent in 14 of 20 runs, and Claude does so in 10 of 10 replays of that shape with either closing sentence tried.
 
 With the remark spoken and recorded, what makes the decline go unanswered is what the backend puts between the two. The context of one failing gpt-4.1 run, replayed as it was, gets `∅` in 6 of 6; the same context with its `Backend (thinking):` notes (the backend's reasoning summaries, several hundred words here) blanked gets an answer in 4 of 4, and with every note between the remark and the decline removed in 4 of 4. Neither wording tried for the prompt's closing sentence changes the live context's outcome (0 and 1 of 6), and a standing system instruction saying the same gets an answer in 4 of 6. The prompt stays in the conversation after its run, and its rule for the mark is read onto the user's own words once enough developer text separates them; a prompt that is not kept, or a connector that keeps reasoning summaries out of the frontend's context, is where a fix lies.
 
-The filtering combination, go: with `filter_incomplete_user_turns` on, the frontend's replies open with the turn-completion marker and a declined one is `● ∅` or `∅` (the replay above, 30 of 30), and the filtering bot passes `frontend_only/text` 5/5, `wait_reassurance/text` 4/5 and `wait_reassurance_declined_upfront/text` 5/5. The bot stays in the manifest for those three scenarios.
-
-The release scenario `async_tool_wait_reassurance/text` on `function-calling-openai-async.py` (a 15-second weather lookup): 5/5.
-
-The twelve existing text scenarios on the three cascade bots, one run each, with the processor in the pipeline (2026-11-02): 32/36. The four failures are the ones every baseline below has: `concurrent_delegations` on all three bots and Claude's `cancel_delegation` acknowledgement in the same response as its `delegate` call.
-
-Audio, two runs per cascade bot (2026-11-02): `wait_reassurance/audio` 6/6; `wait_reassurance_declined_upfront/audio` 2/2 on the gpt-4.1 and Gemini frontends and 2/2 on Claude's. In audio mode the harness waits for the bot's spoken turn to end before the next user turn, so the remark is heard out without a hold.
+The filtering bot, with the same prompt: `frontend_only/text` 5/5, `wait_reassurance/text` 4/5 and `wait_reassurance_declined_upfront/text` 5/5; the existing text scenarios 32/36 (the four failures `concurrent_delegations` on all three bots and Claude's `cancel_delegation`); the release scenario 5/5; audio 6/6 and 6/6.
 
 ## Text evals
 
