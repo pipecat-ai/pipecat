@@ -61,31 +61,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """Soniox Speech-to-Text with Agent Text Input
 
-    This example sends what the bot says to Soniox as agent text, so the
-    recognizer knows the bot's side of the conversation.
-
-    Two modes, and this example uses the second:
-
-    1. Agent Text Input
-       - `enable_agent_text_input=True` sends each reply once, after the bot
-         has said it, so words the bot used (names, product terms) are
-         recognized when the user repeats them
-       - Works with any TTS service
-
-    2. Echo Cancellation
-       - `enable_echo_cancellation=True` sends the bot's words one at a time
-         while they play, timed against playback, which also lets Soniox cancel
-         the bot's own voice leaking back into the user's microphone
-       - Needs a TTS service that reports word timestamps, such as
-         `SonioxTTSService`; without them each piece of text is sent as the TTS
-         service produces it, which is too early to place the bot's voice
-       - `agent_text_lead_ms` sets how far ahead of playback each word is sent
-         (500 to 1000 ms is the documented range)
-
-    Both need a model that supports agent text input, and neither replaces
-    acoustic echo cancellation: Soniox cancels the bot's voice in the
-    transcript, while the local VAD in this pipeline still hears it and will
-    interrupt the bot on a transport that does not cancel echo in the audio.
+    `enable_agent_text_input=True` sends each reply to Soniox once the bot has
+    said it, so the recognizer knows the bot's side of the conversation: words
+    the bot used, such as a name or a product term, are recognized when the user
+    repeats them. It works with any TTS service, and needs a model that supports
+    agent text input, which `stt-rt-v6` does.
 
     For more information: https://soniox.com/docs/stt/rt/agent-text-input
     """
@@ -95,11 +75,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["SONIOX_API_KEY"],
         settings=SonioxSTTService.Settings(
             language_hints=[Language.EN],
-            enable_echo_cancellation=True,  # Implies enable_agent_text_input
-            # Or, for the whole reply once it has been spoken, with any TTS:
-            # enable_agent_text_input=True,
-            # Optional: Tune how early each word is sent
-            # agent_text_lead_ms=700,
+            enable_agent_text_input=True,
         ),
     )
 
