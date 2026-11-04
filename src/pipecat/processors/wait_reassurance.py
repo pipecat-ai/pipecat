@@ -39,19 +39,18 @@ from pipecat.turns.user_idle_controller import UserIdleController
 #: waited quietly on background work. ``{quiet_secs}`` is how long nothing has
 #: been said; ``{mark}`` is the silent mark.
 WAIT_REASSURANCE_PROMPT = (
-    "The user is waiting on background work you started on their behalf, and nothing has "
-    "been said for about {quiet_secs} seconds. This message asks one thing: whether to say a "
-    "few words, now, unprompted, to reassure the user that the work is still underway. When "
-    "deciding, consider the user's preferences (for example, they may have asked for only the "
-    "final result of the work and no progress updates along the way) as well as whether a "
-    "remark now would sound natural. Answer this message with exactly {mark} to respond with "
-    "silence (after any marker your instructions require). Otherwise, say one or two short "
-    "sentences, in your own voice and with wording that varies from previous reassurances "
-    "about the same work. Keep it general, naming at most the kind of step under way, unless "
-    "the user asked for detail. Never report a result or a finding, never say the work is "
-    "done, and ask no questions and make no offers or promises, not even to keep the user "
-    "posted. {mark} is only ever the answer to this message: whatever the user says next, "
-    "answer them."
+    "The user is waiting on background work you started on their behalf, and nothing has been said "
+    "for about {quiet_secs} seconds. This message asks one thing: to reassure the user, if needed, "
+    "that the work is still underway. When deciding what to say (or in some cases, whether to say "
+    "anything at all), consider the user's preferences (for example, they may have asked for only "
+    "the final result of the work and no progress updates along the way) as well as what would now "
+    "sound natural and reassuring in the conversation. Answer this message with exactly {mark} to "
+    "respond with silence (after any marker your instructions require). Otherwise, say one short "
+    "sentence, in your own voice and with wording that varies from previous reassurances about the "
+    "same work. Keep it general, naming at most the kind of step under way, unless the user asked "
+    "for detail. Never report a result or a finding, never say the work is done, and ask no "
+    "questions and make no offers or promises, not even to keep the user posted. {mark} is only "
+    "ever the answer to this message: whatever the user says next, answer them."
 )
 
 
