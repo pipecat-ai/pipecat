@@ -220,6 +220,17 @@ When adding a new service:
 6. Add metrics tracking via `MetricsData` if relevant
 7. Follow the pattern of existing services in `src/pipecat/services/`
 
+### Expression adapters
+
+A TTS service performs expressive conversation's tags through an expression adapter, a `BaseExpressionAdapter` (`src/pipecat/adapters/tts/base_expression_adapter.py`); provider adapters live in `src/pipecat/adapters/tts/services/`. When adding one:
+
+- Add an adapter only for a model that performs sounds, deliveries or emphasis; pauses alone don't qualify. Choose it by model or voice in `get_expression_adapter()`, returning `BaseExpressionAdapter()` for a model that performs none.
+- Declare what the service performs in `ExpressionCapabilities`, by the provider's own names. Where the provider takes free text, set `allows_free_text_delivery` or `allows_free_text_sounds` for that kind instead of listing names.
+- Map each universal name (`ExpressionDelivery`, `ExpressionSound`) the provider names differently in `service_vocabulary`, keyed by members.
+- A name the provider performs that has no universal name gets one in the enums: one spelling per word, an adjective for a delivery and a base word for a sound. Synonyms stay distinct, and sounds that aren't a voice get none. Add the adapter to `ADAPTERS` in `tests/test_universal_names.py`, which checks that every declared voice is reached.
+- Set markup apart from the words with spaces, and have the service report provider markup in its word timestamps as one bracketed word, so word tracking lines up.
+- Add an example in `examples/expressive-conversation/` and an entry in `evals/release/manifest.yaml`.
+
 ## Testing
 
 **Unit tests.** Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
@@ -228,7 +239,7 @@ When adding a new service:
 
 There are two kinds of scenario, told apart by the scenario's keys:
 
-- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
+- A **scripted** scenario (`turns:`) writes the user's turns out, each with `expect:` assertions on the events the bot emits back: latency, `text_contains` and `text_excludes`, `text_matches` regular expressions the text must match, an expected `function_call` (with an `eval:` to judge the call by its name and arguments, where `args:` cannot match verbatim), the turn-completion `marker` the LLM produced (`llm_marker` with `marker: complete | short | long | incomplete`, plus `marker_first`, `markers` and `text_after` checks on the response's raw text), or an LLM judge of the reply. Deterministic input, so it pins one behavior; scenarios are reusable across bots. A run's result records each turn's expectations with what they matched, so a passed run keeps the marker it saw.
 - A **simulated** scenario, a simulation for short (`persona:` and `goal:`), lets an LLM play a caller who pursues the goal and hangs up with an `end_call` tool. A judge then reads the whole conversation, the bot's tool calls in place, and decides whether the bot did its job (`success:`, prose) and how each reply scored on the `metrics:`. A judged metric (`criterion`, optionally `min_score`) says what every reply should be and scores the share of turns that satisfied it; a measured one (`measure: turns | duration | words | latency` with `min_value` / `max_value`, or `measure: function_calls` with the `calls` the bot should make, `[]` for none) is computed from the run. A run passes when the goal is met and no metric falls short, and a simulation's `runs` must all pass.
 
 To confirm a behavior while developing:

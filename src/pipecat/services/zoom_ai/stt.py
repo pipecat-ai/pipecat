@@ -6,8 +6,11 @@
 
 """Zoom Scribe speech-to-text service.
 
-:class:`ZoomAISTTService` streams audio to Scribe Live over a WebSocket. Scribe's
-own voice activity detection ends each turn and returns its final transcript.
+:class:`ZoomAISTTService` streams audio to Scribe Live over a WebSocket. By default
+Scribe's own voice activity detection ends each turn and returns its final transcript.
+With ``vad_force_turn_endpoint=True``, Pipecat's VAD and turn strategies decide when
+the user stops speaking instead, and the service asks Scribe for the final transcript
+at each VAD stop.
 
 Settings map to the Scribe API fields of the same name. For what each feature
 does, and its availability, pricing and enablement, see
@@ -38,9 +41,11 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import ZOOM_AI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -289,6 +294,8 @@ class ZoomAISTTSettings(STTSettings):
             lower is faster, higher keeps sentences with longer pauses together.
             For transcription without an agent, a longer value such as 600 can
             improve accuracy. ``None`` uses Scribe's default (see the Scribe docs).
+            Not used with ``vad_force_turn_endpoint=True``, where Scribe's voice
+            activity detection is off.
         diarization: Whether Scribe labels each completed transcript with a
             speaker. Off by default. The labels are in the Scribe event attached
             as ``TranscriptionFrame.result``: ``speaker``, plus ``speaker_segments``
@@ -322,8 +329,12 @@ class ZoomAISTTSettings(STTSettings):
 class ZoomAISTTService(WebsocketSTTService):
     """Zoom Scribe Live streaming speech-to-text service.
 
-    Streams 16 kHz PCM16 audio to Scribe Live over a WebSocket. Scribe's own
-    voice activity detection decides when the user starts and stops speaking:
+    Streams 16 kHz PCM16 audio to Scribe Live over a WebSocket. It has two turn
+    detection modes, chosen with ``vad_force_turn_endpoint``.
+
+    **Scribe turn detection** (``vad_force_turn_endpoint=False``, the default).
+    Scribe's own voice activity detection decides when the user starts and stops
+    speaking:
     its ``speech_started`` event broadcasts a
     :class:`ProposedUserStartedSpeakingFrame`, and each completed transcript is
     pushed as a :class:`TranscriptionFrame` followed by a
@@ -334,6 +345,15 @@ class ZoomAISTTService(WebsocketSTTService):
     without a preceding ``speech_started`` (for example right after a
     reconnect) opens its own turn, so it is never dropped; a turn whose
     transcript comes back empty ends with no transcription.
+
+    **Pipecat turn detection** (``vad_force_turn_endpoint=True``). Scribe's voice
+    activity detection is turned off (``turn_detection: {"type": "none"}``), and
+    Pipecat's VAD and user turn strategies (e.g. Smart Turn) decide when the user
+    is done. On each :class:`~pipecat.frames.frames.VADUserStoppedSpeakingFrame`
+    the service sends ``input_audio_buffer.commit``, and Scribe returns that turn's
+    final transcript. The service proposes no turns, so the default user turn
+    strategies apply, and it reports a TTFS P99 latency. A local VAD analyzer is
+    required in this mode.
 
     Example::
 
@@ -353,7 +373,9 @@ class ZoomAISTTService(WebsocketSTTService):
         url: str = "wss://api.zoom.us/v2/aiservices/scribe/live",
         sample_rate: int | None = None,
         should_interrupt: bool = True,
+        vad_force_turn_endpoint: bool = False,
         settings: Settings | None = None,
+        ttfs_p99_latency: float | None = ZOOM_AI_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Zoom Scribe Live STT service.
@@ -365,7 +387,21 @@ class ZoomAISTTService(WebsocketSTTService):
                 than localhost logs a warning.
             sample_rate: Input audio sample rate. Audio is resampled to 16 kHz.
             should_interrupt: Whether a user turn started by Scribe interrupts the bot.
+                Only applies with Scribe turn detection
+                (``vad_force_turn_endpoint=False``). Passed along to the user turn
+                strategies this service recommends; a user-supplied
+                ``user_turn_strategies`` overrides it.
+            vad_force_turn_endpoint: Controls turn detection mode. When False (the
+                default), Scribe's voice activity detection ends each turn
+                (``silence_duration_ms``) and the service proposes turn boundaries.
+                When True (Pipecat mode), Scribe's voice activity detection is off
+                and each ``VADUserStoppedSpeakingFrame`` commits the turn, so
+                Pipecat's VAD and turn strategies decide when the user is done.
+                Requires a local VAD analyzer.
             settings: Runtime-updatable settings.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in
+                seconds, used with ``vad_force_turn_endpoint=True``. Override for
+                your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent WebsocketSTTService.
         """
         default_settings = self.Settings(
@@ -386,9 +422,11 @@ class ZoomAISTTService(WebsocketSTTService):
             keepalive_timeout=10,
             keepalive_interval=5,
             settings=default_settings,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
         self._api_key = api_key
+        self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._url = _check_url(url)
         self._should_interrupt = should_interrupt
         self._resampler = create_stream_resampler()
@@ -425,20 +463,52 @@ class ZoomAISTTService(WebsocketSTTService):
 
     @property
     def supports_ttfs(self) -> bool:
-        """Scribe defines the turn boundary, so there is no TTFS to report."""
-        return False
+        """Whether there is a TTFS to report.
+
+        With Scribe turn detection, Scribe defines the turn boundary, so there is
+        none. With ``vad_force_turn_endpoint=True``, the final transcript follows
+        the local VAD stop, so there is.
+        """
+        return self._vad_force_turn_endpoint
 
     def service_metadata_frame(self) -> STTMetadataFrame:
-        """Recommend external turn strategies, since Scribe detects the turns.
+        """Let Scribe's turn detection drive user turns in Scribe turn detection mode.
+
+        With ``vad_force_turn_endpoint=False``, Scribe decides when the user starts
+        and stops speaking, and this service proposes those turns. It recommends
+        :class:`~pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies` so
+        the user aggregator follows the proposals instead of running its own VAD
+        and Smart Turn ("external" means turn detection outside the aggregator,
+        here Scribe's). With ``vad_force_turn_endpoint=True`` the service proposes
+        no turns, so the default turn strategies (local VAD and Smart Turn) are
+        left in place.
 
         Returns:
             The STT metadata frame.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = ExternalUserTurnStrategies(
-            enable_interruptions=self._should_interrupt
-        )
+        if not self._vad_force_turn_endpoint:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt
+            )
         return frame
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Commit the Scribe turn on a local VAD stop, in Pipecat turn detection mode.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+        if (
+            isinstance(frame, VADUserStoppedSpeakingFrame)
+            and self._vad_force_turn_endpoint
+            and self._websocket
+            and self._websocket.state is State.OPEN
+        ):
+            self.request_finalize()
+            await self._send_json({"type": "input_audio_buffer.commit"})
 
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta and reconnect so the new session config takes effect."""
@@ -554,7 +624,7 @@ class ZoomAISTTService(WebsocketSTTService):
             config["vocabulary"] = {"phrases": list(self._settings.vocabulary)}
         if config:
             update["config"] = config
-        if self._settings.silence_duration_ms is not None:
+        if not self._vad_force_turn_endpoint and self._settings.silence_duration_ms is not None:
             update["turn_detection"] = {"silence_duration_ms": self._settings.silence_duration_ms}
         if self._settings.text_polishing:
             update["outputs"] = {"text_polishing": {"enabled": True}}
@@ -562,6 +632,9 @@ class ZoomAISTTService(WebsocketSTTService):
         # Fields the service depends on, whatever ``extra`` says.
         update["type"] = "session.update"
         update["audio"] = {**(update.get("audio") or {}), "format": "pcm16"}
+        if self._vad_force_turn_endpoint:
+            # Scribe's VAD is off; each local VAD stop commits the turn.
+            update["turn_detection"] = {"type": "none"}
         polishing = (update.get("outputs") or {}).get("text_polishing")
         if isinstance(polishing, dict) and polishing.get("enabled"):
             # Live returns only the polished text unless the transcript is asked for too,
@@ -578,7 +651,8 @@ class ZoomAISTTService(WebsocketSTTService):
             self._receive_task = self.create_task(
                 self._receive_task_handler(self._report_error), name="receive"
             )
-        if not self._input_gap_task:
+        # Only Scribe's VAD needs silence to end a turn; in Pipecat mode the commit does.
+        if not self._input_gap_task and not self._vad_force_turn_endpoint:
             self._input_gap_task = self.create_task(self._input_gap_handler(), name="input_gap")
 
     async def _disconnect(self):
@@ -655,6 +729,10 @@ class ZoomAISTTService(WebsocketSTTService):
 
     async def _handle_event(self, event: dict[str, Any]):
         kind = event.get("type")
+        if self._vad_force_turn_endpoint and kind == "input_audio_buffer.speech_started":
+            # Scribe opens its next turn right after each commit; Pipecat's VAD owns
+            # the user turn in this mode.
+            return
         if kind == "input_audio_buffer.speech_started":
             # Hold settings-change reconnects until the turn ends, even without a local VAD.
             self._can_reconnect = False
@@ -688,11 +766,10 @@ class ZoomAISTTService(WebsocketSTTService):
             await self.push_error(error_msg=message)
 
     async def _push_final_transcript(self, event: dict[str, Any]):
-        text = _clean(event.get("transcript"))
-        if self._view.text_polishing:
-            polished = _polished_text(event)
-            if polished is not None:
-                text = polished
+        if self._vad_force_turn_endpoint:
+            await self._push_committed_transcript(event)
+            return
+        text = self._final_text(event)
         if text:
             if not self._user_turn_open:
                 # No speech_started for this transcript (e.g. it was lost in a
@@ -720,6 +797,39 @@ class ZoomAISTTService(WebsocketSTTService):
         self._can_reconnect = True
         if self._need_reconnect:
             self.create_task(self._reconnect(), name="settings_reconnect")
+
+    def _final_text(self, event: dict[str, Any]) -> str:
+        text = _clean(event.get("transcript"))
+        if self._view.text_polishing:
+            polished = _polished_text(event)
+            if polished is not None:
+                text = polished
+        return text
+
+    async def _push_committed_transcript(self, event: dict[str, Any]):
+        """Push a final transcript in Pipecat turn detection mode.
+
+        The final answers the commit sent at the VAD stop, so it confirms the
+        finalize request. Pipecat's VAD and turn strategies own the user turn.
+        """
+        self.confirm_finalize()
+        text = self._final_text(event)
+        if not text:
+            return
+        language = _reported_language(
+            event.get("language"), self._view.language_detection, self._settings.language
+        )
+        await self.emit_stt_usage_metrics()
+        await self.push_frame(
+            TranscriptionFrame(
+                text=text,
+                user_id=self._user_id,
+                timestamp=time_now_iso8601(),
+                language=language,
+                result=event,
+            )
+        )
+        await self._handle_transcription(text, True, language)
 
     async def _end_open_turn(self):
         if self._user_turn_open:

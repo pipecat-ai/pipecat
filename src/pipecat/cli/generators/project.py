@@ -557,7 +557,7 @@ class ProjectGenerator:
 
             if self.config.deploy_to_cloud:
                 console.print(
-                    "\n[dim]See https://docs.pipecat.ai/deployment/pipecat-cloud for deployment info.[/dim]\n"
+                    "\n[dim]See https://docs.pipecat.ai/pipecat-cloud/introduction for deployment info.[/dim]\n"
                 )
             else:
                 console.print(
@@ -609,7 +609,7 @@ class ProjectGenerator:
         # Add cloud deployment info if applicable
         if self.config.deploy_to_cloud:
             console.print(
-                "\n[dim]See https://docs.pipecat.ai/deployment/pipecat-cloud for deployment info.[/dim]\n"
+                "\n[dim]See https://docs.pipecat.ai/pipecat-cloud/introduction for deployment info.[/dim]\n"
             )
         else:
             console.print("\n[dim]See README.md for detailed setup instructions.[/dim]\n")

@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.assemblyai.tts import AssemblyAITTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -70,10 +70,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
+    tts = AssemblyAITTSService(
+        api_key=os.environ["ASSEMBLYAI_API_KEY"],
+        settings=AssemblyAITTSService.Settings(
+            voice="49c443a4-8a1d-5f7e-b70b-98bdbd9823c3",  # Audrey
         ),
     )
 

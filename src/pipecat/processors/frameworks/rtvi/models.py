@@ -38,7 +38,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.2.0"
+PROTOCOL_VERSION = "2.3.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.
@@ -527,6 +527,11 @@ class BotOutputMessageData(TextMessageData):
             with word timestamps; ``"completed"`` once its last word is spoken.
         spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
             Present when ``will_be_spoken`` is ``True``.
+        delivery: **(2.3.0+)** The delivery of the text just spoken, by its
+            universal names, such as ``["warm", "emphasis"]``, empty for the
+            voice's baseline. They change within a segment where its delivery
+            does, so a segment's ``"new"`` message has none. Present in
+            expressive conversation (alpha).
     """
 
     output_type: TextType | str
@@ -539,6 +544,7 @@ class BotOutputMessageData(TextMessageData):
     will_be_spoken: bool | None = None
     spoken_status: SpokenStatus | None = None
     spoken_progress: SpokenProgressData | None = None
+    delivery: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -691,6 +697,32 @@ class UserTranscriptionMessage(BaseModel):
 UserInputType = Literal["transcription", "chat", "backchannel"]
 
 
+class UserPerceptionLabel(BaseModel):
+    """A label of a perception signal, with how sure the reading is.
+
+    Parameters:
+        label: The label, such as ``"frustrated"``.
+        confidence: How sure the reading is, from 0 to 1.
+    """
+
+    label: str
+    confidence: float
+
+
+class UserPerceptionSignal(BaseModel):
+    """One signal of a reading of how the user spoke.
+
+    Parameters:
+        name: What is read, such as ``"tone"``.
+        labels: The likeliest labels, likeliest first, for a signal read as labels.
+        value: The measure, for a signal read as a value.
+    """
+
+    name: str
+    labels: list[UserPerceptionLabel] = []
+    value: float | None = None
+
+
 class UserInputMessageData(BaseModel):
     """Data for user input messages.
 
@@ -705,6 +737,9 @@ class UserInputMessageData(BaseModel):
         user_id: Identifier for the user who spoke or typed. For chat, set only
             when the transport knows the sender, such as Daily and LiveKit.
         msg_id: For chat, the id of the client's ``send-text`` message.
+        perception: For a transcription, how the user said it, when the STT
+            service reports a reading with it. Part of expressive conversation
+            (alpha).
     """
 
     text: str
@@ -713,6 +748,7 @@ class UserInputMessageData(BaseModel):
     final: bool
     user_id: str | None = None
     msg_id: str | None = None
+    perception: list[UserPerceptionSignal] | None = None
 
 
 class UserInputMessage(BaseModel):

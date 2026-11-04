@@ -949,6 +949,17 @@
       "location": "pipecat/frames/frames.py"
     },
     {
+      "subject": "EagerEndOfTurnCancelFrame",
+      "module": "pipecat.frames.frames",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "UserTurnResponseCancelFrame",
+      "message": "`EagerEndOfTurnCancelFrame` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `UserTurnResponseCancelFrame` instead.",
+      "location": "pipecat/frames/frames.py"
+    },
+    {
       "subject": "EndTaskFrame",
       "module": "pipecat.frames.frames",
       "kind": "class",
@@ -1651,6 +1662,28 @@
       "replacement": "TransportParams.video_in_sources",
       "message": "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
       "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.create_resumed_response",
+      "module": "pipecat.serializers.genesys",
+      "kind": "method",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "GenesysAudioHookSerializer.create_resume_request",
+      "message": "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` instead.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.on_pause",
+      "module": "pipecat.serializers.genesys",
+      "kind": "event",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_paused",
+      "message": "Use ``on_paused`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
     },
     {
       "subject": "AnthropicLLMService.InputParams",
@@ -4502,6 +4535,17 @@
       "location": "pipecat/services/simli/video.py"
     },
     {
+      "subject": "SimliVideoService.is_trinity_avatar",
+      "module": "pipecat.services.simli.video",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/services/simli/video.py"
+    },
+    {
       "subject": "SimliVideoService.params",
       "module": "pipecat.services.simli.video",
       "kind": "parameter",
@@ -5107,14 +5151,25 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "ProcessFrameResult",
+      "module": "pipecat.turns.types",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.turns.user_turn_strategies.StrategyMode",
+      "message": "Use :class:`~pipecat.turns.user_turn_strategies.StrategyMode` instead. Every strategy sees every frame, and a list whose strategies all have to agree, such as a wake phrase next to VAD, is ``StrategyMode.ALL``. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/types.py"
+    },
+    {
       "subject": "BaseUserTurnStartStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
       "kind": "parameter",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_started",
-      "message": "Use :meth:`trigger_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_started",
+      "message": "Use :meth:`report_user_turn_started`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
@@ -5129,14 +5184,25 @@
       "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
     },
     {
+      "subject": "BaseUserTurnStartStrategy.trigger_user_turn_started",
+      "module": "pipecat.turns.user_start.base_user_turn_start_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_started",
+      "message": "`BaseUserTurnStartStrategy.trigger_user_turn_started` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_started` instead.",
+      "location": "pipecat/turns/user_start/base_user_turn_start_strategy.py"
+    },
+    {
       "subject": "BaseUserTurnStopStrategy.enable_user_speaking_frames",
       "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
       "kind": "parameter",
       "deprecated_in": "1.8.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "trigger_user_turn_stopped",
-      "message": "Use :meth:`trigger_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
+      "replacement": "report_user_turn_stopped",
+      "message": "Use :meth:`report_user_turn_stopped`'s ``enable_user_speaking_frames`` argument instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
     },
     {
@@ -5149,6 +5215,83 @@
       "replacement": "handle_user_turn_started",
       "message": "Use :meth:`handle_user_turn_started` and :meth:`handle_user_turn_stopped` instead. Will be removed in 2.0.0.",
       "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_finalized",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_finalized` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "start_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `start_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "cancel_user_turn_speculation",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_speculation_cancelled` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `cancel_user_turn_speculation` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "BaseUserTurnStopStrategy.trigger_user_turn_stopped",
+      "module": "pipecat.turns.user_stop.base_user_turn_stop_strategy",
+      "kind": "method",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "report_user_turn_stopped",
+      "message": "`BaseUserTurnStopStrategy.trigger_user_turn_stopped` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `report_user_turn_stopped` instead.",
+      "location": "pipecat/turns/user_stop/base_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "DeferredUserTurnStopStrategy",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`DeferredUserTurnStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "deferred",
+      "module": "pipecat.turns.user_stop.deferred_user_turn_stop_strategy",
+      "kind": "function",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`deferred` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement.",
+      "location": "pipecat/turns/user_stop/deferred_user_turn_stop_strategy.py"
+    },
+    {
+      "subject": "ExternalUserTurnCompletionStopStrategy",
+      "module": "pipecat.turns.user_stop.external_user_turn_completion_stop_strategy",
+      "kind": "class",
+      "deprecated_in": "1.15.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "ExternalUserTurnStopStrategy",
+      "message": "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `ExternalUserTurnStopStrategy` instead.",
+      "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
     },
     {
       "subject": "TaskManager.setup",

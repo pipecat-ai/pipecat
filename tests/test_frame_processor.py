@@ -43,6 +43,30 @@ class BroadcastTestFrame(DataFrame):
     items: list[str] = field(default_factory=list)
 
 
+@dataclass
+class _CancelInProgressFrame(SystemFrame):
+    """Asks the processor to cancel ``target`` if it is the frame in progress."""
+
+    target: Frame | None = None
+
+
+class _CancelInProgressProcessor(FrameProcessor):
+    """Takes 0.4s over every non-system frame, and records what each cancel request did."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled: list[bool] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, _CancelInProgressFrame):
+            assert frame.target is not None
+            self.cancelled.append(await self._cancel_frame_in_progress(frame.target))
+        elif not isinstance(frame, SystemFrame):
+            await asyncio.sleep(0.4)
+        await self.push_frame(frame, direction)
+
+
 class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_before_after_events(self):
         identity = IdentityFilter()
@@ -194,6 +218,58 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
+
+    async def test_cancel_frame_in_progress_keeps_the_queue(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            TextFrame(text="queued"),
+            _CancelInProgressFrame(target=in_progress),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
+        self.assertEqual(down[-1].text, "queued")
+
+    async def test_cancel_frame_in_progress_leaves_other_frames_alone(self):
+        processor = _CancelInProgressProcessor()
+        queued = TextFrame(text="queued")
+        frames_to_send = [
+            TextFrame(text="in progress"),
+            SleepFrame(sleep=0.1),
+            queued,
+            _CancelInProgressFrame(target=queued),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [False])
+        self.assertEqual([f.text for f in down[1:]], ["in progress", "queued"])
+
+    async def test_an_interruption_after_cancel_frame_in_progress_still_interrupts(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            _CancelInProgressFrame(target=in_progress),
+            TextFrame(text="next"),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+        ]
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, InterruptionFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
 
     async def test_interruptible_flag_decides_for_a_frame(self):
         """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""

@@ -74,9 +74,6 @@ class AIService(FrameProcessor):
         We don't store model name here because there's already a single source
         of truth for it in `self._settings.model`. This method is just for
         syncing the model name to the metrics data.
-
-        Args:
-            model: The name of the AI model to use.
         """
         model = self._settings.model
         self.set_core_metrics_data(

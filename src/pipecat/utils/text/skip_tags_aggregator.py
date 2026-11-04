@@ -48,6 +48,11 @@ class SkipTagsAggregator(SimpleTextAggregator):
         self._current_tag: StartEndTags | None = None
         self._current_tag_index: int = 0
 
+    @property
+    def tags(self) -> Sequence[StartEndTags]:
+        """The tag pairs whose text is kept in one aggregation."""
+        return self._tags
+
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text while respecting tag boundaries.
 

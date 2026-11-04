@@ -268,6 +268,63 @@ class TestFramesToEvents(unittest.TestCase):
             s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
         )
 
+    def test_expression_from_messages(self):
+        # Expressive conversation reports what the TTS performed: where the delivery
+        # of the spoken text change, and each event and pause.
+        s = _stream(bot_audio=True)
+
+        def bot_output(
+            segment_id, text_type="sentence", text="words", delivery=None, status="in-progress"
+        ):
+            data = {
+                "text": text,
+                "text_type": text_type,
+                "segment_id": segment_id,
+                "will_be_spoken": True,
+                "spoken_status": status,
+            }
+            if delivery is not None:
+                data["delivery"] = delivery
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
+            )
+
+        def expression(frame):
+            event = s.frame_to_event(frame)
+            return event and event["text"]
+
+        s.frame_to_event(LLMFullResponseStartFrame())
+        # Spoken text counts as it is spoken, not when it is announced.
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
+        self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="completed")))
+        self.assertEqual(
+            expression(bot_output(2, delivery=["excited", "emphasis"])), "<<excited, emphasis>>"
+        )
+        # Delivery can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, delivery=["calm"])), "<<calm>>")
+        # An event counts when it is heard, once.
+        self.assertIsNone(expression(bot_output(3, "expression_sound", "laughter", status="new")))
+        self.assertEqual(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed")),
+            "[[laughter]]",
+        )
+        self.assertIsNone(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed"))
+        )
+        self.assertEqual(
+            expression(bot_output(4, "expression_pause", "600", status="completed")),
+            "[[pause 600]]",
+        )
+        self.assertEqual(expression(bot_output(5, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, delivery=["excited"])))
+        self.assertEqual(expression(bot_output(7, delivery=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no delivery.
+        self.assertIsNone(expression(bot_output(8)))
+        # Each response starts from the baseline.
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertIsNone(expression(bot_output(9, delivery=[])))
+
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
         # bot's turn; the response is emitted from on_user_turn_stopped, not here.
@@ -1098,6 +1155,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure.kind, "text_present")
         self.assertIn("'Berlin.●'", failure.reason)
 
+    async def test_text_matches_checks_the_accumulated_reply(self):
+        import time
+
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_matches=[r"^●"])
+        for first, kind in (("● Berlin.", None), ("Berlin. ●", "text_unmatched")):
+            s = _matcher(bot_audio=False)
+            s._stream._queue.put_nowait({"type": "llm_response", "text": first})
+            s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+            failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+            self.assertEqual(failure.kind if failure else None, kind)
+
     async def test_eval_yes_passes(self):
         s = _matcher()
         s._judge = _FakeJudge(["yes"])
@@ -1361,6 +1429,20 @@ class TestTextContainsResolution(unittest.TestCase):
         # Spacing is ignored, as for text_contains.
         exp = EvalExpectation(event="llm_response", text_excludes="not sure")
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
+
+    def test_text_matches(self):
+        exp = EvalExpectation(
+            event="llm_response", text_matches=[r"^\[\[voice:[^\]]*\]\]", r"\]\]\s*\S"]
+        )
+        ok = {"type": "llm_response", "text": "[[voice: emotion=warm]] Sure thing."}
+        self.assertIsNone(self._check(ok, exp))
+        failure = self._check({"type": "llm_response", "text": "Sure. [[voice: x]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn("does not match '^", failure.reason)
+        # Each pattern must match; the failure names the first that did not.
+        failure = self._check({"type": "llm_response", "text": "[[voice: emotion=warm]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn(repr(r"\]\]\s*\S"), failure.reason)
 
 
 class TestMarkerCheck(unittest.TestCase):
