@@ -50,10 +50,10 @@ WAIT_REASSURANCE_PROMPT = (
     "same work, that makes clear the work has been going on since the user asked and is "
     'continuing: a "still", not a start. Keep it general, naming at most the kind of step under '
     "way; if the user asked for detail, name the step itself, drawing on the notes the work has "
-    "produced, files included. Never report a result or a finding, never say the work is done, and "
-    "ask no questions and make no offers or promises, not even to keep the user posted. {mark} is "
-    "only ever the answer to this message. Whatever the user says next, answer them, and when the "
-    "work reports back, tell the user, however often you have chosen silence before."
+    "produced. Never report a result or a finding, never say the work is done, and ask no "
+    "questions and make no offers or promises, not even to keep the user posted. {mark} is only "
+    "ever the answer to this message. Whatever the user says next, answer them, and when the work "
+    "reports back, tell the user, however often you have chosen silence before."
 )
 
 
