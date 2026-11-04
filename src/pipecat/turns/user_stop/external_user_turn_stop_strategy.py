@@ -62,7 +62,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Args:
             timeout: How long to wait after a final transcription for more of
                 them, so a turn whose transcription arrives late or in pieces
-                is decided once the text has settled.
+                is decided once the text has settled. There's no wait after a
+                finalized transcription, which is the last of them.
             wait_for_transcript: When True (default), turn-stop signaling
                 waits for transcript text to arrive after the external
                 stop signal. When False, the strategy signals turn-stop as
@@ -177,9 +178,13 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # The new text is worth a decision of its own, once no more arrives.
         self._decided = False
         await self._cancel_transcript_timer()
-        self._transcript_task = self.create_task(
-            self._transcript_timer_handler(), f"{self}::_transcript_timer_handler"
-        )
+        if frame.finalized:
+            # No more text is coming for this speech.
+            await self._maybe_report_user_turn_stopped()
+        else:
+            self._transcript_task = self.create_task(
+                self._transcript_timer_handler(), f"{self}::_transcript_timer_handler"
+            )
 
     async def _transcript_timer_handler(self):
         """Decide once no more transcriptions arrive for a while."""
