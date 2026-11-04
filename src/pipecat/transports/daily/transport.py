@@ -2364,9 +2364,6 @@ class DailyOutputTransport(BaseOutputTransport):
 
         Args:
             destination: The destination identifier to register.
-
-        Returns:
-            True if the audio frame was written successfully, False otherwise.
         """
         await self._client.register_audio_destination(destination)
 
