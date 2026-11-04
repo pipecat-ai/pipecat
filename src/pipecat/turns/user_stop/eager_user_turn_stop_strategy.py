@@ -90,6 +90,11 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """The policy deciding whether a speculative response still applies."""
         return self._match_policy
 
+    async def cleanup(self):
+        """Cleanup the strategy, stopping the timer of a speculation in flight."""
+        await super().cleanup()
+        await self._take_speculation()
+
     async def process_frame(self, frame: Frame):
         """Start a speculation on an eager end of turn, withdraw one, or forget one.
 
