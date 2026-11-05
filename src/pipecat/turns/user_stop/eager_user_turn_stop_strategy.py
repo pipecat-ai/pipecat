@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
 class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
@@ -186,7 +187,13 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """Answer an eager end of turn, leaving the turn open."""
         # Segments committed earlier in this turn are part of what the LLM will
         # see, so they're part of what the committed transcript is compared to.
-        speculation = UserTurnSpeculation(text=self._text + frame.text, perception=frame.perception)
+        eager_part = TextPartForConcatenation(
+            frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+        )
+        speculation = UserTurnSpeculation(
+            text=concatenate_aggregated_text([*self._text_parts, eager_part]),
+            perception=frame.perception,
+        )
         self._speculation = speculation
         self._confirmed = None
         self._speculation_timeout_task = self.task_manager.create_task(

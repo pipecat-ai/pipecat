@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
 class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
@@ -78,6 +79,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         super().__init__(**kwargs)
         self._timeout = timeout
         self._wait_for_transcript = wait_for_transcript
+        self._text_parts: list[TextPartForConcatenation] = []
         self._text = ""
         self._user_speaking = False
         self._seen_interim_results = False
@@ -115,6 +117,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
+        self._text_parts = []
         self._text = ""
         self._user_speaking = False
         self._seen_interim_results = False
@@ -172,7 +175,14 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
-        self._text += frame.text
+        # Joined the way the user aggregator joins them, so each transcript
+        # stays a separate word.
+        self._text_parts.append(
+            TextPartForConcatenation(
+                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
+        self._text = concatenate_aggregated_text(self._text_parts)
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # The new text is worth a decision of its own, once no more arrives.

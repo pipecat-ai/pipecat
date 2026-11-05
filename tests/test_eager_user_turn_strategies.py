@@ -422,6 +422,26 @@ class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
         assert [s.text for s in triggered] == ["book a flight"]
 
 
+class TestSpeculationAfterACommittedSegment(unittest.IsolatedAsyncioTestCase):
+    async def test_the_speculated_turn_keeps_the_segments_apart(self):
+        triggered = []
+
+        strategy = EagerUserTurnStopStrategy()
+        await strategy.setup(frame_processor_setup(TaskManager()))
+        self.addAsyncCleanup(strategy.cleanup)
+        strategy.add_event_handler(
+            "on_user_turn_inference_triggered",
+            lambda strategy, speculation: triggered.append(speculation),
+        )
+
+        # A segment committed earlier in the turn, then an eager end of turn.
+        await strategy.handle_user_turn_started()
+        await strategy.process_frame(final("I want to go to Paris"))
+        await strategy.process_frame(eager("next Tuesday"))
+
+        assert [s.text for s in triggered] == ["I want to go to Paris next Tuesday"]
+
+
 class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):
     async def test_formatting_differences_withdraw_the_speculation(self):
         # Opting into ExactMatch requires the committed transcript to be
