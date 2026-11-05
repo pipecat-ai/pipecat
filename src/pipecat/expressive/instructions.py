@@ -29,12 +29,7 @@ from pipecat.expressive.expression import (
     ExpressionCapabilities,
     ExpressionTerm,
 )
-from pipecat.expressive.perception import (
-    PerceptionCapabilities,
-    PerceptionSignal,
-    PerceptionTerm,
-    format_perception,
-)
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
 _RCS_OPENING = (
@@ -131,18 +126,16 @@ def expression_policy_warning(
 def _perception_section(perception: PerceptionCapabilities | None) -> str | None:
     if not perception or not perception.signals:
         return None
-    such_as = ""
-    example = next((term for term in perception.signals if len(term.labels) >= 2), None)
-    if example:
-        labels = [(example.labels[0], 0.86), (example.labels[1], 0.10)]
-        such_as = f" such as {format_perception([PerceptionSignal(example.name, labels)])},"
     signals = "\n".join(_signal_line(term) for term in perception.signals)
+    # No example reading: an LLM shown one, even with placeholders, learns to
+    # write readings of its own.
     return (
-        f"A user message may start with an RCS reading of how the user sounded, in "
-        f"parentheses,{such_as} each "
-        "signal with its likeliest labels and how sure the reading is, from 0 to 1, or with a "
-        "measure. The reading can be wrong, so weigh it against their words. A reading below "
-        f"0.5 is a guess: don't act on it. Never write it yourself. The signals are:\n{signals}"
+        "RCS readings (input only):\n"
+        "A user message may start with an RCS reading of how the user sounded, in parentheses, "
+        "each signal with its likeliest labels and how sure the reading is, from 0 to 1, or with "
+        "a measure. A reading is context about the user's words, not words they said. It can be "
+        "wrong, so weigh it against their words. A reading below 0.5 is a guess: don't act on "
+        f"it. The signals are:\n{signals}"
     )
 
 
@@ -197,7 +190,10 @@ def _tags_section(
         tags.append("- [[pause 500]] pauses for about that many milliseconds.")
     if not tags:
         return None
-    return "You can direct how your words are spoken with RCS tags:\n" + "\n".join(tags)
+    return (
+        "RCS tags (output only):\nYou can direct how your words are spoken with tags:\n"
+        + "\n".join(tags)
+    )
 
 
 def _left_out(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:
