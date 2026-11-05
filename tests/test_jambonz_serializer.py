@@ -6,7 +6,10 @@
 
 """Tests for JambonzFrameSerializer wire format."""
 
+import asyncio
 import json
+import math
+import struct
 import unittest
 
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -349,3 +352,43 @@ class TestJambonzSerializeWireFormat(unittest.IsolatedAsyncioTestCase):
 
         after = [await self.serializer.serialize(self.bot_audio()) for _ in range(PUMP)]
         self.assertTrue([s for s in after if s is not None])
+
+
+class TestJambonzOutputBetweenUtterances(unittest.IsolatedAsyncioTestCase):
+    """The end of one bot utterance must not play at the start of the next.
+
+    The output resampler holds back the last few milliseconds of each utterance.
+    Unless its state is cleared over the gap before the next utterance, that
+    tail is played at the start of it, and after an interruption the cut-off
+    speech comes back at the start of the next reply.
+    """
+
+    CHUNK = 480  # 20 ms at the pipeline rate
+
+    def tone(self) -> bytes:
+        return b"".join(
+            struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * n / PIPELINE_RATE)))
+            for n in range(self.CHUNK)
+        )
+
+    async def test_previous_utterance_does_not_leak_into_the_next(self):
+        serializer = JambonzFrameSerializer()
+        await serializer.setup(frame_processor_setup(audio_in_sample_rate=PIPELINE_RATE))
+        await serializer.deserialize(PREAMBLE)
+
+        tone = OutputAudioRawFrame(audio=self.tone(), sample_rate=PIPELINE_RATE, num_channels=1)
+        for _ in range(PUMP):
+            await serializer.serialize(tone)
+
+        await asyncio.sleep(0.3)  # the pause before the bot's next utterance
+
+        silence = OutputAudioRawFrame(
+            audio=b"\x00\x00" * self.CHUNK, sample_rate=PIPELINE_RATE, num_channels=1
+        )
+        written = b""
+        for _ in range(PUMP):
+            written += await serializer.serialize(silence) or b""
+
+        samples = struct.unpack(f"<{len(written) // 2}h", written)
+        self.assertTrue(samples)
+        self.assertLess(max(abs(s) for s in samples), 100)

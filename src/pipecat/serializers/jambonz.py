@@ -116,15 +116,11 @@ class JambonzFrameSerializer(FrameSerializer):
                 ``actionHook`` or hangs up. The jambonz equivalent of Twilio's
                 ``auto_hang_up``, and unlike it needs no API credentials.
                 Defaults to True.
-            resampler_clear_after_secs: Inherited from FrameSerializer. Defaults
-                to None here, since callers pause mid-sentence and the resampler
-                should not discard its history over an ordinary gap.
         """
 
         jambonz_sample_rate: int | None = None
         sample_rate: int | None = None
         disconnect_on_end: bool = True
-        resampler_clear_after_secs: float | None = None
 
     def __init__(self, params: InputParams | None = None, **kwargs):
         """Initialize the JambonzFrameSerializer.
