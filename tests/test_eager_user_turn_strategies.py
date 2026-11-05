@@ -341,6 +341,23 @@ class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
         await strategy.handle_user_turn_stopped()
         assert len(withdrawals) == 1
 
+    async def test_cleanup_stops_the_speculation_timer(self):
+        withdrawals = []
+        task_manager = TaskManager()
+
+        strategy = EagerUserTurnStopStrategy(speculation_timeout=0.1)
+        await strategy.setup(frame_processor_setup(task_manager))
+        strategy.add_event_handler(
+            "on_user_turn_speculation_cancelled", lambda s: withdrawals.append(s)
+        )
+
+        await strategy.process_frame(eager("book a flight"))
+        await strategy.cleanup()
+
+        assert task_manager.current_tasks() == []
+        await asyncio.sleep(0.2)
+        assert withdrawals == []
+
 
 class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
     async def test_speculation_is_withdrawn_when_there_is_nothing_to_compare(self):
