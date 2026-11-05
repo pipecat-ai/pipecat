@@ -29,10 +29,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import run_test
-from pipecat.turns.user_turn_completion_mixin import (
-    USER_TURN_INCOMPLETE_SHORT_MARKER,
-    UserTurnCompletionConfig,
-)
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
@@ -248,8 +245,9 @@ async def test_an_llm_that_filters_incomplete_turns_is_told_a_reading_doesnt_dec
         pipeline_params=EXPRESSIVE,
     )
 
-    completion = UserTurnCompletionConfig().completion_instructions
-    note = perception_turn_completion_instructions(USER_TURN_INCOMPLETE_SHORT_MARKER)
+    config = UserTurnCompletionConfig()
+    completion = config.completion_instructions
+    note = perception_turn_completion_instructions(*config.markers)
     assert llm._settings.system_instruction == (
         f"APP\n\n{expression_instructions(None, perception=TONE)}\n\n{completion}\n\n{note}"
     )

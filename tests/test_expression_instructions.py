@@ -234,12 +234,16 @@ def test_rcs_is_named_before_the_reading_and_the_tags():
 
 
 def test_a_reading_is_left_out_of_the_turn_completion_marker():
-    instructions = perception_turn_completion_instructions("~")
+    instructions = perception_turn_completion_instructions("+", "~", "-")
 
     assert instructions.startswith(
         "When you choose the turn completion marker, decide it from the user's words alone."
     )
-    assert instructions.endswith("still gets ~ when their words are cut off.")
+    assert "still gets ~ when their words are cut off." in instructions
+    assert instructions.endswith(
+        "it doesn't make a hesitant user's cut-off words -, and it doesn't make words that "
+        "haven't answered you +."
+    )
 
 
 def test_perception_comes_before_the_tags_and_the_guidance_last():

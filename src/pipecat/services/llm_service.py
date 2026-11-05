@@ -940,9 +940,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             config = self._user_turn_completion_config
             parts.append(config.completion_instructions)
             if self._perception and self._perception.signals:
-                parts.append(
-                    perception_turn_completion_instructions(config.incomplete_short_marker)
-                )
+                parts.append(perception_turn_completion_instructions(*config.markers))
         if self._cancel_tool_names:
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
         if self._has_async_tools():

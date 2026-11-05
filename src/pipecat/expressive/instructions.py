@@ -75,15 +75,17 @@ def expression_instructions(
     return "\n\n".join([_RCS_OPENING, *parts])
 
 
-def perception_turn_completion_instructions(incomplete_short_marker: str) -> str:
+def perception_turn_completion_instructions(complete: str, short: str, long: str) -> str:
     """Tell an LLM that decides when the user's turn is complete that a reading doesn't decide it.
 
-    It goes after the turn completion instructions. Without it, a reading that
-    the user sounded hesitant can make the LLM wait for cut-off words as long as
-    for a user who needs time to think.
+    It goes after the turn completion instructions. Without it, a reading can
+    change the marker: a hesitant user's cut-off words get the long wait, and
+    words that haven't answered the LLM get an answer.
 
     Args:
-        incomplete_short_marker: The marker for a turn cut off mid-sentence.
+        complete: The marker for a complete turn.
+        short: The marker for a turn cut off mid-sentence.
+        long: The marker for a user who needs time to think.
 
     Returns:
         The instruction.
@@ -91,8 +93,10 @@ def perception_turn_completion_instructions(incomplete_short_marker: str) -> str
     return (
         "When you choose the turn completion marker, decide it from the user's words alone. "
         "The RCS reading in parentheses at the start of their message says how they sounded, "
-        "not whether they finished: a user who sounds hesitant or unsure still gets "
-        f"{incomplete_short_marker} when their words are cut off."
+        f"not whether they finished: a user who sounds hesitant or unsure still gets {short} "
+        "when their words are cut off. A reading never changes the marker the words would get "
+        f"on their own: it doesn't make a hesitant user's cut-off words {long}, and it doesn't "
+        f"make words that haven't answered you {complete}."
     )
 
 
