@@ -231,9 +231,13 @@ def test_readings_are_taught_as_input_and_tags_as_output():
     instructions = expression_instructions(FIXED, perception=PERCEPTION)
 
     assert instructions.startswith(
-        f"{RCS}\n\nRCS readings (input only):\nA user message may start with an RCS reading"
+        f"{RCS}\n\nRCS readings (the user's input, never your output):\n"
+        "A user message may start with an RCS reading"
     )
-    assert "A reading is context about the user's words, not words they said." in instructions
+    assert (
+        "A reading comes from a separate system, not from you: it is part of the user's input "
+        "and never part of your output."
+    ) in instructions
     assert "RCS tags (output only):\nYou can direct how your words are spoken" in instructions
 
 
@@ -255,7 +259,7 @@ def test_perception_comes_before_the_tags_and_the_guidance_last():
 
     instructions = expression_instructions(FIXED, policy, perception=PERCEPTION)
 
-    reading = instructions.index("RCS readings (input only)")
+    reading = instructions.index("RCS readings (the user's input")
     tags = instructions.index("RCS tags (output only)")
     assert reading < tags < instructions.index(ExpressionGuidance.MATCH_STYLE)
 

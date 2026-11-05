@@ -130,12 +130,13 @@ def _perception_section(perception: PerceptionCapabilities | None) -> str | None
     # No example reading: an LLM shown one, even with placeholders, learns to
     # write readings of its own.
     return (
-        "RCS readings (input only):\n"
+        "RCS readings (the user's input, never your output):\n"
         "A user message may start with an RCS reading of how the user sounded, in parentheses, "
         "each signal with its likeliest labels and how sure the reading is, from 0 to 1, or with "
-        "a measure. A reading is context about the user's words, not words they said. It can be "
-        "wrong, so weigh it against their words. A reading below 0.5 is a guess: don't act on "
-        f"it. The signals are:\n{signals}"
+        "a measure. A reading comes from a separate system, not from you: it is part of the "
+        "user's input and never part of your output. It is context about their words, not words "
+        "they said. It can be wrong, so weigh it against their words. A reading below 0.5 is a "
+        f"guess: don't act on it. The signals are:\n{signals}"
     )
 
 
