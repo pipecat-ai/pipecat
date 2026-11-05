@@ -134,7 +134,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         # (e.g. via ``update_strategies``) treats the bot as silent until its
         # next ``BotStartedSpeakingFrame``.
         self._bot_speaking = False
-        self._call_new_ip_api = krisp_sdk_ip_accepts_bot_speaking()
+        self._bot_aware = krisp_sdk_ip_accepts_bot_speaking()
         self._audio_buffer = bytearray()
         self._decision_made = False
 
@@ -211,10 +211,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            if self._call_new_ip_api:
-                await self._handle_bot_stopped(frame)
-            else:
-                await self._handle_reset(frame)
+            await self._handle_bot_stopped(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_reset(frame)
 
@@ -228,7 +225,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The VAD speech-start frame.
         """
         self._speech_active = True
-        if self._call_new_ip_api and not self._bot_speaking:
+        if self._bot_aware and not self._bot_speaking:
             self._decision_made = True
             await self.report_user_turn_started()
             return
@@ -274,7 +271,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            if self._call_new_ip_api:
+            if self._bot_aware:
                 ip_prob = self._ip_session.process(
                     ip_frame, self._speech_active, self._bot_speaking
                 )
@@ -293,15 +290,16 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def _handle_bot_stopped(self, frame: BotStoppedSpeakingFrame):
         """Handle the bot finishing its speech.
 
-        VAD does not fire again for speech already in progress, so a user who is
-        still speaking when the bot stops, with no decision made yet, starts a
-        turn here: with the bot silent there is nothing left to classify.
+        VAD does not fire again for speech already in progress, so with a
+        bot-aware SDK a user who is still speaking when the bot stops, with no
+        decision made yet, starts a turn here: with the bot silent there is
+        nothing left to classify. Otherwise the candidate state is reset.
 
         Args:
             frame: The bot-stopped frame.
         """
         self._bot_speaking = False
-        if self._speech_active and not self._decision_made:
+        if self._bot_aware and self._speech_active and not self._decision_made:
             self._decision_made = True
             await self.report_user_turn_started()
             return
