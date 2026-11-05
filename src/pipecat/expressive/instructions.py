@@ -75,6 +75,27 @@ def expression_instructions(
     return "\n\n".join([_RCS_OPENING, *parts])
 
 
+def perception_turn_completion_instructions(incomplete_short_marker: str) -> str:
+    """Tell an LLM that decides when the user's turn is complete that a reading doesn't decide it.
+
+    It goes after the turn completion instructions. Without it, a reading that
+    the user sounded hesitant can make the LLM wait for cut-off words as long as
+    for a user who needs time to think.
+
+    Args:
+        incomplete_short_marker: The marker for a turn cut off mid-sentence.
+
+    Returns:
+        The instruction.
+    """
+    return (
+        "When you choose the turn completion marker, decide it from the user's words alone. "
+        "The RCS reading in parentheses at the start of their message says how they sounded, "
+        "not whether they finished: a user who sounds hesitant or unsure still gets "
+        f"{incomplete_short_marker} when their words are cut off."
+    )
+
+
 def expression_policy_warning(
     capabilities: ExpressionCapabilities | None, policy: ExpressionPolicy | None
 ) -> str | None:

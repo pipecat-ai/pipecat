@@ -16,7 +16,11 @@ from pipecat.expressive.expression import (
     ExpressionSound,
     ExpressionTerm,
 )
-from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
+from pipecat.expressive.instructions import (
+    expression_instructions,
+    expression_policy_warning,
+    perception_turn_completion_instructions,
+)
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
@@ -227,6 +231,15 @@ def test_rcs_is_named_before_the_reading_and_the_tags():
 
     assert instructions.startswith(f"{RCS}\n\nA user message may start with an RCS reading")
     assert "You can direct how your words are spoken with RCS tags:" in instructions
+
+
+def test_a_reading_is_left_out_of_the_turn_completion_marker():
+    instructions = perception_turn_completion_instructions("~")
+
+    assert instructions.startswith(
+        "When you choose the turn completion marker, decide it from the user's words alone."
+    )
+    assert instructions.endswith("still gets ~ when their words are cut off.")
 
 
 def test_perception_comes_before_the_tags_and_the_guidance_last():
