@@ -12,6 +12,7 @@ from PIL import Image
 
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
+    ClassifierAudio,
     ClassifierError,
     ClassifierImage,
     ClassifierQuestion,
@@ -24,7 +25,7 @@ QUESTION = {"answer": YesNoQuestion(instructions="is this red?")}
 
 
 class _TextClassifier(BaseClassifier):
-    """A classifier that cannot see images: its _ask takes no images."""
+    """A classifier that can neither see nor hear: its _ask takes no audio."""
 
     def __init__(self):
         super().__init__()
@@ -56,10 +57,45 @@ class _ImageClassifier(BaseClassifier):
         return {name: YesNoResult(probability=0.9) for name in questions}, None
 
 
+class _AudioClassifier(BaseClassifier):
+    """A classifier that hears clips of 1 to 3 seconds and records what it was given."""
+
+    def __init__(self, *, sample_rate: int | None = None):
+        super().__init__()
+        self._sample_rate = sample_rate
+        self.clips: list[ClassifierAudio | None] = []
+        self.states: list = []
+
+    @property
+    def supports_audio(self) -> bool:
+        return True
+
+    @property
+    def min_audio_secs(self) -> float:
+        return 1.0
+
+    @property
+    def max_audio_secs(self) -> float:
+        return 3.0
+
+    @property
+    def audio_sample_rate(self) -> int | None:
+        return self._sample_rate
+
+    async def _ask(self, state, questions, images=(), audio=None):
+        self.clips.append(audio)
+        self.states.append(state)
+        return {name: YesNoResult(probability=0.7) for name in questions}, None
+
+
 def _jpeg() -> ClassifierImage:
     buffer = io.BytesIO()
     Image.new("RGB", (8, 8), "red").save(buffer, format="JPEG")
     return ClassifierImage(data=buffer.getvalue(), content_type="image/jpeg")
+
+
+def _clip(secs: float, sample_rate: int = 16000) -> ClassifierAudio:
+    return ClassifierAudio(audio=bytes(int(secs * sample_rate) * 2), sample_rate=sample_rate)
 
 
 class TestImages:
@@ -93,6 +129,70 @@ class TestImages:
 
     def test_the_image_bytes_stay_out_of_the_repr(self):
         assert "data" not in repr(_jpeg())
+
+
+class TestAudio:
+    @pytest.mark.asyncio
+    async def test_a_classifier_that_cannot_hear_refuses_a_clip(self):
+        classifier = _TextClassifier()
+
+        assert not classifier.supports_audio
+        with pytest.raises(ClassifierError, match="cannot hear audio"):
+            await classifier.yes_no("a caller", QUESTION, audio=_clip(2))
+        assert classifier.calls == 0
+
+    @pytest.mark.asyncio
+    async def test_a_clip_reaches_a_classifier_that_hears_with_its_state(self):
+        classifier = _AudioClassifier()
+        clip = _clip(2)
+
+        results = await classifier.yes_no("a caller", QUESTION, audio=clip)
+
+        assert results == {"answer": YesNoResult(probability=0.7)}
+        assert classifier.clips == [clip]
+        assert classifier.states == ["a caller"]
+
+    @pytest.mark.asyncio
+    async def test_a_classifier_that_hears_still_answers_without_a_clip(self):
+        classifier = _AudioClassifier()
+
+        await classifier.ask("a caller", QUESTION)
+
+        assert classifier.clips == [None]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("secs", [0.5, 3.5])
+    async def test_a_clip_of_a_length_the_classifier_doesnt_accept_is_refused(self, secs):
+        classifier = _AudioClassifier()
+
+        with pytest.raises(ClassifierError, match="of audio"):
+            await classifier.ask("a caller", QUESTION, audio=_clip(secs))
+        assert classifier.clips == []
+
+    @pytest.mark.asyncio
+    async def test_a_clip_is_resampled_to_the_classifiers_sample_rate(self):
+        classifier = _AudioClassifier(sample_rate=16000)
+
+        await classifier.ask("a caller", QUESTION, audio=_clip(2, sample_rate=8000))
+
+        [clip] = classifier.clips
+        assert clip.sample_rate == 16000
+        assert clip.duration_secs == pytest.approx(2, abs=0.05)
+
+    @pytest.mark.asyncio
+    async def test_a_clip_keeps_its_own_rate_when_the_classifier_takes_any(self):
+        classifier = _AudioClassifier()
+        clip = _clip(2, sample_rate=8000)
+
+        await classifier.ask("a caller", QUESTION, audio=clip)
+
+        assert classifier.clips == [clip]
+
+    def test_a_clip_knows_how_long_it_is(self):
+        assert _clip(2.5).duration_secs == 2.5
+
+    def test_the_audio_bytes_stay_out_of_the_repr(self):
+        assert "audio=" not in repr(_clip(1))
 
 
 class TestImageType:
