@@ -476,6 +476,21 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         return version is not None and version[0] == 3
 
     @property
+    def _supports_context_update(self) -> bool:
+        """Whether tools and the system instruction can change mid-session.
+
+        Gemini 3.8 Live accepts a context update (``BidiGenerateContentContextUpdate``),
+        which the Gen AI SDK sends from google-genai 2.33 on. Earlier models only take
+        them when the session is set up.
+        """
+        version = self._gemini_version
+        return (
+            version is not None
+            and version >= (3, 8)
+            and hasattr(AsyncSession, "send_context_update")
+        )
+
+    @property
     def _gemini_version(self) -> tuple[int, int] | None:
         """Major/minor version parsed from the model id, or None if absent.
 
@@ -896,12 +911,20 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if not changed:
             return changed
 
-        # TODO: someday we could reconnect here to apply updated settings.
+        unhandled = set(changed)
+        if "system_instruction" in unhandled and self._supports_context_update:
+            # Reconnects start from the latest system instruction too.
+            self._system_instruction_from_init = self._settings.system_instruction
+            system_instruction, _ = await self._effective_instruction_and_tools()
+            await self._send_context_update(system_instruction=system_instruction)
+            unhandled.discard("system_instruction")
+
+        # TODO: someday we could reconnect here to apply other updated settings.
         # Code might look something like the below:
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(unhandled)
 
         return changed
 
@@ -1123,8 +1146,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             await self._handle_messages_append(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolsFrame):
-            # TODO: implement runtime tool updates for Gemini Live.
-            pass
+            await self._handle_set_tools()
         else:
             await self.push_frame(frame, direction)
 
@@ -1178,6 +1200,60 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # without a realtime input.
             if self._is_gemini_3:
                 await self._session.send_realtime_input(text=" ")
+        except Exception as e:
+            await self._handle_send_error(e)
+
+    async def _effective_instruction_and_tools(self) -> tuple[str | None, list | None]:
+        """The system instruction and tools the session should run with.
+
+        The context's own take precedence over the ones provided at
+        initialization time; built-in tools ride along either way.
+        """
+        adapter = self.get_llm_adapter()
+        if self._context:
+            params = await adapter.get_llm_invocation_params(
+                self._context,
+                system_instruction=assert_given(self._system_instruction_from_init),
+                service_tools=self._tools_from_init,
+            )
+            system_instruction = params["system_instruction"]
+            # The adapter settles the tools: the context's own when it has any,
+            # else the init-provided ones.
+            tools = params["tools"]
+        else:
+            system_instruction = self._system_instruction_from_init
+            tools = adapter.from_standard_tools(self._tools_from_init)
+        if tools and self._supports_non_blocking_tools:
+            self._tag_tool_behaviors(tools)
+        return system_instruction, tools
+
+    async def _handle_set_tools(self):
+        """Give the live session the context's new tools (Gemini 3.8 Live and later).
+
+        The context aggregator has already applied the ``LLMSetToolsFrame`` to
+        the context, so the effective tools are read from there.
+        """
+        if not self._supports_context_update:
+            logger.warning(
+                f"{self}: runtime tool updates need Gemini 3.8 Live or later and "
+                "google-genai>=2.33; the session keeps its current tools"
+            )
+            return
+        _, tools = await self._effective_instruction_and_tools()
+        # An empty list removes every tool.
+        await self._send_context_update(tools=tools or [])
+
+    async def _send_context_update(self, **update: Any):
+        """Replace the session's system instruction and/or tools mid-session.
+
+        Without a session there is nothing to update: the next connection is
+        set up with the current values.
+        """
+        if self._disconnecting or not self._session:
+            return
+        logger.debug(f"{self}: updating session context: {sorted(update)}")
+        try:
+            await self._session.send_context_update(**update)
         except Exception as e:
             await self._handle_send_error(e)
 
@@ -1534,30 +1610,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                     config.realtime_input_config = RealtimeInputConfig(turn_coverage=turn_coverage)
 
             # Add system instruction and tools to configuration, if provided.
-            # These settings from the context take precedence over the ones
-            # provided at initialization time.
-            adapter = self.get_llm_adapter()
-            if self._context:
-                params = await adapter.get_llm_invocation_params(
-                    self._context,
-                    system_instruction=assert_given(self._system_instruction_from_init),
-                    service_tools=self._tools_from_init,
-                )
-                system_instruction = params["system_instruction"]
-                # The adapter settles the tools: the context's own when it has
-                # any, else the init-provided ones; built-in tools ride along
-                # either way.
-                tools = params["tools"]
-            else:
-                system_instruction = self._system_instruction_from_init
-                # No context yet: the init-provided tools; built-in tools ride along.
-                tools = adapter.from_standard_tools(self._tools_from_init)
+            system_instruction, tools = await self._effective_instruction_and_tools()
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
             if tools:
-                if self._supports_non_blocking_tools:
-                    self._tag_tool_behaviors(tools)
                 logger.debug(f"Setting tools: {tools}")
                 config.tools = tools
 
