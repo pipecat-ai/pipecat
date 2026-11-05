@@ -98,6 +98,11 @@ class PipecatToneReaderModel:
         """The emotions the model reads."""
         return self.config["emotions"]
 
+    @property
+    def moves(self) -> list[str]:
+        """The moves the model reads, such as ``asks`` or ``hedges``."""
+        return self.config["moves"]
+
     def tag(self, text: str, previous: str | None = None) -> dict[str, Any]:
         """Read one turn.
 

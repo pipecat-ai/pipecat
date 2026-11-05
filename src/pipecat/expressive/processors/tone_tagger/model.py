@@ -14,8 +14,8 @@ from typing import Literal, cast
 import numpy as np
 from loguru import logger
 
-from pipecat.processors.tone.tagger._input import Layout, TurnContext, encode
-from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels, Span
+from pipecat.expressive.processors.tone_tagger._input import Layout, TurnContext, encode
+from pipecat.expressive.processors.tone_tagger._labels import LabelSpace, SentenceLabels, Span
 
 try:
     import onnxruntime as ort
