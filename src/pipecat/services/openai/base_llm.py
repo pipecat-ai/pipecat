@@ -684,6 +684,29 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
             await self.run_function_calls(function_calls)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Keep the service usable when a content filter rejects a request.
+
+        A content filter (Azure OpenAI's, or an OpenAI-compatible moderation
+        proxy's) rejects a request with an HTTP 400 whose ``code`` is
+        ``content_filter``. Falling back to the status code would classify that
+        as ``INVALID_REQUEST``, a permanent category, and mark the service
+        unusable. But the rejection is about this request's content, not about
+        the service: the next request can succeed. ``UNKNOWN`` is not permanent,
+        so the service stays usable. Every other 400 keeps its permanent
+        classification.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            ``ErrorCategory.UNKNOWN`` for a content-filter rejection, otherwise
+            None to fall back to the status code.
+        """
+        if isinstance(exception, BadRequestError) and exception.code == "content_filter":
+            return ErrorCategory.UNKNOWN
+        return None
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
