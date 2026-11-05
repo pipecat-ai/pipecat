@@ -1108,10 +1108,15 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle response.done event."""
         usage = evt.usage
         if usage and usage.total_tokens:
+            input_details = usage.input_token_details
+            output_details = usage.output_token_details
             tokens = LLMTokenUsage(
                 prompt_tokens=usage.input_tokens or 0,
                 completion_tokens=usage.output_tokens or 0,
                 total_tokens=usage.total_tokens or 0,
+                cache_read_input_tokens=input_details.cached_tokens if input_details else None,
+                input_audio_tokens=input_details.audio_tokens if input_details else None,
+                output_audio_tokens=output_details.audio_tokens if output_details else None,
             )
             await self.start_llm_usage_metrics(tokens)
 
