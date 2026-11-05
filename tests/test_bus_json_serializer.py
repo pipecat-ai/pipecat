@@ -4,14 +4,146 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for JSONMessageSerializer's ToolsSchema/LLMContext adapters."""
+"""Unit tests for JSON bus messages and their type adapters."""
 
+import json
 import unittest
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from pydantic import BaseModel
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.bus.messages import BusDataMessage, BusFrameMessage
 from pipecat.bus.serializers.json import JSONMessageSerializer
+from pipecat.frames.frames import LLMUpdateSettingsFrame, STTUpdateSettingsFrame, TextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import LLMSettings, STTSettings
+from pipecat.utils.types import NOT_GIVEN
+
+
+@dataclass
+class NullableMessage(BusDataMessage):
+    """Message with nullable fields whose defaults are not null."""
+
+    value: str | None = "default"
+    values: list[str] | None = field(default_factory=list)
+    callback: Callable[[], None] | None = None
+
+
+class NullableModel(BaseModel):
+    """Metadata model with a nullable field and a non-null default."""
+
+    value: str | None = "default"
+
+
+class UnsetModel(BaseModel):
+    """Metadata model with a nullable field that defaults to null."""
+
+    value: str | None = None
+
+
+class TestExplicitNullRoundTrip(unittest.TestCase):
+    """Explicit nulls remain distinct from omitted settings across a network bus."""
+
+    def setUp(self):
+        self.serializer = JSONMessageSerializer()
+
+    def round_trip(self, message):
+        return self.serializer.deserialize(self.serializer.serialize(message))
+
+    def test_nullable_dataclass_fields(self):
+        message = NullableMessage(source="controller", value=None, values=None)
+
+        restored = self.round_trip(message)
+
+        self.assertIsNone(restored.value)
+        self.assertIsNone(restored.values)
+        self.assertIsNone(restored.target)
+        self.assertEqual(restored.id, message.id)
+
+    def test_nullable_pydantic_metadata(self):
+        frame = TextFrame(text="hello")
+        frame.metadata["config"] = NullableModel(value=None)
+        message = BusFrameMessage(
+            source="controller", frame=frame, direction=FrameDirection.DOWNSTREAM
+        )
+
+        restored = self.round_trip(message)
+
+        self.assertIsInstance(restored.frame.metadata["config"], NullableModel)
+        self.assertIsNone(restored.frame.metadata["config"].value)
+
+    def test_unset_pydantic_fields_stay_unset(self):
+        frame = TextFrame(text="hello")
+        frame.metadata["unset"] = UnsetModel()
+        frame.metadata["explicit"] = UnsetModel(value=None)
+        message = BusFrameMessage(
+            source="controller", frame=frame, direction=FrameDirection.DOWNSTREAM
+        )
+
+        restored = self.round_trip(message)
+
+        self.assertEqual(restored.frame.metadata["unset"].model_fields_set, set())
+        self.assertEqual(restored.frame.metadata["explicit"].model_fields_set, {"value"})
+
+    def test_llm_delta_clears_settings(self):
+        delta = LLMSettings(temperature=None, max_tokens=None)
+        message = BusFrameMessage(
+            source="controller",
+            frame=LLMUpdateSettingsFrame(delta=delta),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        restored = self.round_trip(message)
+        received_delta = restored.frame.delta
+        self.assertEqual(received_delta.given_fields(), delta.given_fields())
+        self.assertIs(received_delta.model, NOT_GIVEN)
+
+        current = LLMSettings(model="example-model", temperature=0.7, max_tokens=256)
+        current.apply_update(received_delta)
+        self.assertIsNone(current.temperature)
+        self.assertIsNone(current.max_tokens)
+        self.assertEqual(current.model, "example-model")
+
+    def test_stt_delta_clears_language(self):
+        delta = STTSettings(language=None)
+        message = BusFrameMessage(
+            source="controller",
+            frame=STTUpdateSettingsFrame(delta=delta),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        restored = self.round_trip(message)
+        self.assertEqual(restored.frame.delta.given_fields(), {"language": None})
+        current = STTSettings(model="example-stt", language="en")
+        current.apply_update(restored.frame.delta)
+        self.assertIsNone(current.language)
+        self.assertEqual(current.model, "example-stt")
+
+    def test_falsy_and_unspecified_settings(self):
+        delta = LLMSettings(temperature=0.0, max_tokens=0, use_provider_thinking_default=False)
+        message = BusFrameMessage(
+            source="controller",
+            frame=LLMUpdateSettingsFrame(delta=delta),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+
+        restored = self.round_trip(message)
+
+        self.assertEqual(restored.frame.delta.given_fields(), delta.given_fields())
+        self.assertIs(restored.frame.delta.model, NOT_GIVEN)
+
+    def test_unsupported_callable_remains_omitted(self):
+        message = NullableMessage(source="controller", callback=lambda: None)
+
+        encoded = self.serializer.serialize(message)
+        restored = self.serializer.deserialize(encoded)
+
+        self.assertNotIn("callback", json.loads(encoded)["__data__"])
+        self.assertIsNone(restored.callback)
 
 
 class TestToolsSchemaCustomToolsRoundTrip(unittest.TestCase):
