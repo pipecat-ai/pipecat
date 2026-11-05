@@ -301,7 +301,8 @@ class HeyGenWebsocketTTSSettings(ElevenLabsTTSSettingsBase):
     """Settings for HeyGenTTSService.
 
     Parameters:
-        model: HeyGen Voice model: ``heygen-voice-1`` or ``heygen-voice-1-turbo``.
+        model: HeyGen Voice model: ``heygen-voice-1``, ``heygen-voice-1-turbo``
+            or ``heygen-voice-1-turbo-free``.
         voice: HeyGen voice ID: a public voice or an instant clone in your workspace.
         language: Language of the text. If ``None``, HeyGen detects it.
     """
