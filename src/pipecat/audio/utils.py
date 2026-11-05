@@ -334,6 +334,10 @@ def is_silence(pcm_bytes: bytes) -> bool:
     # Convert raw audio bytes to a NumPy array of int16 samples
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
 
+    # Empty audio has no samples, so it carries no speech.
+    if audio_data.size == 0:
+        return True
+
     # Check the maximum absolute amplitude in the frame
     max_value = np.abs(audio_data.astype(np.int32)).max()
 

@@ -9,7 +9,9 @@ import struct
 import unittest
 import wave
 
-from pipecat.audio.utils import pcm_to_wav
+import numpy as np
+
+from pipecat.audio.utils import SPEAKING_THRESHOLD, is_silence, pcm_to_wav
 
 
 class TestPcmToWav(unittest.TestCase):
@@ -81,6 +83,23 @@ class TestPcmToWav(unittest.TestCase):
         num_channels, _, _, frames = self._read_wav(wav)
         self.assertEqual(num_channels, 2)
         self.assertEqual(frames, pcm[:-2])
+
+
+class TestIsSilence(unittest.TestCase):
+    def test_empty_audio_is_silence(self):
+        self.assertTrue(is_silence(b""))
+
+    def test_zeros_are_silence(self):
+        audio = np.zeros(160, dtype=np.int16).tobytes()
+        self.assertTrue(is_silence(audio))
+
+    def test_loud_sample_is_not_silence(self):
+        audio = np.array([1000], dtype=np.int16).tobytes()
+        self.assertFalse(is_silence(audio))
+
+    def test_threshold_sample_is_silence(self):
+        audio = np.array([SPEAKING_THRESHOLD], dtype=np.int16).tobytes()
+        self.assertTrue(is_silence(audio))
 
 
 if __name__ == "__main__":
