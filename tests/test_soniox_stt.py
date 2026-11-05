@@ -4,22 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     InterimTranscriptionFrame,
+    LLMContextAssistantTurnFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    TTSStartedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
@@ -30,8 +37,12 @@ from pipecat.services.soniox.stt import (
     language_to_soniox_language,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import TransportParams
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.text.base_text_aggregator import TextType
+from pipecat.utils.time import time_now_iso8601
 from tests.frame_processor_helpers import frame_processor_setup
 
 
@@ -623,9 +634,9 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     assert traced_transcriptions == [("Tell me a joke.", True, None)]
 
 
-def _connected_service():
+def _connected_service(**kwargs):
     """Build a service holding an open fake socket, without touching the network."""
-    service = SonioxSTTService(api_key="test-key")
+    service = SonioxSTTService(api_key="test-key", **kwargs)
     service._setup = frame_processor_setup(TaskManager())
     websocket = _FakeWebsocket([])
     service._websocket = websocket
@@ -788,3 +799,80 @@ async def test_soniox_error_code_sets_category(monkeypatch):
 @pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
 def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
     assert language_to_soniox_language(language) == "no"
+
+
+@pytest.mark.parametrize("agent_text_input", [False, True])
+@pytest.mark.asyncio
+async def test_connect_config_requests_agent_text_input_when_it_is_enabled(
+    monkeypatch, agent_text_input
+):
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(enable_agent_text_input=agent_text_input),
+    )
+    await service._connect_websocket()
+
+    assert service._websocket is websocket
+    config = json.loads(websocket.send.await_args.args[0])
+    assert config["enable_agent_text_input"] is agent_text_input
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_is_sent_as_agent_text_when_the_turn_ends():
+    service, websocket = _connected_service()
+    service._settings.enable_agent_text_input = True
+
+    await service.process_frame(
+        LLMContextAssistantTurnFrame(text="Lekadol is in stock.", timestamp=time_now_iso8601()),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    # The framework reports the turn, and the whole reply goes out as one segment.
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Lekadol is in stock.", "end_of_segment": True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_uses_the_transform_it_is_given():
+    service, websocket = _connected_service(agent_text_transform=_shout)
+    service._settings.enable_agent_text_input = True
+
+    await service._process_assistant_turn("Lekadol is in stock.")
+
+    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["LEKADOL IS IN STOCK."]
+
+
+async def _shout(text: str, text_type) -> str:
+    return text.upper()
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_is_not_sent_when_agent_text_input_is_disabled():
+    service, websocket = _connected_service()
+
+    await service._process_assistant_turn("Lekadol is in stock.")
+
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_leaves_out_audio_tags():
+    service, websocket = _connected_service()
+    service._settings.enable_agent_text_input = True
+
+    await service._process_assistant_turn("Sure, [laughs] Lekadol is in stock.")
+    await service._process_assistant_turn("[laughs]")
+
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Sure, Lekadol is in stock.", "end_of_segment": True}
+    ]
