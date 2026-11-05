@@ -3314,6 +3314,17 @@
       "location": "pipecat/services/groq/tts.py"
     },
     {
+      "subject": "HumeTTSService",
+      "module": "pipecat.services.hume.tts",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`HumeTTSService` is deprecated since 1.16.0 and will be removed in 2.0.0. No replacement. Hume shuts down its TTS API on November 13, 2026.",
+      "location": "pipecat/services/hume/tts.py"
+    },
+    {
       "subject": "HumeTTSService.InputParams",
       "module": "pipecat.services.hume.tts",
       "kind": "class",

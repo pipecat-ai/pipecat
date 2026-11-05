@@ -70,6 +70,10 @@ class HumeTTSSettings(TTSSettings):
     temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@deprecated(
+    "`HumeTTSService` is deprecated since 1.16.0 and will be removed in 2.0.0. No replacement. "
+    "Hume shuts down its TTS API on November 13, 2026."
+)
 class HumeTTSService(TTSService):
     """Hume Octave Text-to-Speech service.
 
@@ -83,6 +87,10 @@ class HumeTTSService(TTSService):
     - Supports word-level timestamps for precise audio-text synchronization.
     - Supports dynamic updates of voice and synthesis parameters at runtime.
     - Provides metrics for Time To First Byte (TTFB) and TTS usage.
+
+    .. deprecated:: 1.16.0
+        No replacement. Hume shuts down its TTS API on November 13, 2026, after
+        which this service can no longer synthesize speech. Will be removed in 2.0.0.
     """
 
     Settings = HumeTTSSettings
