@@ -13,22 +13,36 @@ that file and prints the exact command to run, so start there.
 
 ## Bot → softphone (same Daily domain)
 
-With the softphone registered (`provision.py softphone`), generate the
-dial-out body and command:
+One-time setup (details in [`../README.md`](../README.md)):
+
+```bash
+brew install baresip                                  # apt install baresip on Linux
+cp examples/sip/env.example examples/sip/.env         # then fill in the keys
+uv run python examples/sip/util/provision.py provision
+```
+
+Terminal 1 — launch the softphone. This terminal becomes baresip; it rings
+here when the bot calls:
+
+```bash
+uv run python examples/sip/util/provision.py softphone
+```
+
+Terminal 2 — generate the dial-out body and command:
 
 ```bash
 uv run python examples/sip/util/provision.py call dial-out --to softphone
 ```
 
-Run the command it prints:
+Still in terminal 2, run the command it printed:
 
 ```bash
 uv run python examples/sip/dial-out/bot.py -t sip -d \
     --runner-body examples/sip/dial-out/dialout-body.json
 ```
 
-The bot dials as soon as it is ready; answer in the softphone — `a` in
-baresip, the green button in a GUI app.
+The bot dials as soon as it is ready. Answer in terminal 1 by typing `a`
+(baresip's answer command) — or the green button in a GUI softphone.
 
 ## Bot → cell phone (PSTN via Twilio trunk)
 

@@ -9,18 +9,30 @@ softphone on your Daily domain, or from a real phone over the PSTN.
 
 ## Softphone → bot (same Daily domain)
 
-Launch the softphone (terminal 1) and the bot (terminal 2):
+One-time setup (details in [`../README.md`](../README.md)):
+
+```bash
+brew install baresip                                  # apt install baresip on Linux
+cp examples/sip/env.example examples/sip/.env         # then fill in the keys
+uv run python examples/sip/util/provision.py provision
+```
+
+Terminal 1 — launch the softphone. This terminal becomes baresip; the `d`
+command further below is typed here:
 
 ```bash
 uv run python examples/sip/util/provision.py softphone
 ```
 
+Terminal 2 — run the bot:
+
 ```bash
 uv run python examples/sip/dial-in/bot.py -t sip -d
 ```
 
-Wait for the bot's `[1/6] REGISTER ok`, then dial it from the baresip
-terminal (`provision` and `status` print the exact URI):
+Wait for the bot's `[1/6] REGISTER ok`. Then, in terminal 1 at the baresip
+prompt, type `d` (baresip's dial command) followed by the bot's URI —
+`provision` and `status` print the exact URI:
 
 ```
 d sip:pipecat-harness-bot@<domain>.sip.daily.co
@@ -54,13 +66,25 @@ uv run python examples/sip/util/provision.py provision --pstn --number +1XXXXXXX
 uv run python examples/sip/dial-in/bot.py -t sip -d
 ```
 
-Call the trunk's number (`status` prints it) from your phone.
+Call the trunk's number from your phone. It is printed by:
+
+```bash
+uv run python examples/sip/util/provision.py status
+```
 
 ### The auto-caller
 
 Fully automated — you neither speak nor hear anything on this call. Twilio
 places it and plays a scripted sentence to the bot; you watch the two
-terminals instead:
+terminals instead.
+
+Terminal 1 — run the bot:
+
+```bash
+uv run python examples/sip/dial-in/bot.py -t sip -d
+```
+
+Terminal 2 — place the call:
 
 ```bash
 uv run python examples/sip/util/provision.py call dial-in --via sip --duration 30
