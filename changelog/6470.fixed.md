@@ -1,0 +1,1 @@
+- Fixed a `PipelineWorker` observer that raised an exception in one of its callbacks receiving no more frames for the rest of the session, while every later frame was still queued for it. The exception is logged and the observer keeps receiving frames.
