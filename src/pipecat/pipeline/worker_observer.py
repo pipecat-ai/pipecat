@@ -251,16 +251,7 @@ class WorkerObserver(BaseObserver):
             # A failing observer must not end this task, or it would get
             # nothing more while its queue keeps growing.
             try:
-                if isinstance(data, _PipelineStartedSignal):
-                    await observer.on_pipeline_started()
-                elif isinstance(data, FramePushed):
-                    await observer.on_push_frame(data)
-                elif isinstance(data, FrameProcessed):
-                    await observer.on_process_frame(data)
-                elif isinstance(data, ProcessorSetUp):
-                    await observer.on_processor_setup(data)
-                elif isinstance(data, StartupWarmup):
-                    await observer.on_startup_warmup(data)
+                await self._notify_observer(observer, data)
             except Exception as e:
                 # Cancellation still ends the task, even when the observer turns it into an error.
                 if (task := asyncio.current_task()) and task.cancelling():
@@ -278,3 +269,16 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies.get(observer) if self._proxies else None
             if not proxy or proxy.queue is not queue:
                 break
+
+    async def _notify_observer(self, observer: BaseObserver, data: Any):
+        """Call the observer callback that matches the queued data."""
+        if isinstance(data, _PipelineStartedSignal):
+            await observer.on_pipeline_started()
+        elif isinstance(data, FramePushed):
+            await observer.on_push_frame(data)
+        elif isinstance(data, FrameProcessed):
+            await observer.on_process_frame(data)
+        elif isinstance(data, ProcessorSetUp):
+            await observer.on_processor_setup(data)
+        elif isinstance(data, StartupWarmup):
+            await observer.on_startup_warmup(data)
