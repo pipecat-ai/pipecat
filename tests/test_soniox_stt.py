@@ -4,17 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     InterimTranscriptionFrame,
@@ -22,11 +18,9 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
-    TTSStartedFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.stt import (
@@ -37,11 +31,8 @@ from pipecat.services.soniox.stt import (
     language_to_soniox_language,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import TransportParams
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
-from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import time_now_iso8601
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -801,11 +792,8 @@ def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
     assert language_to_soniox_language(language) == "no"
 
 
-@pytest.mark.parametrize("agent_text_input", [False, True])
-@pytest.mark.asyncio
-async def test_connect_config_requests_agent_text_input_when_it_is_enabled(
-    monkeypatch, agent_text_input
-):
+async def _connect_config(monkeypatch, **kwargs):
+    """Connect a service to a fake socket and return the config it sent."""
     websocket = _FakeWebsocket([], state=State.OPEN)
 
     async def fake_websocket_connect(*args, **kwargs):
@@ -815,21 +803,41 @@ async def test_connect_config_requests_agent_text_input_when_it_is_enabled(
         "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
     )
 
-    service = SonioxSTTService(
-        api_key="test-key",
-        settings=SonioxSTTService.Settings(enable_agent_text_input=agent_text_input),
-    )
+    service = SonioxSTTService(api_key="test-key", **kwargs)
     await service._connect_websocket()
 
     assert service._websocket is websocket
-    config = json.loads(websocket.send.await_args.args[0])
-    assert config["enable_agent_text_input"] is agent_text_input
+    return json.loads(websocket.send.await_args.args[0])
+
+
+@pytest.mark.asyncio
+async def test_connect_config_requests_agent_text_input_by_default(monkeypatch):
+    config = await _connect_config(monkeypatch)
+
+    assert config["model"] == "stt-rt-v6"
+    assert config["enable_agent_text_input"] is True
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        SonioxSTTService.Settings(enable_agent_text_input=False),
+        SonioxSTTService.Settings(model="stt-rt-v5"),
+        SonioxSTTService.Settings(model="stt-rt-v5", enable_agent_text_input=True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_config_leaves_out_agent_text_input_when_disabled_or_unsupported(
+    monkeypatch, settings
+):
+    config = await _connect_config(monkeypatch, settings=settings)
+
+    assert "enable_agent_text_input" not in config
 
 
 @pytest.mark.asyncio
 async def test_assistant_turn_is_sent_as_agent_text_when_the_turn_ends():
     service, websocket = _connected_service()
-    service._settings.enable_agent_text_input = True
 
     await service.process_frame(
         LLMContextAssistantTurnFrame(text="Lekadol is in stock.", timestamp=time_now_iso8601()),
@@ -842,23 +850,16 @@ async def test_assistant_turn_is_sent_as_agent_text_when_the_turn_ends():
     ]
 
 
+@pytest.mark.parametrize(
+    "settings",
+    [
+        SonioxSTTService.Settings(enable_agent_text_input=False),
+        SonioxSTTService.Settings(model="stt-rt-v5"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_assistant_turn_uses_the_transform_it_is_given():
-    service, websocket = _connected_service(agent_text_transform=_shout)
-    service._settings.enable_agent_text_input = True
-
-    await service._process_assistant_turn("Lekadol is in stock.")
-
-    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["LEKADOL IS IN STOCK."]
-
-
-async def _shout(text: str, text_type) -> str:
-    return text.upper()
-
-
-@pytest.mark.asyncio
-async def test_assistant_turn_is_not_sent_when_agent_text_input_is_disabled():
-    service, websocket = _connected_service()
+async def test_assistant_turn_is_not_sent_when_disabled_or_unsupported(settings):
+    service, websocket = _connected_service(settings=settings)
 
     await service._process_assistant_turn("Lekadol is in stock.")
 
@@ -866,13 +867,9 @@ async def test_assistant_turn_is_not_sent_when_agent_text_input_is_disabled():
 
 
 @pytest.mark.asyncio
-async def test_assistant_turn_leaves_out_audio_tags():
+async def test_blank_assistant_turn_is_not_sent():
     service, websocket = _connected_service()
-    service._settings.enable_agent_text_input = True
 
-    await service._process_assistant_turn("Sure, [laughs] Lekadol is in stock.")
-    await service._process_assistant_turn("[laughs]")
+    await service._process_assistant_turn("  ")
 
-    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
-        {"type": "agent_text", "text": "Sure, Lekadol is in stock.", "end_of_segment": True}
-    ]
+    assert _sent_payloads(websocket) == []
