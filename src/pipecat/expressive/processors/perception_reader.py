@@ -79,43 +79,20 @@ class PerceptionQuestion(BaseModel):
 class PerceptionReader(FrameProcessor):
     """Reads how each user turn was said by asking a classifier.
 
-    Goes between the STT service and the user aggregator. The answers are set
-    as each final transcription's ``perception``: one signal per question,
-    named after it. The signals are declared at start in a
+    Goes between the STT service and the user aggregator. Each final
+    transcription gets the classifier's answers as its ``perception``, one
+    signal per question, named after it. Every reading is also broadcast in a
+    :class:`~pipecat.frames.frames.PerceptionFrame` as soon as it's made, and
+    the signals are declared at start in a
     :class:`~pipecat.frames.frames.PerceptionMetadataFrame`.
 
-    A text classifier is asked about each final transcription, with the bot's
-    reply before it. A classifier that can hear, as said by its
-    ``supports_audio``, hears the user's speech in clips instead, with the bot's reply before it
-    as the state. The reader keeps the user's recent speech across turns: each
-    stretch the VAD reports, from a second before it, without the silence in
-    between. Each time the VAD reports silence, it sends the speech since the
-    last clip, topped up with the user's earlier speech when that's shorter
-    than the classifier's ``min_audio_secs``. A clip isn't sent while the last
-    one is still being read: its speech goes in the next. Each final
-    transcription gets the answers about the turn's latest clip, or about the
-    turn's latest clip answered when that one is late. No speech is kept while
-    the user is muted.
-
-    Every reading is also broadcast as soon as it's made, in a
-    :class:`~pipecat.frames.frames.PerceptionFrame`, so processors and clients
-    can act on it before a transcription carries it.
-
-    With a text classifier, a final transcription goes on as soon as it's
-    read, up to ``timeout`` seconds after it arrived. With an audio classifier,
-    the reader holds the final transcriptions of the user's speech until the
-    user stops speaking, up to the 5 seconds the user aggregator keeps a turn
-    open without user activity by default, the STT has had its
-    ``ttfs_p99_latency`` to send the rest, and the latest clip is read, up to
-    ``timeout`` seconds after the user stopped. They go on together, the last
-    one marked ``finalized`` unless the user has spoken again since, so the
-    user turn stop strategies end the turn as soon as it arrives. The reader
-    then adds the timeout to the ``ttfs_p99_latency`` of the
-    :class:`~pipecat.frames.frames.STTMetadataFrame` it passes on, so the stop
-    strategies wait for the transcriptions it holds. A transcription passes
-    unread when no reading is ready in time or the classifier fails. A
-    classifier that can't be set up is reported as an error that leaves the
-    reader unusable, and transcriptions pass unread.
+    A text classifier reads each final transcription, with the bot's reply
+    before it. A classifier that can hear, as its ``supports_audio`` says,
+    hears a clip of the user's recent speech each time they pause, and the
+    transcriptions of that speech wait for its answers, up to ``timeout``
+    seconds after the user stopped. A transcription passes unread when its
+    reading is late or the classifier fails, and a classifier that can't be set
+    up leaves the reader unusable.
 
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)`` for the LLM to read
