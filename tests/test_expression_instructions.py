@@ -27,6 +27,8 @@ FIXED = ExpressionCapabilities(
     service_vocabulary={ExpressionDelivery.WARM: ["happy"], ExpressionSound.LAUGH: ["laughter"]},
 )
 
+RCS = "This conversation uses RCS, the Real-time Context Standard, for context beyond plain text."
+
 FREE_TEXT = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughs"), ExpressionTerm("woo", "an excited whoop")],
     delivery=[ExpressionTerm("excited"), ExpressionTerm("whispers", "speaking in a whisper")],
@@ -178,9 +180,9 @@ def test_a_free_text_service_is_taught_none_of_a_kind_the_policy_names_none_of()
 
     instructions = expression_instructions(capabilities, ExpressionPolicy(delivery=[], sounds=[]))
 
-    assert (
-        instructions
-        == "You can direct how your words are spoken with tags:\n- ^^word^^ stresses a word."
+    assert instructions == (
+        f"{RCS}\n\nYou can direct how your words are spoken with RCS tags:\n"
+        "- ^^word^^ stresses a word."
     )
 
 
@@ -218,6 +220,13 @@ def test_perception_is_taught_with_an_example_and_its_signals():
     assert instructions.endswith(
         "- tone: positive, neutral, sad, frustrated.\n- speech_rate: Words per second."
     )
+
+
+def test_rcs_is_named_before_the_reading_and_the_tags():
+    instructions = expression_instructions(FIXED, perception=PERCEPTION)
+
+    assert instructions.startswith(f"{RCS}\n\nA user message may start with an RCS reading")
+    assert "You can direct how your words are spoken with RCS tags:" in instructions
 
 
 def test_perception_comes_before_the_tags_and_the_guidance_last():

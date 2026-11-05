@@ -6,10 +6,12 @@
 
 """The instruction that teaches an LLM to take part in expressive conversation.
 
-Part of expressive conversation (alpha). The instruction has three parts: how
-to read what was perceived of how the user spoke, built from a perception
-producer's :class:`~pipecat.expressive.perception.PerceptionCapabilities`; the
-tags the active TTS service can perform, by their universal names, built from its
+Part of expressive conversation (alpha). The readings and tags it teaches are
+written in RCS, the Real-time Context Standard. The instruction has three
+parts: how to read what was perceived of how the user spoke, built from a
+perception producer's
+:class:`~pipecat.expressive.perception.PerceptionCapabilities`; the tags the
+active TTS service can perform, by their universal names, built from its
 :class:`~pipecat.expressive.expression.ExpressionCapabilities`; and the
 developer's guidance on how to answer, from an
 :class:`~pipecat.expressive.policy.ExpressionPolicy`.
@@ -34,6 +36,10 @@ from pipecat.expressive.perception import (
     format_perception,
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+
+_RCS_OPENING = (
+    "This conversation uses RCS, the Real-time Context Standard, for context beyond plain text."
+)
 
 
 def expression_instructions(
@@ -66,7 +72,7 @@ def expression_instructions(
     ]
     if guidance:
         parts.append("\n".join(guidance))
-    return "\n\n".join(parts)
+    return "\n\n".join([_RCS_OPENING, *parts])
 
 
 def expression_policy_warning(
@@ -107,7 +113,8 @@ def _perception_section(perception: PerceptionCapabilities | None) -> str | None
         such_as = f" such as {format_perception([PerceptionSignal(example.name, labels)])},"
     signals = "\n".join(_signal_line(term) for term in perception.signals)
     return (
-        f"A user message may start with how the user sounded, in parentheses,{such_as} each "
+        f"A user message may start with an RCS reading of how the user sounded, in "
+        f"parentheses,{such_as} each "
         "signal with its likeliest labels and how sure the reading is, from 0 to 1, or with a "
         "measure. The reading can be wrong, so weigh it against their words. A reading below "
         f"0.5 is a guess: don't act on it. Never write it yourself. The signals are:\n{signals}"
@@ -165,7 +172,7 @@ def _tags_section(
         tags.append("- [[pause 500]] pauses for about that many milliseconds.")
     if not tags:
         return None
-    return "You can direct how your words are spoken with tags:\n" + "\n".join(tags)
+    return "You can direct how your words are spoken with RCS tags:\n" + "\n".join(tags)
 
 
 def _left_out(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:
