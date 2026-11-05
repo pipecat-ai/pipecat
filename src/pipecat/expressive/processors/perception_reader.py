@@ -139,21 +139,23 @@ class PerceptionReader(FrameProcessor):
         for name in questions:
             if not _SIGNAL_NAME.fullmatch(name):
                 raise ValueError(f"{name!r} can't name a signal: it has a space or one of =,[]()")
+        # What to ask, and how long a transcription waits for the answers.
         self._classifier = classifier
         self._questions = dict(questions)
         if timeout is None:
             timeout = 2.0 if classifier.supports_audio else 0.5
         self._timeout = timeout
+        # The bot's last reply, which the user's turn is read against.
         self._previous: str | None = None
-        # For a classifier that hears: the user's recent speech, and the read
-        # of its latest clip.
+        # For a classifier that hears: the user's recent speech, read a clip at
+        # each pause.
         self._speech = _RecentSpeech(classifier)
         self._audio_read: asyncio.Task | None = None
-        self._stt_latency = 0.0
-        # Final transcriptions waiting for an audio reading, and the task that
-        # pushes them on.
+        # Transcriptions held until their speech is read, and the task that
+        # pushes them on once the STT's latency has passed.
         self._held: list[TranscriptionFrame] = []
         self._release_task: asyncio.Task | None = None
+        self._stt_latency = 0.0
         self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
 
     @property
@@ -441,13 +443,17 @@ class _RecentSpeech:
     """
 
     def __init__(self, classifier: BaseClassifier):
+        # How long a clip can be, and the audio's sample rate.
         self._min_secs = classifier.min_audio_secs
         self._max_secs = classifier.max_audio_secs
+        self._sample_rate = 0
+        # The stretch the VAD is reporting, the speech kept before it, and how
+        # much of that no clip has had yet. Nothing is kept while muted.
         self._buffer = SpeechSegmentBuffer(max_secs=self._max_secs)
         self._speech = bytearray()
         self._new_bytes = 0
-        self._sample_rate = 0
         self._muted = False
+        # Set while the user is silent, and when they stopped speaking.
         self._ended = asyncio.Event()
         self._ended.set()
         self._ended_at: float | None = None
