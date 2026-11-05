@@ -500,14 +500,6 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "hume_tts": (
-        "HumeTTSService(\n"
-        '        api_key=os.getenv("HUME_API_KEY"),\n'
-        "        settings=HumeTTSService.Settings(\n"
-        '            voice=os.getenv("HUME_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "inworld_tts": (
         "InworldTTSService(\n"
         '        api_key=os.getenv("INWORLD_API_KEY"),\n'

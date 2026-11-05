@@ -941,15 +941,6 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
-            value="hume_tts",
-            label="Hume TTS",
-            package="pipecat-ai[hume]",
-            class_name=["HumeTTSService"],
-            env_prefix="HUME",
-            include_params=["api_key"],
-            settings_params=["voice"],
-        ),
-        ServiceDefinition(
             value="inworld_tts",
             label="Inworld",
             package="pipecat-ai",

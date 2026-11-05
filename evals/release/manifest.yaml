@@ -92,8 +92,6 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
     scenarios: [scripted/capital_question]
-  - bot: voice/voice-hume.py
-    scenarios: [scripted/capital_question]
   - bot: voice/voice-inworld.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-inworld-http.py

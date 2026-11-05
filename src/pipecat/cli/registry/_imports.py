@@ -149,7 +149,6 @@ IMPORTS = {
     "google_tts": ["from pipecat.services.google.tts import GoogleTTSService"],
     "gradium_tts": ["from pipecat.services.gradium.tts import GradiumTTSService"],
     "groq_tts": ["from pipecat.services.groq.tts import GroqTTSService"],
-    "hume_tts": ["from pipecat.services.hume.tts import HumeTTSService"],
     "inworld_tts": ["from pipecat.services.inworld.tts import InworldTTSService"],
     "kokoro_tts": ["from pipecat.services.kokoro.tts import KokoroTTSService"],
     "minimax_tts": ["from pipecat.services.minimax.tts import MiniMaxHttpTTSService"],
