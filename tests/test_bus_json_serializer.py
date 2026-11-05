@@ -15,12 +15,20 @@ from pydantic import BaseModel
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.bus.messages import BusDataMessage, BusFrameMessage
 from pipecat.bus.serializers.json import JSONMessageSerializer
-from pipecat.frames.frames import LLMUpdateSettingsFrame, STTUpdateSettingsFrame, TextFrame
+from pipecat.frames.frames import (
+    LLMUpdateSettingsFrame,
+    OutputDTMFFrame,
+    STTUpdateSettingsFrame,
+    TextFrame,
+    TranscriptionFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import LLMSettings, STTSettings
+from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN
 
 
@@ -144,6 +152,33 @@ class TestExplicitNullRoundTrip(unittest.TestCase):
 
         self.assertNotIn("callback", json.loads(encoded)["__data__"])
         self.assertIsNone(restored.callback)
+
+
+class TestStrEnumRoundTrip(unittest.TestCase):
+    """String enums come back as their enum, not as the plain string value."""
+
+    def setUp(self):
+        self.serializer = JSONMessageSerializer()
+
+    def round_trip(self, frame):
+        message = BusFrameMessage(
+            source="worker-a", frame=frame, direction=FrameDirection.DOWNSTREAM
+        )
+        return self.serializer.deserialize(self.serializer.serialize(message)).frame
+
+    def test_dtmf_buttons_keep_their_type(self):
+        restored = self.round_trip(OutputDTMFFrame.from_string("12#"))
+
+        self.assertEqual(restored.buttons, [KeypadEntry.ONE, KeypadEntry.TWO, KeypadEntry.POUND])
+        self.assertTrue(all(type(b) is KeypadEntry for b in restored.buttons))
+        self.assertEqual(restored.to_string(), "12#")
+
+    def test_transcription_language_keeps_its_type(self):
+        frame = TranscriptionFrame(text="hola", user_id="user", timestamp="", language=Language.ES)
+
+        restored = self.round_trip(frame)
+
+        self.assertIs(restored.language, Language.ES)
 
 
 class TestToolsSchemaCustomToolsRoundTrip(unittest.TestCase):
