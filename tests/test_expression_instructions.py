@@ -234,9 +234,10 @@ def test_readings_are_taught_as_input_and_tags_as_output():
         f"{RCS}\n\nRCS readings (the user's input, never your output):\n"
         "A user message may start with an RCS reading"
     )
+    assert "in parentheses, each signal in square brackets" in instructions
     assert (
-        "A reading comes from a separate system, not from you: it is part of the user's input "
-        "and never part of your output."
+        "Readings appear ONLY in the user's messages, added by a separate system, never by you: "
+        "a reading is part of the user's input and never part of your output."
     ) in instructions
     assert "RCS tags (output only):\nYou can direct how your words are spoken" in instructions
 
