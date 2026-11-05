@@ -31,13 +31,13 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
-from pipecat.processors.tone import _models
 from pipecat.processors.tone.tagger import PipecatToneTagger
 from pipecat.processors.tone.tagger import model as tagger_model
 from pipecat.processors.tone.tagger._input import Layout, Message, TurnContext, encode
 from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels, Span
 from pipecat.processors.tone.tagger.model import PipecatToneTaggerModel
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils import models
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
@@ -75,7 +75,7 @@ class FakeTaggerModel:
 @pytest.fixture(autouse=True)
 def _unshared_models(monkeypatch):
     """Each test loads its own model."""
-    monkeypatch.setattr(_models, "_models", {})
+    monkeypatch.setattr(models, "_models", {})
 
 
 def _tagger(monkeypatch, model: FakeTaggerModel) -> PipecatToneTagger:
@@ -707,7 +707,7 @@ async def test_a_vocabulary_names_a_label_first_where_the_service_performs_it(mo
     vocabulary = {"warm": ["cheerful"], "laugh": ["giggles"]}
 
     for tts in (ELEVENLABS, CARTESIA):
-        monkeypatch.setattr(_models, "_models", {})
+        monkeypatch.setattr(models, "_models", {})
         await run_test(
             PipecatToneTagger(vocabulary=vocabulary),
             frames_to_send=[tts, *_reply("Hi.")],

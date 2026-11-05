@@ -33,8 +33,8 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.tone.model import TONE_REPO, TONE_REVISION, PipecatToneReaderModel
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.tone._models import load_shared_model
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.models import load_shared_model
 
 
 class PipecatToneClassifier(BaseClassifier):
