@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -1407,6 +1408,43 @@ class TestObserverEdges(_CycleDriver, unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(total, self.spoke_at - self.silence_at, places=6)
         # The abandoned inference is not in the timeline it preceded.
         self.assertEqual(len([c for c in contributions if c.label == "LLM inference"]), 1)
+
+    async def test_a_turn_started_after_vad_stop_is_measured_from_user_silence(self):
+        """A turn start strategy driven by transcripts interrupts after the VAD stop."""
+        await self._push(ClientConnectedFrame())
+        await self.observer.on_pipeline_started()
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        self._wait(60.0)
+
+        await self._push(VADUserStartedSpeakingFrame(start_secs=0.2, timestamp=self.clock))
+        self._wait(1.0)
+        self.silence_at = self.clock
+        self._wait(0.2)
+        await self._push(VADUserStoppedSpeakingFrame(stop_secs=0.2, timestamp=self.clock))
+        self._wait(0.1)
+        await self._push(
+            TranscriptionFrame(user_id="u", text="hello", timestamp=""), source="STT#0"
+        )
+        await self._push(UserStartedSpeakingFrame())
+        await self._push(InterruptionFrame())
+        await self._push(UserStoppedSpeakingFrame())
+        await self._push(LLMFullResponseStartFrame(), source="LLM#0")
+        self._wait(0.3)
+        await self._push(MetricsFrame(data=[TTFBMetricsData(processor="LLM#0", value=0.3)]))
+        await self._push(LLMTextFrame("Hi."), source="LLM#0")
+        self._wait(0.2)
+        await self._push(
+            TTSAudioRawFrame(audio=b"", sample_rate=24000, num_channels=1), source="TTS#0"
+        )
+        await self._push(BotStartedSpeakingFrame(), source="Transport#0")
+        self.spoke_at = self.clock
+        await self._settle()
+
+        breakdown = self.breakdowns[-1]
+        self.assertEqual(breakdown.measured_from, MeasuredFrom.USER_SILENCE)
+        self.assertAlmostEqual(breakdown.user_turn_start_time, self.silence_at, places=6)
+        self.assertAlmostEqual(breakdown.total_secs, self.spoke_at - self.silence_at, places=6)
+        self.assertIn("transcription", [c.label for c in breakdown.contributions])
 
     async def test_one_cycle_does_not_reach_the_next(self):
         """Back to back turns are measured independently."""
