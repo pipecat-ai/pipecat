@@ -23,6 +23,14 @@ from pipecat.expressive.expression import (
 )
 from pipecat.expressive.formatter import EXPRESSION_TAGS
 from pipecat.expressive.policy import ExpressionPolicy
+from pipecat.expressive.processors.tone_tagger._input import Message, TurnContext, fold
+from pipecat.expressive.processors.tone_tagger._labels import (
+    BREATH_KINDS,
+    LabelSpace,
+    ReplyRenderer,
+    SentenceLabels,
+)
+from pipecat.expressive.processors.tone_tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.frames.frames import (
     ExpressionMetadataFrame,
     Frame,
@@ -38,14 +46,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi.frames import RTVISendTextFrame
-from pipecat.processors.tone.tagger._input import Message, TurnContext, fold
-from pipecat.processors.tone.tagger._labels import (
-    BREATH_KINDS,
-    LabelSpace,
-    ReplyRenderer,
-    SentenceLabels,
-)
-from pipecat.processors.tone.tagger.model import TAGGER_REVISION, PipecatToneTaggerModel
 from pipecat.utils.models import load_shared_model
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 

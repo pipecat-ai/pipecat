@@ -17,6 +17,6 @@ names the TTS service performs them by.
 **Alpha.** These types are likely to change between releases.
 """
 
-from pipecat.processors.tone.tagger.processor import PipecatToneTagger
+from pipecat.expressive.processors.tone_tagger.processor import PipecatToneTagger
 
 __all__ = ["PipecatToneTagger"]

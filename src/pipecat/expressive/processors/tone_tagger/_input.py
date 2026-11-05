@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.processors.tone.tagger._labels import LabelSpace, SentenceLabels
+from pipecat.expressive.processors.tone_tagger._labels import LabelSpace, SentenceLabels
 
 # The presets the model reads, by the names it was trained on.
 PRESET_NAMES: dict[str, str] = {
