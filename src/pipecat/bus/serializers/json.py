@@ -87,13 +87,14 @@ class JSONMessageSerializer(MessageSerializer):
 
     def _serialize_value(self, value: Any) -> Any:
         """Recursively serialize a value to a JSON-compatible representation."""
-        if isinstance(value, _JSON_NATIVE):
-            return value
+        # Before the native types: a StrEnum or IntEnum is also a str or int.
         if isinstance(value, Enum):
             return {
                 "__type__": f"{type(value).__module__}.{type(value).__name__}",
                 "__data__": value.name,
             }
+        if isinstance(value, _JSON_NATIVE):
+            return value
         if isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
         if isinstance(value, list):
