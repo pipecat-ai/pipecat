@@ -4,4 +4,4 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Tone: a reader for how the user spoke, and a tagger for how the bot speaks."""
+"""Pipecat Tone's tagger, for how the bot speaks."""

@@ -76,7 +76,7 @@ class PipecatToneTagger(LLMTextProcessor):
 
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)``. Add a
-    :class:`~pipecat.processors.tone.reader.PipecatToneReader` for the tagger
+    :class:`~pipecat.expressive.processors.tone_reader.PipecatToneReader` for the tagger
     to hear how the user sounded.
 
     Example::
