@@ -1,0 +1,1 @@
+- Fixed sentence aggregation splitting numbered-list markers into standalone TTS requests.

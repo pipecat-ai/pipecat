@@ -11,11 +11,14 @@ until it finds an end-of-sentence marker, making it suitable for basic TTS
 text processing scenarios.
 """
 
+import re
 from collections.abc import AsyncIterator
 from enum import Enum, auto
 
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
+
+_LIST_MARKER = re.compile(r"(?m)^([ \t]*\d+)\.(?=\s)")
 
 
 class _LookaheadState(Enum):
@@ -138,6 +141,8 @@ class SimpleTextAggregator(BaseTextAggregator):
             # Including "?" could make the terminal-punctuation fallback accept
             # the whole buffer. This temporary slice does not discard the "?".
             candidate = self._text[:-1] if is_punctuation else self._text
+            # List markers are not sentences; preserve their width for source offsets.
+            candidate = _LIST_MARKER.sub(r"\1 ", candidate)
             if protected_end:
                 # Blank out punctuation up to protected_end with equal-width
                 # spaces, so boundary offsets still refer to self._text.
