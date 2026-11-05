@@ -24,7 +24,11 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.expressive.formatter import strip_expression_tags
-from pipecat.expressive.perception import PerceptionSignal, format_perception
+from pipecat.expressive.perception import (
+    PerceptionSignal,
+    format_perception,
+    merge_perception,
+)
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AssistantImageRawFrame,
@@ -318,8 +322,8 @@ class UserTurnStoppedMessage:
             instead.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
-        perception: The turn's final reading of how the user spoke, with
-            expressive conversation on and a perception producer in the
+        perception: The turn's final readings of how the user spoke, merged,
+            with expressive conversation on and a perception producer in the
             pipeline, or None. Part of expressive conversation (alpha).
 
     """
@@ -804,8 +808,8 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
-        # With expressive conversation on, the latest final reading of how the
-        # user spoke: for the user message, written at its head, and for the
+        # With expressive conversation on, the final readings of how the user
+        # spoke, merged: for the user message, written at its head, and for the
         # turn, reported when it stops. A turn can write several messages.
         self._expressive = False
         self._perception: list[PerceptionSignal] | None = None
@@ -1403,8 +1407,8 @@ class LLMUserAggregator(LLMContextAggregator):
     def _handle_perception(self, signals: list[PerceptionSignal] | None):
         if not self._expressive or not signals:
             return
-        self._perception = signals
-        self._turn_perception = signals
+        self._perception = merge_perception(self._perception, signals)
+        self._turn_perception = merge_perception(self._turn_perception, signals)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
