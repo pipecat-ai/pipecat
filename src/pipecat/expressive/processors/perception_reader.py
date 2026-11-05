@@ -40,7 +40,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -173,10 +172,6 @@ class PerceptionReader(FrameProcessor):
         # of its latest clip.
         self._speech = _RecentSpeech(classifier)
         self._audio_read: asyncio.Task | None = None
-        # Counts the user's turns, so a clip read after its turn ended isn't
-        # given to the next turn's transcriptions.
-        self._turn = 0
-        self._latest_reading: list[PerceptionSignal] | None = None
         self._stt_latency = 0.0
         # Final transcriptions waiting for an audio reading, and the task that
         # pushes them on.
@@ -252,9 +247,6 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
             await self.push_frame(frame, direction)
@@ -297,16 +289,11 @@ class PerceptionReader(FrameProcessor):
         if self._classifier.supports_audio and self.is_usable:
             self._read_speech()
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
-        self._turn += 1
-        self._latest_reading = None
-
     async def _handle_mute(self, frame: UserMuteStartedFrame | UserMuteStoppedFrame):
         muted = isinstance(frame, UserMuteStartedFrame)
         self._speech.mute(muted)
         if muted:
             await self._cancel_read()
-            self._latest_reading = None
 
     async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
@@ -358,23 +345,27 @@ class PerceptionReader(FrameProcessor):
         if clip:
             logger.debug(f"{self}: reading {clip.duration_secs:.1f}s of the user's speech")
             state = {"assistant": self._previous} if self._previous else {}
-            self._audio_read = self.create_task(self._read_audio(state, clip, self._turn))
+            self._audio_read = self.create_task(self._read_audio(state, clip))
         else:
             logger.debug(f"{self}: too little of the user's speech yet for a clip")
+            # This speech has no clip of its own, so it gets no reading.
+            self._audio_read = None
 
-    async def _read_audio(self, state: dict[str, Any], clip: ClassifierAudio, turn: int):
-        """Read a clip and broadcast its answers, keeping them as its turn's latest reading."""
+    async def _read_audio(
+        self, state: dict[str, Any], clip: ClassifierAudio
+    ) -> list[PerceptionSignal] | None:
+        """A clip's reading, broadcast as soon as it's made, or None when the classifier fails."""
         questions = self.questions
+        signals = None
         try:
             results = await self._classifier.ask(
                 state, self._classifier_questions(questions), audio=clip
             )
             signals = self._signals(results, questions)
-            if turn == self._turn:
-                self._latest_reading = signals
             await self.broadcast_frame(PerceptionFrame, perception=signals)
         except ClassifierError as e:
             await self.push_error(f"{self}: {e}", e)
+        return signals
 
     async def _release_transcriptions(self):
         """Push the held transcriptions on with the reading, in order."""
@@ -388,13 +379,13 @@ class PerceptionReader(FrameProcessor):
         """Push the transcriptions of the user's speech on together, once it's over and read."""
         speech_end = await self._wait_for_speech_end()
         held, self._held = self._held, []
-        await self._wait_for_latest_clip(speech_end)
+        reading = await self._clip_reading(speech_end)
         # The stop strategies end the turn at once on a finalized transcription,
         # so only the speech's last one is, and none when the user has spoken
         # again since.
         over = speech_end is not None and self._speech.ended_at == speech_end
         for frame in held:
-            frame.perception = self._latest_reading
+            frame.perception = reading
             frame.finalized = over and frame is held[-1]
             await self.push_frame(frame)
 
@@ -407,20 +398,23 @@ class PerceptionReader(FrameProcessor):
             await asyncio.sleep(max(0.0, speech_end + self._stt_latency - time.monotonic()))
         return speech_end
 
-    async def _wait_for_latest_clip(self, speech_end: float | None):
-        """Wait for the latest clip's reading, up to the timeout after the user stopped speaking."""
+    async def _clip_reading(self, speech_end: float | None) -> list[PerceptionSignal] | None:
+        """The reading of the speech's clip, waited for up to the timeout after the user stopped."""
         read = self._audio_read
         if read and not read.done():
-            logger.debug(f"{self}: transcriptions are waiting for the latest clip")
+            logger.debug(f"{self}: transcriptions are waiting for their clip's reading")
             deadline = (speech_end if speech_end is not None else time.monotonic()) + self._timeout
             # A wait that doesn't cancel the read when it's late, nor fails
             # when a mute cancels it.
             await asyncio.wait({read}, timeout=max(0.0, deadline - time.monotonic()))
             if not read.done():
-                fallback = "an earlier clip's reading" if self._latest_reading else "no reading"
                 logger.warning(
-                    f"{self}: the latest clip wasn't read after {self._timeout}s, using {fallback}"
+                    f"{self}: the clip wasn't read after {self._timeout}s, the speech passes unread"
                 )
+        reading = None
+        if read and read.done() and not read.cancelled() and read.exception() is None:
+            reading = read.result()
+        return reading
 
     async def _cancel_read(self):
         """Stop the read still running, if any."""

@@ -400,7 +400,6 @@ async def test_a_turn_shorter_than_the_classifier_takes_passes_unread():
     assert _perception(down) == [None]
 
 
-@pytest.mark.asyncio
 def _two_turns(first: InputAudioRawFrame, second: InputAudioRawFrame) -> list:
     """Two user turns, the first read before the second, with the second's transcription."""
     return [
@@ -589,7 +588,7 @@ async def test_a_transcription_gets_the_answers_about_the_turns_latest_clip():
 
 
 @pytest.mark.asyncio
-async def test_a_late_latest_clip_falls_back_to_the_latest_clip_answered():
+async def test_a_late_clip_leaves_its_speech_unread():
     down, _ = await run_test(
         PerceptionReader(
             classifier=FakeAudioClassifier(delays=[0.0, 1.0], probabilities=[0.2, 0.9]),
@@ -599,7 +598,8 @@ async def test_a_late_latest_clip_falls_back_to_the_latest_clip_answered():
         frames_to_send=_two_pauses(_audio(1, 2), _audio(2, 2)),
     )
 
-    assert _perception(down) == [[PerceptionSignal("hesitation", value=0.2)]]
+    # The earlier clip's reading is the earlier speech's, not this one's.
+    assert _perception(down) == [None]
 
 
 @pytest.mark.asyncio
