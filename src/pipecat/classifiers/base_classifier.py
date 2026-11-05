@@ -14,7 +14,8 @@ at once: :meth:`BaseClassifier.ask` takes any mix of kinds, and
 :meth:`BaseClassifier.yes_no`, :meth:`BaseClassifier.choice` and
 :meth:`BaseClassifier.score` take questions of one kind and return typed
 results. Classifiers that can see images take :class:`ClassifierImage`
-alongside the state.
+alongside the state, and classifiers that can hear take a clip of audio,
+:class:`ClassifierAudio`.
 """
 
 import io
@@ -26,6 +27,7 @@ from typing import Any, Literal, TypeAlias, TypeVar
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.audio.utils import create_file_resampler
 from pipecat.frames.frames import ImageRawFrame
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
@@ -132,6 +134,23 @@ class ClassifierImage(BaseModel):
         return content_type
 
 
+class ClassifierAudio(BaseModel):
+    """A clip of audio the questions can hear, alongside the state.
+
+    Parameters:
+        audio: The clip, as 16-bit mono PCM.
+        sample_rate: The clip's sample rate in Hz.
+    """
+
+    audio: bytes = Field(repr=False)
+    sample_rate: int
+
+    @property
+    def duration_secs(self) -> float:
+        """How long the clip is, in seconds."""
+        return len(self.audio) / (2 * self.sample_rate)
+
+
 class YesNoResult(BaseModel):
     """Answer to a :class:`YesNoQuestion`.
 
@@ -227,6 +246,12 @@ class BaseClassifier(BaseObject):
     Classifiers that can see images say so in :attr:`supports_images`, and
     then take ``images`` with the state. The others refuse them.
 
+    Classifiers that can hear say so in :attr:`supports_audio`, and then take
+    one clip as ``audio`` with the state. They declare the clips they accept:
+    from :attr:`min_audio_secs` to :attr:`max_audio_secs` long, resampled to
+    :attr:`audio_sample_rate` before :meth:`_ask` gets them. A clip of another
+    length is refused, and so is a clip for a classifier that cannot hear.
+
     An owner that runs inside a worker calls :meth:`setup` with its task
     manager before the first question, and :meth:`cleanup` when it is done.
 
@@ -253,6 +278,7 @@ class BaseClassifier(BaseObject):
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
+        self._resampler = create_file_resampler()
 
         self._register_event_handler("on_metrics")
 
@@ -266,12 +292,33 @@ class BaseClassifier(BaseObject):
         """Whether questions can come with images."""
         return False
 
+    @property
+    def supports_audio(self) -> bool:
+        """Whether questions can come with a clip of audio."""
+        return False
+
+    @property
+    def min_audio_secs(self) -> float:
+        """The shortest clip the classifier accepts, in seconds."""
+        return 0.0
+
+    @property
+    def max_audio_secs(self) -> float | None:
+        """The longest clip the classifier accepts, in seconds, or None for no limit."""
+        return None
+
+    @property
+    def audio_sample_rate(self) -> int | None:
+        """The sample rate clips are resampled to, or None to keep their own."""
+        return None
+
     async def ask(
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
         *,
         images: Sequence[ClassifierImage] | None = None,
+        audio: ClassifierAudio | None = None,
     ) -> dict[str, ClassifierResult]:
         """Answer several questions about one state.
 
@@ -280,6 +327,8 @@ class BaseClassifier(BaseObject):
             questions: The questions, by name.
             images: Images the questions can look at, for a classifier that
                 supports them.
+            audio: A clip of audio the questions can hear, for a classifier
+                that supports it.
 
         Returns:
             One result per question, by the same names, each of the type
@@ -289,12 +338,18 @@ class BaseClassifier(BaseObject):
             ClassifierError: If the answers could not be produced, or not in
                 time: every classifier answers or raises within a bound of
                 its own, so a caller waiting on it is never left hanging.
-                Also if images come to a classifier that cannot see them.
+                Also if images come to a classifier that cannot see them, or
+                a clip to one that cannot hear or doesn't accept its length.
         """
         if images and not self.supports_images:
             raise ClassifierError(f"{self} cannot see images")
+        if audio and not self.supports_audio:
+            raise ClassifierError(f"{self} cannot hear audio")
+        # A clip goes to _ask only when there is one, so the _ask of a
+        # classifier that cannot hear needn't take ``audio``.
+        clip = {"audio": await self._clip(audio)} if audio else {}
         started = time.perf_counter()
-        results, usage = await self._ask(state, questions, images=list(images or []))
+        results, usage = await self._ask(state, questions, images=list(images or []), **clip)
         await self._call_event_handler(
             "on_metrics", self._metrics(time.perf_counter() - started, usage)
         )
@@ -306,6 +361,7 @@ class BaseClassifier(BaseObject):
         questions: Mapping[str, YesNoQuestion],
         *,
         images: Sequence[ClassifierImage] | None = None,
+        audio: ClassifierAudio | None = None,
     ) -> dict[str, YesNoResult]:
         """Ask whether the state meets each condition.
 
@@ -314,6 +370,8 @@ class BaseClassifier(BaseObject):
             questions: The questions, by name.
             images: Images the questions can look at, for a classifier that
                 supports them.
+            audio: A clip of audio the questions can hear, for a classifier
+                that supports it.
 
         Returns:
             How likely each answer is yes, by the same names.
@@ -321,7 +379,8 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions, images=images), YesNoResult)
+        results = await self.ask(state, questions, images=images, audio=audio)
+        return self._typed(results, YesNoResult)
 
     async def choice(
         self,
@@ -329,6 +388,7 @@ class BaseClassifier(BaseObject):
         questions: Mapping[str, ChoiceQuestion],
         *,
         images: Sequence[ClassifierImage] | None = None,
+        audio: ClassifierAudio | None = None,
     ) -> dict[str, ChoiceResult]:
         """Ask which option fits the state, for each question.
 
@@ -337,6 +397,8 @@ class BaseClassifier(BaseObject):
             questions: The questions, by name.
             images: Images the questions can look at, for a classifier that
                 supports them.
+            audio: A clip of audio the questions can hear, for a classifier
+                that supports it.
 
         Returns:
             The option that fits and how likely each one is, by the same
@@ -345,7 +407,8 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions, images=images), ChoiceResult)
+        results = await self.ask(state, questions, images=images, audio=audio)
+        return self._typed(results, ChoiceResult)
 
     async def score(
         self,
@@ -353,6 +416,7 @@ class BaseClassifier(BaseObject):
         questions: Mapping[str, ScoreQuestion],
         *,
         images: Sequence[ClassifierImage] | None = None,
+        audio: ClassifierAudio | None = None,
     ) -> dict[str, ScoreResult]:
         """Ask where the state falls on each scale.
 
@@ -361,6 +425,8 @@ class BaseClassifier(BaseObject):
             questions: The questions, by name.
             images: Images the questions can look at, for a classifier that
                 supports them.
+            audio: A clip of audio the questions can hear, for a classifier
+                that supports it.
 
         Returns:
             The position on each scale and how likely each level is, by the
@@ -369,7 +435,8 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        return self._typed(await self.ask(state, questions, images=images), ScoreResult)
+        results = await self.ask(state, questions, images=images, audio=audio)
+        return self._typed(results, ScoreResult)
 
     @abstractmethod
     async def _ask(
@@ -377,12 +444,34 @@ class BaseClassifier(BaseObject):
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
         images: Sequence[ClassifierImage] = (),
+        audio: ClassifierAudio | None = None,
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
         """Answer the questions, and say what tokens the call used if that is known.
 
-        ``images`` is always empty for a classifier that does not support images.
+        ``images`` is always empty for a classifier that does not support
+        images. ``audio`` is passed only for a classifier that supports it,
+        and only when there is a clip: one of an accepted length, at
+        :attr:`audio_sample_rate`.
         """
         pass
+
+    async def _clip(self, audio: ClassifierAudio) -> ClassifierAudio:
+        """The clip at :attr:`audio_sample_rate`, or a ClassifierError if its length isn't accepted."""
+        duration = audio.duration_secs
+        if duration < self.min_audio_secs:
+            raise ClassifierError(
+                f"{self} needs at least {self.min_audio_secs:g}s of audio, got {duration:.2f}s"
+            )
+        if self.max_audio_secs is not None and duration > self.max_audio_secs:
+            raise ClassifierError(
+                f"{self} takes at most {self.max_audio_secs:g}s of audio, got {duration:.2f}s"
+            )
+        if self.audio_sample_rate and audio.sample_rate != self.audio_sample_rate:
+            resampled = await self._resampler.resample(
+                audio.audio, audio.sample_rate, self.audio_sample_rate
+            )
+            audio = ClassifierAudio(audio=resampled, sample_rate=self.audio_sample_rate)
+        return audio
 
     def _metrics(self, seconds: float, usage: LLMTokenUsage | None) -> list[MetricsData]:
         data: list[MetricsData] = [
