@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 from tests.openai_http_helpers import http
 
@@ -634,3 +635,4 @@ async def test_openai_llm_usability_after_bad_request(code, expect_usable):
         assert usable_at_handler_time is expect_usable
         assert service.is_usable is expect_usable
         assert category.is_permanent is not expect_usable
+        assert (category == ErrorCategory.CONTENT_FILTERED) is (code == "content_filter")

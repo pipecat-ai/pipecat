@@ -692,19 +692,19 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         ``content_filter``. Falling back to the status code would classify that
         as ``INVALID_REQUEST``, a permanent category, and mark the service
         unusable. But the rejection is about this request's content, not about
-        the service: the next request can succeed. ``UNKNOWN`` is not permanent,
-        so the service stays usable. Every other 400 keeps its permanent
-        classification.
+        the service: the next request can succeed. ``CONTENT_FILTERED`` is not
+        permanent, so the service stays usable. Every other 400 keeps its
+        permanent classification.
 
         Args:
             exception: The exception to classify.
 
         Returns:
-            ``ErrorCategory.UNKNOWN`` for a content-filter rejection, otherwise
+            ``ErrorCategory.CONTENT_FILTERED`` for a content-filter rejection, otherwise
             None to fall back to the status code.
         """
         if isinstance(exception, BadRequestError) and exception.code == "content_filter":
-            return ErrorCategory.UNKNOWN
+            return ErrorCategory.CONTENT_FILTERED
         return None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
