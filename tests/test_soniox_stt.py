@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     InterimTranscriptionFrame,
+    LLMContextAssistantTurnFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -32,6 +33,7 @@ from pipecat.services.soniox.stt import (
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.time import time_now_iso8601
 from tests.frame_processor_helpers import frame_processor_setup
 
 
@@ -623,9 +625,9 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     assert traced_transcriptions == [("Tell me a joke.", True, None)]
 
 
-def _connected_service():
+def _connected_service(**kwargs):
     """Build a service holding an open fake socket, without touching the network."""
-    service = SonioxSTTService(api_key="test-key")
+    service = SonioxSTTService(api_key="test-key", **kwargs)
     service._setup = frame_processor_setup(TaskManager())
     websocket = _FakeWebsocket([])
     service._websocket = websocket
@@ -788,3 +790,86 @@ async def test_soniox_error_code_sets_category(monkeypatch):
 @pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
 def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
     assert language_to_soniox_language(language) == "no"
+
+
+async def _connect_config(monkeypatch, **kwargs):
+    """Connect a service to a fake socket and return the config it sent."""
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = SonioxSTTService(api_key="test-key", **kwargs)
+    await service._connect_websocket()
+
+    assert service._websocket is websocket
+    return json.loads(websocket.send.await_args.args[0])
+
+
+@pytest.mark.asyncio
+async def test_connect_config_requests_agent_text_input_by_default(monkeypatch):
+    config = await _connect_config(monkeypatch)
+
+    assert config["model"] == "stt-rt-v6"
+    assert config["enable_agent_text_input"] is True
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        SonioxSTTService.Settings(enable_agent_text_input=False),
+        SonioxSTTService.Settings(model="stt-rt-v5"),
+        SonioxSTTService.Settings(model="stt-rt-v5", enable_agent_text_input=True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connect_config_leaves_out_agent_text_input_when_disabled_or_unsupported(
+    monkeypatch, settings
+):
+    config = await _connect_config(monkeypatch, settings=settings)
+
+    assert "enable_agent_text_input" not in config
+
+
+@pytest.mark.asyncio
+async def test_assistant_turn_is_sent_as_agent_text_when_the_turn_ends():
+    service, websocket = _connected_service()
+
+    await service.process_frame(
+        LLMContextAssistantTurnFrame(text="Lekadol is in stock.", timestamp=time_now_iso8601()),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    # The framework reports the turn, and the whole reply goes out as one segment.
+    assert [json.loads(p) for p in _sent_payloads(websocket)] == [
+        {"type": "agent_text", "text": "Lekadol is in stock.", "end_of_segment": True}
+    ]
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        SonioxSTTService.Settings(enable_agent_text_input=False),
+        SonioxSTTService.Settings(model="stt-rt-v5"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_assistant_turn_is_not_sent_when_disabled_or_unsupported(settings):
+    service, websocket = _connected_service(settings=settings)
+
+    await service._process_assistant_turn("Lekadol is in stock.")
+
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_blank_assistant_turn_is_not_sent():
+    service, websocket = _connected_service()
+
+    await service._process_assistant_turn("  ")
+
+    assert _sent_payloads(websocket) == []

@@ -7,6 +7,7 @@
 """Soniox speech-to-text service implementation."""
 
 import json
+import re
 import time
 from collections import Counter
 from collections.abc import AsyncGenerator
@@ -48,6 +49,12 @@ FINALIZE_MESSAGE = '{"type": "finalize"}'
 END_TOKEN = "<end>"
 
 FINALIZED_TOKEN = "<fin>"
+
+# The versioned real-time model names, e.g. "stt-rt-v6".
+_VERSIONED_MODEL = re.compile(r"stt-rt-v(\d+)")
+
+# The first real-time model version that accepts agent text input.
+_AGENT_TEXT_INPUT_MIN_VERSION = 6
 
 
 class SonioxContextGeneralItem(BaseModel):
@@ -106,7 +113,7 @@ class SonioxInputParams(BaseModel):
         client_reference_id: Client reference ID to use for transcription.
     """
 
-    model: str = "stt-rt-v5"
+    model: str = "stt-rt-v6"
 
     audio_format: str | None = "pcm_s16le"
     num_channels: int | None = 1
@@ -244,6 +251,12 @@ class SonioxSTTSettings(STTSettings):
         endpoint_latency_adjustment_level: Reduces endpoint latency vs. the default (0-3); higher
             finalizes sooner but may reduce accuracy.
         client_reference_id: Client reference ID to use for transcription.
+        enable_agent_text_input: Whether to send each completed bot reply to
+            Soniox as agent text, so words the bot said (e.g. a product name)
+            are recognized when the user says them. Defaults to True. Only
+            takes effect on models that support agent text input
+            (``stt-rt-v6`` and later); it stays off for older models. Agent
+            text is billed as input text tokens.
 
     Endpoint detection runs in both turn detection modes. With
     ``vad_force_turn_endpoint=True`` it only ends transcripts, so
@@ -264,6 +277,7 @@ class SonioxSTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     client_reference_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_agent_text_input: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
@@ -358,7 +372,7 @@ class SonioxSTTService(WebsocketSTTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="stt-rt-v5",
+            model="stt-rt-v6",
             language=None,
             language_hints=None,
             language_hints_strict=None,
@@ -369,6 +383,7 @@ class SonioxSTTService(WebsocketSTTService):
             endpoint_sensitivity=None,
             endpoint_latency_adjustment_level=None,
             client_reference_id=None,
+            enable_agent_text_input=True,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -575,6 +590,37 @@ class SonioxSTTService(WebsocketSTTService):
                 await self._websocket.send(FINALIZE_MESSAGE)
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
+    async def _process_assistant_turn(self, text: str):
+        """Send the bot's completed reply to Soniox as agent text.
+
+        The text arrives without turn completion markers or expression tags, and
+        goes out as one segment.
+
+        Args:
+            text: The assistant's aggregated spoken text for this turn.
+        """
+        if self._agent_text_input_enabled() and text.strip():
+            await self._send_agent_text(text)
+
+    def _agent_text_input_enabled(self) -> bool:
+        """Whether this session takes agent text: enabled, on a model that supports it.
+
+        Soniox ends the stream on an ``agent_text`` message to a session that did
+        not enable it, and on enabling it for a model without support.
+        """
+        return bool(self._settings.enable_agent_text_input) and _supports_agent_text_input(
+            self._settings.model
+        )
+
+    async def _send_agent_text(self, text: str):
+        """Send a completed bot reply, which Soniox places by its position in the audio."""
+        if self._websocket and self._websocket.state is State.OPEN:
+            message = {"type": "agent_text", "text": text, "end_of_segment": True}
+            try:
+                await self._websocket.send(json.dumps(message))
+            except Exception as e:
+                logger.warning(f"{self}: agent text send failed: {e}")
+
     async def _send_stop_recording(self):
         """Send the end-of-audio frame, an empty message that ends the session."""
         if self._websocket and self._websocket.state is State.OPEN:
@@ -653,6 +699,9 @@ class SonioxSTTService(WebsocketSTTService):
                 "enable_language_identification": s.enable_language_identification,
                 "client_reference_id": s.client_reference_id,
             }
+            # Left out unless enabled: older models reject the field.
+            if self._agent_text_input_enabled():
+                config["enable_agent_text_input"] = True
 
             # Send the configuration message.
             await self._websocket.send(json.dumps(config))
@@ -808,3 +857,12 @@ class SonioxSTTService(WebsocketSTTService):
             logger.warning(f"{self}: websocket unavailable, skipping keepalive")
             return
         await self._websocket.send(KEEPALIVE_MESSAGE)
+
+
+def _supports_agent_text_input(model: str | None | NotGiven) -> bool:
+    """Whether a Soniox model accepts agent text input.
+
+    Versioned models before ``stt-rt-v6`` do not. Any other name is assumed to.
+    """
+    match = _VERSIONED_MODEL.fullmatch(model) if isinstance(model, str) else None
+    return not match or int(match.group(1)) >= _AGENT_TEXT_INPUT_MIN_VERSION
