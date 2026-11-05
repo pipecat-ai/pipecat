@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.heygen.tts import (
     HEYGEN_DEFAULT_VOICE_ID,
+    HEYGEN_KEEPALIVE_CONTEXT_ID,
     HeyGenHttpTTSService,
     HeyGenTTSService,
     language_to_heygen_language,
@@ -324,6 +325,33 @@ async def test_heygen_websocket_interruption_closes_context():
 
     sent = [json.loads(call.args[0]) for call in websocket.send.call_args_list]
     assert {"context_id": "ctx-1", "close_context": True} in sent
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_keepalive_never_names_a_closed_context():
+    """Keepalives name only an open context; HeyGen opens a context for any other."""
+    tts = HeyGenTTSService(api_key="test-key", sample_rate=24000)
+    websocket = AsyncMock()
+    websocket.state = State.OPEN
+    tts._websocket = websocket
+
+    def last_sent():
+        return json.loads(websocket.send.call_args_list[-1].args[0])
+
+    idle = {"context_id": HEYGEN_KEEPALIVE_CONTEXT_ID, "close_context": True}
+
+    await tts._send_keepalive()
+    assert last_sent() == idle
+
+    tts._turn_context_id = "ctx-1"
+    await tts._send_context_init("ctx-1")
+    await tts._send_keepalive()
+    assert last_sent() == {"text": "", "context_id": "ctx-1"}
+
+    # Closed but still the active context while its last audio arrives.
+    await tts._close_context("ctx-1")
+    await tts._send_keepalive()
+    assert last_sent() == idle
 
 
 def test_heygen_websocket_token_mode_disables_auto_mode():

@@ -53,6 +53,9 @@ HEYGEN_WEBSOCKET_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48
 # audio is then resampled to the pipeline rate.
 HEYGEN_FALLBACK_SAMPLE_RATE = 24000
 
+# A context ID the service never opens; idle keepalives close it.
+HEYGEN_KEEPALIVE_CONTEXT_ID = "pipecat-keepalive"
+
 
 HEYGEN_LANGUAGE_MAP = {
     Language.AR: "ar",
@@ -387,7 +390,7 @@ class HeyGenTTSService(ElevenLabsTTSBase):
             auto_mode = self._text_aggregation_mode != TextAggregationMode.TOKEN
         self._auto_mode = auto_mode
 
-        # Contexts whose opening message has been sent, so keepalives may target them.
+        # Contexts opened and not yet closed, so keepalives may target them.
         self._context_init_sent: set[str] = set()
         # Contexts whose first alignment has arrived; only the first can carry
         # utterance-leading spaces.
@@ -457,6 +460,7 @@ class HeyGenTTSService(ElevenLabsTTSBase):
             await self._close_context(context_id)
 
     async def _close_context(self, context_id: str):
+        self._context_init_sent.discard(context_id)
         if context_id and self._websocket:
             try:
                 await self._websocket.send(
@@ -476,11 +480,15 @@ class HeyGenTTSService(ElevenLabsTTSBase):
     async def _send_keepalive(self):
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
+        # HeyGen opens a context for a keepalive naming one that is not open
+        # (with no context_id, one named "default"), so a keepalive names only an
+        # open context. Without one, closing a context that does not exist resets
+        # HeyGen's inactivity timer and changes nothing else.
         context_id = self.get_active_audio_context_id()
         if context_id and context_id in self._context_init_sent:
             message = {"text": "", "context_id": context_id}
         else:
-            message = {"text": ""}
+            message = {"context_id": HEYGEN_KEEPALIVE_CONTEXT_ID, "close_context": True}
         await self._websocket.send(json.dumps(message))
 
     async def _receive_messages(self):
