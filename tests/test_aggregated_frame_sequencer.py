@@ -2024,6 +2024,13 @@ class TestParallelSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.tts_text, " How are you?")
 
+    async def test_numbered_list_marker_stays_with_item(self):
+        agg = _ParallelSentenceAggregator()
+        out = await _agg_feed(agg, "1", ".", " Take", " a", " walk", ".", "\n", "2", ".", " Read")
+        self.assertEqual([e[0] for e in out], ["1. Take a walk."])
+        f = await agg.flush()
+        self.assertEqual(f.tts_text, "\n2. Read")
+
     async def test_flush_emits_trailing_partial_sentence(self):
         agg = _ParallelSentenceAggregator()
         await _agg_feed(agg, "Just", " a", " fragment")
