@@ -62,8 +62,10 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
+from pipecat.services.openai._errors import classify_openai_error
 from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -389,6 +391,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a content-filter rejection as ``ErrorCategory.CONTENT_FILTERED``.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the status code.
+        """
+        return classify_openai_error(exception)
 
     def _build_response_params(self, invocation_params: OpenAIResponsesLLMInvocationParams) -> dict:
         """Build parameters for a Responses API call.

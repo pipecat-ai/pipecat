@@ -40,8 +40,9 @@ class ErrorCategory(Enum):
             application-supplied content a provider rejected once the service
             has repaired its context (e.g. removed the rejected file message).
             Either way the failure says nothing about the service's own health.
-        CONTENT_FILTERED: The provider's content filter rejected this request's
-            content. The next request can succeed, so this is not permanent.
+        CONTENT_FILTERED: The provider's content policy rejected the request's
+            content. The failure is about that content, not the service's
+            health, but no response is coming for the request.
     """
 
     UNKNOWN = "unknown"
