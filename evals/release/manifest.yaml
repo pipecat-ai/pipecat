@@ -475,6 +475,8 @@ suite:
     scenarios: [scripted/perception]
   - bot: expressive-conversation/expressive-conversation-tone-tagger.py
     scenarios: [scripted/expression_tagger, scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-hume-audio-decisions.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services

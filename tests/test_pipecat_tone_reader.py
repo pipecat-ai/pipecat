@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
     LLMContextAssistantTurnFrame,
+    PerceptionFrame,
     PerceptionMetadataFrame,
     TranscriptionFrame,
 )
@@ -82,10 +83,10 @@ async def test_the_reading_is_set_on_its_transcription(monkeypatch):
     down, _ = await run_test(
         _reader(monkeypatch, FakeReaderModel()),
         frames_to_send=[_transcription("Oh great, a forty minute wait.")],
-        expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame],
+        expected_down_frames=[PerceptionMetadataFrame, PerceptionFrame, TranscriptionFrame],
     )
 
-    assert down[1].perception == [
+    assert down[2].perception == [
         PerceptionSignal("emotion", labels=[("angry", 0.71), ("neutral", 0.2)]),
         PerceptionSignal("sarcasm", value=0.99),
     ]
