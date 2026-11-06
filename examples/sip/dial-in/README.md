@@ -12,7 +12,7 @@ softphone on your Daily domain, or from a real phone over the PSTN.
 One-time setup (details in [`../README.md`](../README.md)):
 
 ```bash
-brew install baresip                                  # apt install baresip on Linux
+brew install baresip                                  # only for the baresip softphone; apt on Linux
 cp examples/sip/env.example examples/sip/.env         # then fill in the keys
 uv run python examples/sip/util/provision.py provision
 ```
@@ -35,10 +35,10 @@ prompt, type `d` (baresip's dial command) followed by the bot's URI —
 `provision` and `status` print the exact URI:
 
 ```
-d sip:pipecat-harness-bot@<domain>.sip.daily.co
+d sip:pipecat-harness-bot@<domain>.sip-us.daily.co
 ```
 
-In a GUI softphone, dial the bare `pipecat-harness-bot@<domain>.sip.daily.co`
+In a GUI softphone, dial the bare `pipecat-harness-bot@<domain>.sip-us.daily.co`
 — no `sip:` prefix.
 
 Expect no ringback — the bot auto-answers — then a greeting and a

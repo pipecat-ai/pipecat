@@ -718,7 +718,7 @@ def print_softphone_credentials(state: dict[str, Any]) -> None:
     bot = clients.get(BOT_USER, {})
     unknown = "(not cached — run provision to rotate it)"
     print()
-    print("Softphone account — Telephone.app > Settings > Accounts > +:")
+    print("Softphone account — enter these in Linphone, Telephone.app or Zoiper:")
     print(f"  Username:   {dev.get('username', '?')}")
     print(f"  Domain:     {dev.get('domain', '?')}")
     print(f"  Password:   {dev.get('password') or unknown}")

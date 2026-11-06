@@ -123,7 +123,7 @@ MCP (Model Context Protocol) tool server integration.
 
 ### [`transports/`](./transports/)
 
-Transport layer examples (WebRTC, Daily, LiveKit).
+Transport layer examples (WebRTC, Daily, LiveKit, SIP, MoQ, Vonage).
 
 ### [`video-avatar/`](./video-avatar/)
 

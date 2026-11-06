@@ -16,7 +16,7 @@ that file and prints the exact command to run, so start there.
 One-time setup (details in [`../README.md`](../README.md)):
 
 ```bash
-brew install baresip                                  # apt install baresip on Linux
+brew install baresip                                  # only for the baresip softphone; apt on Linux
 cp examples/sip/env.example examples/sip/.env         # then fill in the keys
 uv run python examples/sip/util/provision.py provision
 ```
