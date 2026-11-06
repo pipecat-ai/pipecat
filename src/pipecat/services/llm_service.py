@@ -67,7 +67,6 @@ from pipecat.frames.frames import (
     TTSMetadataFrame,
     UserTurnResponseCancelFrame,
 )
-from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -76,18 +75,13 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
+from pipecat.services.async_tool_llm_extension import AsyncToolLLMExtension
 from pipecat.services.base_llm_extension import BaseLLMExtension, LLMExtensionTool
 from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.speculation_gate import SpeculationGate
 from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
-from pipecat.utils.async_tool_cancellation import (
-    ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
-    CANCEL_TOOL_PREFIX,
-    build_cancel_tool_schema,
-    cancel_tool_name,
-)
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
@@ -471,12 +465,8 @@ class LLMService(AIService, Generic[TAdapter]):
         # See `_OutputGate`.
         self._output_gate: _OutputGate | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
-        # The per-tool cancel tools currently advertised, by name.
-        self._cancel_tool_names: set[str] = set()
         # The extensions' built-in tools currently advertised, by name.
         self._extension_tool_names: set[str] = set()
-        # Cancel-tool names that collide with a user's own tool, warned about once.
-        self._warned_cancel_collisions: set[str] = set()
         # The user's base system instruction, without composed addons. Captured
         # here and refreshed when the user changes ``system_instruction`` at
         # runtime; ``_compose_system_instruction`` always rebuilds the effective
@@ -539,6 +529,8 @@ class LLMService(AIService, Generic[TAdapter]):
         # attaches the extension that reads it.
         self._metadata_frames: dict[type[Frame], ServiceMetadataFrame] = {}
         self._sort_extensions()
+        # Every service has one: it contributes nothing until an async tool is registered.
+        self._attach_extension(AsyncToolLLMExtension())
         for extension in extensions or ():
             if extension.installed_by:
                 raise ValueError(
@@ -1025,17 +1017,6 @@ class LLMService(AIService, Generic[TAdapter]):
         self._appended_system_instructions.append(instruction)
         self._compose_system_instruction()
 
-    def _has_async_tools(self) -> bool:
-        """Whether any registered tool runs asynchronously.
-
-        Returns:
-            True when a tool is registered with ``cancel_on_interruption=False``,
-            which is what makes the async-tool guidance worth composing in. The
-            built-in cancellation tool is registered as a synchronous one, so it
-            never counts on its own.
-        """
-        return any(not item.cancel_on_interruption for item in self._functions.values())
-
     def _compose_system_instruction(self):
         """Rebuild ``system_instruction`` from the base prompt and all active addons.
 
@@ -1043,9 +1024,8 @@ class LLMService(AIService, Generic[TAdapter]):
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
         guide), how to read perception and the expression tags the TTS service
-        performs (with expressive conversation on), what each LLM extension
-        contributes, in extension order, and async tool cancellation
-        instructions (when enabled). Safe to call repeatedly — it always
+        performs (with expressive conversation on), and what each LLM
+        extension contributes, in extension order. Safe to call repeatedly — it always
         rebuilds from the base, so it never compounds, and it logs the result
         only when it differs from the previous composition.
         """
@@ -1064,10 +1044,6 @@ class LLMService(AIService, Generic[TAdapter]):
             for extension in self._extensions
             if (instruction := extension.system_instruction)
         )
-        if self._cancel_tool_names:
-            parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
-        if self._has_async_tools():
-            parts.append(ASYNC_TOOL_INSTRUCTIONS)
         composed = "\n\n".join(p for p in parts if p) or None
         self._settings.system_instruction = composed
         if composed != self._composed_system_instruction:
@@ -1443,7 +1419,7 @@ class LLMService(AIService, Generic[TAdapter]):
                 the call to stop. Defaults to ``None`` (fall back to the
                 ``@tool_options`` decorator value, then to False).
         """
-        if function_name in self._cancel_tool_names or function_name in self._extension_tool_names:
+        if function_name in self._extension_tool_names:
             raise ValueError(
                 f"'{function_name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
@@ -1581,7 +1557,7 @@ class LLMService(AIService, Generic[TAdapter]):
                 value (then the False default).
         """
         wrapper = DirectFunctionWrapper(handler)
-        if wrapper.name in self._cancel_tool_names or wrapper.name in self._extension_tool_names:
+        if wrapper.name in self._extension_tool_names:
             raise ValueError(
                 f"'{wrapper.name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
@@ -1642,7 +1618,9 @@ class LLMService(AIService, Generic[TAdapter]):
         resolved = self._resolve_tool_option(
             function_name, explicit, handler, "_pipecat_cancellable_by_llm", default=False
         )
-        if not resolved:
+        if not resolved and not (
+            self._enable_async_tool_cancellation and not cancel_on_interruption
+        ):
             return False
         if cancel_on_interruption:
             # A synchronous call holds the LLM until it returns, so it is never
@@ -1909,12 +1887,10 @@ class LLMService(AIService, Generic[TAdapter]):
         # so re-advertising it (a later tool-set change) registers it afresh.
         self._explicitly_unregistered_function_names &= advertised
 
-        # What the registry holds decides both whether the async-tool guidance
-        # belongs in the system instruction and whether the cancellation tools do,
-        # and it is settled only here: tools advertised on a context frame register
-        # during this sync, a manual registration never goes through that path at
-        # all, and a context can advertise nothing.
-        self._sync_cancel_tools()
+        # What the registry holds decides what the extensions add, tools and
+        # instructions both, and it is settled only here: tools advertised on a
+        # context frame register during this sync, a manual registration never
+        # goes through that path at all, and a context can advertise nothing.
         self._sync_extension_tools()
         self._compose_system_instruction()
 
@@ -2045,10 +2021,11 @@ class LLMService(AIService, Generic[TAdapter]):
             await self.broadcast_frame(UserTurnResponseCancelFrame)
             return
 
-        # Exclude the built-in tools — they are internal mechanism and should
-        # not be surfaced to user-facing event handlers or frames.
-        builtin = self._cancel_tool_names | self._extension_tool_names
-        user_visible_calls = [fc for fc in function_calls if fc.function_name not in builtin]
+        # Exclude the extensions' built-in tools — they are internal mechanism
+        # and should not be surfaced to user-facing event handlers or frames.
+        user_visible_calls = [
+            fc for fc in function_calls if fc.function_name not in self._extension_tool_names
+        ]
         if user_visible_calls:
             await self._call_event_handler("on_function_calls_started", user_visible_calls)
             await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=user_visible_calls)
@@ -2373,35 +2350,6 @@ class LLMService(AIService, Generic[TAdapter]):
                 f"currently advertised tool set."
             )
 
-    def _is_cancellable(self, item: FunctionCallRegistryItem) -> bool:
-        """Whether the LLM may cancel calls of a registered tool.
-
-        The one place that decides it, so what gets advertised and what a cancel
-        tool will actually stop can't drift apart.
-
-        Args:
-            item: The registered tool to judge.
-
-        Returns:
-            True if the tool opted in, or if the deprecated
-            ``enable_async_tool_cancellation`` covers it by being async.
-        """
-        return item.cancellable_by_llm or (
-            self._enable_async_tool_cancellation and not item.cancel_on_interruption
-        )
-
-    def _cancellable_tool_names(self) -> set[str]:
-        """Names of the registered tools the LLM may cancel.
-
-        Returns:
-            The tools that opted in with ``cancellable_by_llm=True``. The
-            deprecated ``enable_async_tool_cancellation`` widens this to every
-            async tool.
-        """
-        return {
-            name for name, item in self._functions.items() if name and self._is_cancellable(item)
-        }
-
     def _sync_extension_tools(self) -> None:
         """Match the built-in tools to what the extensions add, given the registered tools.
 
@@ -2430,104 +2378,6 @@ class LLMService(AIService, Generic[TAdapter]):
                 cancel_on_interruption=tool.cancel_on_interruption,
             )
             self._extension_tool_names.add(name)
-
-    def _sync_cancel_tools(self) -> None:
-        """Match the advertised cancel tools to the tools currently registered.
-
-        One cancel tool per cancellable tool, named for it, reconciled from a
-        single reading of the registry so the advertised set can never drift from
-        what is actually cancellable. A tool that never opted in has no cancel
-        tool at all, so there is nothing for the LLM to call against it.
-        """
-        wanted = {cancel_tool_name(name): name for name in self._cancellable_tool_names()}
-
-        for stale in self._cancel_tool_names - set(wanted):
-            self._adapter.builtin_tools.pop(stale, None)
-            self._functions.pop(stale, None)
-            self._cancel_tool_names.discard(stale)
-
-        for name, target in wanted.items():
-            if name in self._cancel_tool_names:
-                continue
-            if name in self._functions:
-                # Once per name: this runs on every context frame, and the
-                # collision persists for as long as both tools are registered.
-                if name not in self._warned_cancel_collisions:
-                    self._warned_cancel_collisions.add(name)
-                    logger.warning(
-                        f"{self}: '{target}' is cancellable but its cancel tool can't be "
-                        f"advertised — '{name}' is already registered as a tool of its own. "
-                        f"Rename one of them, or the LLM has no way to stop {target}."
-                    )
-                continue
-            self._adapter.builtin_tools[name] = build_cancel_tool_schema(target)
-            self._functions[name] = FunctionCallRegistryItem(
-                function_name=name,
-                handler=self._cancel_tool_handler,
-                cancel_on_interruption=True,
-            )
-            self._cancel_tool_names.add(name)
-
-    async def _cancel_tool_handler(self, params: FunctionCallParams):
-        """Handle a ``cancel_<tool>`` invocation from the LLM.
-
-        Which work to stop comes from the tool the model called, so the common
-        case takes no arguments at all. ``tool_call_id`` only has to be given to
-        choose between several running calls of the same tool.
-
-        Args:
-            params: Function call parameters, optionally carrying ``tool_call_id``.
-        """
-        target = (params.function_name or "")[len(CANCEL_TOOL_PREFIX) :]
-        tool_call_id: str | None = params.arguments.get("tool_call_id")
-
-        async def refuse(reason: str, **extra: Any) -> None:
-            logger.debug(f"{self}: declining to cancel {target} — {reason}")
-            await params.result_callback(
-                {"cancelled": None, "reason": reason, **extra},
-                properties=FunctionCallResultProperties(run_llm=True),
-            )
-
-        candidates = [
-            item
-            for item in self._function_call_tasks.values()
-            if item.function_name == target and self._is_cancellable(item.registry_item)
-        ]
-        if not candidates:
-            await refuse(f"no {target} call is running")
-            return
-        if tool_call_id:
-            match = next((i for i in candidates if i.tool_call_id == tool_call_id), None)
-            if match is None:
-                await refuse(f"no running {target} call has that tool_call_id")
-                return
-        elif len(candidates) > 1:
-            # Several calls of the one tool: the model has to say which, so the
-            # refusal carries the ids to say it with.
-            # Spell the choices out in the reason itself: a model reading a
-            # refusal acts on what it says far more readily than on a field
-            # beside it.
-            choices = "; ".join(
-                f"{i.tool_call_id} (called with {json.dumps(i.arguments, default=str)})"
-                for i in candidates
-            )
-            await refuse(
-                f"{len(candidates)} {target} calls are running: {choices}. Call "
-                f"{params.function_name} again with tool_call_id set to the one to stop.",
-                running=[
-                    {"tool_call_id": i.tool_call_id, "arguments": i.arguments} for i in candidates
-                ],
-            )
-            return
-        else:
-            match = candidates[0]
-
-        logger.debug(f"{self}: cancelling [{match.function_name}:{match.tool_call_id}]")
-        await self._cancel_function_calls_by_tool_call_id(match.tool_call_id)
-        await params.result_callback(
-            {"cancelled": match.tool_call_id, "function_name": match.function_name},
-            properties=FunctionCallResultProperties(run_llm=True),
-        )
 
     async def _cancel_function_call_tasks(
         self,
@@ -2667,14 +2517,30 @@ class LLMService(AIService, Generic[TAdapter]):
         """
         return await self._cancel_function_call_tasks(lambda item: True, reason=reason)
 
-    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
-        """Cancel in-progress function call tasks by their tool_call_id.
+    def running_function_calls(self) -> list[FunctionCallRunnerItem]:
+        """The function calls in flight.
+
+        For a tool handler that acts on calls in progress, such as an
+        extension's cancel tool.
+
+        Returns:
+            Each call's runner item: its name, ``tool_call_id``, arguments and
+            registry item.
+        """
+        return list(self._function_call_tasks.values())
+
+    async def cancel_function_call(self, tool_call_id: str, *, reason: str = "cancelled"):
+        """Cancel the function call in flight with the given ``tool_call_id``.
+
+        Its handler is thrown ``asyncio.CancelledError``, the call is settled
+        downstream as cancelled, and ``on_function_calls_cancelled`` fires.
 
         Args:
-            tool_call_id: tool_call_id to cancel.
+            tool_call_id: The call to cancel.
+            reason: What triggered the cancellation, for the logs.
         """
         await self._cancel_function_call_tasks(
-            lambda item: item.tool_call_id == tool_call_id, reason="User request"
+            lambda item: item.tool_call_id == tool_call_id, reason=reason
         )
 
     async def _cancel_function_call(self, function_name: str | None):
