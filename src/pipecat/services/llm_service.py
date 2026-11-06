@@ -31,7 +31,11 @@ from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.llm.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.expressive.expression import ExpressionCapabilities
-from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
+from pipecat.expressive.instructions import (
+    expression_instructions,
+    expression_policy_warning,
+    perception_turn_completion_instructions,
+)
 from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
@@ -915,10 +919,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
         guide), how to read perception and the expression tags the TTS service
-        performs (with expressive conversation on), turn completion instructions (when enabled), and async tool
-        cancellation instructions (when enabled). Safe to call repeatedly — it
-        always rebuilds from the base, so it never compounds, and it logs the
-        result only when it differs from the previous composition.
+        performs (with expressive conversation on), turn completion instructions
+        (when enabled) with a note that a reading doesn't decide them when
+        perception is taught too, and async tool cancellation instructions (when
+        enabled). Safe to call repeatedly — it always rebuilds from the base, so
+        it never compounds, and it logs the result only when it differs from the
+        previous composition.
         """
         base = self._base_system_instruction
         parts = [base] if base else []
@@ -931,7 +937,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if expression:
             parts.append(expression)
         if self._filter_incomplete_user_turns:
-            parts.append(self._user_turn_completion_config.completion_instructions)
+            config = self._user_turn_completion_config
+            parts.append(config.completion_instructions)
+            if self._perception and self._perception.signals:
+                parts.append(perception_turn_completion_instructions(*config.markers))
         if self._cancel_tool_names:
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
         if self._has_async_tools():
