@@ -49,8 +49,10 @@ images only to a scenario that expects one::
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
 when the response ends. ``marker:`` says which one: ``complete`` (the turn was
 finished and the bot answers), ``short`` (the user was cut off and the bot
-waits), ``long`` (the user asked for time), or ``incomplete`` (either of the
-last two). A bare ``llm_marker`` asserts only that the bot read a response.
+waits), ``long`` (the user asked for time), ``incomplete`` (either of the
+last two), or ``silent`` (the LLM answered with its silent mark and the bot
+dropped the reply unspoken). A bare ``llm_marker`` asserts only that the bot
+read a response.
 Markers never reach clients by default; a scenario that asserts on one asks the
 bot to report them::
 
@@ -168,6 +170,18 @@ Supported expectation fields (per event):
           calls:
             - name: submit_session_suggestion
           eval: "a session about OpenTelemetry tracing, submitted for Jennifer Smith"
+
+``allow_continue: false``
+    with ``eval:`` — judge the reply yes or no, never ``continue``. The judge
+    answers ``continue`` for a reply on the way to its answer, a "let me check"
+    before the result, and the harness then waits for more of the reply.
+    Setting ``allow_continue: false`` forces the judge to consider the reply
+    as final, the thing to be judged, rather than skipping it: a wait
+    reassurance ("still working on it...") is judged that way::
+
+        - event: response
+          eval: "says it is still working on the task, reporting no result"
+          allow_continue: false
 
 ``absent: true``
     invert the expectation: assert that NO event of this type arrives before the
@@ -358,8 +372,9 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 # What a ``marker:`` may name on an ``llm_marker`` expectation. The first three
 # are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
-# accepts ``short`` or ``long``.
-MARKER_KINDS = ("complete", "short", "long", "incomplete")
+# accepts ``short`` or ``long``; ``silent`` is the LLM service's kind for a
+# reply it dropped as its silent mark.
+MARKER_KINDS = ("complete", "short", "long", "incomplete", "silent")
 
 # Where an expectation checks for its event from: where the expectation above
 # it was met, or the beginning of the turn.
@@ -433,6 +448,11 @@ class EvalExpectation:
             ``previous`` (the default), where the expectation above it was
             met; or ``turn_start``, the beginning of the turn, at events the
             expectations above it did not use.
+        allow_continue: With ``eval``, whether the judge may answer
+            ``continue`` and have the harness wait for more of the reply;
+            ``None`` leaves it to the judge's own setting. ``False`` forces
+            the judge to consider the reply as final, the thing to be judged,
+            rather than skipping it.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -452,6 +472,7 @@ class EvalExpectation:
     markers: int | None = None
     text_after: bool | None = None
     check_from: str = "previous"
+    allow_continue: bool | None = None
     absent: bool = False
 
     @property
@@ -997,6 +1018,16 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             "Will run but is unlikely to be meaningful."
         )
 
+    allow_continue = e.get("allow_continue")
+    if allow_continue is not None and not isinstance(allow_continue, bool):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' must be a boolean"
+        )
+    if allow_continue is not None and criterion is None:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' "
+            f"only applies with 'eval:'"
+        )
     absent = e.get("absent", False)
     if not isinstance(absent, bool):
         raise ValueError(
@@ -1087,6 +1118,7 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         markers=e.get("markers"),
         text_after=e.get("text_after"),
         check_from=check_from,
+        allow_continue=allow_continue,
         absent=absent,
     )
 

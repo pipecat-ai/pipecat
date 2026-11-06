@@ -26,6 +26,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.llm_extensions.wait_reassurance import WaitReassuranceLLMExtension
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
@@ -137,6 +138,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
+        # A brief word from the LLM while an async tool runs.
+        extensions=[WaitReassuranceLLMExtension()],
     )
 
     @llm.event_handler("on_function_calls_started")

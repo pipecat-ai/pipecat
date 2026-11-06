@@ -1,0 +1,5 @@
+name: wait_reassurance_declined_upfront
+judge: !include ../../../release/scenarios/judge_text.yaml
+scenarios:
+  - name: text
+    turns: !include ../turns/wait_reassurance_declined_upfront.yaml
