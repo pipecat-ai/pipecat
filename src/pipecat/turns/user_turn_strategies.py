@@ -30,7 +30,7 @@ from pipecat.turns.user_stop import (
     LLMTurnCompletionUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 
 _S = TypeVar("_S")
 
@@ -236,11 +236,12 @@ class FilterIncompleteUserTurnStrategies(UserTurnStrategies):
     recommends instead, such as an STT service's own turn detection.
 
     Parameters:
-        config: Optional configuration applied to the LLM via the
-            ``filter_incomplete_user_turns`` setting. Customizes the
+        config: Optional configuration of the LLM's
+            :class:`~pipecat.turns.user_stop.llm_turn_completion.llm_extension.LLMTurnCompletionLLMExtension`.
+            Customizes the
             turn-completion instructions, incomplete-turn timeouts, and
             re-prompts. If None, defaults from
-            :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`
+            :class:`~pipecat.turns.user_turn_completion.UserTurnCompletionConfig`
             are used.
 
     Example::

@@ -405,9 +405,9 @@ class LLMMarkerFrame(DataFrame):
     writes the marker to the context so the LLM can self-condition on
     prior markers on subsequent turns.
 
-    The primary use today is the ``filter_incomplete_user_turns``
-    protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ● / ◐ / ○ on every response. The frame is
+    The primary use today is turn completion, where
+    ``LLMTurnCompletionLLMExtension`` emits the turn-completion markers
+    ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -444,7 +444,7 @@ class LLMMarkerResponseFrame(DataFrame):
         marker: The marker found, or ``None`` when the response carried none.
         kind: What the marker meant, in the emitter's own vocabulary, for
             consumers that should not depend on the marker text (which is
-            configurable). The turn-completion mixin uses ``"complete"``,
+            configurable). The turn-completion extension uses ``"complete"``,
             ``"short"`` and ``"long"``.
         markers: Every marker the emitter recognizes, so a consumer can find
             them in ``raw`` without knowing the emitter's configuration.
