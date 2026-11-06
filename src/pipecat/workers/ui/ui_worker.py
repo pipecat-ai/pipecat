@@ -43,7 +43,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoResult,
 )
 from pipecat.classifiers.llm.classifier import LLMClassifier
-from pipecat.frames.frames import LLMContextFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.job_context import (
     JobGroup,
     JobGroupContext,
@@ -66,6 +66,7 @@ from pipecat.processors.frameworks.rtvi.models import (
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.workers.llm.llm_context_worker import LLMContextWorker
+from pipecat.workers.ui.llm_extension import UIStateLLMExtension
 from pipecat.workers.ui.ui_event_decorator import _collect_ui_event_handlers
 from pipecat.workers.ui.ui_prompts import UI_STATE_PROMPT_GUIDE
 
@@ -191,8 +192,8 @@ class UIWorker(LLMContextWorker):
                 disable.
             auto_inject_ui_state: When True (the default), append the latest
                 ``<ui_state>`` snapshot to the context before every inference
-                (via the LLM's ``on_before_process_frame`` hook). Set False to
-                inject manually with ``inject_ui_state()``.
+                that answers a user turn. Set False to inject manually with
+                ``inject_ui_state()``.
             keep_history: When False (the default), the context is cleared at the
                 start of every job, so each turn sees only the current
                 ``<ui_state>`` and query -- best for the stateless-delegate role.
@@ -201,7 +202,7 @@ class UIWorker(LLMContextWorker):
                 cost of more tokens and possible confusion from stale
                 ``<ui_state>`` blocks. Use context summarization to prune the
                 history when it gets too large.
-            prompt_guide: Wire-format guide appended to the LLM's
+            prompt_guide: Wire-format guide added to the LLM's
                 ``system_instruction`` so it can parse the ``<ui_state>`` /
                 ``<ui_event>`` messages. Defaults to ``UI_STATE_PROMPT_GUIDE``;
                 pass a string to override or ``None`` to disable. Living in
@@ -215,15 +216,19 @@ class UIWorker(LLMContextWorker):
             context=context,
             assistant_params=assistant_params,
         )
-        # Auto-append the UI wire-format guide to the LLM's system
-        # instruction so the author doesn't have to concatenate it manually
-        # and it survives the per-job context reset. Pass a string to
-        # ``prompt_guide`` to override the text, or ``None`` to disable.
-        if prompt_guide:
-            self.llm.append_system_instruction(prompt_guide)
+        # The LLM's half of reading the screen: the wire-format guide in its
+        # system instruction, where it survives the per-job context reset, and
+        # the latest snapshot appended before each inference that answers a
+        # user turn. The snapshot is a normal, persistent developer message;
+        # growth is managed by ``keep_history`` + context summarization.
+        self.llm.add_extension(
+            UIStateLLMExtension(
+                prompt_guide=prompt_guide,
+                render=self.render_ui_state if auto_inject_ui_state else None,
+            )
+        )
         self._classifier = classifier or LLMClassifier(llm=llm)
         self._inject_events = inject_events
-        self._auto_inject_ui_state = auto_inject_ui_state
         self._keep_history = keep_history
         self._ui_event_handlers = _collect_ui_event_handlers(self)
         # Latest accessibility snapshot received from the client. Updated
@@ -240,25 +245,6 @@ class UIWorker(LLMContextWorker):
         # job response. See the "Single-flight job semantics" section
         # in the class docstring.
         self._pending: asyncio.Future | None = None
-
-        # Auto-inject the current ``<ui_state>`` snapshot into the context just
-        # before each inference. Driven by the LLM's ``on_before_process_frame``
-        # so it fires whenever the worker runs its LLM (e.g. a ``respond`` job),
-        # appending the snapshot to the same context the request is built from.
-        # The snapshot is a normal, persistent developer message; growth is
-        # managed by ``keep_history`` + context summarization.
-        @self.llm.event_handler("on_before_process_frame")
-        async def _inject_ui_state(_llm, frame):
-            if not (self._auto_inject_ui_state and isinstance(frame, LLMContextFrame)):
-                return
-            # Only inject on a user-turn-initiating inference, not the follow-up
-            # inference the LLM runs after a tool result (which would stack a
-            # duplicate ``<ui_state>`` within the same turn).
-            if not _is_user_turn(frame.context):
-                return
-            content = self.render_ui_state()
-            if content:
-                frame.context.add_message({"role": "developer", "content": content})
 
         # The reply the LLM writes answers the in-flight job, unless a tool is
         # answering it: a reply that comes with tool calls is a preamble.
@@ -658,8 +644,9 @@ class UIWorker(LLMContextWorker):
 
         Body of the built-in ``respond`` job. Records the in-flight job, clears
         the context when ``keep_history=False``, appends the rendered query, and
-        runs the LLM (the current ``<ui_state>`` is injected by the
-        ``on_before_process_frame`` hook). Then blocks until the LLM's reply
+        runs the LLM (the current ``<ui_state>`` is injected by the worker's
+        :class:`~pipecat.workers.ui.llm_extension.UIStateLLMExtension`
+        on the LLM). Then blocks until the LLM's reply
         ends the turn or a ``@tool`` calls ``respond_to_job``, which chooses
         how the answer is delivered, and sends the job response.
 
@@ -678,8 +665,8 @@ class UIWorker(LLMContextWorker):
             # request to act on, whereas the SDK-injected <ui_state> / <ui_event>
             # messages are the "developer" (programmatic context) content. The
             # "user" role also marks the turn boundary that gates <ui_state>
-            # injection -- see _is_user_turn() and the on_before_process_frame
-            # hook in __init__ (a non-user tail would skip the snapshot).
+            # injection by the UIStateLLMExtension (a non-user tail would skip
+            # the snapshot).
             await self.queue_frame(
                 LLMMessagesAppendFrame(
                     messages=[{"role": "user", "content": self.render_query(message)}],
@@ -1172,21 +1159,6 @@ class UIWorker(LLMContextWorker):
             logger.debug(
                 f"{self.name}: cancel event for unknown or non-cancellable group {job_id}; ignoring"
             )
-
-
-def _is_user_turn(context: LLMContext) -> bool:
-    """Whether the context's last message is the user's turn.
-
-    Distinguishes a fresh user-turn inference (tail is the user message) from
-    the follow-up inference the LLM runs after a tool result (tail is the tool
-    result / assistant output), so the ``<ui_state>`` snapshot is injected once
-    per turn rather than again on each tool round.
-    """
-    messages = context.messages
-    if not messages:
-        return False
-    last = messages[-1]
-    return isinstance(last, dict) and last.get("role") == "user"
 
 
 def _render_node(node: dict[str, Any], *, depth: int, lines: list[str]) -> None:
