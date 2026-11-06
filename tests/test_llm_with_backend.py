@@ -56,6 +56,7 @@ from pipecat.pipeline.llm_with_backend.prompts import (
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
+from pipecat.services.llm_extensions.user_turn_completion import UserTurnCompletionLLMExtension
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
@@ -911,7 +912,7 @@ async def test_no_turn_is_raced_while_the_frontend_filters_incomplete_turns():
     await run_test(
         service,
         frames_to_send=[
-            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[UserTurnCompletionLLMExtension])),
             SleepFrame(0.1),
             _user_turn(),
             SleepFrame(0.1),

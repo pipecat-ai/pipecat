@@ -37,9 +37,9 @@ Key helpers:
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, fields, replace
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 from loguru import logger
 
@@ -47,7 +47,8 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 if TYPE_CHECKING:
-    from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+    from pipecat.services.llm_extensions.base_llm_extension import BaseLLMExtension
+    from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 
 
 # In a settings object ``NOT_GIVEN`` means "this field was not included in the
@@ -336,6 +337,15 @@ class LLMSettings(ServiceSettings):
             runs at its provider's default. Services that otherwise send each
             model its lowest thinking setting, for the fastest responses, send
             none. ``BackendLLMWorker`` sets it on its LLM. Defaults to False.
+        extensions: The LLM extensions attached to the service (see
+            :class:`~pipecat.services.llm_extensions.base_llm_extension.BaseLLMExtension`).
+            The union type reflects the two modes. A delta adds to the
+            extensions held, and each of its entries is a callable that builds
+            an extension, one for each service the delta reaches: an update
+            marked ``reach_inactive_services`` reaches every LLM behind an
+            :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher`, and an
+            extension belongs to one service. The stored value holds the
+            extensions themselves, however they were attached.
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -351,6 +361,41 @@ class LLMSettings(ServiceSettings):
         default_factory=lambda: NOT_GIVEN
     )
     use_provider_thinking_default: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    extensions: list[BaseLLMExtension | Callable[[], BaseLLMExtension]] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    def apply_update(self, delta: Self) -> dict[str, Any]:
+        """Merge a delta into these settings; its ``extensions`` build and add to the ones held.
+
+        Args:
+            delta: A delta-mode settings object of the same type.
+
+        Returns:
+            A dict mapping each changed field name to its pre-update value.
+
+        Raises:
+            TypeError: If an entry of the delta's ``extensions`` is an
+                extension rather than a callable that builds one.
+        """
+        builders = delta.extensions
+        if not is_given(builders):
+            return super().apply_update(delta)
+        built: list[BaseLLMExtension] = []
+        for builder in builders:
+            if not callable(builder):
+                raise TypeError(
+                    "A settings update's extensions are callables that build an extension, "
+                    "one per service the update reaches. To attach an extension in hand, use "
+                    "LLMService.add_extension()."
+                )
+            built.append(builder())
+
+        changed = super().apply_update(replace(delta, extensions=NOT_GIVEN))
+        held = list(self.extensions) if is_given(self.extensions) else []
+        changed["extensions"] = held
+        self.extensions = [*held, *built]
+        return changed
 
 
 @dataclass

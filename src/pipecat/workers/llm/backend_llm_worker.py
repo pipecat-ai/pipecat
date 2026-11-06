@@ -116,7 +116,7 @@ ERROR_UPDATE_TYPE = "error"
 #: writes a note paragraph and then a marked one, so a mark at the start of a
 #: later line splits the message, a note before it and a spoken message from
 #: it on, rather than losing the result. The turn-completion markers are
-#: read the same way (``user_turn_completion_mixin``).
+#: read the same way (``user_turn_completion``).
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.

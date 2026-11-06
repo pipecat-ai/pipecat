@@ -115,7 +115,7 @@ from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     UserTurnStoppedParams,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
@@ -2772,7 +2772,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         default markers and any seen on this turn's marker frames are removed,
         so a custom marker set is stripped too.
         """
-        from pipecat.turns.user_turn_completion_mixin import (
+        from pipecat.turns.user_turn_completion import (
             USER_TURN_COMPLETE_MARKER,
             USER_TURN_INCOMPLETE_LONG_MARKER,
             USER_TURN_INCOMPLETE_SHORT_MARKER,

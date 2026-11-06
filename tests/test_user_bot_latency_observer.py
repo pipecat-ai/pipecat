@@ -1,6 +1,5 @@
 import asyncio
 import unittest
-from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -35,23 +34,14 @@ from pipecat.observers.user_bot_latency_observer import (
     UserBotLatencyObserver,
 )
 from pipecat.processors.filters.identity_filter import IdentityFilter
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_extensions.user_turn_completion import UserTurnCompletionLLMExtension
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_turn_completion_mixin import (
+from pipecat.turns.user_turn_completion import (
     USER_TURN_COMPLETE_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
-    UserTurnCompletionLLMServiceMixin,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
-from tests.frame_processor_helpers import frame_processor_setup
-
-
-class _MarkerProcessor(UserTurnCompletionLLMServiceMixin, FrameProcessor):
-    """The smallest processor that runs the turn completion protocol, as LLMService does."""
-
-    async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
-        await self._track_pushed_frame(frame)
-        await super().push_frame(frame, direction)
 
 
 class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
@@ -1436,14 +1426,9 @@ class TestFrameContracts(unittest.IsolatedAsyncioTestCase):
         )
 
     async def _markers_pushed_for(self, text: str) -> list[LLMMarkerFrame]:
-        """Run one response through the turn completion protocol."""
-        processor = _MarkerProcessor()
-        # An incomplete verdict arms a timeout, which needs somewhere to run.
-        await processor.setup(frame_processor_setup(TaskManager()))
-        pushed = []
-        processor.push_frame = AsyncMock(side_effect=lambda f, *a, **k: pushed.append(f))
-
-        await processor._push_turn_text(text)
+        """Run one response through the turn completion extension."""
+        extension = UserTurnCompletionLLMExtension()
+        pushed = await extension.filter_push(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
         return [f for f in pushed if isinstance(f, LLMMarkerFrame)]
 
     async def test_turn_completion_pushes_markers_that_way_round(self):

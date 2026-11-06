@@ -54,8 +54,10 @@ from pipecat.pipeline.llm_with_backend.prompts import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContextMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.services.llm_extensions.user_turn_completion import UserTurnCompletionLLMExtension
 from pipecat.services.llm_service import LLMService, _OutputGate
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.types import assert_given
 
 # ---------------------------------------------------------------------------
 # _PredictiveDelegationRace tracks whether a classifier "yes" arrives before the
@@ -393,7 +395,10 @@ class PredictiveDelegation(FrameProcessor):
                 "frontend",
             )
             return False
-        if self._frontend_settings().filter_incomplete_user_turns:
+        if any(
+            isinstance(e, UserTurnCompletionLLMExtension)
+            for e in assert_given(self._frontend_settings().extensions)
+        ):
             self._warn_once(
                 "filtering",
                 "Predictive delegation: turns are left to the frontend while it filters "
