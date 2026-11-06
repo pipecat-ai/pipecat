@@ -20,33 +20,27 @@ from pydantic import BaseModel
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    InterruptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
-    TTSStartedFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
-from pipecat.utils.text.base_text_aggregator import TextType
 from pipecat.utils.time import nanoseconds_to_seconds, time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -272,9 +266,7 @@ class SonioxSTTSettings(STTSettings):
             agent text while it plays, which also lets Soniox cancel the bot's
             echo in the user's audio. Implies ``enable_agent_text_input``, and
             likewise only takes effect on models that support it. Needs a TTS
-            service that reports word timestamps. Word-by-word sending is set
-            up when the service starts, so turning this on with a settings
-            update leaves each reply sent once, after it was spoken.
+            service that reports word timestamps.
         agent_text_lead_ms: How far ahead of playback each of the bot's words is
             sent, in milliseconds. Soniox places agent text where it sits among
             the audio frames and wants it a little before the caller hears it;
@@ -471,7 +463,18 @@ class SonioxSTTService(WebsocketSTTService):
         if is_given(lead := default_settings.agent_text_lead_ms) and lead < 0:
             raise ValueError(f"agent_text_lead_ms cannot be negative, but got {lead}")
 
-        self._agent_text_observer: _AgentTextObserver | None = None
+        # Present while echo cancellation is on, reporting the bot's words.
+        self._agent_text_observer: BotSpeechObserver | None = None
+        # Whether agent text was sent since the last segment was closed.
+        self._agent_text_segment_open = False
+        self._warned_untimed_text = False
+        # Timed words waiting for their moment, each with the turn it belongs to.
+        self._agent_text_words: asyncio.Queue[tuple[TTSTextFrame, asyncio.Event]] = asyncio.Queue()
+        self._agent_text_sender: asyncio.Task | None = None
+        self._agent_text_last_pts = 0
+        # Set when the turn is interrupted. A word decides whether it is still
+        # wanted when its turn to be sent comes round.
+        self._agent_text_turn = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -539,6 +542,7 @@ class SonioxSTTService(WebsocketSTTService):
         changed = await super()._update_settings(delta)
 
         if changed:
+            await self._update_agent_text_observer()
             await self._request_reconnect()
 
         return changed
@@ -550,17 +554,12 @@ class SonioxSTTService(WebsocketSTTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        if self._settings.enable_echo_cancellation and self._agent_text_input_enabled():
-            self._agent_text_observer = _AgentTextObserver(self)
-            self.pipeline_worker.add_observer(self._agent_text_observer)
+        await self._update_agent_text_observer()
         await self._connect()
 
     async def cleanup(self):
         """Stop observing the bot's speech and release the service's resources."""
-        if self._agent_text_observer:
-            await self._agent_text_observer.cancel_scheduled()
-            await self.pipeline_worker.remove_observer(self._agent_text_observer)
-            self._agent_text_observer = None
+        await self._stop_agent_text_observer()
         await super().cleanup()
 
     async def stop(self, frame: EndFrame):
@@ -643,9 +642,6 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             text: The assistant's aggregated spoken text for this turn.
         """
-        # On the observer's presence, not the setting: echo cancellation turned
-        # on by a settings update has no observer, and gating on the setting
-        # would leave the reply unsent by either path.
         if self._agent_text_observer is None and text.strip():
             await self._send_agent_text(text)
 
@@ -670,6 +666,130 @@ class SonioxSTTService(WebsocketSTTService):
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
                 logger.warning(f"{self}: agent text send failed: {e}")
+
+    async def _update_agent_text_observer(self):
+        """Observe the bot's speech while echo cancellation is on."""
+        if not self._setup:
+            return
+        if self._settings.enable_echo_cancellation and self._agent_text_input_enabled():
+            if not self._agent_text_observer:
+                observer = BotSpeechObserver()
+                observer.add_event_handler("on_bot_text", self._on_bot_text)
+                observer.add_event_handler("on_bot_speech_ended", self._on_bot_speech_ended)
+                self.pipeline_worker.add_observer(observer)
+                self._agent_text_observer = observer
+        else:
+            await self._stop_agent_text_observer()
+
+    async def _stop_agent_text_observer(self):
+        observer, self._agent_text_observer = self._agent_text_observer, None
+        if observer:
+            await self.pipeline_worker.remove_observer(observer)
+        if self._agent_text_sender:
+            await self.cancel_task(self._agent_text_sender)
+            self._agent_text_sender = None
+        self._drop_agent_text_words()
+
+    async def _on_bot_text(self, observer: BotSpeechObserver, frame: TTSTextFrame):
+        """Time a word the bot will say against its playback, or send untimed text now."""
+        if frame.pts:
+            self._queue_agent_text(frame)
+            return
+        if not self._warned_untimed_text:
+            self._warned_untimed_text = True
+            logger.warning(
+                f"{self}: the TTS service does not report word timestamps; "
+                "agent text is sent untimed, so echo cancellation will not work"
+            )
+        await self._send_bot_text(frame)
+
+    async def _on_bot_speech_ended(self, observer: BotSpeechObserver, interrupted: bool):
+        """Close the turn's segment, and on an interruption drop the words not yet sent.
+
+        Each word still queued is dropped as the sender reaches it, because the
+        transport drops its audio too.
+        """
+        if interrupted:
+            self._agent_text_turn.set()
+            self._agent_text_turn = asyncio.Event()
+        await self._close_agent_text_segment()
+
+    def _queue_agent_text(self, frame: TTSTextFrame):
+        """Queue a timed word behind the words reported before it."""
+        assert frame.pts
+        if frame.pts < self._agent_text_last_pts:
+            logger.warning(
+                f"{self}: the TTS service reported a word timestamp earlier than "
+                f"the previous one; agent text keeps the order the words arrived in"
+            )
+        self._agent_text_last_pts = frame.pts
+        self._agent_text_words.put_nowait((frame, self._agent_text_turn))
+        # `done()` as well as None: a sender that raised is finished, and
+        # without this the words after it would wait on a task that is over.
+        if self._agent_text_sender is None or self._agent_text_sender.done():
+            self._agent_text_sender = self.create_task(
+                self._send_agent_text_words(), name="soniox-agent-text"
+            )
+
+    async def _send_agent_text_words(self):
+        """Send the queued words one after another, each when its moment comes."""
+        while True:
+            frame, interrupted = await self._agent_text_words.get()
+            await self._send_bot_word_at(frame, interrupted)
+            self._agent_text_words.task_done()
+
+    async def _send_bot_word_at(self, frame: TTSTextFrame, interrupted: asyncio.Event):
+        """Send a word ``agent_text_lead_ms`` before it is played.
+
+        Soniox places agent text where it sits among the audio frames, and
+        recognizes the caller's reply better when the words arrive a little
+        before the caller hears them. The pts is when the audio reaches the
+        transport, so the caller hears it that much later again.
+        """
+        assert frame.pts
+        # Read the clock here, not at push time: whatever the frame waited in
+        # the queue is time the lead would otherwise have lost.
+        delay = nanoseconds_to_seconds(frame.pts - self.get_clock().get_time())
+        delay -= assert_given(self._settings.agent_text_lead_ms) / 1000
+        if not frame.interruptible:
+            # Uninterruptible speech plays on through an interruption.
+            if delay > 0:
+                await asyncio.sleep(delay)
+        else:
+            # An interruption ends the wait: the transport drops this word's
+            # audio, so the caller never hears it.
+            try:
+                await asyncio.wait_for(interrupted.wait(), max(delay, 0))
+            except TimeoutError:
+                pass
+            if interrupted.is_set():
+                return
+        await self._send_bot_text(frame)
+
+    async def _send_bot_text(self, frame: TTSTextFrame):
+        """Send one piece of the bot's text, restoring the space the aggregator stripped."""
+        text = frame.text
+        if self._agent_text_segment_open and not frame.includes_inter_frame_spaces:
+            text = f" {text}"
+        self._agent_text_segment_open = True
+        await self._send_agent_text(text, end_of_segment=False)
+
+    async def _close_agent_text_segment(self):
+        """Close the open segment, if there is one. Closing it twice would open another."""
+        if not self._agent_text_segment_open:
+            return
+        self._agent_text_segment_open = False
+        await self._send_agent_text("", end_of_segment=True)
+
+    def _drop_agent_text_words(self):
+        """Drop the words waiting on the clock, uninterruptible ones too."""
+        self._agent_text_turn.set()
+        self._agent_text_turn = asyncio.Event()
+        # The event alone leaves uninterruptible speech, which ignores it, so
+        # the queue itself goes too.
+        while not self._agent_text_words.empty():
+            self._agent_text_words.get_nowait()
+            self._agent_text_words.task_done()
 
     async def _send_stop_recording(self):
         """Send the end-of-audio frame, an empty message that ends the session."""
@@ -755,8 +875,11 @@ class SonioxSTTService(WebsocketSTTService):
 
             # Send the configuration message.
             await self._websocket.send(json.dumps(config))
-            if self._agent_text_observer:
-                self._agent_text_observer.reset()
+            # The new session has no open segment, and words timed against the
+            # old one's audio would be placed where the bot's voice is not,
+            # where they can cancel the caller's own speech.
+            self._agent_text_segment_open = False
+            self._drop_agent_text_words()
 
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Soniox STT")
@@ -774,6 +897,7 @@ class SonioxSTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
+            self._drop_agent_text_words()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -918,193 +1042,3 @@ def _supports_agent_text_input(model: str | None | NotGiven) -> bool:
     """
     match = _VERSIONED_MODEL.fullmatch(model) if isinstance(model, str) else None
     return not match or int(match.group(1)) >= _AGENT_TEXT_INPUT_MIN_VERSION
-
-
-class _AgentTextObserver(BaseObserver):
-    """Sends the bot's speech to a Soniox STT service, timed against playback.
-
-    A word reported with a presentation timestamp is sent ``agent_text_lead_ms`` before
-    its timestamp, because Soniox places agent text where it sits among the
-    audio frames and recognizes the caller's reply better when the words arrive
-    a little early. The timestamp is when the audio reached the transport, so
-    the caller hears it that much later again; the effective lead is `agent_text_lead_ms`
-    plus whatever the transport and the network add. Nothing measures what was
-    really played, so a transport that underruns hears the reply later than the
-    timestamps say and the lead grows accordingly. Words are sent in the
-    order the TTS service reported them. An interruption drops whatever has
-    not been sent, and the words of the cut-off reply the TTS service still
-    pushes after it, so only what the caller heard is sent.
-
-    Text from a TTS service with no word timestamps has nothing to time
-    against, so it is sent as the TTS service produces it. That still gives
-    Soniox the context, but not echo cancellation.
-    """
-
-    def __init__(self, service: SonioxSTTService):
-        super().__init__()
-        self._service = service
-        self._segment_open = False
-        self._warned_untimed_text = False
-        self._bot_speaking = False
-        # Timed words waiting for their moment, each with the turn it belongs to.
-        self._words: asyncio.Queue[tuple[TTSTextFrame, asyncio.Event]] = asyncio.Queue()
-        self._sender: asyncio.Task | None = None
-        self._last_pts = 0
-        # Set when the turn is interrupted. A word decides whether it is still
-        # wanted when its turn to be sent comes round.
-        self._turn = asyncio.Event()
-        # From an interruption until the TTS service starts its next reply, the
-        # words it pushes belong to the reply that was cut off.
-        self._interrupted = False
-
-    async def on_push_frame(self, data: FramePushed):
-        """Schedule the bot's words, and close the segment when it stops speaking.
-
-        Args:
-            data: Frame push event data containing source, frame, direction, and timestamp.
-        """
-        if data.direction != FrameDirection.DOWNSTREAM:
-            return
-        if not self._service._settings.enable_echo_cancellation:
-            return
-
-        frame = data.frame
-        if isinstance(frame, InterruptionFrame):
-            if data.first_push:
-                await self._interrupt()
-        elif isinstance(frame, TTSStartedFrame):
-            self._interrupted = False
-        elif isinstance(frame, TTSTextFrame) and frame.text and self._is_speech(frame):
-            if self._interrupted and frame.interruptible:
-                # Pushed before the TTS service dropped the reply that was cut
-                # off; the transport drops its audio.
-                return
-            if frame.pts:
-                if data.first_push:
-                    self._queue(frame)
-            elif data.first_push:
-                if not self._warned_untimed_text:
-                    self._warned_untimed_text = True
-                    logger.warning(
-                        f"{self._service}: the TTS service does not report word timestamps; "
-                        "agent text is sent untimed, so echo cancellation will not work"
-                    )
-                await self._send(frame)
-            elif isinstance(data.source, BaseOutputTransport) and not self._bot_speaking:
-                # The transport released untimed text it played no audio for, as
-                # when the TTS service failed, so no BotStoppedSpeakingFrame will
-                # close it.
-                await self._end_segment()
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-            await self._end_segment()
-
-    @staticmethod
-    def _is_speech(frame: TTSTextFrame) -> bool:
-        """Whether the bot says this text out loud as words.
-
-        An expression sound or pause is written into the reply by the LLM and
-        carries the pts of the word beside it, but it is not the bot's words.
-        """
-        return frame.text_type not in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE)
-
-    async def _interrupt(self):
-        """End the turn where the caller cut in.
-
-        Only the words the caller heard were sent: a word still waiting on the
-        clock is dropped when its moment comes, because the transport drops its
-        audio too. The turn ends here rather than on a
-        ``BotStoppedSpeakingFrame``, which an interruption does not always
-        produce - the transport pushes none while uninterruptible audio is
-        still playing, nor when the bot had not started speaking yet.
-        """
-        self._turn.set()
-        self._turn = asyncio.Event()
-        self._interrupted = True
-        await self._end_segment()
-
-    def reset(self):
-        """Forget the previous connection's segment, and the words timed against its audio.
-
-        A word still on the clock was timed against audio this connection never
-        carried, and agent text placed where the bot's voice is not can cancel
-        the caller's own speech instead. A word that never arrives only forfeits
-        a little recognition context, so the queue is dropped.
-        """
-        self._segment_open = False
-        self._turn.set()
-        self._turn = asyncio.Event()
-        # The event alone leaves uninterruptible speech, which ignores it, so
-        # the queue itself goes too.
-        while not self._words.empty():
-            self._words.get_nowait()
-            self._words.task_done()
-
-    async def cancel_scheduled(self):
-        """Drop the words still waiting on the clock, at teardown."""
-        if self._sender:
-            await self._service.cancel_task(self._sender)
-            self._sender = None
-
-    async def _end_segment(self):
-        """Close the open turn, if there is one. Sending it twice would open another."""
-        if not self._segment_open:
-            return
-        self._segment_open = False
-        await self._service._send_agent_text("", end_of_segment=True)
-
-    def _queue(self, frame: TTSTextFrame):
-        """Queue a timed word behind the words reported before it."""
-        assert frame.pts
-        if frame.pts < self._last_pts:
-            logger.warning(
-                f"{self._service}: the TTS service reported a word timestamp earlier than "
-                f"the previous one; agent text keeps the order the words arrived in"
-            )
-        self._last_pts = frame.pts
-        self._words.put_nowait((frame, self._turn))
-        # `done()` as well as None: a sender that raised is finished, and
-        # without this the words after it would wait on a task that is over.
-        if self._sender is None or self._sender.done():
-            self._sender = self._service.create_task(self._send_words(), name="soniox-agent-text")
-
-    async def _send_words(self):
-        """Send the queued words one after another, each when its moment comes."""
-        while True:
-            frame, interrupted = await self._words.get()
-            await self._send_at(frame, interrupted)
-            self._words.task_done()
-
-    async def _send_at(self, frame: TTSTextFrame, interrupted: asyncio.Event):
-        """Wait until `lead` before this word is played, then send it."""
-        assert frame.pts
-        # Read the clock here, not at push time: whatever the frame waited in
-        # the queue is time the lead would otherwise have lost.
-        delay = nanoseconds_to_seconds(frame.pts - self._service.get_clock().get_time())
-        delay -= assert_given(self._service._settings.agent_text_lead_ms) / 1000
-        if not frame.interruptible:
-            # Uninterruptible speech plays on through an interruption.
-            if delay > 0:
-                await asyncio.sleep(delay)
-        else:
-            # An interruption ends the wait: the transport drops this word's
-            # audio, so the caller never hears it.
-            try:
-                await asyncio.wait_for(interrupted.wait(), max(delay, 0))
-            except TimeoutError:
-                pass
-            if interrupted.is_set():
-                return
-        await self._send(frame)
-
-    async def _send(self, frame: TTSTextFrame):
-        """Send one word, restoring the space the aggregator stripped."""
-        text = frame.text
-        if not text.strip():
-            return
-        if self._segment_open and not frame.includes_inter_frame_spaces:
-            text = f" {text}"
-        self._segment_open = True
-        await self._service._send_agent_text(text, end_of_segment=False)
