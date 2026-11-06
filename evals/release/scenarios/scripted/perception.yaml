@@ -40,7 +40,7 @@ scenarios:
           - event: response
             eval: "the bot acknowledges the user's frustration or apologizes, and offers to help"
 
-      - user: "Okay, thanks. Can you tell me how to rebook?"
+      - user: "Okay, thanks. Can you help me book another flight?"
         expect:
           - event: llm_response
             text_excludes: "(["
