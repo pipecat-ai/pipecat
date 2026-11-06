@@ -455,7 +455,9 @@ class ExpectationMatcher:
             with logger.contextualize(eval_pipeline="judge"):
                 # The reply segments were added to the judge's conversation in the
                 # aggregation loop; the judge evaluates that context, not `aggregate`.
-                verdict = await self._judge.evaluate(expectation.eval)
+                verdict = await self._judge.evaluate(
+                    expectation.eval, allow_continue=expectation.allow_continue
+                )
             if verdict.verdict == "none":
                 return ("no_verdict", f"judge said none: {verdict.reason}")
             if verdict.verdict == "no":
@@ -579,7 +581,9 @@ class ExpectationMatcher:
             )
 
         self._judge.add_assistant_message(content)
-        verdict = await self._judge.evaluate(expectation.eval)
+        verdict = await self._judge.evaluate(
+            expectation.eval, allow_continue=expectation.allow_continue
+        )
         if not verdict.passed:
             return self._failure(
                 expectation,

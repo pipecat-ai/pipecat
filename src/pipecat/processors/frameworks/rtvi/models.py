@@ -730,8 +730,9 @@ class BotLLMMarkerMessageData(BaseModel):
         text: The marker as the LLM produced it; empty when the response
             carried none.
         kind: What the marker means, such as ``complete``, ``short`` or ``long``
-            for the markers that say whether the user's turn was complete, or
-            ``None`` when it means nothing the server knows.
+            for the markers that say whether the user's turn was complete,
+            ``silent`` for a reply dropped as the wait-reassurance silent mark,
+            or ``None`` when it means nothing the server knows.
         raw: The response's text as the LLM produced it, markers included.
         markers: Every marker the emitter recognizes.
     """

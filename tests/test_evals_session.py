@@ -462,7 +462,7 @@ class _FakeJudge:
     def add_assistant_message(self, text):
         self.segments.append(text)
 
-    async def evaluate(self, criterion: str):
+    async def evaluate(self, criterion: str, *, allow_continue: bool | None = None):
         self.calls.append(criterion)
         return self._next_verdict()
 
@@ -2920,7 +2920,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             def add_assistant_message(self, text):
                 pass
 
-            async def evaluate(self, criterion):
+            async def evaluate(self, criterion, *, allow_continue=None):
                 raise AssertionError("unreachable")
 
         scenario = EvalScriptScenario(
