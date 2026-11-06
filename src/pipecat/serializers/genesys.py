@@ -29,8 +29,7 @@ from typing import Any
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
-from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -211,10 +210,10 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._sample_rate = 0  # Pipeline input rate, set in setup()
         self._session_id = str(uuid.uuid4())
 
-        self._input_resampler = SOXRStreamAudioResampler(
+        self._input_resampler = create_stream_resampler(
             clear_after_secs=self._params.resampler_clear_after_secs
         )
-        self._output_resampler = SOXRStreamAudioResampler(
+        self._output_resampler = create_stream_resampler(
             clear_after_secs=self._params.resampler_clear_after_secs
         )
 
