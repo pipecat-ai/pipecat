@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import WebsocketTTSService
+from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -40,7 +40,14 @@ class GradiumTTSSettings(TTSSettings):
 
 
 class GradiumTTSService(WebsocketTTSService):
-    """Text-to-Speech service using Gradium's websocket API."""
+    """Text-to-Speech service using Gradium's websocket API.
+
+    By default, LLM tokens are streamed to Gradium as they arrive
+    (``TextAggregationMode.TOKEN``). Gradium treats the end of each ``text``
+    message as a word boundary, so the service only sends whole words: the
+    trailing partial word of each token is held back until the following text
+    completes it or the turn ends.
+    """
 
     Settings = GradiumTTSSettings
     _settings: Settings
@@ -72,6 +79,8 @@ class GradiumTTSService(WebsocketTTSService):
         json_config: str | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -100,8 +109,19 @@ class GradiumTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+                Defaults to ``TextAggregationMode.TOKEN``, streaming LLM tokens to
+                Gradium as whole words for the lowest latency.
+            aggregate_sentences: Whether to aggregate sentences before synthesis.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.
+
             **kwargs: Additional arguments passed to parent class.
         """
+        if text_aggregation_mode is None and aggregate_sentences is None:
+            text_aggregation_mode = TextAggregationMode.TOKEN
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="default",
@@ -127,6 +147,8 @@ class GradiumTTSService(WebsocketTTSService):
             default_settings.apply_update(settings)
 
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
+            aggregate_sentences=aggregate_sentences,
             push_stop_frames=True,
             push_start_frame=True,
             push_text_frames=False,
@@ -144,6 +166,8 @@ class GradiumTTSService(WebsocketTTSService):
         # State tracking
         self._receive_task = None
         self._setup_context_ids: set[str] = set()
+        # Per context, the trailing partial word not yet sent when streaming tokens.
+        self._pending_words: dict[str, str] = {}
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -191,6 +215,21 @@ class GradiumTTSService(WebsocketTTSService):
         """Build text message for Gradium API."""
         msg = {"text": text, "type": "text", "client_req_id": context_id}
         return msg
+
+    def _take_whole_words(self, text: str, context_id: str) -> str:
+        """Return the text that can be sent now without splitting a word.
+
+        When streaming tokens, the text after the last whitespace may be the
+        start of a word the next token continues, so it is kept for the next
+        call or for :meth:`flush_audio`.
+        """
+        if not self._is_streaming_tokens:
+            return text
+        text = self._pending_words.pop(context_id, "") + text
+        end = max((i + 1 for i, c in enumerate(text) if c.isspace()), default=0)
+        if end < len(text):
+            self._pending_words[context_id] = text[end:]
+        return text[:end]
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service and connect.
@@ -274,6 +313,7 @@ class GradiumTTSService(WebsocketTTSService):
         finally:
             self._websocket = None
             self._setup_context_ids.clear()
+            self._pending_words.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -288,6 +328,8 @@ class GradiumTTSService(WebsocketTTSService):
         if not flush_id or not self._websocket:
             return
         try:
+            if rest := self._pending_words.pop(flush_id, ""):
+                await self._websocket.send(json.dumps(self._build_text_msg(rest, flush_id)))
             msg = {"type": "end_of_stream", "client_req_id": flush_id}
             await self._websocket.send(json.dumps(msg))
         except ConnectionClosedOK:
@@ -302,6 +344,7 @@ class GradiumTTSService(WebsocketTTSService):
         ``client_req_id`` will be silently dropped by the base class once the
         audio context no longer exists.
         """
+        self._pending_words.pop(context_id, None)
         await self.stop_all_metrics()
         await super().on_audio_context_interrupted(context_id)
 
@@ -377,8 +420,9 @@ class GradiumTTSService(WebsocketTTSService):
                 if context_id not in self._setup_context_ids:
                     await ws.send(json.dumps(self._build_setup_msg(context_id)))
                     self._setup_context_ids.add(context_id)
-                msg = self._build_text_msg(text=text, context_id=context_id)
-                await ws.send(json.dumps(msg))
+                if words := self._take_whole_words(text, context_id):
+                    msg = self._build_text_msg(text=words, context_id=context_id)
+                    await ws.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
