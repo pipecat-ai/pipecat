@@ -19,8 +19,8 @@ See https://developers.heygen.com/docs/voices/heygen-voice-speech.
 import base64
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from typing import Any, ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Literal
 from urllib.parse import urlencode
 
 import aiohttp
@@ -38,7 +38,7 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Nadine, a HeyGen public voice. Works with every HeyGen Voice model, no clone needed.
 HEYGEN_DEFAULT_VOICE_ID = "83548de556df48ba8c09c42a57c51d85"
@@ -305,10 +305,21 @@ class HeyGenWebsocketTTSSettings(ElevenLabsTTSSettingsBase):
             or ``heygen-voice-1-turbo-free``.
         voice: HeyGen voice ID: a public voice or an instant clone in your workspace.
         language: Language of the text. If ``None``, HeyGen detects it.
+        apply_text_normalization: Text normalization mode (``"auto"``, ``"on"`` or
+            ``"off"``). If ``None``, HeyGen uses ``"auto"``.
+        expressiveness_boost: Voice expressiveness from 0.0 to 1.0. If ``None``,
+            HeyGen uses 1.0.
     """
 
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    expressiveness_boost: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
     #: All settings are WebSocket URL parameters; changing one reconnects.
-    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"model", "voice", "language"})
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"model", "voice", "language", "apply_text_normalization", "expressiveness_boost"}
+    )
 
 
 class HeyGenTTSService(ElevenLabsTTSBase):
@@ -339,6 +350,9 @@ class HeyGenTTSService(ElevenLabsTTSBase):
         auto_mode: bool | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         pause_frame_processing: bool = True,
+        enable_ssml_parsing: bool | None = None,
+        enable_logging: bool | None = None,
+        end_user_id: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -358,6 +372,12 @@ class HeyGenTTSService(ElevenLabsTTSBase):
                 until its audio has played. With False, turns synthesize
                 concurrently on the one socket, which HeyGen limits to 5
                 running contexts.
+            enable_ssml_parsing: Whether ``<break time="1s"/>`` tags become pauses.
+                Without it, HeyGen closes the WebSocket on a break tag.
+            enable_logging: Whether HeyGen stores a copy of the audio and text.
+                If None, HeyGen stores them.
+            end_user_id: Your identifier for the end user, recorded with HeyGen's
+                usage for attribution.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -365,6 +385,8 @@ class HeyGenTTSService(ElevenLabsTTSBase):
             model="heygen-voice-1-turbo",
             voice=HEYGEN_DEFAULT_VOICE_ID,
             language=None,
+            apply_text_normalization=None,
+            expressiveness_boost=None,
         )
 
         if settings is not None:
@@ -379,10 +401,14 @@ class HeyGenTTSService(ElevenLabsTTSBase):
             # HeyGen joins text messages as sent, so sentences need a separating space.
             append_trailing_space=True,
             pause_frame_processing=pause_frame_processing,
+            enable_logging=enable_logging,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
         )
+
+        self._enable_ssml_parsing = enable_ssml_parsing
+        self._end_user_id = end_user_id
 
         # The rate HeyGen synthesizes at; set when the URL is built.
         self._audio_sample_rate = HEYGEN_FALLBACK_SAMPLE_RATE
@@ -427,6 +453,16 @@ class HeyGenTTSService(ElevenLabsTTSBase):
         language = _request_language(assert_given(self._settings.language))
         if language:
             params["language"] = language
+        if self._settings.apply_text_normalization is not None:
+            params["apply_text_normalization"] = self._settings.apply_text_normalization
+        if self._settings.expressiveness_boost is not None:
+            params["expressiveness_boost"] = str(self._settings.expressiveness_boost)
+        if self._enable_ssml_parsing is not None:
+            params["enable_ssml_parsing"] = str(self._enable_ssml_parsing).lower()
+        if self._enable_logging is not None:
+            params["enable_logging"] = str(self._enable_logging).lower()
+        if self._end_user_id:
+            params["end_user_id"] = self._end_user_id
         return f"{self._url}/v3/models/audio/tts/multi-stream-input?{urlencode(params)}"
 
     def _set_voice_settings(self) -> dict[str, Any] | None:
@@ -454,10 +490,10 @@ class HeyGenTTSService(ElevenLabsTTSBase):
     async def on_turn_context_completed(self):
         """Close the server-side context at the end of a turn so its final message arrives."""
         context_id = self._turn_context_id
+        # The parent flushes the turn's context if it was opened; a close without
+        # a flush discards text HeyGen has not spoken yet.
         await super().on_turn_context_completed()
-        if context_id:
-            # A close without a flush discards text HeyGen has not spoken yet.
-            await self.flush_audio(context_id)
+        if context_id in self._context_init_sent:
             await self._close_context(context_id)
 
     async def _close_context(self, context_id: str):
@@ -499,7 +535,13 @@ class HeyGenTTSService(ElevenLabsTTSBase):
 
             # HeyGen sends an error message just before it closes the socket.
             if msg.get("error"):
-                await self.push_error(error_msg=f"HeyGen TTS error: {msg.get('message')}")
+                error = msg["error"] if isinstance(msg["error"], dict) else {}
+                await self.push_error(
+                    error_msg=(
+                        f"HeyGen TTS error: {msg.get('message') or error.get('message')} "
+                        f"(code: {error.get('code')}, request_id: {error.get('request_id')})"
+                    )
+                )
                 continue
 
             context_id = msg.get("contextId")

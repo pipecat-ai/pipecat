@@ -222,7 +222,10 @@ async def _serve_heygen_ws(
                         json.dumps(
                             {
                                 "message": "Insufficient credits.",
-                                "error": {"code": "usage_limit_reached"},
+                                "error": {
+                                    "code": "usage_limit_reached",
+                                    "request_id": "req-123",
+                                },
                             }
                         )
                     )
@@ -310,7 +313,7 @@ async def test_heygen_websocket_error_message_becomes_error_frame():
         )
 
     errors = [f.error for f in up_frames if isinstance(f, ErrorFrame)]
-    assert any("Insufficient credits." in e for e in errors)
+    assert any("Insufficient credits." in e and "req-123" in e for e in errors)
 
 
 @pytest.mark.asyncio
@@ -384,12 +387,14 @@ async def test_heygen_websocket_unsupported_sample_rate_is_resampled():
 
 @pytest.mark.asyncio
 async def test_heygen_websocket_turn_end_flushes_before_close():
-    """At the end of a turn the context is flushed before it is closed, so no text is dropped."""
+    """At the end of a turn the context is flushed once, then closed, so no text is dropped."""
     tts = HeyGenTTSService(api_key="test-key", sample_rate=24000)
     websocket = AsyncMock()
     websocket.state = State.OPEN
     tts._websocket = websocket
     tts._turn_context_id = "ctx-1"
+    tts._context_init_sent.add("ctx-1")
+    tts.audio_context_available = lambda context_id: context_id == "ctx-1"
 
     await tts.on_turn_context_completed()
 
@@ -398,6 +403,49 @@ async def test_heygen_websocket_turn_end_flushes_before_close():
         {"context_id": "ctx-1", "flush": True},
         {"context_id": "ctx-1", "close_context": True},
     ]
+
+
+@pytest.mark.asyncio
+async def test_heygen_websocket_turn_without_text_sends_nothing():
+    """A turn that produced no speech, such as a tool call alone, opens no HeyGen context."""
+    tts = HeyGenTTSService(api_key="test-key", sample_rate=24000)
+    websocket = AsyncMock()
+    websocket.state = State.OPEN
+    tts._websocket = websocket
+    tts._turn_context_id = "ctx-1"
+
+    await tts.on_turn_context_completed()
+
+    websocket.send.assert_not_called()
+
+
+def test_heygen_websocket_url_options():
+    """Connection options and settings reach the URL only when given."""
+    plain = parse_qs(urlparse(HeyGenTTSService(api_key="k")._build_websocket_url()).query)
+    for name in (
+        "enable_logging",
+        "enable_ssml_parsing",
+        "end_user_id",
+        "apply_text_normalization",
+        "expressiveness_boost",
+    ):
+        assert name not in plain
+
+    tts = HeyGenTTSService(
+        api_key="k",
+        enable_logging=False,
+        enable_ssml_parsing=True,
+        end_user_id="user-42",
+        settings=HeyGenTTSService.Settings(
+            apply_text_normalization="off", expressiveness_boost=0.5
+        ),
+    )
+    query = parse_qs(urlparse(tts._build_websocket_url()).query)
+    assert query["enable_logging"] == ["false"]
+    assert query["enable_ssml_parsing"] == ["true"]
+    assert query["end_user_id"] == ["user-42"]
+    assert query["apply_text_normalization"] == ["off"]
+    assert query["expressiveness_boost"] == ["0.5"]
 
 
 def test_heygen_websocket_holds_frames_until_turn_audio_plays():
