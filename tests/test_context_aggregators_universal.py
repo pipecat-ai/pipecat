@@ -35,6 +35,8 @@ from pipecat.frames.frames import (
     LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -2536,6 +2538,25 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(start_count, 1)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello!")
+
+    async def test_a_silent_reply_records_nothing(self):
+        """The service's silent report discards the turn marker it pushed before reading the mark."""
+        from pipecat.turns.user_turn_completion import USER_TURN_COMPLETE_MARKER
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False),
+            LLMMarkerResponseFrame(
+                raw=f"{USER_TURN_COMPLETE_MARKER} ∅", marker="∅", kind="silent", markers=["∅"]
+            ),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        self.assertEqual(context.messages, [])
 
     async def test_turn_completion_markers_stripped_from_transcript(self):
         """Turn completion markers should be stripped from assistant transcript."""

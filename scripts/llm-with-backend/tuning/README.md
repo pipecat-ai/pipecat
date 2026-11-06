@@ -4,6 +4,7 @@ Tools for checking a change to `LLMWithBackend`'s behavior, and a log of what ea
 
 - a prompt: the frontend's in `pipecat.pipeline.llm_with_backend.prompts` (the pairing instruction, the `delegate` tool's description, a request strategy's guidance), or the backend's in `pipecat.workers.llm.backend_llm_worker`;
 - predictive delegation's classifier: its question, threshold, or how much of the conversation it sees.
+- the wait reassurance prompt in `pipecat.services.llm_extensions.wait_reassurance`, which the frontend's model reads each time the conversation has gone quiet with work in flight: the `wait_reassurance*` text evals are its checks, and [`RESULTS.md`](RESULTS.md) records a replay of the prompt alone in mid-delegation contexts.
 
 A small wording change can move a model in ways no unit test catches: gpt-4.1 stops delegating a "never mind", or the classifier starts delegating questions about how the work is going. Run the checks below before and after the change.
 
