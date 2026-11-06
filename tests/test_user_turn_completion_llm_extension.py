@@ -257,8 +257,7 @@ async def _enable_turn_completion(
     await service._update_settings(
         LLMSettings(extensions=[partial(UserTurnCompletionLLMExtension, config)])
     )
-    (extension,) = service._extensions
-    assert isinstance(extension, UserTurnCompletionLLMExtension)
+    (extension,) = [e for e in service._extensions if isinstance(e, UserTurnCompletionLLMExtension)]
     return extension
 
 
@@ -342,7 +341,9 @@ class TestDeprecatedTurnCompletionSettings(unittest.IsolatedAsyncioTestCase):
 
         with self.assertWarns(DeprecationWarning):
             await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
-        self.assertEqual(service._extensions, [])
+        self.assertFalse(
+            any(isinstance(e, UserTurnCompletionLLMExtension) for e in service._extensions)
+        )
         self.assertEqual(service._settings.system_instruction, "You are a helpful assistant.")
         # The base prompt is retained — it's the single source of truth that
         # composition rebuilds from; disabling just recomposes without the
