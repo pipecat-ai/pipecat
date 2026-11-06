@@ -60,6 +60,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-deepgram-flux.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-deepgram-flux-eager.py
+    scenarios: [scripted/capital_question, scripted/filter_incomplete_turns]
   - bot: voice/voice-deepgram-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-elevenlabs.py
