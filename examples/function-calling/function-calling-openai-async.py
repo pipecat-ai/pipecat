@@ -34,6 +34,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.wait_reassurance.llm_extension import WaitReassuranceLLMExtension
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -137,6 +138,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
+        # A brief word from the LLM while an async tool runs.
+        extensions=[WaitReassuranceLLMExtension()],
     )
 
     @llm.event_handler("on_function_calls_started")

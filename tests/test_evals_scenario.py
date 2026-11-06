@@ -386,6 +386,44 @@ class TestEvalsScenarioParser(unittest.TestCase):
                     )
                 )
 
+    def test_allow_continue_false_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: final
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        eval: "says it is still working"
+                        allow_continue: false
+                      - event: llm_response
+                        eval: "gives the result"
+                """
+            )
+        )
+        self.assertIs(s.turns[0].expect[0].allow_continue, False)
+        self.assertIsNone(s.turns[0].expect[1].allow_continue)
+
+    def test_allow_continue_needs_eval_and_a_boolean(self):
+        for extra in (
+            "allow_continue: false",
+            'eval: "x"\n                                allow_continue: no way',
+        ):
+            with self.assertRaises(ValueError):
+                _script(
+                    _write(
+                        f"""
+                        name: bad_allow_continue
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                {extra}
+                        """
+                    )
+                )
+
     def test_absent_expectation_parsed(self):
         s = _script(
             _write(
@@ -544,6 +582,19 @@ class TestEvalsScenarioParser(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad) as ctx:
                 EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
             self.assertIn(message, str(ctx.exception))
+
+    def test_llm_marker_silent_kind_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: silent_marker
+                turns:
+                  - user: "x"
+                    expect: [{event: llm_marker, marker: silent}]
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].marker, "silent")
 
     def test_llm_marker_unknown_kind_rejected(self):
         with self.assertRaises(ValueError) as ctx:
