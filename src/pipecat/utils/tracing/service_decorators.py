@@ -553,6 +553,8 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
     - Service name and model information
     - Transcription text and final status
     - Language information
+    - A ``stt.transcript.committed`` event for finalized transcripts, including
+      the transcript, language, user ID, and frame timestamp
     - Performance metrics like TTFB
     - Usage metrics (audio seconds) when the service reports them via
       ``start_stt_usage_metrics``
@@ -753,6 +755,15 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                     if frame.user_id:
                         span.set_attribute("user_id", frame.user_id)
                     if frame.finalized:
+                        event_attributes = {
+                            "transcript": " ".join(state["segments"]).strip(),
+                            "timestamp": frame.timestamp,
+                        }
+                        if frame.language:
+                            event_attributes["language"] = str(frame.language)
+                        if frame.user_id:
+                            event_attributes["user_id"] = frame.user_id
+                        span.add_event("stt.transcript.committed", attributes=event_attributes)
                         attach_pending_usage(state)
                         span.end()
                         state["span"] = None
