@@ -716,7 +716,7 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         service.register_function("slow", slow, cancel_on_interruption=False)
         await self._run_call(service, "slow")
         await asyncio.sleep(self.TIMEOUT)
-        await service._cancel_function_calls_by_tool_call_id("call_1")
+        await service.cancel_function_call("call_1")
         await asyncio.sleep(self.SETTLE)
 
         self.assertIsInstance(frames[-2], FunctionCallCancelFrame)
