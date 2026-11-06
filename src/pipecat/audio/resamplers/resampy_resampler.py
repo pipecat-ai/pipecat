@@ -11,10 +11,17 @@ for high-quality audio sample rate conversion.
 """
 
 import numpy as np
-import resampy
+from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.utils.deprecation import deprecated
+
+try:
+    import resampy
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use ResampyResampler, you need to `uv add "pipecat-ai[resampy]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @deprecated(
