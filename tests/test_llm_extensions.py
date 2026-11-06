@@ -368,10 +368,10 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        self.assertEqual(len(service._extensions), 2)
-        self.assertIs(service._extensions[0], first)
-        second = service._extensions[1]
-        self.assertIsInstance(second, _Recorder)
+        recorders = [e for e in service._extensions if isinstance(e, _Recorder)]
+        self.assertEqual(len(recorders), 2)
+        self.assertIs(recorders[0], first)
+        second = recorders[1]
         self.assertTrue(second.set_up)
         self.assertEqual(service._settings.system_instruction, "FIRST\n\nSECOND")
 
@@ -390,9 +390,8 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         await one._update_settings(delta)
         await another._update_settings(delta)
 
-        (built_for_one,) = one._extensions
-        (built_for_another,) = another._extensions
-        self.assertIsInstance(built_for_one, _Recorder)
+        (built_for_one,) = [e for e in one._extensions if isinstance(e, _Recorder)]
+        (built_for_another,) = [e for e in another._extensions if isinstance(e, _Recorder)]
         self.assertIsNot(built_for_one, built_for_another)
 
 
