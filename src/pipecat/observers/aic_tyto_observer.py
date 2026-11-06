@@ -38,7 +38,7 @@ from pipecat.frames.frames import CancelFrame, EndFrame, InputAudioRawFrame
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
-DEFAULT_TYTO_MODEL_ID = "tyto-1.1-l-16khz"
+DEFAULT_TYTO_MODEL_ID = "tyto-1.2-l-16khz"
 
 # Tyto analyzes a fixed 5 s window and fills a shorter window with silence.
 # The observer analyzes once per window, so the windows do not overlap.
@@ -128,7 +128,7 @@ class AICTytoObserver(BaseObserver):
 
     Example::
 
-        aic_filter = AICFilter(license_key=key, model_id="quail-vf-2.2-l-16khz")
+        aic_filter = AICFilter(license_key=key, model_id="quail-vf-2.3-l-16khz")
         tyto = AICTytoObserver(license_key=key, audio_filter=aic_filter)
 
         @tyto.event_handler("on_call_summary")
@@ -153,7 +153,7 @@ class AICTytoObserver(BaseObserver):
 
         Args:
             license_key: ai-coustics SDK license key.
-            model_id: Tyto model identifier. Defaults to ``"tyto-1.1-l-16khz"``.
+            model_id: Tyto model identifier. Defaults to ``"tyto-1.2-l-16khz"``.
                 Ignored if ``model_path`` is set.
             model_path: Optional path to a local ``.aicmodel`` file.
             model_download_dir: Directory for downloaded models. Defaults to
