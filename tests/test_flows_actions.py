@@ -23,7 +23,7 @@ import asyncio
 import unittest
 import warnings
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from pipecat.flows.actions import ActionManager
 from pipecat.flows.exceptions import ActionError
@@ -288,3 +288,83 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ActionError):
             await action_manager.execute_actions([{"type": "failing_action"}])
+
+    def test_action_frames_are_uninterruptible(self):
+        """Action frames must be uninterruptible so interruptions don't drop them from queues."""
+        from pipecat.flows.actions import ActionFinishedFrame, FunctionActionFrame
+
+        action_frame = FunctionActionFrame(action={}, function=AsyncMock())
+        self.assertFalse(action_frame.interruptible)
+
+        finished_frame = ActionFinishedFrame()
+        self.assertFalse(finished_frame.interruptible)
+
+    async def test_interruption_during_tts_action_preserves_finished_frame(self):
+        """An interruption while TTS is speaking drops speech but preserves ActionFinishedFrame."""
+        from pipecat.flows.actions import ActionFinishedFrame
+        from pipecat.frames.frames import TTSSpeakFrame
+        from pipecat.utils.frame_queue import FrameQueue
+
+        queue = FrameQueue()
+        mock_worker = AsyncMock()
+
+        async def queue_frame(frame):
+            queue.put_nowait(frame)
+
+        mock_worker.queue_frame = AsyncMock(side_effect=queue_frame)
+        mock_worker.set_reached_downstream_filter = Mock()
+
+        def mock_event_handler(event_name):
+            def decorator(func):
+                setattr(mock_worker, event_name, func)
+                return func
+
+            return decorator
+
+        mock_worker.event_handler = mock_event_handler
+
+        action_manager = ActionManager(mock_worker, self.mock_flow_manager)
+
+        # Execute tts_say in a task because it will wait for ActionFinishedFrame to reach downstream
+        task = asyncio.create_task(
+            action_manager.execute_actions([{"type": "tts_say", "text": "Hello"}])
+        )
+        await asyncio.sleep(0.01)
+
+        # Both TTSSpeakFrame and ActionFinishedFrame were queued
+        self.assertEqual(queue.qsize(), 2)
+        items = list(queue._queue)
+        self.assertIsInstance(items[0], TTSSpeakFrame)
+        self.assertIsInstance(items[1], ActionFinishedFrame)
+
+        # Simulate interruption by resetting the queue
+        queue.reset()
+
+        # TTSSpeakFrame was dropped, but ActionFinishedFrame was preserved
+        self.assertEqual(queue.qsize(), 1)
+        remaining = queue.get_nowait()
+        self.assertIsInstance(remaining, ActionFinishedFrame)
+
+        # Deliver the remaining frame downstream to complete the action
+        await mock_worker.on_frame_reached_downstream(mock_worker, remaining)
+        await task
+
+        self.assertEqual(action_manager._ongoing_actions_count, 0)
+        self.assertTrue(action_manager._ongoing_actions_finished_event.is_set())
+
+    async def test_function_action_error_still_decrements_ongoing_count(self):
+        """A failing function action still decrements the ongoing actions count."""
+
+        async def failing_function(action, flow_manager):
+            raise RuntimeError("Function failed")
+
+        mock_worker = make_mock_worker()
+        action_manager = ActionManager(mock_worker, self.mock_flow_manager)
+
+        with self.assertRaises(ActionError):
+            await action_manager.execute_actions(
+                [{"type": "function", "handler": failing_function}]
+            )
+
+        self.assertEqual(action_manager._ongoing_actions_count, 0)
+        self.assertTrue(action_manager._ongoing_actions_finished_event.is_set())
