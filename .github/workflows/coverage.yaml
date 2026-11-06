@@ -49,6 +49,7 @@ jobs:
             --extra pgmq \
             --extra piper \
             --extra redis \
+            --extra resampy \
             --extra rime \
             --extra runner \
             --extra sagemaker \
