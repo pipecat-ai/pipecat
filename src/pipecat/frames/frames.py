@@ -1807,6 +1807,35 @@ class ExternalFunctionCallCancelFrame(SystemFrame):
 
 
 @dataclass
+class BackgroundWorkStartedFrame(SystemFrame):
+    """Background work has started: work the bot runs without blocking the conversation.
+
+    Broadcast by the component that starts the work, e.g. ``LLMService`` for
+    an asynchronous function call (``cancel_on_interruption=False``) and
+    ``BackendConnector`` for a task delegated to an ``LLMWithBackend``
+    backend, with a :class:`BackgroundWorkFinishedFrame` carrying the same
+    ``work_id`` once the work is over. Anything else that dispatches such
+    work, like a job sent to another worker, should broadcast the same pair.
+
+    Parameters:
+        work_id: Identifies the work; the finished frame carries the same one.
+    """
+
+    work_id: str
+
+
+@dataclass
+class BackgroundWorkFinishedFrame(SystemFrame):
+    """Background work is over, whether by result, error or cancellation.
+
+    Parameters:
+        work_id: The work that finished, as its started frame named it.
+    """
+
+    work_id: str
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
@@ -2869,6 +2898,39 @@ class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame[STTSettings]):
 
 
 @dataclass
+class UserTurnIdleFrame(SystemFrame):
+    """The user has been idle for the idle timeout: it is their turn, and they have said nothing.
+
+    Broadcast by the user aggregator (or a ``UserTurnProcessor``) when its
+    :class:`~pipecat.turns.user_idle_controller.UserIdleController` reports
+    the user idle, together with its ``on_user_turn_idle`` event, so a
+    processor can act on the silence too.
+
+    Parameters:
+        quiet_secs: How long nothing has been said, in seconds.
+    """
+
+    quiet_secs: float
+
+
+@dataclass
+class UserWaitingFrame(SystemFrame):
+    """The user has waited quietly on background work for the waiting timeout.
+
+    Broadcast by the user aggregator (or a ``UserTurnProcessor``) when its
+    :class:`~pipecat.turns.user_idle_controller.UserIdleController` reports
+    the user waiting, together with its ``on_user_waiting`` event. Background
+    work is what a :class:`BackgroundWorkStartedFrame` announced and no
+    :class:`BackgroundWorkFinishedFrame` has ended.
+
+    Parameters:
+        quiet_secs: How long nothing has been said, in seconds.
+    """
+
+    quiet_secs: float
+
+
+@dataclass
 class UserIdleTimeoutUpdateFrame(SystemFrame):
     """Frame for updating the user idle timeout at runtime.
 
@@ -2879,6 +2941,23 @@ class UserIdleTimeoutUpdateFrame(SystemFrame):
 
     Parameters:
         timeout: The new idle timeout in seconds. 0 disables idle detection.
+    """
+
+    timeout: float
+
+
+@dataclass
+class UserWaitingTimeoutUpdateFrame(SystemFrame):
+    """Frame for updating the user waiting timeout at runtime.
+
+    Setting timeout to 0 disables waiting detection. Setting a positive value
+    enables it. Updates apply immediately: a running waiting timer restarts
+    with the new duration, and if the user is waiting on background work the
+    timer is armed right away.
+
+    Parameters:
+        timeout: The new waiting timeout in seconds. 0 disables waiting
+            detection.
     """
 
     timeout: float
