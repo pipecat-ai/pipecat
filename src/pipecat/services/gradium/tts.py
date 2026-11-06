@@ -40,14 +40,7 @@ class GradiumTTSSettings(TTSSettings):
 
 
 class GradiumTTSService(WebsocketTTSService):
-    """Text-to-Speech service using Gradium's websocket API.
-
-    By default, LLM tokens are streamed to Gradium as they arrive
-    (``TextAggregationMode.TOKEN``). Gradium treats the end of each ``text``
-    message as a word boundary, so the service only sends whole words: the
-    trailing partial word of each token is held back until the following text
-    completes it or the turn ends.
-    """
+    """Text-to-Speech service using Gradium's websocket API."""
 
     Settings = GradiumTTSSettings
     _settings: Settings
@@ -109,9 +102,7 @@ class GradiumTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregation_mode: How to aggregate incoming text before synthesis.
-                Defaults to ``TextAggregationMode.TOKEN``, streaming LLM tokens to
-                Gradium as whole words for the lowest latency.
+            text_aggregation_mode: Defaults to ``TextAggregationMode.TOKEN``.
             aggregate_sentences: Whether to aggregate sentences before synthesis.
 
                 .. deprecated:: 0.0.104
@@ -166,7 +157,6 @@ class GradiumTTSService(WebsocketTTSService):
         # State tracking
         self._receive_task = None
         self._setup_context_ids: set[str] = set()
-        # Per context, the trailing partial word not yet sent when streaming tokens.
         self._pending_words: dict[str, str] = {}
 
     def can_generate_metrics(self) -> bool:
@@ -217,12 +207,7 @@ class GradiumTTSService(WebsocketTTSService):
         return msg
 
     def _take_whole_words(self, text: str, context_id: str) -> str:
-        """Return the text that can be sent now without splitting a word.
-
-        When streaming tokens, the text after the last whitespace may be the
-        start of a word the next token continues, so it is kept for the next
-        call or for :meth:`flush_audio`.
-        """
+        """Gradium ends a word at each message, so hold back a trailing partial word."""
         if not self._is_streaming_tokens:
             return text
         text = self._pending_words.pop(context_id, "") + text
