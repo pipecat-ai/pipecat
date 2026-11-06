@@ -24,6 +24,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceResult,
     ClassifierError,
     ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -117,9 +118,10 @@ class LLMClassifier(BaseClassifier):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], None]:
         """Answer the questions in one LLM call. The call reports no token usage."""
+        images = [item for item in inputs if isinstance(item, ClassifierImage)]
         context = LLMContext([self._message(state, questions, images)])
         try:
             reply = await asyncio.wait_for(

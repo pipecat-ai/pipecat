@@ -494,7 +494,7 @@ class TestOpenAIDecisionsClassifier:
         question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
         assert classifier.supports_images
 
-        await classifier.yes_no("a camera frame", question, images=[png])
+        await classifier.yes_no("a camera frame", question, inputs=[png])
         await classifier.yes_no("no frame", question)
 
         assert bodies[0]["input"] == [
@@ -525,7 +525,7 @@ class TestOpenAIDecisionsClassifier:
         images = [_circle("red")] * (OPENAI_DECISIONS_MAX_IMAGES + 1)
         with pytest.raises(ClassifierError, match="at most 128 images"):
             await classifier.yes_no(
-                "frames", {"answer": YesNoQuestion(instructions="?")}, images=images
+                "frames", {"answer": YesNoQuestion(instructions="?")}, inputs=images
             )
         assert sent == []
         await classifier.client.close()
@@ -807,8 +807,8 @@ class TestOpenAIDecisionsLive:
         classifier = OpenAIDecisionsClassifier(api_key=os.environ["OPENAI_API_KEY"])
         question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
         try:
-            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
-            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            red = await classifier.yes_no("A camera frame.", question, inputs=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, inputs=[_circle("blue")])
             assert red["red"].is_yes
             assert not blue["red"].is_yes
         finally:

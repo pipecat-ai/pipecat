@@ -53,7 +53,7 @@ class _FakeClassifier(BaseClassifier):
         await super().cleanup()
         self.cleaned_up = True
 
-    async def _ask(self, state, questions, images=None):
+    async def _ask(self, state, questions, inputs=()):
         self.asked.append(state)
         if self.delay:
             await asyncio.sleep(self.delay)

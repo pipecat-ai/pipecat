@@ -13,11 +13,13 @@ question is one of :class:`YesNoQuestion`, :class:`ChoiceQuestion` or
 at once: :meth:`BaseClassifier.ask` takes any mix of kinds, and
 :meth:`BaseClassifier.yes_no`, :meth:`BaseClassifier.choice` and
 :meth:`BaseClassifier.score` take questions of one kind and return typed
-results. Classifiers that can see images take :class:`ClassifierImage`
-alongside the state, and classifiers that can hear take a clip of audio,
-:class:`ClassifierAudio`.
+results. Questions can come with inputs alongside the state, of the kinds
+the classifier takes: images (:class:`ClassifierImage`), clips of audio
+(:class:`ClassifierAudio`) and files such as PDFs or videos
+(:class:`ClassifierFile`).
 """
 
+import base64
 import io
 import time
 from abc import abstractmethod
@@ -25,10 +27,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypeAlias, TypeVar
 
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from pipecat.audio.utils import create_file_resampler
-from pipecat.frames.frames import ImageRawFrame
+from pipecat.frames.frames import FileRawFrame, ImageRawFrame
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
     LLMUsageMetricsData,
@@ -36,6 +38,7 @@ from pipecat.metrics.metrics import (
     ProcessingMetricsData,
 )
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.image import encode_image
 
 
@@ -151,6 +154,52 @@ class ClassifierAudio(BaseModel):
         return len(self.audio) / (2 * self.sample_rate)
 
 
+class ClassifierFile(BaseModel):
+    """An encoded file the questions can look at, alongside the state, such as a PDF or a video.
+
+    Parameters:
+        content_type: The file's MIME type, such as ``application/pdf`` or
+            ``video/mp4``.
+        data: The file's bytes. One of ``data`` and ``url`` is required.
+        url: Where the file can be fetched from, for a classifier whose
+            provider fetches files itself.
+    """
+
+    content_type: str
+    data: bytes | None = Field(default=None, repr=False)
+    url: str | None = None
+
+    @classmethod
+    def from_frame(cls, frame: FileRawFrame) -> "ClassifierFile":
+        """Build a file from a file frame, such as a file the user sent.
+
+        Args:
+            frame: The file frame, holding a base64 data URL or a URL.
+
+        Returns:
+            The file.
+        """
+        if frame.type == "url":
+            return cls(content_type=frame.format, url=frame.file)
+        return cls(content_type=frame.format, data=cls._decode(frame.file))
+
+    @model_validator(mode="after")
+    def _has_data_or_url(self) -> "ClassifierFile":
+        """The file, or a ValueError if it has both data and a URL or neither."""
+        if (self.data is None) == (self.url is None):
+            raise ValueError("ClassifierFile takes either data or a url")
+        return self
+
+    @staticmethod
+    def _decode(file: str) -> bytes:
+        """The bytes of a base64 data URL, or of plain base64."""
+        return base64.b64decode(file.split(",", 1)[1] if file.startswith("data:") else file)
+
+
+#: What can come with the state: an image, a clip of audio or a file.
+ClassifierInput: TypeAlias = ClassifierImage | ClassifierAudio | ClassifierFile
+
+
 class YesNoResult(BaseModel):
     """Answer to a :class:`YesNoQuestion`.
 
@@ -243,14 +292,12 @@ class BaseClassifier(BaseObject):
     the three typed methods are built on it and take questions of one kind.
     Subclasses implement :meth:`_ask`.
 
-    Classifiers that can see images say so in :attr:`supports_images`, and
-    then take ``images`` with the state. The others refuse them.
-
-    Classifiers that can hear say so in :attr:`supports_audio`, and then take
-    one clip as ``audio`` with the state. They declare the clips they accept:
-    from :attr:`min_audio_secs` to :attr:`max_audio_secs` long, resampled to
-    :attr:`audio_sample_rate` before :meth:`_ask` gets them. A clip of another
-    length is refused, and so is a clip for a classifier that cannot hear.
+    Questions can come with ``inputs``: images, clips of audio and files. A
+    classifier says which it takes, in :attr:`supports_images`,
+    :attr:`supports_audio` and :attr:`file_types`, and refuses the rest. One
+    that hears declares the clips it accepts: from :attr:`min_audio_secs` to
+    :attr:`max_audio_secs` long, resampled to :attr:`audio_sample_rate`
+    before :meth:`_ask` gets them. A clip of another length is refused.
 
     An owner that runs inside a worker calls :meth:`setup` with its task
     manager before the first question, and :meth:`cleanup` when it is done.
@@ -312,23 +359,30 @@ class BaseClassifier(BaseObject):
         """The sample rate clips are resampled to, or None to keep their own."""
         return None
 
+    @property
+    def file_types(self) -> frozenset[str]:
+        """The MIME types of the files questions can come with; none by default."""
+        return frozenset()
+
     async def ask(
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
         *,
+        inputs: Sequence[ClassifierInput] | None = None,
         images: Sequence[ClassifierImage] | None = None,
-        audio: ClassifierAudio | None = None,
     ) -> dict[str, ClassifierResult]:
         """Answer several questions about one state.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
-            images: Images the questions can look at, for a classifier that
-                supports them.
-            audio: A clip of audio the questions can hear, for a classifier
-                that supports it.
+            inputs: Images, clips of audio and files that come with the
+                state, of the kinds the classifier takes.
+            images: Images the questions can look at.
+
+                .. deprecated:: 1.16.0
+                    Use ``inputs`` instead. Will be removed in 2.0.0.
 
         Returns:
             One result per question, by the same names, each of the type
@@ -338,18 +392,12 @@ class BaseClassifier(BaseObject):
             ClassifierError: If the answers could not be produced, or not in
                 time: every classifier answers or raises within a bound of
                 its own, so a caller waiting on it is never left hanging.
-                Also if images come to a classifier that cannot see them, or
-                a clip to one that cannot hear or doesn't accept its length.
+                Also if an input is of a kind the classifier doesn't take,
+                or a clip of a length it doesn't accept.
         """
-        if images and not self.supports_images:
-            raise ClassifierError(f"{self} cannot see images")
-        if audio and not self.supports_audio:
-            raise ClassifierError(f"{self} cannot hear audio")
-        # A clip goes to _ask only when there is one, so the _ask of a
-        # classifier that cannot hear needn't take ``audio``.
-        clip = {"audio": await self._clip(audio)} if audio else {}
+        checked = [await self._check(item) for item in self._inputs(inputs, images)]
         started = time.perf_counter()
-        results, usage = await self._ask(state, questions, images=list(images or []), **clip)
+        results, usage = await self._ask(state, questions, inputs=checked)
         await self._call_event_handler(
             "on_metrics", self._metrics(time.perf_counter() - started, usage)
         )
@@ -360,18 +408,20 @@ class BaseClassifier(BaseObject):
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, YesNoQuestion],
         *,
+        inputs: Sequence[ClassifierInput] | None = None,
         images: Sequence[ClassifierImage] | None = None,
-        audio: ClassifierAudio | None = None,
     ) -> dict[str, YesNoResult]:
         """Ask whether the state meets each condition.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
-            images: Images the questions can look at, for a classifier that
-                supports them.
-            audio: A clip of audio the questions can hear, for a classifier
-                that supports it.
+            inputs: Images, clips of audio and files that come with the
+                state, of the kinds the classifier takes.
+            images: Images the questions can look at.
+
+                .. deprecated:: 1.16.0
+                    Use ``inputs`` instead. Will be removed in 2.0.0.
 
         Returns:
             How likely each answer is yes, by the same names.
@@ -379,7 +429,7 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        results = await self.ask(state, questions, images=images, audio=audio)
+        results = await self.ask(state, questions, inputs=self._inputs(inputs, images))
         return self._typed(results, YesNoResult)
 
     async def choice(
@@ -387,18 +437,20 @@ class BaseClassifier(BaseObject):
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ChoiceQuestion],
         *,
+        inputs: Sequence[ClassifierInput] | None = None,
         images: Sequence[ClassifierImage] | None = None,
-        audio: ClassifierAudio | None = None,
     ) -> dict[str, ChoiceResult]:
         """Ask which option fits the state, for each question.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
-            images: Images the questions can look at, for a classifier that
-                supports them.
-            audio: A clip of audio the questions can hear, for a classifier
-                that supports it.
+            inputs: Images, clips of audio and files that come with the
+                state, of the kinds the classifier takes.
+            images: Images the questions can look at.
+
+                .. deprecated:: 1.16.0
+                    Use ``inputs`` instead. Will be removed in 2.0.0.
 
         Returns:
             The option that fits and how likely each one is, by the same
@@ -407,7 +459,7 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        results = await self.ask(state, questions, images=images, audio=audio)
+        results = await self.ask(state, questions, inputs=self._inputs(inputs, images))
         return self._typed(results, ChoiceResult)
 
     async def score(
@@ -415,18 +467,20 @@ class BaseClassifier(BaseObject):
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ScoreQuestion],
         *,
+        inputs: Sequence[ClassifierInput] | None = None,
         images: Sequence[ClassifierImage] | None = None,
-        audio: ClassifierAudio | None = None,
     ) -> dict[str, ScoreResult]:
         """Ask where the state falls on each scale.
 
         Args:
             state: What the questions are about.
             questions: The questions, by name.
-            images: Images the questions can look at, for a classifier that
-                supports them.
-            audio: A clip of audio the questions can hear, for a classifier
-                that supports it.
+            inputs: Images, clips of audio and files that come with the
+                state, of the kinds the classifier takes.
+            images: Images the questions can look at.
+
+                .. deprecated:: 1.16.0
+                    Use ``inputs`` instead. Will be removed in 2.0.0.
 
         Returns:
             The position on each scale and how likely each level is, by the
@@ -435,7 +489,7 @@ class BaseClassifier(BaseObject):
         Raises:
             ClassifierError: If the answers could not be produced.
         """
-        results = await self.ask(state, questions, images=images, audio=audio)
+        results = await self.ask(state, questions, inputs=self._inputs(inputs, images))
         return self._typed(results, ScoreResult)
 
     @abstractmethod
@@ -443,20 +497,43 @@ class BaseClassifier(BaseObject):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
-        audio: ClassifierAudio | None = None,
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
         """Answer the questions, and say what tokens the call used if that is known.
 
-        ``images`` is always empty for a classifier that does not support
-        images. ``audio`` is passed only for a classifier that supports it,
-        and only when there is a clip: one of an accepted length, at
-        :attr:`audio_sample_rate`.
+        ``inputs`` holds only the kinds the classifier takes, each clip of an
+        accepted length and at :attr:`audio_sample_rate`.
         """
         pass
 
+    def _inputs(
+        self,
+        inputs: Sequence[ClassifierInput] | None,
+        images: Sequence[ClassifierImage] | None,
+    ) -> list[ClassifierInput]:
+        """The inputs, with the images given the deprecated way first."""
+        if images is not None:
+            warn_deprecated(
+                "`images` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+                "Use `inputs` instead.",
+                stacklevel=3,
+            )
+        return [*(images or []), *(inputs or [])]
+
+    async def _check(self, item: ClassifierInput) -> ClassifierInput:
+        """The input as :meth:`_ask` gets it, or a ClassifierError if it isn't taken."""
+        if isinstance(item, ClassifierAudio):
+            return await self._clip(item)
+        if isinstance(item, ClassifierImage) and not self.supports_images:
+            raise ClassifierError(f"{self} cannot see images")
+        if isinstance(item, ClassifierFile) and item.content_type not in self.file_types:
+            raise ClassifierError(f"{self} doesn't take {item.content_type} files")
+        return item
+
     async def _clip(self, audio: ClassifierAudio) -> ClassifierAudio:
-        """The clip at :attr:`audio_sample_rate`, or a ClassifierError if its length isn't accepted."""
+        """The clip at :attr:`audio_sample_rate`, or a ClassifierError if it isn't accepted."""
+        if not self.supports_audio:
+            raise ClassifierError(f"{self} cannot hear audio")
         duration = audio.duration_secs
         if duration < self.min_audio_secs:
             raise ClassifierError(

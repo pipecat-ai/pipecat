@@ -356,7 +356,7 @@ async def test_images_go_to_the_llm_before_the_questions():
     question = {"red": YesNoQuestion(instructions="is there a red circle?")}
     assert classifier.supports_images
 
-    results = await classifier.yes_no("A camera frame.", question, images=[image, image])
+    results = await classifier.yes_no("A camera frame.", question, inputs=[image, image])
     await classifier.yes_no("No frame.", question)
 
     assert results["red"].probability == 0.9
@@ -394,8 +394,8 @@ async def test_a_vision_llm_answers_a_question_about_an_image():
     classifier = LLMClassifier(llm=llm, timeout=30)
     question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
 
-    red = await classifier.yes_no("A camera frame.", question, images=[circle("red")])
-    blue = await classifier.yes_no("A camera frame.", question, images=[circle("blue")])
+    red = await classifier.yes_no("A camera frame.", question, inputs=[circle("red")])
+    blue = await classifier.yes_no("A camera frame.", question, inputs=[circle("blue")])
 
     assert red["red"].is_yes
     assert not blue["red"].is_yes

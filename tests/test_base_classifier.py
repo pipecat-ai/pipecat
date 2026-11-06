@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
 import io
 from collections.abc import Mapping, Sequence
 
@@ -14,24 +15,27 @@ from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ClassifierAudio,
     ClassifierError,
+    ClassifierFile,
     ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.frames.frames import ImageRawFrame
+from pipecat.frames.frames import FileRawFrame, ImageRawFrame
 
 QUESTION = {"answer": YesNoQuestion(instructions="is this red?")}
+PDF = ClassifierFile(content_type="application/pdf", data=b"%PDF-1.4")
 
 
 class _TextClassifier(BaseClassifier):
-    """A classifier that can neither see nor hear: its _ask takes no audio."""
+    """A classifier that takes no inputs."""
 
     def __init__(self):
         super().__init__()
         self.calls = 0
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, inputs=()):
         self.calls += 1
         return {name: YesNoResult(probability=0.5) for name in questions}, None
 
@@ -41,7 +45,7 @@ class _ImageClassifier(BaseClassifier):
 
     def __init__(self):
         super().__init__()
-        self.images: list[Sequence[ClassifierImage]] = []
+        self.images: list[Sequence[ClassifierInput]] = []
 
     @property
     def supports_images(self) -> bool:
@@ -51,10 +55,34 @@ class _ImageClassifier(BaseClassifier):
         self,
         state,
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
+        inputs: Sequence[ClassifierInput] = (),
     ):
-        self.images.append(images)
+        self.images.append(inputs)
         return {name: YesNoResult(probability=0.9) for name in questions}, None
+
+
+class _AnyInputClassifier(BaseClassifier):
+    """A classifier that sees images, hears clips and reads PDFs, and records its inputs."""
+
+    def __init__(self):
+        super().__init__()
+        self.inputs: list[Sequence[ClassifierInput]] = []
+
+    @property
+    def supports_images(self) -> bool:
+        return True
+
+    @property
+    def supports_audio(self) -> bool:
+        return True
+
+    @property
+    def file_types(self) -> frozenset[str]:
+        return frozenset({"application/pdf"})
+
+    async def _ask(self, state, questions, inputs=()):
+        self.inputs.append(inputs)
+        return {name: YesNoResult(probability=0.6) for name in questions}, None
 
 
 class _AudioClassifier(BaseClassifier):
@@ -82,8 +110,8 @@ class _AudioClassifier(BaseClassifier):
     def audio_sample_rate(self) -> int | None:
         return self._sample_rate
 
-    async def _ask(self, state, questions, images=(), audio=None):
-        self.clips.append(audio)
+    async def _ask(self, state, questions, inputs=()):
+        self.clips.append(next(iter(inputs), None))
         self.states.append(state)
         return {name: YesNoResult(probability=0.7) for name in questions}, None
 
@@ -105,7 +133,7 @@ class TestImages:
 
         assert not classifier.supports_images
         with pytest.raises(ClassifierError, match="cannot see images"):
-            await classifier.yes_no("a frame", QUESTION, images=[_jpeg()])
+            await classifier.yes_no("a frame", QUESTION, inputs=[_jpeg()])
         assert classifier.calls == 0
 
     @pytest.mark.asyncio
@@ -121,14 +149,104 @@ class TestImages:
         classifier = _ImageClassifier()
         image = _jpeg()
 
-        await classifier.yes_no("a frame", QUESTION, images=[image])
-        await classifier.ask("a frame", QUESTION, images=(image, image))
+        await classifier.yes_no("a frame", QUESTION, inputs=[image])
+        await classifier.ask("a frame", QUESTION, inputs=(image, image))
         await classifier.yes_no("no frame", QUESTION)
 
         assert classifier.images == [[image], [image, image], []]
 
+    @pytest.mark.asyncio
+    async def test_images_given_the_deprecated_way_still_reach_it_with_a_warning(self):
+        classifier = _ImageClassifier()
+        image = _jpeg()
+
+        with pytest.warns(DeprecationWarning, match="`images` is deprecated since 1.16.0"):
+            await classifier.yes_no("a frame", QUESTION, images=[image])
+
+        assert classifier.images == [[image]]
+
     def test_the_image_bytes_stay_out_of_the_repr(self):
         assert "data" not in repr(_jpeg())
+
+
+class TestFiles:
+    @pytest.mark.asyncio
+    async def test_a_classifier_that_takes_no_files_refuses_them(self):
+        classifier = _TextClassifier()
+
+        assert classifier.file_types == frozenset()
+        with pytest.raises(ClassifierError, match="doesn't take application/pdf files"):
+            await classifier.yes_no("an invoice", QUESTION, inputs=[PDF])
+        assert classifier.calls == 0
+
+    @pytest.mark.asyncio
+    async def test_a_file_of_a_type_the_classifier_doesnt_take_is_refused(self):
+        classifier = _AnyInputClassifier()
+        video = ClassifierFile(content_type="video/mp4", url="https://example.com/clip.mp4")
+
+        with pytest.raises(ClassifierError, match="doesn't take video/mp4 files"):
+            await classifier.yes_no("a clip", QUESTION, inputs=[video])
+        assert classifier.inputs == []
+
+    @pytest.mark.asyncio
+    async def test_a_file_of_a_type_the_classifier_takes_reaches_it(self):
+        classifier = _AnyInputClassifier()
+
+        await classifier.yes_no("an invoice", QUESTION, inputs=[PDF])
+
+        assert classifier.inputs == [[PDF]]
+
+    def test_a_file_has_data_or_a_url_but_not_both(self):
+        with pytest.raises(ValueError):
+            ClassifierFile(content_type="application/pdf")
+        with pytest.raises(ValueError):
+            ClassifierFile(content_type="application/pdf", data=b"x", url="https://example.com")
+
+    def test_a_file_from_a_frame_of_bytes_decodes_its_data_url(self):
+        frame = FileRawFrame(
+            file="data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4").decode(),
+            type="bytes",
+            filename="invoice.pdf",
+            format="application/pdf",
+        )
+
+        file = ClassifierFile.from_frame(frame)
+
+        assert (file.content_type, file.data, file.url) == ("application/pdf", b"%PDF-1.4", None)
+
+    def test_a_file_from_a_frame_of_a_url_keeps_the_url(self):
+        frame = FileRawFrame(
+            file="https://example.com/invoice.pdf",
+            type="url",
+            filename=None,
+            format="application/pdf",
+        )
+
+        file = ClassifierFile.from_frame(frame)
+
+        assert (file.url, file.data) == ("https://example.com/invoice.pdf", None)
+
+    def test_the_file_bytes_stay_out_of_the_repr(self):
+        assert "PDF-1.4" not in repr(PDF)
+
+
+class TestInputs:
+    @pytest.mark.asyncio
+    async def test_inputs_of_every_kind_reach_the_classifier_in_order(self):
+        classifier = _AnyInputClassifier()
+        image, clip = _jpeg(), _clip(1)
+
+        await classifier.ask("a ticket", QUESTION, inputs=[clip, PDF, image])
+
+        assert classifier.inputs == [[clip, PDF, image]]
+
+    @pytest.mark.asyncio
+    async def test_a_classifier_with_no_inputs_gets_an_empty_list(self):
+        classifier = _AnyInputClassifier()
+
+        await classifier.ask("a ticket", QUESTION)
+
+        assert classifier.inputs == [[]]
 
 
 class TestAudio:
@@ -138,7 +256,7 @@ class TestAudio:
 
         assert not classifier.supports_audio
         with pytest.raises(ClassifierError, match="cannot hear audio"):
-            await classifier.yes_no("a caller", QUESTION, audio=_clip(2))
+            await classifier.yes_no("a caller", QUESTION, inputs=[_clip(2)])
         assert classifier.calls == 0
 
     @pytest.mark.asyncio
@@ -146,7 +264,7 @@ class TestAudio:
         classifier = _AudioClassifier()
         clip = _clip(2)
 
-        results = await classifier.yes_no("a caller", QUESTION, audio=clip)
+        results = await classifier.yes_no("a caller", QUESTION, inputs=[clip])
 
         assert results == {"answer": YesNoResult(probability=0.7)}
         assert classifier.clips == [clip]
@@ -166,14 +284,14 @@ class TestAudio:
         classifier = _AudioClassifier()
 
         with pytest.raises(ClassifierError, match="of audio"):
-            await classifier.ask("a caller", QUESTION, audio=_clip(secs))
+            await classifier.ask("a caller", QUESTION, inputs=[_clip(secs)])
         assert classifier.clips == []
 
     @pytest.mark.asyncio
     async def test_a_clip_is_resampled_to_the_classifiers_sample_rate(self):
         classifier = _AudioClassifier(sample_rate=16000)
 
-        await classifier.ask("a caller", QUESTION, audio=_clip(2, sample_rate=8000))
+        await classifier.ask("a caller", QUESTION, inputs=[_clip(2, sample_rate=8000)])
 
         [clip] = classifier.clips
         assert clip.sample_rate == 16000
@@ -184,7 +302,7 @@ class TestAudio:
         classifier = _AudioClassifier()
         clip = _clip(2, sample_rate=8000)
 
-        await classifier.ask("a caller", QUESTION, audio=clip)
+        await classifier.ask("a caller", QUESTION, inputs=[clip])
 
         assert classifier.clips == [clip]
 

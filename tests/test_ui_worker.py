@@ -935,7 +935,7 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, inputs=()):
         results = {}
         for name, question in questions.items():
             self.asked.append((state, question))
@@ -1201,7 +1201,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
         from pipecat.classifiers.base_classifier import ClassifierError
 
         class _Broken(_FakeClassifier):
-            async def _ask(self, state, questions, images=()):
+            async def _ask(self, state, questions, inputs=()):
                 raise ClassifierError("down")
 
         worker = await _make_worker(classifier=_Broken(0.9))

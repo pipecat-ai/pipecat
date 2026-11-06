@@ -300,6 +300,50 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "BaseClassifier.ask.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.choice.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.score.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.yes_no.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
       "subject": "pipecat.classifiers.jev.classifier",
       "module": "pipecat.classifiers.jev.classifier",
       "kind": "module",

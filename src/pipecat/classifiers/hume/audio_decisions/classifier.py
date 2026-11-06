@@ -24,7 +24,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceResult,
     ClassifierAudio,
     ClassifierError,
-    ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -49,8 +49,8 @@ class HumeAudioClassifier(BaseClassifier):
 
     Hume hears the clip, 5 seconds to 5 minutes of it, and reads the state as
     the clip's ``context``, such as who is speaking and what they said. Every
-    question needs a clip: one without is refused with a
-    :class:`~pipecat.classifiers.base_classifier.ClassifierError`. A
+    call needs exactly one clip in its ``inputs``: any other number is
+    refused with a :class:`~pipecat.classifiers.base_classifier.ClassifierError`. A
     state longer than Hume reads keeps its last 1000 characters. Its
     probabilities estimate the share of human raters who would give each
     answer. Clips are sent as 16 kHz mono WAV, which is how the model hears
@@ -144,12 +144,15 @@ class HumeAudioClassifier(BaseClassifier):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
-        audio: ClassifierAudio | None = None,
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions about the clip in one request."""
-        if not audio:
-            raise ClassifierError(f"{self} answers questions about a clip of audio")
+        clips = [item for item in inputs if isinstance(item, ClassifierAudio)]
+        if len(clips) != 1:
+            raise ClassifierError(
+                f"{self} answers questions about one clip of audio, got {len(clips)}"
+            )
+        audio = clips[0]
         answers, usage = await self._client.ask(
             pcm_to_wav(audio.audio, audio.sample_rate),
             {name: self._to_hume(question) for name, question in questions.items()},

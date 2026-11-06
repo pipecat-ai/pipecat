@@ -715,7 +715,7 @@ class _ScriptedClassifier(BaseClassifier):
         self._fail = fail
         self.states: list = []
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, inputs=()):
         self.states.append(state)
         await asyncio.sleep(self._after)
         if self._fail:
