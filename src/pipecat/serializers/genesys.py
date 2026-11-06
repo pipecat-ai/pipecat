@@ -729,6 +729,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
             logger.error(f"Failed to parse AudioHook message: {e}")
             return None
 
+        # Control messages are JSON objects; a value of another shape carries
+        # neither a type nor a sequence for the protocol to answer.
+        if not isinstance(message, dict):
+            logger.error(f"Ignoring AudioHook message that is not a JSON object: {data}")
+            return None
+
         return await self._handle_control_message(message)
 
     async def _deserialize_audio(self, data: bytes) -> Frame | None:

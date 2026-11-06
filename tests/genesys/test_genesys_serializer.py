@@ -489,3 +489,20 @@ class TestGenesysAudioHookSerializer:
         assert response1["seq"] == 1
         assert response2["seq"] == 2
         assert response3["seq"] == 3
+
+
+class TestGenesysNonObjectMessages:
+    """A text frame that is valid JSON but not an object.
+
+    The websocket transports treat an exception out of ``deserialize()`` as
+    fatal, so a message such as ``null`` or ``[]`` has to be ignored rather than
+    raise and end the call.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("payload", ["null", "[]", '"open"', "123", "true"])
+    async def test_non_object_json_is_ignored(self, payload):
+        """Test that a control message of another shape returns None."""
+        serializer = GenesysAudioHookSerializer()
+
+        assert await serializer.deserialize(payload) is None
