@@ -119,6 +119,15 @@ def assert_server_ruff_lint_clean(server_path):
 
 # Test configurations for different transport types
 TEST_CONFIGS = [
+    {
+        "name": "rime-stt",
+        "bot_type": "web",
+        "transports": ["smallwebrtc"],
+        "mode": "cascade",
+        "stt_service": "rime_stt",
+        "llm_service": "openai_llm",
+        "tts_service": "rime_tts",
+    },
     # WebRTC Transports - Cascade
     {
         "name": "daily-cascade",
@@ -532,6 +541,14 @@ def test_project_generation(config_data, temp_output_dir):
     # Verify pyproject.toml has correct dependencies
     pyproject_content = pyproject_file.read_text()
     assert "pipecat-ai[" in pyproject_content, "pyproject.toml should have pipecat-ai dependencies"
+
+    if config.stt_service == "rime_stt":
+        dependencies = tomllib.loads(pyproject_content)["project"]["dependencies"]
+        requirement = next(item for item in dependencies if item.startswith("pipecat-ai["))
+        extras = set(requirement.split("[", 1)[1].split("]", 1)[0].split(","))
+        assert "rime-stt" in extras
+        if config.tts_service == "rime_tts":
+            assert "rime" in extras
 
     # Verify transport extras
     for transport in config.transports:

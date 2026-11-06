@@ -1,0 +1,46 @@
+name: rime_stt_audio
+
+user: !include ../user_audio.yaml
+
+judge:
+  modality: audio
+  transcription:
+    service: moonshine
+    model: small-streaming
+
+scenarios:
+  - name: multi_turn
+    turns:
+      - expect:
+          - event: response
+      - user: My name is Alex. Please remember my name.
+        expect:
+          - event: response
+      - user: What is my name?
+        expect:
+          - event: response
+            text_contains: Alex
+      - user: What is the capital of Germany?
+        expect:
+          - event: response
+            text_contains: Berlin
+
+  - name: interruption_and_next_turn
+    turns:
+      - expect:
+          - event: response
+      - user: Tell me a long story about Paris, at least six hundred words.
+        expect:
+          - event: bot_started_speaking
+      - user: Stop the story. What is the capital of Japan?
+        send_after:
+          event: bot_started_speaking
+          delay_ms: 1000
+        expect:
+          - event: bot_interrupted
+          - event: response
+            text_contains: Tokyo
+      - user: What is the capital of France?
+        expect:
+          - event: response
+            text_contains: Paris
