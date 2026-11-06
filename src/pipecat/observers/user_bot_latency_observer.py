@@ -685,8 +685,16 @@ class UserBotLatencyObserver(BaseObserver):
         elif isinstance(data.frame, TTSAudioRawFrame):
             self._mark(_MomentKind.FIRST_AUDIO, source=data.source.name, once=True)
         elif isinstance(data.frame, InterruptionFrame):
-            # Discard stale metrics from cancelled LLM/TTS cycles
+            # Discard stale metrics from cancelled LLM/TTS cycles, but keep the
+            # user turn being measured: a start strategy driven by transcripts
+            # starts the turn, and interrupts, after the VAD reported the stop.
+            user_turn_start_time = self._user_turn_start_time
+            turn_moments = [
+                m for m in self._moments if m.kind in (_MomentKind.VAD_STOP, _MomentKind.TRANSCRIPT)
+            ]
             self._reset_accumulators()
+            self._user_turn_start_time = user_turn_start_time
+            self._moments = turn_moments
         elif isinstance(data.frame, FunctionCallInProgressFrame):
             self._function_call_starts[data.frame.tool_call_id] = (
                 data.frame.function_name,
