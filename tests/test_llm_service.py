@@ -18,6 +18,8 @@ from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -504,6 +506,80 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(muted)
 
 
+class TestBackgroundWorkFrames(unittest.IsolatedAsyncioTestCase):
+    """An async call is work the conversation waits on; a synchronous one holds it."""
+
+    async def _frames_for(self, service: MockLLMService, function_name: str) -> list:
+        service._call_event_handler = AsyncMock()
+
+        async def run_inline(runner_items):
+            for runner_item in runner_items:
+                await service._run_function_call(runner_item)
+
+        service._run_parallel_function_calls = run_inline
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+
+        frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=function_name,
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+        return frames
+
+    async def test_an_async_call_is_bracketed_by_the_work_frames(self):
+        service = MockLLMService()
+
+        async def async_tool(params: FunctionCallParams):
+            await params.result_callback(
+                "working", properties=FunctionCallResultProperties(is_final=False)
+            )
+            await params.result_callback("done")
+
+        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+
+        frames = await self._frames_for(service, "async_tool")
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
+                FunctionCallResultFrame,
+                FunctionCallResultFrame,
+                BackgroundWorkFinishedFrame,
+            ],
+        )
+        self.assertEqual(frames[2].work_id, "call_1")
+        self.assertEqual(frames[-1].work_id, "call_1")
+
+    async def test_a_synchronous_call_broadcasts_no_work_frames(self):
+        service = MockLLMService()
+
+        async def sync_tool(params: FunctionCallParams):
+            await params.result_callback("done")
+
+        service.register_function("sync_tool", sync_tool)
+
+        frames = await self._frames_for(service, "sync_tool")
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+        )
+
+
 class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
     """A function call that runs past its deadline is cancelled, not abandoned."""
 
@@ -642,8 +718,9 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         await service._cancel_function_calls_by_tool_call_id("call_1")
         await asyncio.sleep(self.SETTLE)
 
-        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
-        self.assertFalse(frames[-1].run_llm)
+        self.assertIsInstance(frames[-2], FunctionCallCancelFrame)
+        self.assertFalse(frames[-2].run_llm)
+        self.assertIsInstance(frames[-1], BackgroundWorkFinishedFrame)
 
     async def test_sequential_runner_survives_a_timeout(self):
         """A cancelled call must not take the sequential runner down with it."""
@@ -746,9 +823,15 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [type(frame) for frame in frames],
-            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
+                FunctionCallResultFrame,
+                BackgroundWorkFinishedFrame,
+            ],
         )
-        self.assertEqual(frames[-1].result, {"ok": True})
+        self.assertEqual(frames[-2].result, {"ok": True})
 
     async def test_timeout_settles_a_call_with_no_task_left_to_cancel(self):
         """The handler can finish while the deadline is being processed.
@@ -873,12 +956,14 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
             [
                 FunctionCallsStartedFrame,
                 FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
                 FunctionCallResultFrame,
                 FunctionCallCancelFrame,
+                BackgroundWorkFinishedFrame,
             ],
         )
-        self.assertFalse(frames[2].properties.is_final)
-        self.assertTrue(frames[-1].run_llm)
+        self.assertFalse(frames[3].properties.is_final)
+        self.assertTrue(frames[-2].run_llm)
 
     async def test_a_hanging_async_tool_times_out_without_any_update(self):
         """Control for the test above, differing only in the missing update."""
@@ -908,10 +993,12 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
             [
                 FunctionCallsStartedFrame,
                 FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
                 FunctionCallCancelFrame,
+                BackgroundWorkFinishedFrame,
             ],
         )
-        self.assertTrue(frames[-1].run_llm)
+        self.assertTrue(frames[-2].run_llm)
 
 
 class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):

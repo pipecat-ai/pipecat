@@ -39,6 +39,8 @@ from pipecat.expressive.instructions import (
 from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -2017,6 +2019,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             cancel_on_interruption=item.cancel_on_interruption,
             group_id=runner_item.group_id,
         )
+        # An async call is background work: the pipeline is told when it
+        # starts and when it settles.
+        async_call = not item.cancel_on_interruption
+        if async_call:
+            await self.broadcast_frame(BackgroundWorkStartedFrame, work_id=runner_item.tool_call_id)
 
         timeout_task: asyncio.Task | None = None
         # Set when the handler raises, so the result settling the call on its
@@ -2070,6 +2077,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 properties=properties,
                 error=call_error,
             )
+            if is_final and async_call:
+                await self.broadcast_frame(
+                    BackgroundWorkFinishedFrame, work_id=runner_item.tool_call_id
+                )
 
         # Start a timeout task for deferred function calls
         async def timeout_handler():
@@ -2412,6 +2423,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             tool_call_id=runner_item.tool_call_id,
             run_llm=run_llm,
         )
+        if not runner_item.registry_item.cancel_on_interruption:
+            await self.broadcast_frame(
+                BackgroundWorkFinishedFrame, work_id=runner_item.tool_call_id
+            )
         return FunctionCallFromLLM(
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,

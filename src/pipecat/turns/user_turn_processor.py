@@ -17,7 +17,9 @@ from pipecat.frames.frames import (
     StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnIdleFrame,
     UserTurnResponseCancelFrame,
+    UserWaitingFrame,
 )
 from pipecat.processors.frame_processor import (
     FrameDirection,
@@ -55,6 +57,9 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
     - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
+      A ``UserTurnIdleFrame`` is broadcast with it.
+    - on_user_waiting: Emitted when the user has waited quietly on background
+      work for the configured timeout. A ``UserWaitingFrame`` is broadcast with it.
 
     Example::
 
@@ -91,6 +96,7 @@ class UserTurnProcessor(FrameProcessor):
         user_turn_strategies_params: UserTurnStrategiesParams | None = None,
         user_turn_stop_timeout: float = 5.0,
         user_idle_timeout: float = 0,
+        user_waiting_timeout: float = 0,
         **kwargs,
     ):
         """Initialize the user turn processor.
@@ -105,6 +111,10 @@ class UserTurnProcessor(FrameProcessor):
                 The processor will emit an `on_user_turn_idle` event when the user
                 has been idle (not speaking) for this duration. Set to 0 to disable
                 idle detection.
+            user_waiting_timeout: Seconds of quiet, while background work is in
+                progress (e.g. an asynchronous function call, or a task delegated
+                to an `LLMWithBackend` backend), before the processor emits an
+                `on_user_waiting` event. Set to 0 to disable waiting detection.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
@@ -114,6 +124,7 @@ class UserTurnProcessor(FrameProcessor):
         self._register_event_handler("on_user_turn_resumed")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_waiting")
         self._register_event_handler("on_user_turn_inference_triggered")
 
         self._user_turn_controller = UserTurnController(
@@ -142,8 +153,11 @@ class UserTurnProcessor(FrameProcessor):
             "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
         )
 
-        self._user_idle_controller = UserIdleController(user_idle_timeout=user_idle_timeout)
+        self._user_idle_controller = UserIdleController(
+            user_idle_timeout=user_idle_timeout, user_waiting_timeout=user_waiting_timeout
+        )
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
+        self._user_idle_controller.add_event_handler("on_user_waiting", self._on_user_waiting)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor.
@@ -267,8 +281,13 @@ class UserTurnProcessor(FrameProcessor):
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
 
-    async def _on_user_turn_idle(self, controller):
+    async def _on_user_turn_idle(self, controller: UserIdleController):
+        await self.broadcast_frame(UserTurnIdleFrame, quiet_secs=controller.quiet_secs)
         await self._call_event_handler("on_user_turn_idle")
+
+    async def _on_user_waiting(self, controller: UserIdleController):
+        await self.broadcast_frame(UserWaitingFrame, quiet_secs=controller.quiet_secs)
+        await self._call_event_handler("on_user_waiting")
 
     async def _on_user_turn_inference_triggered(
         self,

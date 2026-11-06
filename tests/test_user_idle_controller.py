@@ -9,20 +9,35 @@ import unittest
 import unittest.mock
 
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
+    LLMMarkerResponseFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnIdleFrame,
+    UserWaitingFrame,
+    UserWaitingTimeoutUpdateFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_idle_controller import UserIdleController
+from pipecat.turns.user_turn_processor import UserTurnProcessor
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
 USER_IDLE_TIMEOUT = 0.2
+USER_WAITING_TIMEOUT = 0.2
 
 
 class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
@@ -627,3 +642,403 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
+    """The waiting timer: the same silence as idle, with background work in progress."""
+
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+        self.controller = UserIdleController(
+            user_idle_timeout=USER_IDLE_TIMEOUT, user_waiting_timeout=USER_WAITING_TIMEOUT
+        )
+        await self.controller.setup(frame_processor_setup(self.task_manager))
+        self.events: list[str] = []
+
+        @self.controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            self.events.append("idle")
+
+        @self.controller.event_handler("on_user_waiting")
+        async def on_user_waiting(controller):
+            self.events.append("waiting")
+
+    async def asyncTearDown(self):
+        await self.controller.cleanup()
+
+    async def _let_timers_run(self):
+        await asyncio.sleep(USER_WAITING_TIMEOUT + 0.1)
+
+    async def test_bot_stopping_with_work_in_flight_starts_the_waiting_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_bot_stopping_with_nothing_in_flight_starts_the_idle_timer(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["idle"])
+
+    async def test_an_open_async_call_counts_as_work_in_flight(self):
+        """The call's work frames bracket it; its pending result alone suppresses idle."""
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="call_1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+        self.assertFalse(self.controller.waiting_for_user)
+
+    async def test_a_pending_synchronous_call_starts_no_timer(self):
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+    async def test_work_starting_in_a_quiet_conversation_starts_the_waiting_timer(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_work_starting_while_the_bot_speaks_waits_for_it_to_stop(self):
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_the_last_work_finishing_hands_over_to_the_idle_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w2"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+        await self.controller.process_frame(BackgroundWorkFinishedFrame(work_id="w2"))
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(BackgroundWorkFinishedFrame(work_id="w1"))
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["idle"])
+        self.assertTrue(self.controller.waiting_for_user)
+
+    async def test_a_finish_for_unknown_work_is_ignored(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BackgroundWorkFinishedFrame(work_id="other"))
+        await self.controller.process_frame(BackgroundWorkFinishedFrame(work_id="w1"))
+        await self.controller.process_frame(BackgroundWorkFinishedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["idle"])
+
+    async def test_the_waiting_event_fires_once_per_start(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting"])
+
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting", "waiting"])
+
+    async def test_a_silent_reply_starts_the_waiting_timer_over(self):
+        """A reply the LLM left unspoken ends its turn like speech would."""
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting"])
+
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="∅", kind="silent"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting", "waiting"])
+
+    async def test_a_silent_reply_starts_the_idle_timer_over(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["idle"])
+
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="∅", kind="silent"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["idle", "idle"])
+        self.assertTrue(self.controller.waiting_for_user)
+
+    async def test_a_silent_reply_starts_no_timer_while_someone_speaks(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="∅", kind="silent"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="∅", kind="silent"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, [])
+
+    async def test_other_marker_reports_start_no_timer(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="● Hi", kind="complete"))
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["idle"])
+
+    async def test_a_waiting_timeout_update_applies_at_once(self):
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        events = []
+
+        @controller.event_handler("on_user_waiting")
+        async def on_user_waiting(controller):
+            events.append("waiting")
+
+        await controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserWaitingTimeoutUpdateFrame(timeout=USER_WAITING_TIMEOUT))
+        await self._let_timers_run()
+        self.assertEqual(events, ["waiting"])
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserWaitingTimeoutUpdateFrame(timeout=0))
+        await self._let_timers_run()
+        self.assertEqual(events, ["waiting"])
+        await controller.cleanup()
+
+    async def test_quiet_secs_counts_from_when_the_conversation_went_quiet(self):
+        self.assertEqual(self.controller.quiet_secs, 0.0)
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(0.1)
+        self.assertGreaterEqual(self.controller.quiet_secs, 0.1)
+
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+        self.assertEqual(self.controller.quiet_secs, 0.0)
+        await self.controller.process_frame(UserStoppedSpeakingFrame())
+        await asyncio.sleep(0.05)
+        self.assertGreaterEqual(self.controller.quiet_secs, 0.05)
+        self.assertLess(self.controller.quiet_secs, 0.1)
+
+    async def test_quiet_goes_on_through_a_silent_reply(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        await self.controller.process_frame(LLMMarkerResponseFrame(raw="∅", kind="silent"))
+        self.assertGreaterEqual(self.controller.quiet_secs, USER_WAITING_TIMEOUT)
+
+    async def test_a_call_settling_with_work_in_flight_starts_the_waiting_timer_over(self):
+        """The bot speaks, then calls a function, and says nothing on its result."""
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_a_call_settling_while_the_bot_speaks_starts_no_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+    async def test_speech_cancels_the_waiting_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+    async def test_wait_for_user_with_work_in_flight_starts_the_waiting_timer(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+        await self.controller.process_frame(UserStoppedSpeakingFrame())
+        await self.controller.wait_for_user()
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_an_idle_timeout_update_does_not_arm_during_work(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_work_starting_cancels_an_idle_timer_even_with_no_waiting_timeout(self):
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        events = []
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            events.append("idle")
+
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
+        await controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self._let_timers_run()
+
+        self.assertEqual(events, [])
+        await controller.cleanup()
+
+    async def test_work_finishing_cancels_a_waiting_timer_even_with_no_idle_timeout(self):
+        controller = UserIdleController(user_waiting_timeout=USER_WAITING_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        events = []
+
+        @controller.event_handler("on_user_waiting")
+        async def on_user_waiting(controller):
+            events.append("waiting")
+
+        await controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+        await controller.process_frame(BackgroundWorkFinishedFrame(work_id="w1"))
+        await self._let_timers_run()
+
+        self.assertEqual(events, [])
+        await controller.cleanup()
+
+    async def test_waiting_detection_is_off_by_default(self):
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        events = []
+
+        @controller.event_handler("on_user_waiting")
+        async def on_user_waiting(controller):
+            events.append("waiting")
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            events.append("idle")
+
+        await controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(events, [])
+        await controller.cleanup()
+
+
+class TestUserWaitingHosts(unittest.IsolatedAsyncioTestCase):
+    """The hosts expose the waiting timeout and event beside the idle pair, and broadcast both silences."""
+
+    def _waiting_frames(self, frames: list) -> list[UserWaitingFrame]:
+        return [f for f in frames if isinstance(f, UserWaitingFrame)]
+
+    def _idle_frames(self, frames: list) -> list[UserTurnIdleFrame]:
+        return [f for f in frames if isinstance(f, UserTurnIdleFrame)]
+
+    async def test_the_user_aggregator_emits_on_user_waiting(self):
+        user, assistant = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(user_waiting_timeout=USER_WAITING_TIMEOUT),
+        )
+        events = []
+
+        @user.event_handler("on_user_waiting")
+        async def on_user_waiting(aggregator):
+            events.append("waiting")
+
+        received_down, received_up = await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=[
+                BackgroundWorkStartedFrame(work_id="w1"),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(USER_WAITING_TIMEOUT + 0.2),
+            ],
+        )
+
+        self.assertEqual(events, ["waiting"])
+        # The frame goes both ways, saying how long it has been quiet.
+        (down,) = self._waiting_frames(received_down)
+        (up,) = self._waiting_frames(received_up)
+        self.assertGreaterEqual(down.quiet_secs, USER_WAITING_TIMEOUT)
+        self.assertEqual(up.quiet_secs, down.quiet_secs)
+
+    async def test_the_user_aggregator_broadcasts_the_idle_frame(self):
+        user, assistant = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(user_idle_timeout=USER_IDLE_TIMEOUT),
+        )
+
+        received_down, received_up = await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=[BotStoppedSpeakingFrame(), SleepFrame(USER_IDLE_TIMEOUT + 0.2)],
+        )
+
+        (down,) = self._idle_frames(received_down)
+        (up,) = self._idle_frames(received_up)
+        self.assertGreaterEqual(down.quiet_secs, USER_IDLE_TIMEOUT)
+        self.assertEqual(up.quiet_secs, down.quiet_secs)
+
+    async def test_the_user_turn_processor_emits_on_user_waiting(self):
+        processor = UserTurnProcessor(user_waiting_timeout=USER_WAITING_TIMEOUT)
+        events = []
+
+        @processor.event_handler("on_user_waiting")
+        async def on_user_waiting(processor):
+            events.append("waiting")
+
+        received_down, received_up = await run_test(
+            processor,
+            frames_to_send=[
+                BackgroundWorkStartedFrame(work_id="w1"),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(USER_WAITING_TIMEOUT + 0.2),
+            ],
+        )
+
+        self.assertEqual(events, ["waiting"])
+        self.assertEqual(len(self._waiting_frames(received_down)), 1)
+        self.assertEqual(len(self._waiting_frames(received_up)), 1)
+
+    async def test_the_user_turn_processor_broadcasts_the_idle_frame(self):
+        processor = UserTurnProcessor(user_idle_timeout=USER_IDLE_TIMEOUT)
+
+        received_down, received_up = await run_test(
+            processor,
+            frames_to_send=[BotStoppedSpeakingFrame(), SleepFrame(USER_IDLE_TIMEOUT + 0.2)],
+        )
+
+        self.assertEqual(len(self._idle_frames(received_down)), 1)
+        self.assertEqual(len(self._idle_frames(received_up)), 1)
