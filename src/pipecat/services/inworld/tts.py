@@ -655,8 +655,10 @@ class InworldTTSService(WebsocketTTSService):
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
             apply_text_normalization: Whether to apply text normalization.
-            max_buffer_delay_ms: Maximum buffer delay in milliseconds.
-            buffer_char_threshold: Buffer character threshold.
+            max_buffer_delay_ms: Maximum buffer delay in milliseconds. Use the
+                ``max_buffer_delay_ms`` constructor argument instead.
+            buffer_char_threshold: Buffer character threshold. Use the
+                ``buffer_char_threshold`` constructor argument instead.
             auto_mode: Whether to use auto mode. Recommended when texts are sent
                 in full sentences/phrases. When enabled, the server controls
                 flushing of buffered text to achieve minimal latency while
@@ -685,6 +687,8 @@ class InworldTTSService(WebsocketTTSService):
         auto_mode: bool | None = None,
         apply_text_normalization: str | None = None,
         timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",
+        max_buffer_delay_ms: int | None = None,
+        buffer_char_threshold: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         aggregate_sentences: bool | None = None,
@@ -717,6 +721,13 @@ class InworldTTSService(WebsocketTTSService):
             apply_text_normalization: Whether to apply text normalization.
             timestamp_transport_strategy: Strategy for timestamp transport
                 ("ASYNC" or "SYNC"). Defaults to "ASYNC".
+            max_buffer_delay_ms: Maximum time in milliseconds the server buffers
+                text before synthesizing it when auto mode is off. If None
+                (default), 3000 is used.
+            buffer_char_threshold: Number of buffered characters that triggers
+                synthesis. With the ``SENTENCE_BOUNDARY`` strategy it also cuts
+                sentences longer than it. If None (default), 250 is used, or
+                Inworld's default with ``SENTENCE_BOUNDARY``.
             params: Input parameters for Inworld WebSocket TTS configuration.
 
                 .. deprecated:: 0.0.105
@@ -761,8 +772,6 @@ class InworldTTSService(WebsocketTTSService):
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
-        _buffer_max_delay_ms = None
-        _buffer_char_threshold = None
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
@@ -776,8 +785,10 @@ class InworldTTSService(WebsocketTTSService):
                     timestamp_transport_strategy = params.timestamp_transport_strategy
                 if params.auto_mode is not None:
                     auto_mode = params.auto_mode
-            _buffer_max_delay_ms = params.max_buffer_delay_ms
-            _buffer_char_threshold = params.buffer_char_threshold
+            if max_buffer_delay_ms is None:
+                max_buffer_delay_ms = params.max_buffer_delay_ms
+            if buffer_char_threshold is None:
+                buffer_char_threshold = params.buffer_char_threshold
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -800,8 +811,8 @@ class InworldTTSService(WebsocketTTSService):
         self._timestamp_type = "WORD"
 
         self._buffer_settings = {
-            "maxBufferDelayMs": _buffer_max_delay_ms,
-            "bufferCharThreshold": _buffer_char_threshold,
+            "maxBufferDelayMs": max_buffer_delay_ms,
+            "bufferCharThreshold": buffer_char_threshold,
         }
 
         self._receive_task = None

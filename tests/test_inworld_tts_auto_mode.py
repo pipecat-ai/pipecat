@@ -35,12 +35,30 @@ async def test_token_mode_uses_sentence_boundary():
 
 @pytest.mark.asyncio
 async def test_sentence_boundary_sends_a_set_buffer_char_threshold():
-    with pytest.deprecated_call():
-        params = InworldTTSService.InputParams(buffer_char_threshold=400)
-        config = await _create_config(
-            text_aggregation_mode=TextAggregationMode.TOKEN, params=params
-        )
+    config = await _create_config(
+        text_aggregation_mode=TextAggregationMode.TOKEN, buffer_char_threshold=400
+    )
     assert config["autoModeStrategy"] == "SENTENCE_BOUNDARY"
+    assert config["bufferCharThreshold"] == 400
+
+
+@pytest.mark.asyncio
+async def test_buffer_args_override_params():
+    with pytest.deprecated_call():
+        params = InworldTTSService.InputParams(max_buffer_delay_ms=1000, buffer_char_threshold=400)
+        config = await _create_config(
+            params=params, max_buffer_delay_ms=500, buffer_char_threshold=100
+        )
+    assert config["maxBufferDelayMs"] == 500
+    assert config["bufferCharThreshold"] == 100
+
+
+@pytest.mark.asyncio
+async def test_buffer_params_apply_without_args():
+    with pytest.deprecated_call():
+        params = InworldTTSService.InputParams(max_buffer_delay_ms=1000, buffer_char_threshold=400)
+        config = await _create_config(params=params)
+    assert config["maxBufferDelayMs"] == 1000
     assert config["bufferCharThreshold"] == 400
 
 
