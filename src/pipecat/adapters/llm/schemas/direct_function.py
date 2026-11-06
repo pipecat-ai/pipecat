@@ -193,7 +193,7 @@ class BaseDirectFunctionWrapper:
         Returns:
             A dictionary representing the JSON Schema
         """
-        if type_hint is None:
+        if type_hint is None or type_hint is Any:
             return {}
 
         # Handle basic types
