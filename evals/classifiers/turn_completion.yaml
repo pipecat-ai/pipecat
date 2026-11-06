@@ -3,7 +3,7 @@
 # Each entry is what speech recognition would hand the bot: lower case, no
 # punctuation, sometimes cut off. `bot` is the bot's previous line, when the
 # label depends on it. `label` is the verdict the turn-completion protocol in
-# pipecat.turns.user_turn_completion_mixin asks the LLM for:
+# pipecat.turns.user_turn_completion asks the LLM for:
 #
 #   complete  the user has taken their turn, answer them
 #   short     cut off mid-sentence, they will continue in a few seconds

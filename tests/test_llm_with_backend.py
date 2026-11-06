@@ -59,6 +59,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
@@ -911,7 +912,7 @@ async def test_no_turn_is_raced_while_the_frontend_filters_incomplete_turns():
     await run_test(
         service,
         frames_to_send=[
-            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])),
             SleepFrame(0.1),
             _user_turn(),
             SleepFrame(0.1),

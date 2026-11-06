@@ -16,7 +16,8 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import run_test
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 
 
 class _MockLLMService(LLMService):
@@ -112,12 +113,13 @@ class TestLLMSwitcherSettings(unittest.IsolatedAsyncioTestCase):
     """An LLMSwitcher must apply settings updates on every member LLM."""
 
     async def test_turn_completion_setting_applied_to_all_member_llms(self):
-        """Enabling filter_incomplete_user_turns reaches inactive members too.
+        """Installing the turn-completion extension reaches inactive members too.
 
-        LLMTurnCompletionUserTurnStopStrategy enables the setting with a single
-        frame on StartFrame. A member LLM that missed it would emit none of the
-        completion markers the strategy waits on, so user turns would stop being
-        finalized as soon as it became the active LLM.
+        LLMTurnCompletionUserTurnStopStrategy installs it with a single frame on
+        StartFrame, as a callable that builds one per member. A member LLM that
+        missed it would emit none of the completion markers the strategy waits
+        on, so user turns would stop being finalized as soon as it became the
+        active LLM.
         """
         llm1 = _MockLLMService()
         llm2 = _MockLLMService()
@@ -127,14 +129,14 @@ class TestLLMSwitcherSettings(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(filter_incomplete_user_turns=True),
+                    delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension]),
                     reach_inactive_services=True,
                 )
             ],
         )
 
         for llm in (llm1, llm2):
-            self.assertTrue(llm._filter_incomplete_user_turns)
+            self.assertIsInstance(llm._extensions[0], LLMTurnCompletionLLMExtension)
             self.assertEqual(
                 llm._settings.system_instruction,
                 UserTurnCompletionConfig().completion_instructions,
