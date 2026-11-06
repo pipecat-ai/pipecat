@@ -27,7 +27,7 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Rime speech recognition
 
-The [Rime STT guide](../docs/services/rime-stt.md#run-the-examples) includes commands for streaming and completed-segment transcription and a Rime STT → OpenAI → Rime TTS voice agent.
+The [Rime STT guide](../docs/services/rime-stt.md#run-the-examples) includes commands for streaming transcription and a Rime STT → OpenAI → Rime TTS voice agent.
 
 ## Running examples with other transports
 

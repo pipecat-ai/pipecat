@@ -71,7 +71,7 @@ def language(tag: str):
 
 
 class Peer:
-    """Expose canonical STT RPCs with test-controlled responses and completion."""
+    """Expose streaming STT with test-controlled responses and completion."""
 
     def __init__(self):
         self.calls: list[Call] = []
@@ -84,16 +84,6 @@ class Peer:
         await context.send_initial_metadata((("x-request-id", call.request_id),))
         self.requests.put_nowait(call)
         return call
-
-    async def transcribe(self, request, context):
-        call = await self._begin(request, request.options.language, context)
-        call.audio.append(request.audio)
-        call.received_audio.set()
-        call.eof.set()
-        response = await call.responses.get()
-        if isinstance(response, Failure):
-            await context.abort(response.code, response.detail)
-        return response
 
     async def stream(self, requests, context):
         request = await anext(requests)
@@ -147,11 +137,6 @@ async def peer_server(monkeypatch):
             grpc.method_handlers_generic_handler(
                 "rime.SpeechToText",
                 {
-                    "Transcribe": grpc.unary_unary_rpc_method_handler(
-                        peer.transcribe,
-                        request_deserializer=proto.TranscriptionRequest.FromString,
-                        response_serializer=proto.TranscriptionResponse.SerializeToString,
-                    ),
                     "TranscribeStreaming": grpc.stream_stream_rpc_method_handler(
                         peer.stream,
                         request_deserializer=proto.StreamingTranscriptionRequest.FromString,

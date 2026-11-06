@@ -306,11 +306,8 @@ async def test_cancel_is_prompt_and_cleanup_is_repeatable(client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("segmented", [False, True])
 @pytest.mark.parametrize("second_text", ["second", ""])
-async def test_real_aggregator_keeps_delayed_segments_in_one_turn(client, segmented, second_text):
-    from rimelabs_sdk import Transcription
-
+async def test_real_aggregator_keeps_delayed_segments_in_one_turn(client, second_text):
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import (
         LLMUserAggregator,
@@ -340,70 +337,46 @@ async def test_real_aggregator_keeps_delayed_segments_in_one_turn(client, segmen
         turns.append(message.content)
         completed.set()
 
-    cls = rime.RimeSegmentedSTTService if segmented else RimeSTTService
-    service = cls(api_key="test", ttfs_p99_latency=60)
+    service = RimeSTTService(api_key="test", ttfs_p99_latency=60)
     async with harness(service, downstream=aggregator) as (out, _):
         await send(service, VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame())
-        if segmented:
-            async with asyncio.timeout(2):
-                first_call = await client.new_call.get()
-        else:
-            first = await next_stream(client)
+        first = await next_stream(client)
         await send(service, VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame())
         # Both VAD stops must reach the real turn controller before A finishes.
         await asyncio.sleep(0.03)
-        if segmented:
-            first_call[2].set_result(Transcription(text="first", language="en"))
-            async with asyncio.timeout(2):
-                second_call = await client.new_call.get()
-        else:
-            second = await next_stream(client)
-            await first.finish("first")
+        second = await next_stream(client)
+        await first.finish("first")
         await out.wait_for(TranscriptionFrame)
         assert not completed.is_set()
         assert not out.transcripts[0].finalized
-        if segmented:
-            second_call[2].set_result(Transcription(text=second_text, language="en"))
-        else:
-            await wait(second.exhausted)
-            await second.finish(second_text)
+        await wait(second.exhausted)
+        await second.finish(second_text)
         await wait(completed)
         assert turns == ["first second" if second_text else "first"]
         assert out.transcripts[-1].finalized
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("segmented", [False, True])
-async def test_empty_success_does_not_start_an_agent_reply(client, segmented):
-    from rimelabs_sdk import Transcription
-
+async def test_empty_success_does_not_start_an_agent_reply(client):
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator
 
     context = LLMContext()
     aggregator = LLMUserAggregator(context, enable_direct_mode=True)
-    cls = rime.RimeSegmentedSTTService if segmented else RimeSTTService
-    service = cls(api_key="test")
+    service = RimeSTTService(api_key="test")
     async with harness(service, downstream=aggregator) as (out, _):
         await send(service, VADUserStartedSpeakingFrame(), audio(), VADUserStoppedSpeakingFrame())
-        if segmented:
-            async with asyncio.timeout(2):
-                call = await client.new_call.get()
-            call[2].set_result(Transcription(text="", language="en"))
-        else:
-            stream = await next_stream(client)
-            await wait(stream.exhausted)
-            await stream.finish("")
+        stream = await next_stream(client)
+        await wait(stream.exhausted)
+        await stream.finish("")
         await out.wait_for(TranscriptionFrame)
         assert context.messages == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("segmented", [False, True])
 @pytest.mark.parametrize("bad_frame", [audio(rate=44100), audio(channels=3), audio(rate=24000)])
-async def test_invalid_or_changing_format_is_request_scoped(client, segmented, bad_frame):
-    cls = rime.RimeSegmentedSTTService if segmented else RimeSTTService
-    service = cls(api_key="test")
+async def test_invalid_or_changing_format_is_request_scoped(client, bad_frame):
+    service = RimeSTTService(api_key="test")
     async with harness(service) as (out, upstream):
         await send(
             service,

@@ -7,8 +7,6 @@
 """Real SDK, protobuf and gRPC behavior through Pipecat workers."""
 
 import asyncio
-import io
-import wave
 
 import grpc
 import numpy as np
@@ -16,7 +14,6 @@ import pytest
 from rime_api import speech_to_text_pb2 as proto
 from rimelabs_sdk import Rime, RimeInputError
 
-from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -29,10 +26,14 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.services.rime.stt import RimeSegmentedSTTService, RimeSTTService
+from pipecat.services.rime.stt import RimeSTTService
 from pipecat.utils.errors import ErrorCategory
 from tests.rime_stt_helpers import audio, wait
-from tests.rime_stt_peer import Failure, language, peer_server, pipeline
+from tests.rime_stt_peer import Failure, peer_server, pipeline
+
+
+async def pcm_audio():
+    yield bytes(320)
 
 
 async def start_speech(worker, peer):
@@ -95,44 +96,6 @@ async def test_streaming_config_pcm_and_transcript_contract(monkeypatch, contrac
             pcm = np.frombuffer(b"".join(call.audio), dtype="<i2")
             assert len(pcm) == pytest.approx(1600, abs=1)
             assert pcm[100:-100].mean() == pytest.approx(2000 if channels == 2 else 1000, abs=1)
-
-
-@pytest.mark.asyncio
-async def test_unary_wav_and_options_reach_the_sdk_peer(monkeypatch):
-    async with peer_server(monkeypatch) as peer, Rime(api_key="local-peer") as client:
-        service = RimeSegmentedSTTService(
-            client=client,
-            trailing_silence_secs=0,
-            settings=RimeSegmentedSTTService.Settings(
-                language="es", mode="verbatim", context_terms=["Rime"]
-            ),
-        )
-        async with pipeline(service) as (worker, out, _):
-            samples = np.tile(np.array([1000, 3000], dtype="<i2"), (4800, 1)).tobytes()
-            await worker.queue_frames(
-                [
-                    VADUserStartedSpeakingFrame(),
-                    audio(samples[:3], 48000, 2),
-                    audio(samples[3:], 48000, 2),
-                ]
-            )
-            await out.wait_for(InputAudioRawFrame, 2)
-            await worker.queue_frame(VADUserStoppedSpeakingFrame())
-            call = await peer.next_call()
-            assert call.request.options.language == "es"
-            assert call.request.options.mode == proto.TRANSCRIPTION_MODE_VERBATIM
-            assert list(call.request.options.context_terms) == ["Rime"]
-            with wave.open(io.BytesIO(call.audio[0]), "rb") as wav:
-                assert (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) == (16000, 1, 2)
-                samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
-            assert len(samples) == 1600
-            assert samples[100:-100].mean() == pytest.approx(2000, abs=1)
-            call.responses.put_nowait(
-                proto.TranscriptionResponse(text="hola", language=language("es"))
-            )
-            final = (await out.wait_for(TranscriptionFrame))[0]
-            assert final.text == "hola" and final.finalized
-            assert final.result["request_id"] == call.request_id
 
 
 @pytest.mark.asyncio
@@ -209,13 +172,10 @@ async def test_sdk_rejects_invalid_completion_without_committing_partial(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("service_cls", [RimeSTTService, RimeSegmentedSTTService])
 @pytest.mark.parametrize("stop_frame", [CancelFrame, EndFrame])
-async def test_cancel_and_shutdown_deadline_preserve_injected_client(
-    monkeypatch, service_cls, stop_frame
-):
+async def test_cancel_and_shutdown_deadline_preserve_injected_client(monkeypatch, stop_frame):
     async with peer_server(monkeypatch) as peer, Rime(api_key="local-peer") as client:
-        service = service_cls(client=client, shutdown_timeout=0.05)
+        service = RimeSTTService(client=client, shutdown_timeout=0.05)
         async with pipeline(service) as (worker, out, _):
             await worker.queue_frames([VADUserStartedSpeakingFrame(), audio()])
             await out.wait_for(InputAudioRawFrame)
@@ -227,24 +187,26 @@ async def test_cancel_and_shutdown_deadline_preserve_injected_client(
             await out.wait_for(stop_frame)
             assert not out.transcripts
         await service.cleanup()
-        async with asyncio.TaskGroup() as tasks:
-            request = tasks.create_task(
-                client.stt.transcribe(pcm_to_wav(bytes(320), 16000), language="en")
-            )
+
+        async def respond():
             fresh = await peer.next_call()
-            fresh.responses.put_nowait(
-                proto.TranscriptionResponse(text="still open", language=language("en"))
-            )
-        assert request.result().text == "still open"
+            await wait(fresh.eof)
+            fresh.update("still open")
+            fresh.finish()
+
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(respond())
+            async with client.stt.stream(pcm_audio(), language="en") as stream:
+                updates = [update async for update in stream]
+        assert updates[-1].text == "still open"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("service_cls", [RimeSTTService, RimeSegmentedSTTService])
-async def test_worker_cleanup_closes_owned_sdk_client(monkeypatch, service_cls):
+async def test_worker_cleanup_closes_owned_sdk_client(monkeypatch):
     async with peer_server(monkeypatch):
-        service = service_cls(api_key="local-peer")
+        service = RimeSTTService(api_key="local-peer")
         async with pipeline(service):
             client = service._recognition.client
         await service.cleanup()
         with pytest.raises(RimeInputError, match="closed"):
-            await client.stt.transcribe(pcm_to_wav(bytes(320), 16000), language="en")
+            client.stt.stream(pcm_audio(), language="en")

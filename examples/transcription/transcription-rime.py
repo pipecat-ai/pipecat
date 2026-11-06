@@ -9,7 +9,7 @@
 
 Install ``pipecat-ai[rime-stt]`` plus the selected transport extra and set
 ``RIME_API_KEY``. Set ``RIME_STT_CONTRACT=append_fragments`` to accumulate
-append fragments, or ``RIME_STT_SEGMENTED=1`` for completed-segment recognition.
+append fragments.
 ``RIME_STT_LANGUAGE`` defaults to ``en``. Input audio is mono.
 """
 
@@ -26,7 +26,7 @@ from pipecat.pipeline.worker import PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.rime.stt import RimeSegmentedSTTService, RimeSTTService
+from pipecat.services.rime.stt import RimeSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -61,21 +61,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    if os.getenv("RIME_STT_SEGMENTED") == "1":
-        stt = RimeSegmentedSTTService(
-            api_key=os.environ["RIME_API_KEY"],
-            settings=RimeSegmentedSTTService.Settings(
-                language=os.getenv("RIME_STT_LANGUAGE", "en")
-            ),
-        )
-    else:
-        stt = RimeSTTService(
-            api_key=os.environ["RIME_API_KEY"],
-            settings=RimeSTTService.Settings(
-                language=os.getenv("RIME_STT_LANGUAGE", "en"),
-                output_contract=os.getenv("RIME_STT_CONTRACT", "revised_hypotheses"),
-            ),
-        )
+    stt = RimeSTTService(
+        api_key=os.environ["RIME_API_KEY"],
+        settings=RimeSTTService.Settings(
+            language=os.getenv("RIME_STT_LANGUAGE", "en"),
+            output_contract=os.getenv("RIME_STT_CONTRACT", "revised_hypotheses"),
+        ),
+    )
 
     vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 

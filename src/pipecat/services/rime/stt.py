@@ -6,10 +6,10 @@
 
 """VAD-driven Rime speech recognition using the public Rime SDK.
 
-Both services require VAD start/stop frames, from either a VADProcessor or the
-user aggregator. Each VAD segment is one request. Streaming accepts PCM16 at
-8, 16, 24 or 48 kHz, mono or stereo; segmented recognition normalizes complete
-segments to 16 kHz mono WAV. Without VAD, only a one-second prefix is retained.
+The service requires VAD start/stop frames, from either a VADProcessor or the
+user aggregator. Each VAD segment is one streaming request. Input is PCM16
+little-endian at 8, 16, 24 or 48 kHz, mono or stereo. Without VAD, only a
+one-second prefix is retained.
 """
 
 import asyncio
@@ -21,9 +21,6 @@ from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
-import numpy as np
-
-from pipecat.audio.utils import create_file_resampler, pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -40,7 +37,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import (
     MetricsData,
-    ProcessingMetricsData,
     STTUsage,
     STTUsageMetricsData,
     TTFBMetricsData,
@@ -48,7 +44,7 @@ from pipecat.metrics.metrics import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import SegmentedSTTService, STTSegment, STTService
+from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
@@ -77,7 +73,6 @@ except ImportError as e:
 
 _MAX_REQUESTS = 4
 _MAX_AUDIO_SECONDS = 120
-_MAX_WAV_BYTES = 16 * 1024 * 1024
 _MAX_TEXT_BYTES = 1024 * 1024
 
 
@@ -90,21 +85,12 @@ class RimeSTTSettings(STTSettings):
         mode: Written formatting or verbatim recognition.
         context_terms: Recognition hints, copied in their original order.
         model: Must be None; Rime selects the recognizer.
-    """
-
-    mode: Literal["written", "verbatim"] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    context_terms: Sequence[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-
-@dataclass
-class RimeStreamingSTTSettings(RimeSTTSettings):
-    """Recognition options for live audio.
-
-    Parameters:
         output_contract: Replacement hypotheses or append-only fragments.
             Both produce cumulative Pipecat interim transcripts and one final.
     """
 
+    mode: Literal["written", "verbatim"] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context_terms: Sequence[str] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     output_contract: Literal["revised_hypotheses", "append_fragments"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -125,7 +111,7 @@ def _validate_settings(settings: RimeSTTSettings) -> None:
     if any(not isinstance(term, str) for term in terms):
         raise ValueError("Rime STT context_terms must contain strings")
     settings.context_terms = tuple(terms)
-    if isinstance(settings, RimeStreamingSTTSettings) and settings.output_contract not in (
+    if settings.output_contract not in (
         "revised_hypotheses",
         "append_fragments",
     ):
@@ -134,15 +120,16 @@ def _validate_settings(settings: RimeSTTSettings) -> None:
         raise ValueError("Rime STT does not support additional recognition settings")
 
 
-def _settings_store(delta: RimeSTTSettings | None, *, streaming: bool) -> RimeSTTSettings:
-    defaults: dict[str, Any] = dict(model=None, language="en", mode="written", context_terms=())
-    settings: RimeSTTSettings = (
-        RimeStreamingSTTSettings(**defaults, output_contract="revised_hypotheses")
-        if streaming
-        else RimeSTTSettings(**defaults)
+def _settings_store(delta: RimeSTTSettings | None) -> RimeSTTSettings:
+    settings = RimeSTTSettings(
+        model=None,
+        language="en",
+        mode="written",
+        context_terms=(),
+        output_contract="revised_hypotheses",
     )
     if delta is not None:
-        cast(RimeSTTSettings, settings).apply_update(delta)
+        settings.apply_update(delta)
     _validate_settings(settings)
     return settings
 
@@ -196,7 +183,6 @@ class _Utterance:
     task: asyncio.Task | None = None
     speech_end: float | None = None
     received_at: float | None = None
-    processing_duration: float | None = None
     accepted_bytes: int = 0
     uploaded_seconds: float = 0
     text: str = ""
@@ -330,10 +316,6 @@ class _Recognition:
                     processor=self.service.name, value=STTUsage(audio_seconds=seconds)
                 )
             )
-        if self.service.metrics_enabled and record.processing_duration is not None:
-            data.append(
-                ProcessingMetricsData(processor=self.service.name, value=record.processing_duration)
-            )
         if (
             self.service.metrics_enabled
             and not record.discarded
@@ -403,15 +385,15 @@ class RimeSTTService(STTService):
     newer speech is pending, so it cannot finalize that newer segment.
     """
 
-    Settings = RimeStreamingSTTSettings
-    _settings: RimeStreamingSTTSettings
+    Settings = RimeSTTSettings
+    _settings: RimeSTTSettings
 
     def __init__(
         self,
         *,
         api_key: str | None = None,
         client: Rime | None = None,
-        settings: RimeStreamingSTTSettings | None = None,
+        settings: RimeSTTSettings | None = None,
         request_timeout: float = 120,
         shutdown_timeout: float = 5.0,
         sample_rate: int | None = None,
@@ -431,9 +413,7 @@ class RimeSTTService(STTService):
             sample_rate: Expected input rate, if specified. Audio is never relabeled.
             **kwargs: Additional STTService options, including ttfs_p99_latency.
         """
-        super().__init__(
-            settings=_settings_store(settings, streaming=True), sample_rate=sample_rate, **kwargs
-        )
+        super().__init__(settings=_settings_store(settings), sample_rate=sample_rate, **kwargs)
         self._recognition = _Recognition(self, api_key, client, request_timeout, shutdown_timeout)
         self._prefix = bytearray()
         self._prefix_format: tuple[int, int] | None = None
@@ -566,7 +546,7 @@ class RimeSTTService(STTService):
     async def _read(self, record: _Utterance):
         state = self._recognition
         assert state.client is not None and record.audio_format is not None
-        settings = cast(RimeStreamingSTTSettings, record.settings)
+        settings = record.settings
         stream = None
         try:
             async with asyncio.timeout(state.timeout):
@@ -685,299 +665,6 @@ class RimeSTTService(STTService):
 
     async def cleanup(self):
         """Release SDK resources, including after partial startup."""
-        self._recognition.closed = True
-        await self._discard()
-        await self._recognition.close()
-        await super().cleanup()
-
-
-@dataclass
-class _RimeSegment(STTSegment):
-    utterance: _Utterance
-
-
-class RimeSegmentedSTTService(SegmentedSTTService):
-    """Transcribe complete VAD segments as 16 kHz mono WAV with Rime.
-
-    Audio is buffered by SegmentedSTTService and transcribed in speech order.
-    Four pending segments and 120 seconds per segment bound retained audio.
-    Settings and speaker identity belong to the segment that captured them.
-    """
-
-    Settings = RimeSTTSettings
-    _settings: RimeSTTSettings
-
-    def __init__(
-        self,
-        *,
-        api_key: str | None = None,
-        client: Rime | None = None,
-        settings: RimeSTTSettings | None = None,
-        request_timeout: float = 120,
-        shutdown_timeout: float = 5.0,
-        sample_rate: int | None = None,
-        **kwargs,
-    ):
-        """Initialize recognition without opening a connection.
-
-        Args:
-            api_key: Rime API credential. Defaults to RIME_API_KEY when no client is supplied.
-            client: Caller-owned SDK client on the pipeline's event loop. Mutually
-                exclusive with api_key; the service never closes this client.
-            settings: Recognition options for subsequent segments.
-            request_timeout: Positive finite SDK request timeout in seconds.
-                Server deadlines still apply.
-            shutdown_timeout: Positive finite time to drain speech on EndFrame,
-                in seconds, before cancelling unfinished requests.
-            sample_rate: Expected input rate; samples are resampled to 16 kHz.
-            **kwargs: SegmentedSTTService options, including trailing_silence_secs.
-        """
-        super().__init__(
-            settings=_settings_store(settings, streaming=False), sample_rate=sample_rate, **kwargs
-        )
-        if (
-            not math.isfinite(self._trailing_silence_secs)
-            or not 0 <= self._trailing_silence_secs < _MAX_AUDIO_SECONDS
-        ):
-            raise ValueError("trailing_silence_secs must be finite and between 0 and 120")
-        self._recognition = _Recognition(self, api_key, client, request_timeout, shutdown_timeout)
-        self._input_format: tuple[int, int] | None = None
-        self._input_user = ""
-        self._transcribing: _Utterance | None = None
-        self._resampler = create_file_resampler()
-
-    def can_generate_metrics(self) -> bool:
-        """Whether request time, speech-end latency and usage are available."""
-        return True
-
-    @property
-    def wants_wav_segments(self) -> bool:
-        """Normalize captured PCM before constructing the SDK's WAV input."""
-        return False
-
-    async def start(self, frame: StartFrame):
-        """Start the ordered segment worker and create its SDK client."""
-        await super().start(frame)
-        await self._recognition.start()
-
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        return await self._recognition.update(delta)
-
-    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        # Timing belongs to queued segments, rather than STTService's shared timer.
-        pass
-
-    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        pass
-
-    async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        state = self._recognition
-        if state.speaking:
-            return
-        state.speaking = self._user_speaking = True
-        record = await state.begin()
-        if record is not None and self._audio_buffer:
-            record.audio_format, record.user_id = self._input_format, self._input_user
-
-    async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        state = self._recognition
-        if not state.speaking:
-            return
-        state.speaking = self._user_speaking = False
-        state.suppressed = False
-        record = state.active
-        if record is not None and not self.is_usable:
-            # The base handler skips enqueueing audio while the service is unusable.
-            record.done = record.discarded = True
-            await state.publish()
-        elif record is not None and not record.discarded and self._audio_buffer:
-            record.speech_end = frame.timestamp - frame.stop_secs
-            if len(self._audio_buffer) % (cast(tuple[int, int], record.audio_format)[1] * 2):
-                await state.error(RimeAudioFormatError("Incomplete PCM sample frame"), record)
-            else:
-                await super()._handle_user_stopped_speaking(frame)
-        elif record is not None:
-            record.done = True
-            await state.publish()
-        state.active = None
-        self._audio_buffer.clear()
-
-    def _create_segment(self, audio: bytes) -> STTSegment:
-        record = self._recognition.active
-        assert record is not None
-        return _RimeSegment(audio=audio, user_id=record.user_id, utterance=record)
-
-    def _trailing_silence(self) -> bytes:
-        rate, channels = self._input_format or (self.sample_rate, 1)
-        return bytes(int(rate * self._trailing_silence_secs) * channels * 2)
-
-    def _record_stt_audio_usage(self, audio: bytes | bytearray):
-        # Usage is recorded when normalized audio is submitted to the SDK.
-        pass
-
-    async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
-        """Validate and bound PCM before adding it to the segment buffer."""
-        state = self._recognition
-        if (
-            self.is_muted
-            or state.closed
-            or not self.is_usable
-            or state.suppressed
-            or not frame.audio
-        ):
-            return
-        audio_format = (frame.sample_rate, frame.num_channels)
-        user_id = frame.user_id if isinstance(frame, UserAudioRawFrame) else ""
-        if state.speaking and state.active is None:
-            await state.begin()
-        record = state.active
-        try:
-            if (
-                frame.sample_rate not in (8000, 16000, 24000, 48000)
-                or frame.num_channels not in (1, 2)
-                or (
-                    self._init_sample_rate is not None
-                    and frame.sample_rate != self._init_sample_rate
-                )
-            ):
-                raise RimeAudioFormatError("Unsupported input format")
-            if record is not None:
-                if record.audio_format is None:
-                    record.audio_format, record.user_id = audio_format, user_id
-                if record.audio_format != audio_format or record.user_id != user_id:
-                    raise RimeAudioFormatError("Audio format or speaker changed during speech")
-                budget = (
-                    int((_MAX_AUDIO_SECONDS - self._trailing_silence_secs) * frame.sample_rate)
-                    * frame.num_channels
-                    * 2
-                )
-                if len(self._audio_buffer) + len(frame.audio) > budget:
-                    raise RimeResourceLimitError("Speech segment exceeds 120 seconds")
-            elif audio_format != self._input_format or user_id != self._input_user:
-                self._audio_buffer.clear()
-            self._input_format, self._input_user = audio_format, user_id
-            self._audio_buffer_size_1s = frame.sample_rate * frame.num_channels * 2
-            if not self._user_speaking:
-                # Keep an incomplete final sample with the next chunk, and trim
-                # the prefix only at interleaved sample-frame boundaries.
-                self._audio_buffer_size_1s += (len(self._audio_buffer) + len(frame.audio)) % (
-                    frame.num_channels * 2
-                )
-            await super().process_audio_frame(frame, direction)
-        except (RimeAudioFormatError, RimeResourceLimitError) as e:
-            self._audio_buffer.clear()
-            state.suppressed = True
-            await state.error(e, record, detail=str(e))
-
-    async def _process_segment(self, segment: STTSegment):
-        assert isinstance(segment, _RimeSegment)
-        record = segment.utterance
-        state = self._recognition
-        if record.discarded or state.closed or not self.is_usable:
-            record.done = record.discarded = True
-            await state.publish()
-            return
-        self._transcribing = record
-        try:
-            assert record.audio_format is not None
-            rate, channels = record.audio_format
-            pcm = segment.audio
-            if channels == 2:
-                pcm = (
-                    np.frombuffer(pcm, dtype="<i2")
-                    .reshape(-1, 2)
-                    .astype(np.int32)
-                    .mean(axis=1)
-                    .astype("<i2")
-                    .tobytes()
-                )
-            pcm = await self._resampler.resample(pcm, rate, 16000)
-            wav = pcm_to_wav(pcm, 16000)
-            if len(wav) > _MAX_WAV_BYTES:
-                raise RimeResourceLimitError("WAV exceeds 16 MiB")
-            record.uploaded_seconds = len(pcm) / 32000
-            async for frame in self.run_stt(wav):
-                if isinstance(frame, TranscriptionFrame):
-                    record.final = frame
-            record.done = True
-        except asyncio.CancelledError:
-            record.done = record.discarded = True
-            raise
-        except Exception as e:
-            await state.error(e, record)
-        finally:
-            await state.metrics(record)
-            await state.publish()
-            self._transcribing = None
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
-        """Transcribe a normalized WAV segment using its captured request options."""
-        state = self._recognition
-        record = self._transcribing
-        if record is None or state.client is None:
-            raise RuntimeError("Rime segmented STT requires a captured VAD segment")
-        settings = record.settings
-        started_at = time.monotonic()
-        try:
-            async with asyncio.timeout(state.timeout):
-                result = await state.client.stt.transcribe(
-                    audio,
-                    language=cast(str, settings.language),
-                    mode=TranscriptionMode(settings.mode),
-                    context_terms=cast(Sequence[str], settings.context_terms),
-                    timeout=state.timeout,
-                )
-            if not record.discarded:
-                record.request_id = result.request_id
-                record.received_at = time.time()
-                yield state.frame(record, result.text, language=result.language, final=True)
-        finally:
-            record.processing_duration = time.monotonic() - started_at
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Discard muted speech and resume on fresh audio if VAD is still active."""
-        if isinstance(frame, STTMuteFrame) and frame.mute:
-            await self._discard()
-            if self._segment_task is None:
-                self._segment_task = self.create_task(self._segment_task_handler())
-        elif isinstance(frame, STTMuteFrame) and self.is_muted:
-            self._recognition.suppressed = False
-        await super().process_frame(frame, direction)
-
-    async def _discard(self):
-        state = self._recognition
-        self._audio_buffer.clear()
-        for record in state.pending:
-            record.discarded = record.done = True
-        state.pending.clear()
-        state.active = None
-        state.suppressed = False
-        await self._cancel_segment_task()
-        while not self._segment_queue.empty():
-            self._segment_queue.get_nowait()
-
-    async def stop(self, frame: EndFrame):
-        """Flush active speech and bound the base class's graceful drain."""
-        if self._recognition.speaking:
-            await self._handle_user_stopped_speaking(VADUserStoppedSpeakingFrame())
-        try:
-            async with asyncio.timeout(self._recognition.shutdown_timeout):
-                await super().stop(frame)
-        except TimeoutError:
-            await self._recognition.error(RimeTimeoutError("Shutdown deadline expired"))
-        finally:
-            await self._discard()
-            await self._recognition.close()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel queued and active requests and close an owned SDK client."""
-        self._recognition.closed = True
-        await self._discard()
-        await self._recognition.close()
-        await super().cancel(frame)
-
-    async def cleanup(self):
-        """Release resources after normal shutdown or partial startup."""
         self._recognition.closed = True
         await self._discard()
         await self._recognition.close()

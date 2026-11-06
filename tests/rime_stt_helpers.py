@@ -9,7 +9,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from rimelabs_sdk import Transcription, TranscriptionFinal
+from rimelabs_sdk import TranscriptionFinal
 
 from pipecat.frames.frames import InputAudioRawFrame, StartFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -72,9 +72,7 @@ class FakeRime:
     def __init__(self, *, automatic=False, consume=True):
         self.stt = self
         self.streams = []
-        self.calls = []
         self.new_stream = asyncio.Queue()
-        self.new_call = asyncio.Queue()
         self.closed = False
         self.automatic = automatic
         self.consume = consume
@@ -86,21 +84,6 @@ class FakeRime:
         self.streams.append(stream)
         self.new_stream.put_nowait(stream)
         return stream
-
-    async def transcribe(self, audio, **options):
-        result = asyncio.get_running_loop().create_future()
-        call = (audio, options, result)
-        self.calls.append(call)
-        self.new_call.put_nowait(call)
-        if self.automatic:
-            result.set_result(
-                Transcription(
-                    text=f"segment {len(self.calls)}",
-                    language="en",
-                    request_id=f"unary-{len(self.calls)}",
-                )
-            )
-        return await result
 
     async def close(self):
         self.closed = True

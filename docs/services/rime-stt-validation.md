@@ -7,7 +7,7 @@ uv run --extra rime-stt pytest -n 0 \
   tests/test_rime_stt.py tests/test_rime_stt_stream.py tests/test_rime_stt_protocol.py
 ```
 
-The peer controls replies and completion with events and queues. It covers both transcript contracts, unary WAV requests, overlapping streaming requests, malformed completion, gRPC failures, and cancellation while an injected client remains usable. These tests require no provider credentials. Their loopback channel is plaintext; they do not validate TLS, the public Rime endpoint, or recognition accuracy.
+The peer controls replies and completion with events and queues. It covers both transcript contracts, overlapping streaming requests, malformed completion, gRPC failures, and cancellation while an injected client remains usable. These tests require no provider credentials. Their loopback channel is plaintext; they do not validate TLS, the public Rime endpoint, or recognition accuracy.
 
 ## Audio evals
 
