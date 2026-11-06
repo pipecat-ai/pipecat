@@ -128,7 +128,7 @@ class AICTytoObserver(BaseObserver):
 
     Example::
 
-        aic_filter = AICFilter(license_key=key, model_id="quail-vf-2.2-l-16khz")
+        aic_filter = AICFilter(license_key=key, model_id="quail-vf-2.3-l-16khz")
         tyto = AICTytoObserver(license_key=key, audio_filter=aic_filter)
 
         @tyto.event_handler("on_call_summary")
