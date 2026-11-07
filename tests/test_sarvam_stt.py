@@ -35,7 +35,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.stt import (
-    HTTP_MODEL_CONFIGS,
     MODEL_CONFIGS,
     SarvamHttpSTTService,
     SarvamRealtimeSTTService,
@@ -1393,12 +1392,20 @@ def _http_service(**kwargs) -> SarvamHttpSTTService:
     return SarvamHttpSTTService(api_key="test-key", **kwargs)
 
 
-def _mock_rest_client(service: SarvamHttpSTTService, response=None, error=None) -> AsyncMock:
-    """Replace the service's SDK client with a stub REST transcribe call."""
+def _mock_rest_client(
+    service: SarvamHttpSTTService, response=None, error=None, responses=None
+) -> AsyncMock:
+    """Replace the service's SDK client with a stub REST transcribe call.
+
+    ``responses`` returns one response per call, in order; ``response`` is
+    returned for every call.
+    """
     from types import SimpleNamespace
 
     if error is not None:
         transcribe = AsyncMock(side_effect=error)
+    elif responses is not None:
+        transcribe = AsyncMock(side_effect=responses)
     else:
         transcribe = AsyncMock(return_value=response)
     service._sarvam_client = SimpleNamespace(speech_to_text=SimpleNamespace(transcribe=transcribe))
@@ -1415,9 +1422,26 @@ async def _run_stt(service: SarvamHttpSTTService, audio: bytes = b"RIFF-fake-wav
     return [frame async for frame in service.run_stt(audio)]
 
 
-def test_http_supported_models():
-    """The REST endpoint offers the current Saaras generations only."""
-    assert set(HTTP_MODEL_CONFIGS) == {"saaras:v3", "saaras:v4"}
+def _wav(seconds: float, sample_rate: int = 8000) -> bytes:
+    """A WAV file of ``seconds`` of 16-bit mono audio."""
+    from pipecat.audio.utils import pcm_to_wav
+
+    return pcm_to_wav(b"\x01\x02" * int(sample_rate * seconds), sample_rate)
+
+
+def _wav_seconds(audio: bytes) -> float:
+    import io
+    import wave
+
+    with wave.open(io.BytesIO(audio)) as wav:
+        return wav.getnframes() / wav.getframerate()
+
+
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_accepts_websocket_models(model):
+    """The REST endpoint offers the same models as the WebSocket one."""
+    service = _http_service(settings=SarvamHttpSTTService.Settings(model=model))
+    assert service._settings.model == model
 
 
 def test_http_default_model():
@@ -1432,24 +1456,16 @@ def test_http_unsupported_model_raises():
         _http_service(settings=SarvamHttpSTTService.Settings(model="saarika:v2.5"))
 
 
-def test_http_mode_requires_supporting_model():
-    """The REST API documents mode for saaras:v3 only."""
-    with pytest.raises(ValueError, match="does not support mode"):
-        _http_service(mode="codemix")  # default model is saaras:v4
-
-    service = _http_service(
-        mode="codemix", settings=SarvamHttpSTTService.Settings(model="saaras:v3")
-    )
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_mode_accepted_by_each_model(model):
+    service = _http_service(mode="codemix", settings=SarvamHttpSTTService.Settings(model=model))
     assert service._mode == "codemix"
 
 
-def test_http_mode_defaults_per_model():
-    """Without an explicit mode, each model gets its REST default."""
-    v3 = _http_service(settings=SarvamHttpSTTService.Settings(model="saaras:v3"))
-    assert v3._mode == "transcribe"
-
-    v4 = _http_service()
-    assert v4._mode is None
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_mode_defaults_to_transcribe(model):
+    service = _http_service(settings=SarvamHttpSTTService.Settings(model=model))
+    assert service._mode == "transcribe"
 
 
 @pytest.mark.asyncio
@@ -1479,8 +1495,9 @@ async def test_http_run_stt_yields_transcription_inline():
 
 
 @pytest.mark.asyncio
-async def test_http_run_stt_sends_configured_language_and_no_mode_for_v4():
+async def test_http_run_stt_sends_configured_language_and_mode_for_v4():
     service = _http_service(
+        mode="translate",
         settings=SarvamHttpSTTService.Settings(language=Language.EN_IN),
     )
     transcribe = _mock_rest_client(service, _rest_response("hello", language_code="en-IN"))
@@ -1490,8 +1507,96 @@ async def test_http_run_stt_sends_configured_language_and_no_mode_for_v4():
     kwargs = transcribe.await_args.kwargs
     assert kwargs["model"] == "saaras:v4"
     assert kwargs["language_code"] == "en-IN"
-    assert "mode" not in kwargs
+    assert kwargs["mode"] == "translate"
+    assert "request_options" not in kwargs  # no keyterms configured
     assert frames[0].language == Language.EN_IN
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_odia_code_without_warning():
+    """A configured language is sent as the Sarvam code the base class stored,
+    without resolving it again (Odia's Sarvam code differs from its Language)."""
+    import io
+
+    from loguru import logger
+
+    service = _http_service(settings=SarvamHttpSTTService.Settings(language=Language.OR_IN))
+    transcribe = _mock_rest_client(service, _rest_response("ନମସ୍କାର", language_code="od-IN"))
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        frames = await _run_stt(service)
+    finally:
+        logger.remove(handler_id)
+
+    assert transcribe.await_args.kwargs["language_code"] == "od-IN"
+    assert frames[0].language == Language.OR_IN
+    assert sink.getvalue() == ""
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_keyterms_as_json_form_field():
+    service = _http_service(keyterms=["Sarvam", "New Delhi"])
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await _run_stt(service)
+
+    request_options = transcribe.await_args.kwargs["request_options"]
+    assert json.loads(request_options["additional_body_parameters"]["keyterms"]) == [
+        "Sarvam",
+        "New Delhi",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_short_segment_unchanged():
+    service = _http_service()
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+    audio = _wav(30)
+
+    await _run_stt(service, audio)
+
+    assert transcribe.await_count == 1
+    assert transcribe.await_args.kwargs["file"][1] == audio
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_splits_segment_over_30_seconds():
+    """The REST endpoint rejects audio over 30 seconds, so a longer segment is
+    sent in pieces and the transcripts are joined into one frame."""
+    service = _http_service()
+    transcribe = _mock_rest_client(
+        service,
+        responses=[
+            _rest_response("first part", language_code="hi-IN"),
+            _rest_response("second part", language_code="hi-IN"),
+            _rest_response("end"),
+        ],
+    )
+
+    frames = await _run_stt(service, _wav(65))
+
+    pieces = [call.kwargs["file"][1] for call in transcribe.await_args_list]
+    assert [_wav_seconds(p) for p in pieces] == [30, 30, 5]
+    assert len(frames) == 1
+    assert frames[0].text == "first part second part end"
+    assert frames[0].language == Language.HI_IN
+    assert len(frames[0].result) == 3
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_split_failure_yields_error_frame():
+    service = _http_service()
+    _mock_rest_client(
+        service, responses=[_rest_response("first part"), RuntimeError("piece failed")]
+    )
+
+    frames = await _run_stt(service, _wav(45))
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert "piece failed" in frames[0].error
 
 
 @pytest.mark.asyncio
@@ -1564,13 +1669,17 @@ async def test_http_update_settings_rejects_unsupported_model():
 
 
 @pytest.mark.asyncio
-async def test_http_update_settings_drops_mode_the_new_model_lacks():
+async def test_http_update_settings_model_change_keeps_mode():
     service = _http_service(
         mode="codemix", settings=SarvamHttpSTTService.Settings(model="saaras:v3")
     )
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
     await service._update_settings(STTSettings(model="saaras:v4"))
-    assert service._settings.model == "saaras:v4"
-    assert service._mode is None
+    await _run_stt(service)
+
+    assert transcribe.await_args.kwargs["model"] == "saaras:v4"
+    assert transcribe.await_args.kwargs["mode"] == "codemix"
 
 
 @pytest.mark.asyncio
