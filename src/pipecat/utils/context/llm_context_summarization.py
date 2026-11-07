@@ -10,7 +10,9 @@ This module provides reusable functionality for automatically compressing conver
 context when token limits are reached, enabling efficient long-running conversations.
 """
 
+import base64
 import json
+import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
@@ -33,6 +35,8 @@ DEFAULT_SUMMARIZATION_TIMEOUT = 120.0
 CHARS_PER_TOKEN = 4  # Industry-standard heuristic: 1 token ≈ 4 characters
 TOKEN_OVERHEAD_PER_MESSAGE = 10  # Estimated structural overhead per message
 IMAGE_TOKEN_ESTIMATE = 500  # Rough estimate for image content
+AUDIO_TOKENS_PER_SECOND = 32  # Gemini's rate for audio; OpenAI's is 10/s, so this errs high
+WAV_HEADER_BASE64_CHARS = 1024  # Base64 prefix decoded to read a WAV header
 SUMMARY_TOKEN_BUFFER = 0.8  # Keep summary at 80% of available space for safety
 MIN_SUMMARY_TOKENS = 100  # Minimum tokens to allocate for summary
 
@@ -337,8 +341,8 @@ class LLMContextSummarizationUtil:
             context: LLM context to estimate.
 
         Returns:
-            The estimated total token count, covering message content (text and
-            images), tool calls and their arguments, tool results, and
+            The estimated total token count, covering message content (text,
+            images and audio), tool calls and their arguments, tool results, and
             ``TOKEN_OVERHEAD_PER_MESSAGE`` of structural overhead per message.
         """
         total = 0
@@ -369,6 +373,11 @@ class LLMContextSummarizationUtil:
                         elif item_type in ("image_url", "image"):
                             # Images are expensive, rough estimate
                             total += IMAGE_TOKEN_ESTIMATE
+                        # Audio content
+                        elif item_type == "input_audio":
+                            total += LLMContextSummarizationUtil._estimate_audio_tokens(
+                                item.get("input_audio")
+                            )
 
             # Tool calls
             if "tool_calls" in message:
@@ -387,6 +396,48 @@ class LLMContextSummarizationUtil:
                 total += TOKEN_OVERHEAD_PER_MESSAGE
 
         return total
+
+    @staticmethod
+    def _estimate_audio_tokens(input_audio: object) -> int:
+        """Estimate token count for an ``input_audio`` part from the audio's duration.
+
+        The duration is the payload's decoded size over the byte rate in its
+        WAV header. Only the header is decoded, since this runs over the whole
+        context on every LLM response. A part that isn't a readable WAV,
+        whatever its ``format`` says, counts as 0.
+
+        Args:
+            input_audio: The ``input_audio`` value of the content part.
+
+        Returns:
+            Estimated token count, ``AUDIO_TOKENS_PER_SECOND`` per second of audio.
+        """
+        data = input_audio.get("data") if isinstance(input_audio, dict) else None
+        if not isinstance(data, str):
+            return 0
+
+        try:
+            header = base64.b64decode(data[:WAV_HEADER_BASE64_CHARS])
+        except ValueError:
+            return 0
+
+        if header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            return 0
+
+        offset = 12
+        while offset + 20 <= len(header):
+            chunk_id, chunk_size = struct.unpack_from("<4sI", header, offset)
+            if chunk_id == b"fmt ":
+                # Average bytes per second, 8 bytes into the chunk's data
+                (byte_rate,) = struct.unpack_from("<I", header, offset + 16)
+                if not byte_rate:
+                    return 0
+                # Size of the decoded payload, computed without decoding it
+                num_bytes = len(data) * 3 // 4 - data[-2:].count("=")
+                return num_bytes * AUDIO_TOKENS_PER_SECOND // byte_rate
+            offset += 8 + chunk_size + (chunk_size & 1)
+
+        return 0
 
     @staticmethod
     def _is_tool_message_pending(content: str) -> bool:
