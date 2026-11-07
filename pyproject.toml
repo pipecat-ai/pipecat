@@ -41,6 +41,7 @@ dependencies = [
     # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
     "pydantic>=2.13; python_full_version >= '3.14'",
     "python-dotenv>=1.0.0,<2.0.0",
+    "pipecat-resampler>=0.1.0,<1",
     "soundfile~=0.13.1",
     "soxr~=1.0.0",
     "openai>=1.74.0,<4",

@@ -5983,6 +5983,7 @@ dependencies = [
     { name = "onnxruntime" },
     { name = "openai" },
     { name = "pillow" },
+    { name = "pipecat-resampler" },
     { name = "protobuf" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -6320,6 +6321,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
     { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.9.0,<1" },
     { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.3.0" },
+    { name = "pipecat-resampler", specifier = ">=0.1.0,<1" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
@@ -6426,6 +6428,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d4/50/7ad21080c8c8d6210b08c6f2b72f9939da71caa2f8c3f16ac4afd9af25e8/pipecat_ai_prebuilt-1.3.0.tar.gz", hash = "sha256:b7ee2244e6885f2866272d4f4c5053980b1a1fcfc8c8976b6a21e6558676b061", size = 825709, upload-time = "2026-10-02T13:06:10.876Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e4/6a/df44efb2952089e59a7a2e1798156666257429613d6feac6f1ebb364f420/pipecat_ai_prebuilt-1.3.0-py3-none-any.whl", hash = "sha256:fe06408efea390d0cfe4257b4bf86aff19b44189cdbb504954dd9329513dbf7f", size = 828361, upload-time = "2026-10-02T13:06:09.099Z" },
+]
+
+[[package]]
+name = "pipecat-resampler"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/53/81366ec71cd83d85919444556141888aa2e8f53d986a8c18234b6e4519b1/pipecat_resampler-0.1.0.tar.gz", hash = "sha256:e72c531b7883eaf6c57d0d45020eac928cae897a581a9d98f6c9a13a75817869", size = 21356, upload-time = "2026-11-07T06:29:39.447Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/97/ea043839afd9c6bd9553421f818884be132c6087de64362fc8325b98ec28/pipecat_resampler-0.1.0-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:872ae09fd9904995ec4310d0325e4bcbf9268a575a04536d8940c93af2a77fd1", size = 26535, upload-time = "2026-11-07T06:29:30.162Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/7a/0baa6fcecfb69dde226a5c6b56bf58e4dd09b9eabbc28b645f75018671b1/pipecat_resampler-0.1.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:95d6009869b8db02330ec901d5a98a7548e7c018b449374ba58b5a242ceeb70f", size = 23501, upload-time = "2026-11-07T06:29:31.661Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/57/a33a7fff25b8b178173a74e91ffa1d92393fe3383d7fb80309be74e46bac/pipecat_resampler-0.1.0-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:e4912876147cdc5088560d259251e3bc5ab7a4f007933d01fc50abbc37f9444d", size = 46473, upload-time = "2026-11-07T06:29:32.931Z" },
+    { url = "https://files.pythonhosted.org/packages/04/58/3188b72b1429b6b2326adfe969a6bfc23adaeb2ed6eaff1e75582e0a76de/pipecat_resampler-0.1.0-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:0ed39fda463f6540ff382885aa89297961a6de099a299045960656d14b7e443a", size = 53685, upload-time = "2026-11-07T06:29:34.567Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/81/9e0668c5307345f557ee4e27aa5602cfd62420cb37ee3f5885a431ff46f1/pipecat_resampler-0.1.0-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:a31d298e5944b6b9d5c0d04a79b8ae79145b6005e93eacf0ea19e470a071ebed", size = 45323, upload-time = "2026-11-07T06:29:35.929Z" },
+    { url = "https://files.pythonhosted.org/packages/17/f5/5be8325aacb6af70520d42ab723ac2e85f62651a0b83fb27b1b257280ba6/pipecat_resampler-0.1.0-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:4053e306d09ffffac31c1b5925f28f1ac5a6768571948978cf812f2a4cec6531", size = 53025, upload-time = "2026-11-07T06:29:37.295Z" },
+    { url = "https://files.pythonhosted.org/packages/01/e0/4464c57d40e8f2823fcbd475d885c9e9fc9d682849c211b5f77785bf470e/pipecat_resampler-0.1.0-cp311-abi3-win_amd64.whl", hash = "sha256:e336dc3fa2a8ae1ad94200117a650baec1a50d72aa7968f53d3ffd13341490a5", size = 25160, upload-time = "2026-11-07T06:29:38.398Z" },
 ]
 
 [[package]]
