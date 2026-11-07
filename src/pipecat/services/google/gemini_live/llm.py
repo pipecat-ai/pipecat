@@ -77,7 +77,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
+from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .file_api import GeminiFileAPI
@@ -418,6 +418,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     proactivity: ProactivityConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@traced_realtime_llm
 class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     """Provides access to Google's Gemini Live API.
 
@@ -806,7 +807,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._last_transcription_sent = ""
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
-        self._llm_output_buffer = ""
         self._transcription_timeout_task = None
 
         self._sample_rate = 24000
@@ -1676,6 +1676,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if sc and sc.turn_complete:
             if not message.usage_metadata:
                 logger.warning("Received turn_complete without usage_metadata")
+            # Usage goes first, so the reply it belongs to is still open when
+            # it is reported.
+            if message.usage_metadata:
+                await self._handle_msg_usage_metadata(message)
             if interaction_idle is False:
                 # The server is still reasoning in the background, so this
                 # turn_complete only closes an output chunk. Hold the turn
@@ -1686,8 +1690,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # earlier one still being held.
                 self._discard_deferred_turn()
                 await self._handle_msg_turn_complete(message)
-            if message.usage_metadata:
-                await self._handle_msg_usage_metadata(message)
         if message.tool_call:
             await self._handle_msg_tool_call(message)
         if message.session_resumption_update:
@@ -2130,7 +2132,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         except Exception as e:
             await self._handle_send_error(e)
 
-    @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
         self,
         tool_call_id: str,
@@ -2297,7 +2298,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         )
         await self.push_frame(frame)
 
-    @traced_gemini_live(operation="llm_tool_call")
     async def _handle_msg_tool_call(self, message: LiveServerMessage):
         """Handle tool call messages."""
         assert message.tool_call is not None
@@ -2327,16 +2327,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         await self.run_function_calls(function_calls_llm)
 
-    @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
         text = self._bot_text_buffer
 
-        # Trace the complete LLM response (this will be handled by the decorator)
-        # The decorator will extract the output text and usage metadata from the message
-
         self._bot_text_buffer = ""
-        self._llm_output_buffer = ""
 
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
@@ -2358,13 +2353,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # TEXT modality case
                 await self.push_frame(LLMFullResponseEndFrame())
 
-    @traced_stt
-    async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
     async def _push_user_transcription(self, text: str, result: LiveServerMessage | None = None):
         """Push a user transcription frame upstream.
 
@@ -2375,7 +2363,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             text: The transcription text to push
             result: Optional LiveServerMessage that triggered this transcription
         """
-        await self._handle_user_transcription(text, True, self._settings.language)
         await self.push_frame(
             TranscriptionFrame(
                 text=text,
@@ -2484,8 +2471,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # Check for grounding metadata in server content
         if message.server_content and message.server_content.grounding_metadata:
             self._accumulated_grounding_metadata = message.server_content.grounding_metadata
-        # Collect text for tracing
-        self._llm_output_buffer += text
 
         # NOTE: Shoot. When using Vertex AI, output transcription messages
         # arrive *before* the model_turn messages with audio, so we need to
