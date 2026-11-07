@@ -43,6 +43,16 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_content_kept(self):
+        cases = {
+            "call `__init__` please": "call __init__ please",
+            "pass `*args` along": "pass *args along",
+            "`# comment` here": "# comment here",
+            "**bold** and `_x_`": "bold and _x_",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
     async def test_alnum_preserving(self):
         text = "**Hello** and _world_"
         result = await strip_markdown(text, "*")
