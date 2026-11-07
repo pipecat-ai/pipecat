@@ -30,12 +30,19 @@ SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 
 # Files allowed to omit an encoding, with the reason. Keep this list short: every
 # entry is a place where a Windows-only decode bug can come back.
+#
+# ``cli/commands/init.py`` talks to the context hub process two ways, and in both the
+# encoding belongs to the child: it relays the child's stdout/stderr through an
+# inherited descriptor (the log sink), and it captures the child's output of
+# ``install`` with ``text=True``. Pinning either side alone would desynchronise the
+# two; the fix is to make the hub write UTF-8 and say so on both sides, which is a
+# change in that process rather than an ``encoding=`` argument here.
 ALLOWED: dict[str, str] = {
     "cli/commands/init.py": (
-        "the child process writes its stdout/stderr into this file through an "
-        "inherited descriptor, so the writer's encoding is the child's; changing "
-        "only the reader would desynchronise the two. Needs a byte-level redesign "
-        "of the log relay, not an `encoding=` argument."
+        "every text call here is child-process IO: the log sink relays a dup'd "
+        "descriptor, the failure tail is read back from that same log, and the "
+        "install call captures the child's output — the writer's encoding is the "
+        "child's."
     ),
 }
 
@@ -70,6 +77,17 @@ def _text_calls_without_encoding(tree: ast.AST) -> list[tuple[int, str]]:
             if isinstance(mode, str) and "b" in mode:
                 continue
             label = "io.open()"
+        elif attr in ("run", "check_output", "Popen", "call", "check_call"):
+            # subprocess decodes the child's output with the locale too
+            textual = any(
+                kw.arg in ("text", "universal_newlines")
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in node.keywords
+            )
+            if not textual or any(kw.arg == "encoding" for kw in node.keywords):
+                continue
+            label = f"subprocess.{attr}(text=True)"
         else:
             continue
         if any(kw.arg == "encoding" for kw in node.keywords):
