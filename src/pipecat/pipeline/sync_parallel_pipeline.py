@@ -305,26 +305,23 @@ class SyncParallelPipeline(BasePipeline):
 
             await processor.process_frame(frame, direction)
 
+            # An EndFrame is the last frame out of a pipeline, so it marks the
+            # end of the output itself. It is pushed once, after every
+            # pipeline's output.
             if isinstance(frame, EndFrame):
-                # The EndFrame is pushed once, after every pipeline's output.
-                new_frame = await queue.get()
-                while not isinstance(new_frame, EndFrame):
-                    if use_pipeline_order:
-                        output_frames.append(new_frame)
-                    else:
-                        await main_queue.put(new_frame)
-                    queue.task_done()
-                    new_frame = await queue.get()
+                sentinel = EndFrame
             else:
                 await processor.process_frame(SyncFrame(), direction)
+                sentinel = SyncFrame
+
+            new_frame = await queue.get()
+            while not isinstance(new_frame, sentinel):
+                if use_pipeline_order:
+                    output_frames.append(new_frame)
+                else:
+                    await main_queue.put(new_frame)
+                queue.task_done()
                 new_frame = await queue.get()
-                while not isinstance(new_frame, SyncFrame):
-                    if use_pipeline_order:
-                        output_frames.append(new_frame)
-                    else:
-                        await main_queue.put(new_frame)
-                    queue.task_done()
-                    new_frame = await queue.get()
 
             return output_frames
 
