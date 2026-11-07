@@ -1500,7 +1500,8 @@ class GeminiTTSService(GoogleBaseTTSService):
         """Whether the model follows the Gemini 3.8 TTS request contract.
 
         Gemini 3.8 TTS models treat input text as a verbatim transcript, take
-        style instructions via ``speech_metadata``, and return WAV by default.
+        style instructions via ``speech_metadata``, and return WAV by default
+        on unary requests (streaming returns raw L16 PCM).
         Covers the official ``gemini-3.8-*-tts`` names and the ``sonic-*``
         preview codenames.
         """
@@ -1708,10 +1709,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             contents: Any = text
             if is_gemini_38:
                 # Gemini 3.8 TTS treats the input strictly as a verbatim
-                # transcript: sustained style goes in speech_metadata. The
-                # response defaults to WAV (google-genai 2.25.0 offers no way to
-                # request raw PCM via GenerateContentConfig), so the audio
-                # streaming below strips a RIFF header when one arrives.
+                # transcript: sustained style goes in speech_metadata.
                 part_kwargs: dict[str, Any] = {"text": text}
                 # In expressive conversation, the request's delivery adds to the
                 # prompt's style.
@@ -1767,8 +1765,18 @@ class GeminiTTSService(GoogleBaseTTSService):
                 if buffer:
                     yield bytes(buffer)
 
+            # Streaming responses are headerless 24 kHz audio/l16, so the source
+            # rate is passed explicitly rather than read from a WAV header.
+            # Without it, audio is never resampled to self.sample_rate and plays
+            # at the wrong speed when the pipeline runs at another rate (e.g.
+            # 8 kHz telephony). A RIFF header, should one ever arrive, is still
+            # stripped rather than played as audio.
+            # https://ai.google.dev/gemini-api/docs/generate-content/speech-generation
             async for frame in self._stream_audio_frames_from_iterator(
-                audio_chunks(), strip_wav_header=is_gemini_38, context_id=context_id
+                audio_chunks(),
+                strip_wav_header=is_gemini_38,
+                in_sample_rate=self.GOOGLE_SAMPLE_RATE,
+                context_id=context_id,
             ):
                 yield frame
 

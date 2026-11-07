@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.google.tts import GeminiTTSService
 from pipecat.tests.utils import run_test
 
@@ -411,6 +412,52 @@ async def test_genai_38_strips_wav_header(mock_genai_client_class):
     audio = b"".join(f.audio for f in down_frames if isinstance(f, TTSAudioRawFrame))
     assert not audio.startswith(b"RIFF")
     assert audio == payload + b"\x03\x04" * 2400
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gemini-3.1-flash-tts-preview",
+        pytest.param("gemini-3.8-flash-tts", marks=requires_speech_metadata),
+    ],
+)
+@pytest.mark.asyncio
+@patch("google.genai.Client")
+async def test_genai_headerless_stream_resampled_to_pipeline_rate(mock_genai_client_class, model):
+    """A headerless 24 kHz stream is resampled to an 8 kHz pipeline, not played 3x slow."""
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+
+    mock_stream = AsyncMock()
+    mock_client.aio.models.generate_content_stream = mock_stream
+
+    # Half a second of 24 kHz 16-bit mono audio, sent as streaming does: raw L16, no RIFF.
+    source_audio = b"\x10\x00" * 12000
+
+    async def mock_generator(*args, **kwargs):
+        yield MockChunk(source_audio)
+
+    mock_stream.side_effect = mock_generator
+
+    tts = GeminiTTSService(
+        api_key="test-api-key",
+        settings=GeminiTTSService.Settings(model=model, voice="Puck"),
+    )
+
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="Hello world.")],
+        pipeline_params=PipelineParams(audio_out_sample_rate=8000),
+    )
+    audio_frames = [f for f in frames_received[0] if isinstance(f, TTSAudioRawFrame)]
+
+    assert audio_frames
+    assert all(f.sample_rate == 8000 for f in audio_frames)
+    # Resampled to 8 kHz, half a second is 8000 bytes, less a ~90 ms tail the streaming
+    # resampler holds back. Unresampled, all 24000 bytes would be stamped as 8 kHz.
+    audio_bytes = sum(len(f.audio) for f in audio_frames)
+    resampled = len(source_audio) // 3
+    assert resampled * 3 // 4 <= audio_bytes <= resampled
 
 
 @pytest.mark.asyncio
