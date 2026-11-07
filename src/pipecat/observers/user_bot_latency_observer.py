@@ -575,6 +575,27 @@ class UserBotLatencyObserver(BaseObserver):
                 "and will be removed in 2.0.0. No replacement.",
                 stacklevel=2,
             )
+        # A subclass may read other frames: it observes every class unless given frame_types.
+        if type(self) is UserBotLatencyObserver:
+            kwargs.setdefault(
+                "frame_types",
+                (
+                    ClientConnectedFrame,
+                    VADUserStartedSpeakingFrame,
+                    VADUserStoppedSpeakingFrame,
+                    UserStoppedSpeakingFrame,
+                    TranscriptionFrame,
+                    LLMFullResponseStartFrame,
+                    LLMMarkerFrame,
+                    LLMTextFrame,
+                    TTSAudioRawFrame,
+                    InterruptionFrame,
+                    FunctionCallInProgressFrame,
+                    FunctionCallResultFrame,
+                    MetricsFrame,
+                    BotStartedSpeakingFrame,
+                ),
+            )
         super().__init__(observe_every_push=False, **kwargs)
         self._min_contribution_secs = min_contribution_secs
         self._now = time_source

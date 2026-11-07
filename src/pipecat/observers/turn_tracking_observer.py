@@ -68,6 +68,19 @@ class TurnTrackingObserver(BaseObserver):
                 "and will be removed in 2.0.0. No replacement.",
                 stacklevel=2,
             )
+        # A subclass may read other frames: it observes every class unless given frame_types.
+        if type(self) is TurnTrackingObserver:
+            kwargs.setdefault(
+                "frame_types",
+                (
+                    StartFrame,
+                    UserStartedSpeakingFrame,
+                    BotStartedSpeakingFrame,
+                    BotStoppedSpeakingFrame,
+                    EndFrame,
+                    CancelFrame,
+                ),
+            )
         super().__init__(observe_every_push=False, **kwargs)
         self._turn_count = 0
         self._is_turn_active = False

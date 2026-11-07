@@ -63,6 +63,9 @@ class TurnTraceObserver(BaseObserver):
             tracing_context: Pipeline-scoped tracing context for span hierarchy.
             **kwargs: Additional arguments passed to parent class.
         """
+        # A subclass may read other frames: it observes every class unless given frame_types.
+        if type(self) is TurnTraceObserver:
+            kwargs.setdefault("frame_types", (StartFrame,))
         super().__init__(**kwargs)
         self._turn_tracker = turn_tracker
         self._latency_tracker = latency_tracker
