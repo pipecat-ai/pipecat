@@ -90,7 +90,7 @@ class Report:
 
     @classmethod
     def load(cls, path: Path) -> Report:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         meta = digest.parse_frontmatter(text)
         end = text.find("\n---", 3)
         body = text[end + 4 :] if text.startswith("---") and end != -1 else text
@@ -99,7 +99,7 @@ class Report:
     def save(self) -> None:
         front = yaml.safe_dump(self.meta, sort_keys=False, allow_unicode=True, width=1000).rstrip()
         body = self.body if self.body.startswith("\n") else "\n" + self.body
-        self.path.write_text(f"---\n{front}\n---{body}")
+        self.path.write_text(f"---\n{front}\n---{body}", encoding="utf-8")
 
 
 @dataclass
@@ -374,7 +374,7 @@ def ensure_digest(reports_dir: Path, date: str, reports_repo: str) -> Path:
         highlights=None,
         repo_url=f"https://github.com/{reports_repo}",
     )
-    out.write_text(text)
+    out.write_text(text, encoding="utf-8")
     return out
 
 

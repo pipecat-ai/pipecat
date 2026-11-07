@@ -44,9 +44,9 @@ def load_reports(reports_dir: Path, date: str) -> list[dict]:
     """Frontmatter of every report for ``date``, each tagged with its relative path."""
     found = []
     for path in sorted(reports_dir.glob(f"reports/*/*/{date}.md")):
-        meta = parse_frontmatter(path.read_text())
+        meta = parse_frontmatter(path.read_text(encoding="utf-8"))
         meta.setdefault("service", "/".join(path.parts[-3:-1]))
-        if not meta.get("error") and not path.read_text().startswith("---"):
+        if not meta.get("error") and not path.read_text(encoding="utf-8").startswith("---"):
             meta["error"] = "report has no frontmatter"
         meta["_path"] = path.relative_to(reports_dir).as_posix()
         found.append(meta)
@@ -184,12 +184,12 @@ def main(argv: list[str] | None = None) -> int:
     text = render(
         reports,
         date=args.date,
-        highlights=args.highlights.read_text() if args.highlights else None,
+        highlights=args.highlights.read_text(encoding="utf-8") if args.highlights else None,
         repo_url=args.repo_url or None,
     )
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(text)
+        args.out.write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
     return 0
