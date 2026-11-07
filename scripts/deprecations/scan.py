@@ -346,7 +346,7 @@ def scan_source(src_root: Path, *, exclude: frozenset[str] = DEFAULT_EXCLUDE) ->
     """Walk ``src_root`` and collect deprecation markers."""
     scan = Scan()
     for py_file in sorted(src_root.rglob("*.py")):
-        relpath = str(py_file.relative_to(src_root.parent))
+        relpath = py_file.relative_to(src_root.parent).as_posix()
         if relpath in exclude:
             continue
         # An editor may leave a lock symlink such as ``.#module.py`` pointing
