@@ -638,6 +638,7 @@ class BaseOutputTransport(FrameProcessor):
             # speaking while there's uninterruptible audio still to play (after
             # the reset, everything left in the queue is uninterruptible).
             if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
+                await self._resampler.reset()
                 await self._bot_stopped_speaking()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
@@ -839,19 +840,12 @@ class BaseOutputTransport(FrameProcessor):
             await self._audio_queue.put(frame)
 
         async def _bot_stopped_speaking(self):
-            """Handle bot stopped speaking event."""
+            """Announce playback stopping without changing buffered input."""
             if not self._bot_speaking:
                 return
 
             self._bot_speaking = False
             self._tts_audio_received = False
-
-            # Any remaining leftover here (e.g. from an interruption) is
-            # discarded rather than flushed, since it's no longer wanted. The
-            # same goes for the audio still inside the resampler, which would
-            # otherwise be prepended to whatever the bot says next.
-            self._clear_audio_buffer()
-            await self._resampler.reset()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
