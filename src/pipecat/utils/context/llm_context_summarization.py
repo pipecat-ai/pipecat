@@ -617,7 +617,8 @@ class LLMContextSummarizationUtil:
             else:
                 text = str(content)
 
-            if text:
+            # A tool message's text is written once, as its TOOL_RESULT line below.
+            if text and role != "tool":
                 # Capitalize role for readability
                 formatted_role = role.upper()
                 transcript_parts.append(f"{formatted_role}: {text}")
