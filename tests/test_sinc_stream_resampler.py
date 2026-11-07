@@ -6,6 +6,7 @@
 
 """Tests for SincStreamAudioResampler."""
 
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -120,6 +121,33 @@ class TestSincStreamAudioResamplerOutput(unittest.IsolatedAsyncioTestCase):
 
                 expected = reference(resampler, samples)[: len(streamed)]
                 self.assertLessEqual(np.abs(streamed - expected).max(), 1)
+
+    async def test_a_long_chunk_matches_resampling_at_once(self):
+        for in_rate, out_rate in RATE_PAIRS:
+            with self.subTest(in_rate=in_rate, out_rate=out_rate):
+                samples = noise(in_rate, secs=4.0)
+                resampler = SincStreamAudioResampler(clear_after_secs=None)
+
+                (output,) = await stream(resampler, samples, [len(samples)], in_rate, out_rate)
+
+                self.assertLessEqual(np.abs(output - reference(resampler, samples)).max(), 1)
+
+    async def test_a_long_chunk_uses_bounded_memory(self):
+        # One pair computed phase by phase, one computed by gathering windows.
+        for in_rate, out_rate in [(48000, 8000), (22050, 16000)]:
+            with self.subTest(in_rate=in_rate, out_rate=out_rate):
+                audio = noise(in_rate, secs=10.0).tobytes()
+                resampler = SincStreamAudioResampler(clear_after_secs=None)
+                await resampler.resample(audio[:200], in_rate, out_rate)
+
+                tracemalloc.start()
+                try:
+                    await resampler.resample(audio, in_rate, out_rate)
+                    peak = tracemalloc.get_traced_memory()[1]
+                finally:
+                    tracemalloc.stop()
+
+                self.assertLess(peak, 10_000_000)
 
 
 class TestSincStreamAudioResamplerQuality(unittest.IsolatedAsyncioTestCase):

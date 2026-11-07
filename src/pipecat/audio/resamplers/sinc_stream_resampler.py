@@ -29,6 +29,11 @@ _PASSBAND = 0.9
 # strided views of the input. Above it, each output's window is gathered.
 _MAX_PHASE_GROUPS = 8
 
+# Most input samples copied into windows at once. Outputs are computed in
+# blocks this bounds, so a long chunk doesn't copy a window per output sample
+# all at once; a paced chunk fits in one block.
+_MAX_BLOCK_SAMPLES = 1 << 19
+
 
 class SincStreamAudioResampler(BaseAudioResampler):
     """Streaming resampler with a polyphase windowed-sinc filter.
@@ -180,18 +185,27 @@ class SincStreamAudioResampler(BaseAudioResampler):
         return output.astype(np.int16).tobytes()
 
     def _convolve(self, buffer: np.ndarray, count: int) -> np.ndarray:
-        """Compute this call's output samples from the buffered input."""
-        if self._up <= _MAX_PHASE_GROUPS:
-            return self._convolve_by_phase(buffer, count)
-        return self._convolve_gathered(buffer, count)
+        """Compute this call's output samples from the buffered input, block by block."""
+        convolve = (
+            self._convolve_by_phase if self._up <= _MAX_PHASE_GROUPS else self._convolve_gathered
+        )
+        block = max(1, _MAX_BLOCK_SAMPLES // self._width)
+        if count <= block:
+            return convolve(buffer, self._offset, count)
+        output = np.empty(count, dtype=np.float32)
+        for first in range(0, count, block):
+            size = min(block, count - first)
+            start, offset = divmod(self._offset + first * self._down, self._up)
+            output[first : first + size] = convolve(buffer[start:], offset, size)
+        return output
 
-    def _convolve_by_phase(self, buffer: np.ndarray, count: int) -> np.ndarray:
+    def _convolve_by_phase(self, buffer: np.ndarray, offset: int, count: int) -> np.ndarray:
         """Compute outputs one phase at a time, each phase a strided view of the input."""
         output = np.empty(count, dtype=np.float32)
         item = buffer.itemsize
         # Outputs `up` apart share a phase and start `down` input samples apart.
         for first in range(min(self._up, count)):
-            start, phase = divmod(self._offset + first * self._down, self._up)
+            start, phase = divmod(offset + first * self._down, self._up)
             outputs = len(range(first, count, self._up))
             windows = np.ndarray(
                 shape=(outputs, self._width),
@@ -205,9 +219,9 @@ class SincStreamAudioResampler(BaseAudioResampler):
             output[first :: self._up] = np.ascontiguousarray(windows) @ self._taps[phase]
         return output
 
-    def _convolve_gathered(self, buffer: np.ndarray, count: int) -> np.ndarray:
+    def _convolve_gathered(self, buffer: np.ndarray, offset: int, count: int) -> np.ndarray:
         """Compute outputs by gathering each one's window and phase."""
-        positions = self._offset + np.arange(count) * self._down
+        positions = offset + np.arange(count) * self._down
         starts, phases = np.divmod(positions, self._up)
         windows = sliding_window_view(buffer, self._width)[starts]
         return np.einsum("ij,ij->i", windows, self._taps[phases])
