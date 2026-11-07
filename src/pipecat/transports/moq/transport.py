@@ -302,6 +302,11 @@ _PEER_DATA_GRACE_S = 5.0
 # absorbed as that much measured jitter in the player's delay floor —
 # and well below any real turn gap.
 _EPOCH_REANCHOR_MIN_GAP_S = 0.25
+# How long to keep the session alive after the session-ending marker is
+# published so the record reaches the wire before teardown cancels the
+# connection task (see ``_publish_session_ending``). Well under any
+# interactive perception threshold.
+_SESSION_ENDING_SETTLE_S = 0.25
 
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
@@ -680,6 +685,11 @@ class MOQTransportClient:
         # down once every holder has released it (see :meth:`_release`),
         # mirroring DailyTransportClient's join/leave counter.
         self._holders = 0
+        # Monotonic moment the session-ending marker was published, if it
+        # has been. The first holder to release the session publishes it
+        # (see ``_release``); everything after — including ``disconnect`` —
+        # only waits out the settle window, never re-publishes.
+        self._session_ending_sent_at: float | None = None
 
         # Identifies this transport instance on its transcript records.
         self._epoch = secrets.token_hex(8)
@@ -927,8 +937,10 @@ class MOQTransportClient:
         written to the moq audio stream. When wall-clock reaches that
         value, the last audio chunk has (approximately) been consumed by
         the browser's player. Add a small margin for the client-side
-        jitter buffer to drain past the final sample before we signal
-        session-ending and tear the transport down.
+        jitter buffer to drain past the final sample before the transport
+        is torn down. (The session-ending marker does NOT wait for this —
+        it is published before the drain, so the browser already knows
+        the call is ending; see ``_publish_session_ending``.)
 
         No-op when no audio has been published yet or the clock has
         already caught up. Capped at ``audio_out_max_buffer_ms`` as a
@@ -1732,26 +1744,43 @@ class MOQTransportClient:
         self._active_consumers.append(consumer)
         return consumer
 
+    def _publish_session_ending(self):
+        """Publish the intra-transport ``session-ending`` marker, exactly once.
+
+        The marker tells the browser-side MoQ transport the call is over:
+        stop reconnecting, drain the jitter buffer, close the audio
+        decoder cleanly — without that heads-up, WebTransport just
+        vanishes underneath Chrome's WebCodecs decoder and can crash the
+        renderer ("Aw snap"). It is published the moment the first holder
+        releases the session (see :meth:`_release`), before any audio
+        drain: everything between that release and full teardown — the
+        paced drain alone can run to ``audio_out_max_buffer_ms`` — is
+        invisible to the browser, which otherwise sits on a call that is
+        already over with no way to tell.
+        """
+        if self._session_ending_sent_at is not None:
+            return
+        self._session_ending_sent_at = time.monotonic()
+        try:
+            if getattr(self, "_transcript_out", None) is not None:
+                self.publish_transcript({"label": "moq-transport", "type": "session-ending"})
+        except Exception as e:
+            logger.debug(f"MOQ: could not send session-ending notification: {e}")
+
     async def disconnect(self):
         """Disconnect from the MOQ relay.
 
-        Sends an intra-transport ``session-ending`` notification on the
-        transcript stream before tearing anything down. This gives the
-        browser-side MoQ transport a chance to disable auto-reconnect,
-        drain its jitter buffer, and close the audio decoder cleanly —
-        without that heads-up, WebTransport just vanishes underneath
-        Chrome's WebCodecs decoder and can crash the renderer ("Aw snap").
+        Tears the session down: finishes the published tracks, cancels
+        the open consumers and the connection task. The ``session-ending``
+        notification itself is published by the first holder release (see
+        :meth:`_publish_session_ending`); here we only wait out whatever
+        is left of its settle window so the record reaches the wire
+        before the connection task is cancelled.
         """
-        # Best-effort: publish the shutdown marker while the transcript
-        # stream is still alive, then yield briefly so the frame has time
-        # to reach the wire before we cancel _run. 250ms is well under
-        # any interactive perception threshold.
-        try:
-            if hasattr(self, "_transcript_out") and self._transcript_out is not None:
-                self.publish_transcript({"label": "moq-transport", "type": "session-ending"})
-                await asyncio.sleep(0.25)
-        except Exception as e:
-            logger.debug(f"MOQ: could not send session-ending notification: {e}")
+        self._publish_session_ending()
+        settle = _SESSION_ENDING_SETTLE_S - (time.monotonic() - (self._session_ending_sent_at or 0))
+        if settle > 0:
+            await asyncio.sleep(settle)
 
         # Cancel any open consumers so their async iterations terminate.
         self._cancel_consumers()
@@ -1798,9 +1827,14 @@ class MOQTransportClient:
     async def _release(self, *, drain: bool):
         """Release one holder's claim on the session, draining first if asked.
 
-        The session is only actually disconnected once every holder
-        (input and output) has released it — see :attr:`_holders`.
+        The session-ending marker is published on the FIRST release,
+        before any drain (see :meth:`_publish_session_ending`) so the
+        browser learns the call is over while the final audio is still
+        playing out, not after. The session itself is only actually
+        disconnected once every holder (input and output) has released
+        it — see :attr:`_holders`.
         """
+        self._publish_session_ending()
         if drain:
             await self.wait_for_audio_drain()
         self._holders -= 1
@@ -1817,7 +1851,9 @@ class MOQTransportClient:
         have released their claim, and by the time the last one does,
         every audio frame written by the output side has already been
         drained. Draining twice (once per caller) is harmless — the
-        second call just observes the clock has already caught up.
+        second call just observes the clock has already caught up. The
+        session-ending marker goes out with the FIRST release, before
+        either drain — it no longer waits for the audio to finish.
         """
         await self._release(drain=True)
 
