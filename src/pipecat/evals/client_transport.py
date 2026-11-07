@@ -24,7 +24,7 @@ import time
 import wave
 from pathlib import Path
 
-from pipecat.audio.utils import create_stream_resampler, mix_audio
+from pipecat.audio.utils import create_file_resampler, mix_audio
 from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
 from pipecat.frames.frames import (
     CancelFrame,
@@ -170,7 +170,7 @@ class _RecorderTrack:
             return b""
         audio = self._layout()
         if self._rate != out_rate:
-            audio = await create_stream_resampler().resample(audio, self._rate, out_rate)
+            audio = await create_file_resampler().resample(audio, self._rate, out_rate)
         lead = int((self.first - start) * out_rate * 2) & ~1
         return b"\x00" * lead + audio
 
