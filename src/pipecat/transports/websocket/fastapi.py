@@ -200,7 +200,11 @@ class FastAPIWebsocketClient:
         if self._leave_counter > 0:
             return
 
-        if self.is_connected and not self.is_closing:
+        if (
+            self.is_connected
+            and not self.is_closing
+            and self._websocket.application_state != WebSocketState.DISCONNECTED
+        ):
             self._closing = True
             self._close_task = asyncio.create_task(self._websocket.close(), name="fastapi-ws-close")
             self._close_task.add_done_callback(self._on_close_done)
