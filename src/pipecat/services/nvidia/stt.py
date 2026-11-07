@@ -136,7 +136,7 @@ class _NvidiaBaseSTTSettings(STTSettings):
         max_speakers: Maximum number of speakers for diarization.
         diarization_max_speakers: Maximum number of speakers for diarization.
 
-            .. deprecated:: 1.14.0
+            .. deprecated:: 1.16.0
                 Use ``max_speakers`` instead. Will be removed in 2.0.0.
 
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
@@ -170,7 +170,7 @@ def _migrate_diarization_max_speakers(settings: _STTSettingsT) -> _STTSettingsT:
     if not is_given(value) or value is None:
         return settings
     warn_deprecated(
-        "`diarization_max_speakers` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+        "`diarization_max_speakers` is deprecated since 1.16.0 and will be removed in 2.0.0. "
         "Use `max_speakers` instead.",
         stacklevel=3,
     )

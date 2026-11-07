@@ -420,7 +420,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 recommendation and this setting with it. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
 
-                .. deprecated:: 1.14.0
+                .. deprecated:: 1.16.0
                     Use ``settings=AssemblyAISTTService.Settings(speaker_format=...)``
                     instead. Will be removed in 2.0.0.
 
@@ -467,7 +467,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if speaker_format is not None:
             self._warn_init_param_moved_to_settings(
-                "speaker_format", "speaker_format", deprecated_since="1.14.0"
+                "speaker_format", "speaker_format", deprecated_since="1.16.0"
             )
             default_settings.speaker_format = speaker_format
 

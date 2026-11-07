@@ -156,7 +156,7 @@ def _resolve_model(
 
 def _warn_speaker_active_format(stacklevel: int) -> None:
     warn_deprecated(
-        "`speaker_active_format` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+        "`speaker_active_format` is deprecated since 1.16.0 and will be removed in 2.0.0. "
         "Use `speaker_format` instead.",
         stacklevel=stacklevel,
     )
@@ -210,7 +210,7 @@ class SpeechmaticsSTTSettings(STTSettings):
             ``speaker_id``, ``ts`` and ``lang`` attributes. Takes precedence over
             ``speaker_format``.
 
-            .. deprecated:: 1.14.0
+            .. deprecated:: 1.16.0
                 Use ``speaker_format`` instead. Will be removed in 2.0.0.
 
         known_speakers: List of known speaker labels and identifiers.
