@@ -400,7 +400,13 @@ class TestFramesToEvents(unittest.TestCase):
             )
         )
         self.assertEqual(
-            event, {"type": "function_call", "name": "get_weather", "args": {"city": "Paris"}}
+            event,
+            {
+                "type": "function_call",
+                "name": "get_weather",
+                "tool_call_id": "c",
+                "args": {"city": "Paris"},
+            },
         )
 
     def test_tts_text_only_in_audio_mode(self):
@@ -3186,7 +3192,13 @@ class TestExternalFunctionCallEvents(unittest.TestCase):
         )
 
         self.assertEqual(
-            started, {"type": "function_call", "name": "run_tests", "args": {"path": "x"}}
+            started,
+            {
+                "type": "function_call",
+                "name": "run_tests",
+                "tool_call_id": "toolu_1",
+                "args": {"path": "x"},
+            },
         )
         self.assertIsNone(progress)
         self.assertEqual(

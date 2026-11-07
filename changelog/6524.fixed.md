@@ -1,0 +1,1 @@
+- Evaluation conversations correlate tool-call cancellation by call ID, including parallel calls to the same function, so the judge sees which invocation was cancelled.

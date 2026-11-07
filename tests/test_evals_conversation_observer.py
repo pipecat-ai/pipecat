@@ -8,6 +8,7 @@ import unittest
 
 from pipecat.evals.conversation_observer import EvalConversationObserver
 from pipecat.frames.frames import (
+    ExternalFunctionCallCancelFrame,
     ExternalFunctionCallInProgressFrame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -62,6 +63,24 @@ class TestEvalConversationObserver(unittest.IsolatedAsyncioTestCase):
                 direction=direction,
                 timestamp=0,
             )
+        )
+
+    async def test_parallel_calls_are_cancelled_by_identity(self):
+        for started, cancelled in (
+            (FunctionCallInProgressFrame, FunctionCallCancelFrame),
+            (ExternalFunctionCallInProgressFrame, ExternalFunctionCallCancelFrame),
+        ):
+            with self.subTest(frame=started.__name__):
+                prefix = started.__name__
+                await self._push(started("book", prefix + "1", arguments={"time": "6"}))
+                await self._push(started("book", prefix + "2", arguments={"time": "7"}))
+                await self._push(cancelled("book", prefix + "1"))
+                await self._push(cancelled("book", prefix + "1"))
+                await self._push(cancelled("book", prefix + "missing"))
+        await self.observer.cleanup()
+        self.assertEqual(
+            [(m["arguments"], m["cancelled"]) for m in self.reported[0]],
+            [({"time": "6"}, True), ({"time": "7"}, False)] * 2,
         )
 
     async def test_the_turns_and_calls_are_reported_as_a_conversation_once_the_pipeline_is_done(
