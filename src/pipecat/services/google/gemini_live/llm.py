@@ -767,15 +767,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         self._last_sent_time = 0
 
-        self._system_instruction_from_init = self._settings.system_instruction
-        # The instruction actually configured on the running session. Composition
-        # (LLMService._compose_system_instruction) keeps rebuilding
-        # ``_settings.system_instruction`` after construction (appended
-        # instructions, async-tool guidance, turn-completion instructions), and
-        # every connection must send that live value instead of the init
-        # snapshot, so this is refreshed on each connect and used as the
-        # change-detection baseline for reconnects.
-        self._sent_system_instruction: str | None = self._system_instruction_from_init
+        # The system instruction the current session was configured with.
+        self._sent_system_instruction: str | None = None
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
         # Provider-native tool lists (dicts) pass through unchanged.
@@ -1196,11 +1189,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             # We got our initial context
             self._context = context
 
-            # Reconnect if context changes the effective system instruction
-            # or tools compared to the initial connection (which used the
-            # init-provided values). Note that the determination of "effective"
-            # system instruction is delegated to the adapter, which still
-            # chooses the init-provided value if there is one.
+            # Reconnect if the effective system instruction differs from the
+            # one the session was configured with, or the context brings tools
+            # of its own. The adapter determines the effective instruction,
+            # preferring the service's own over a context system message.
             adapter = self.get_llm_adapter()
             params = await adapter.get_llm_invocation_params(
                 self._context, system_instruction=assert_given(self._settings.system_instruction)
@@ -1223,20 +1215,19 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
             # Create initial response if needed, based on conversation history
             # in context.
-            # (If the context has no messages but we do have a system
-            # instruction — meaning it was provided at init time — doctor our
-            # context now so that we'll have something to send to the service
-            # to trigger a response).
+            # (If the context has no messages but the user gave the service a
+            # system instruction, doctor our context now so that we'll have
+            # something to send to the service to trigger a response).
             messages = params["messages"]
             if not messages and self._inference_on_context_initialization:
-                if self._system_instruction_from_init:
+                if self._base_system_instruction:
                     logger.debug(
                         "No messages found in initial context; seeding with system instruction to trigger bot response."
                     )
                     self._context.add_message(
                         {
                             "role": "developer",
-                            "content": assert_given(self._system_instruction_from_init),
+                            "content": self._base_system_instruction,
                         }
                     )
                 else:
@@ -1557,7 +1548,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # either way.
                 tools = params["tools"]
             else:
-                system_instruction = self._settings.system_instruction
+                system_instruction = assert_given(self._settings.system_instruction)
                 # No context yet: the init-provided tools; built-in tools ride along.
                 tools = adapter.from_standard_tools(self._tools_from_init)
             self._sent_system_instruction = system_instruction
