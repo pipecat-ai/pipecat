@@ -353,6 +353,17 @@ class TestConstruction(unittest.TestCase):
         initial = make_flow(config()).node("initial")
         self.assertEqual(initial["role_message"], "You work for {{ restaurant }}.")
 
+    def test_role_message_with_options_becomes_a_role_message(self):
+        cfg = config()
+        cfg.nodes["initial"].role_message = FlowConfig.RoleMessage(
+            content="You work for {{ restaurant }}.", reach_inactive_services=True
+        )
+        initial = make_flow(cfg).node("initial")
+        self.assertEqual(
+            initial["role_message"],
+            {"content": "You work for {{ restaurant }}.", "reach_inactive_services": True},
+        )
+
     def test_annotation_warning(self):
         records = []
         sink = logger.add(lambda m: records.append(m.record["message"]), level="WARNING")

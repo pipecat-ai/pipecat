@@ -134,6 +134,23 @@ class FlowConfig(BaseModel):
         role: str
         content: str
 
+    class RoleMessage(BaseModel):
+        """A node's role message, with options for how it is delivered.
+
+        Parameters:
+            content: The bot's role or personality, sent as the LLM's system
+                instruction. May contain ``{{ key }}`` placeholders; see
+                :class:`FlowConfig`.
+            reach_inactive_services: Whether the system instruction reaches
+                every LLM an ``LLMSwitcher`` manages, not only the active one,
+                so it survives a service switch. Defaults to False.
+        """
+
+        model_config = ConfigDict(extra="forbid")
+
+        content: str
+        reach_inactive_services: bool = False
+
     class Branch(BaseModel):
         """A transition chosen by a field of the tool's result.
 
@@ -283,9 +300,10 @@ class FlowConfig(BaseModel):
         Parameters:
             task_messages: What the LLM should do at this node.
             role_message: The bot's role or personality, sent as the LLM's
-                system instruction on entering this node. It persists across
-                transitions until another node sets its own. May contain
-                ``{{ key }}`` placeholders; see :class:`FlowConfig`.
+                system instruction on entering this node. Either text or a
+                :class:`FlowConfig.RoleMessage` carrying delivery options. It
+                persists across transitions until another node sets its own.
+                May contain ``{{ key }}`` placeholders; see :class:`FlowConfig`.
             functions: Tools offered at this node, in addition to the
                 config's ``global_functions``.
             pre_actions: Actions run before the LLM responds at this node.
@@ -299,7 +317,7 @@ class FlowConfig(BaseModel):
         model_config = ConfigDict(extra="forbid")
 
         task_messages: "list[FlowConfig.Message]"
-        role_message: str | None = None
+        role_message: "str | FlowConfig.RoleMessage | None" = None
         functions: "list[FlowConfig.Function]" = Field(default_factory=list)
         pre_actions: "list[FlowConfig.Action]" = Field(default_factory=list)
         post_actions: "list[FlowConfig.Action]" = Field(default_factory=list)

@@ -179,6 +179,32 @@ class ContextStrategyConfig:
             raise ValueError("summary_prompt is required when using RESET_WITH_SUMMARY strategy")
 
 
+class RoleMessage(TypedDict, total=False):
+    """A node's role message, with options for how it is delivered.
+
+    Use it in place of a plain string ``role_message`` when the system
+    instruction needs more than the default delivery.
+
+    Parameters:
+        content: The bot's role/personality, sent as the LLM's system
+            instruction.
+        reach_inactive_services: Whether the system instruction should reach
+            every LLM an :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher`
+            manages, not only the active one, so it survives a service switch.
+            Defaults to False.
+
+    Example::
+
+        {
+            "content": "You are a helpful assistant...",
+            "reach_inactive_services": True,
+        }
+    """
+
+    content: Required[str]
+    reach_inactive_services: bool
+
+
 class NodeConfig(TypedDict, total=False):
     """Configuration for a single node in the flow.
 
@@ -186,8 +212,9 @@ class NodeConfig(TypedDict, total=False):
         task_messages: List of message dicts defining the current node's objectives.
         name: Name of the node, useful for debug logging when returning a next node
             from a "consolidated" function.
-        role_message: The bot's role/personality as a plain string, sent as the
-            LLM's system instruction via ``LLMUpdateSettingsFrame``. When
+        role_message: The bot's role/personality, sent as the LLM's system
+            instruction via ``LLMUpdateSettingsFrame``. Either a plain string
+            or a :class:`RoleMessage` carrying delivery options. When
             provided, the system instruction persists across node transitions
             until a new node explicitly sets ``role_message`` again.
         role_messages: Deprecated list-of-dicts format for the bot's role/personality.
@@ -223,7 +250,7 @@ class NodeConfig(TypedDict, total=False):
 
     task_messages: Required[list[dict]]
     name: str
-    role_message: str
+    role_message: str | RoleMessage
     role_messages: list[dict[str, Any]]
     # ``FlowsFunctionSchema`` and ``FlowsDirectFunction`` are defined below
     # (see the note above ``ConsolidatedFunctionResult``); string forward

@@ -126,6 +126,37 @@ class TestFlowConfigLoading(unittest.TestCase):
         self.assertEqual([f.name for f in config.global_functions], ["get_delivery_estimate"])
         self.assertIsNone(config.global_functions[0].transition_to)
 
+    def test_role_message_with_options(self):
+        config = FlowConfig.from_yaml(
+            """
+initial_node: a
+nodes:
+  a:
+    role_message:
+      content: You are a helpful assistant.
+      reach_inactive_services: true
+    task_messages:
+      - role: developer
+        content: hi
+"""
+        )
+        role_message = config.nodes["a"].role_message
+        self.assertIsInstance(role_message, FlowConfig.RoleMessage)
+        self.assertEqual(role_message.content, "You are a helpful assistant.")
+        self.assertTrue(role_message.reach_inactive_services)
+
+    def test_role_message_options_default(self):
+        data = _minimal()
+        data["nodes"]["a"]["role_message"] = {"content": "You are a helpful assistant."}
+        role_message = FlowConfig.model_validate(data).nodes["a"].role_message
+        self.assertFalse(role_message.reach_inactive_services)
+
+    def test_role_message_rejects_unknown_options(self):
+        data = _minimal()
+        data["nodes"]["a"]["role_message"] = {"content": "hi", "reach_all": True}
+        with self.assertRaises(ValidationError):
+            FlowConfig.model_validate(data)
+
     def test_defaults(self):
         config = FlowConfig.model_validate(_minimal())
         node = config.nodes["a"]

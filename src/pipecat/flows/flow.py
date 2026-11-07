@@ -41,6 +41,7 @@ from pipecat.flows.types import (
     FlowsDirectFunctionWrapper,
     FlowsFunctionSchema,
     NodeConfig,
+    RoleMessage,
 )
 
 if TYPE_CHECKING:
@@ -143,8 +144,13 @@ class Flow:
             "task_messages": [{"role": m.role, "content": m.content} for m in node.task_messages],
             "respond_immediately": node.respond_immediately,
         }
-        if node.role_message is not None:
+        if isinstance(node.role_message, str):
             config["role_message"] = node.role_message
+        elif node.role_message is not None:
+            config["role_message"] = RoleMessage(
+                content=node.role_message.content,
+                reach_inactive_services=node.role_message.reach_inactive_services,
+            )
         if node.functions:
             config["functions"] = [
                 schema

@@ -1,0 +1,1 @@
+- Added `RoleMessage` to Pipecat Flows, accepted wherever a node takes a `role_message` (`NodeConfig` and `FlowConfig`). Its `reach_inactive_services` option sends the node's system instruction to every LLM an `LLMSwitcher` manages, not only the active one, so the role survives a service switch. A plain string `role_message` still reaches only the active LLM.

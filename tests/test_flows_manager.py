@@ -29,6 +29,7 @@ from pipecat.flows.types import (
     FlowArgs,
     FlowResult,
     FlowsFunctionSchema,
+    RoleMessage,
     flows_tool_options,
 )
 from pipecat.frames.frames import (
@@ -37,14 +38,17 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
+from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.tests.utils import run_test
 from tests.flows_test_helpers import (
     assert_tts_speak_frames_queued,
     get_advertised_tool_handlers,
     get_advertised_tools,
     make_mock_worker,
 )
+from tests.test_llm_switcher import _MockLLMService
 
 
 class TestFlowManager(unittest.IsolatedAsyncioTestCase):
@@ -1270,10 +1274,83 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
             settings_frames[0].delta.system_instruction, "You are a helpful assistant."
         )
 
+        # A plain string keeps the default delivery: active LLM only
+        self.assertFalse(settings_frames[0].reach_inactive_services)
+
         # Verify messages frame contains only task_messages
         append_frames = [f for f in first_frames if isinstance(f, LLMMessagesAppendFrame)]
         self.assertEqual(len(append_frames), 1)
         self.assertEqual(append_frames[0].messages, node["task_messages"])
+
+    async def _role_message_settings_frame(self, role_message) -> LLMUpdateSettingsFrame:
+        """Enter a node with the given role_message and return its settings frame."""
+        flow_manager = FlowManager(
+            worker=self.mock_worker,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        await flow_manager.initialize()
+        flow_manager.state["name"] = "Ada"
+
+        node: NodeConfig = {
+            "role_message": role_message,
+            "task_messages": [{"role": "developer", "content": "Do the task."}],
+            "functions": [],
+        }
+        await flow_manager.set_node_from_config(node)
+
+        frames = self.mock_worker.queue_frames.call_args_list[0][0][0]
+        settings_frames = [f for f in frames if isinstance(f, LLMUpdateSettingsFrame)]
+        self.assertEqual(len(settings_frames), 1)
+        return settings_frames[0]
+
+    async def test_role_message_object_reaches_inactive_services(self):
+        """A RoleMessage can mark the system instruction to reach inactive LLMs."""
+        frame = await self._role_message_settings_frame(
+            RoleMessage(content="You are a helpful assistant.", reach_inactive_services=True)
+        )
+        self.assertEqual(frame.delta.system_instruction, "You are a helpful assistant.")
+        self.assertTrue(frame.reach_inactive_services)
+
+    async def test_role_message_object_defaults_to_active_service_only(self):
+        """A RoleMessage without the flag behaves like a plain string."""
+        frame = await self._role_message_settings_frame(
+            RoleMessage(content="You are a helpful assistant.")
+        )
+        self.assertEqual(frame.delta.system_instruction, "You are a helpful assistant.")
+        self.assertFalse(frame.reach_inactive_services)
+
+    async def test_role_message_object_renders_placeholders(self):
+        """Placeholders in a RoleMessage's content are filled from state."""
+        frame = await self._role_message_settings_frame(
+            {"content": "You are talking to {{ name }}.", "reach_inactive_services": True}
+        )
+        self.assertEqual(frame.delta.system_instruction, "You are talking to Ada.")
+        self.assertTrue(frame.reach_inactive_services)
+
+    async def test_role_message_survives_llm_switch(self):
+        """Every LLM of an LLMSwitcher applies a RoleMessage marked to reach them."""
+        frame = await self._role_message_settings_frame(
+            RoleMessage(content="You are a helpful assistant.", reach_inactive_services=True)
+        )
+
+        llm1 = _MockLLMService()
+        llm2 = _MockLLMService()
+        await run_test(LLMSwitcher(llms=[llm1, llm2]), frames_to_send=[frame])
+
+        for llm in (llm1, llm2):
+            self.assertEqual(llm._settings.system_instruction, "You are a helpful assistant.")
+
+    async def test_plain_role_message_reaches_only_active_llm(self):
+        """A plain string role_message applies to the active LLM of a switcher alone."""
+        frame = await self._role_message_settings_frame("You are a helpful assistant.")
+
+        llm1 = _MockLLMService()
+        llm2 = _MockLLMService()
+        await run_test(LLMSwitcher(llms=[llm1, llm2]), frames_to_send=[frame])
+
+        self.assertEqual(llm1._settings.system_instruction, "You are a helpful assistant.")
+        self.assertIsNone(llm2._settings.system_instruction)
 
     async def test_role_messages_persist_across_reset(self):
         """Test that system instruction persists when a RESET node omits role_message."""
