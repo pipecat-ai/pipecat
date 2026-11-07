@@ -1264,11 +1264,12 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
 
 
 async def _run_against_local_sarvam(*, close_first):
-    """Stream 1 s of audio to a local stand-in for the realtime endpoint.
+    """Stream 2 s of audio to a local stand-in for the realtime endpoint.
 
     Each connection answers 500 ms of audio with one final transcript. The
     first connection is then closed with ``close_first`` (a close code and
-    reason).
+    reason). The extra audio gives the second connection time to answer after
+    the reconnect.
     """
     handshakes = 0
 
@@ -1296,7 +1297,7 @@ async def _run_against_local_sarvam(*, close_first):
             api_key="test-key", base_url=f"ws://127.0.0.1:{port}/ws", sample_rate=8000
         )
         frames = []
-        for _ in range(50):
+        for _ in range(100):
             frames += [
                 InputAudioRawFrame(audio=b"\0\0" * 160, sample_rate=8000, num_channels=1),
                 SleepFrame(sleep=0.02),
