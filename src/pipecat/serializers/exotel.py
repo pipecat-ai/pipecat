@@ -30,8 +30,7 @@ class ExotelFrameSerializer(FrameSerializer):
     """Serializer for Exotel Media Streams WebSocket protocol.
 
     This serializer handles converting between Pipecat frames and Exotel's WebSocket
-    media streams protocol. It supports audio conversion, DTMF events, and automatic
-    call termination.
+    media streams protocol. It supports audio conversion and DTMF events.
 
     Note: Ref docs for events:
         https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
