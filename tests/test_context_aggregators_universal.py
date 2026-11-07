@@ -59,6 +59,7 @@ from pipecat.frames.frames import (
     UserFileRawFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
+    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     UserTurnInferenceCompletedFrame,
@@ -86,6 +87,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.empty_user_turn import DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT
 from pipecat.turns.user_mute import (
+    AlwaysUserMuteStrategy,
     FirstSpeechUserMuteStrategy,
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
@@ -3470,6 +3472,427 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
             assistant._require_paired_user_aggregator()
+
+
+class TestFunctionCallResultForMutedUser(unittest.IsolatedAsyncioTestCase):
+    """A function call result isn't held for a user muted during their turn."""
+
+    def _function_call_frames(self) -> list[Frame]:
+        return [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="fn_1", tool_call_id="1", arguments={}, context=None
+                    )
+                ]
+            ),
+            FunctionCallInProgressFrame(
+                function_name="fn_1", tool_call_id="1", arguments={}, cancel_on_interruption=False
+            ),
+        ]
+
+    def _function_call_result(self) -> FunctionCallResultFrame:
+        return FunctionCallResultFrame(
+            function_name="fn_1", tool_call_id="1", arguments={}, result={"ok": True}
+        )
+
+    async def _run_pair(
+        self, frames_to_send: list[Frame], *, mute: bool
+    ) -> tuple[list[Frame], list[Frame]]:
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_mute_strategies=[FunctionCallUserMuteStrategy()] if mute else [],
+            ),
+        )
+        return await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+            expected_up_frames=None,
+        )
+
+    async def test_result_runs_while_turn_muted_by_the_function_call_is_open(self):
+        """The result runs at once, though the turn the mute cut off never ends."""
+        frames_to_send = [
+            # The user starts speaking just before the function call mutes them.
+            VADUserStartedSpeakingFrame(),
+            SleepFrame(),
+            *self._function_call_frames(),
+            SleepFrame(),
+            self._function_call_result(),
+            SleepFrame(sleep=0.5),
+        ]
+        _, received_up = await self._run_pair(frames_to_send, mute=True)
+        runs = [f for f in received_up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(runs), 1)
+
+    async def test_result_runs_when_bot_stops_while_turn_muted_by_the_function_call_is_open(self):
+        """A result deferred for the bot to finish speaking runs when it does."""
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            SleepFrame(),
+            *self._function_call_frames(),
+            SleepFrame(),
+            # The bot says something like "one moment" while the call runs.
+            BotStartedSpeakingFrame(),
+            self._function_call_result(),
+            SleepFrame(sleep=0.3),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.3),
+        ]
+        _, received_up = await self._run_pair(frames_to_send, mute=True)
+        runs = [f for f in received_up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(runs), 1)
+
+    async def test_result_held_for_unmuted_speaking_user_rides_their_turn(self):
+        """Without a mute, the result waits for the user's turn and runs with it, once."""
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello", user_id="cat", timestamp=""),
+            SleepFrame(),
+            *self._function_call_frames(),
+            SleepFrame(),
+            self._function_call_result(),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
+        ]
+        received_down, received_up = await self._run_pair(frames_to_send, mute=False)
+        runs = [f for f in [*received_down, *received_up] if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(runs), 1)
+        self.assertIn(runs[0], received_down)
+
+    async def test_result_held_before_the_mute_runs_when_the_mute_arrives(self):
+        """A result held for the speaking user runs once the mute reaches the aggregator."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                *self._function_call_frames(),
+                self._function_call_result(),
+                SleepFrame(),
+                UserMuteStartedFrame(),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_cancellation_held_before_the_mute_runs_when_the_mute_arrives(self):
+        """A cancellation held for the speaking user runs once the mute reaches the aggregator."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                FunctionCallCancelFrame(function_name="fn_1", tool_call_id="1", run_llm=True),
+                SleepFrame(),
+                UserMuteStartedFrame(),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_result_held_in_a_new_turn_after_a_muted_turn_lost_its_stop(self):
+        """A muted turn that never ended doesn't release the result of the next one."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                # The mute drops this turn's UserStoppedSpeakingFrame.
+                UserStartedSpeakingFrame(),
+                UserMuteStartedFrame(),
+                UserMuteStoppedFrame(),
+                UserStartedSpeakingFrame(),
+                *self._function_call_frames(),
+                self._function_call_result(),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[],
+        )
+
+    async def test_result_runs_after_the_mute_ends_in_the_same_turn(self):
+        """A user muted during their turn isn't waited for once the mute ends."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                UserMuteStartedFrame(),
+                UserMuteStoppedFrame(),
+                *self._function_call_frames(),
+                self._function_call_result(),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_empty_turn_muted_during_it_is_not_recovered(self):
+        """An empty turn that ends after the mute does runs no recovery on top of the result."""
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_mute_strategies=[FunctionCallUserMuteStrategy()],
+                user_turn_stop_timeout=0.5,
+            ),
+        )
+        received_down, received_up = await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                self._function_call_result(),
+                SleepFrame(),
+                # The user is still talking when the mute ends, and says nothing recognized.
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.5),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=None,
+        )
+        runs = [f for f in [*received_down, *received_up] if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(runs), 1)
+
+    async def _run_pair_with_stop_timeout(self, frames_to_send: list[Frame]) -> list[Frame]:
+        """Run the pair with a function call mute and return every LLMContextFrame."""
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_mute_strategies=[FunctionCallUserMuteStrategy()],
+                user_turn_stop_timeout=0.5,
+            ),
+        )
+        received_down, received_up = await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+            expected_up_frames=None,
+        )
+        return [f for f in [*received_down, *received_up] if isinstance(f, LLMContextFrame)]
+
+    async def test_empty_muted_turn_whose_result_does_not_run_is_recovered(self):
+        """A muted, empty turn that nothing ran the LLM for runs the recovery."""
+        runs = await self._run_pair_with_stop_timeout(
+            [
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="fn_1",
+                    tool_call_id="1",
+                    arguments={},
+                    result={"ok": True},
+                    run_llm=False,
+                ),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.5),
+            ]
+        )
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(
+            runs[0].context.messages[-1],
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+        )
+
+    async def test_empty_muted_turn_whose_result_is_empty_is_recovered(self):
+        """A muted, empty turn whose call returns no result runs the recovery."""
+        runs = await self._run_pair_with_stop_timeout(
+            [
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="fn_1", tool_call_id="1", arguments={}, result=None
+                ),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.5),
+            ]
+        )
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(
+            runs[0].context.messages[-1],
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+        )
+
+    async def test_empty_turn_answered_by_a_result_released_on_mute_is_not_recovered(self):
+        """A result held before the mute and released by it answers the empty turn."""
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_mute_strategies=[AlwaysUserMuteStrategy()],
+                user_turn_stop_timeout=0.5,
+            ),
+        )
+        received_down, received_up = await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                # Held: the user is speaking and not muted.
+                self._function_call_result(),
+                SleepFrame(),
+                # The bot speaking mutes the user, releasing the result for when it stops.
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.5),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=None,
+        )
+        runs = [f for f in [*received_down, *received_up] if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(runs), 1)
+
+    async def test_empty_turn_after_a_muted_one_is_recovered(self):
+        """A muted turn whose result ran doesn't keep the next empty turn from recovery."""
+        runs = await self._run_pair_with_stop_timeout(
+            [
+                # A muted, empty turn: its result runs, so no recovery.
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                self._function_call_result(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+                # An unmuted, empty turn that interrupts the bot answering the result.
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ]
+        )
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(
+            runs[1].context.messages[-1],
+            {"role": "developer", "content": DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT},
+        )
+
+    async def test_cancellation_asking_to_run_runs_while_turn_muted_is_open(self):
+        """A timed-out call's cancellation runs the LLM though the muted turn never ends."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                UserMuteStartedFrame(),
+                *self._function_call_frames(),
+                SleepFrame(),
+                FunctionCallCancelFrame(function_name="fn_1", tool_call_id="1", run_llm=True),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_append_asking_to_run_runs_while_turn_muted_is_open(self):
+        """An append with run_llm=True runs the LLM though the muted turn never ends."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserStartedSpeakingFrame(),
+                UserMuteStartedFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_result_held_again_in_the_unmuted_turn_after_a_muted_one(self):
+        """The next turn without a mute holds its result and runs it with the turn, once."""
+        second_call = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="fn_2", tool_call_id="2", arguments={}, context=None
+                    )
+                ]
+            ),
+            FunctionCallInProgressFrame(
+                function_name="fn_2", tool_call_id="2", arguments={}, cancel_on_interruption=False
+            ),
+        ]
+        frames_to_send = [
+            # A muted turn: its result runs at once.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hi", user_id="cat", timestamp=""),
+            SleepFrame(),
+            UserMuteStartedFrame(),
+            *self._function_call_frames(),
+            SleepFrame(),
+            self._function_call_result(),
+            SleepFrame(),
+            UserMuteStoppedFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
+            # An unmuted turn: its result waits for the turn and runs with it.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello", user_id="cat", timestamp=""),
+            SleepFrame(),
+            *second_call,
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="fn_2", tool_call_id="2", arguments={}, result={"ok": True}
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
+        ]
+        pair = LLMContextAggregatorPair(
+            LLMContext(),
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+        received_down, received_up = await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+            expected_up_frames=None,
+        )
+        up_runs = [f for f in received_up if isinstance(f, LLMContextFrame)]
+        down_runs = [f for f in received_down if isinstance(f, LLMContextFrame)]
+        # One run for the muted turn's result, then one for each turn's end.
+        self.assertEqual(len(up_runs), 1)
+        self.assertEqual(len(down_runs), 2)
+
+    async def test_mute_while_the_user_is_silent_does_not_release_their_next_turn(self):
+        """A mute that starts before the user speaks leaves their turn waited for."""
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[
+                UserMuteStartedFrame(),
+                UserMuteStoppedFrame(),
+                UserStartedSpeakingFrame(),
+                *self._function_call_frames(),
+                self._function_call_result(),
+                SleepFrame(),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[],
+        )
 
 
 if __name__ == "__main__":
