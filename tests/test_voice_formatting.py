@@ -43,6 +43,21 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_content_kept(self):
+        cases = {
+            "call `__init__` please": "call __init__ please",
+            "`*args`": "*args",
+            "`# comment`": "# comment",
+            "`> quoted`": "> quoted",
+            "`- item`": "- item",
+            "**bold `__x__`** end": "bold __x__ end",
+            "- `*x*` item": "*x* item",
+            "`a_b` and `c*d`": "a_b and c*d",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
     async def test_alnum_preserving(self):
         text = "**Hello** and _world_"
         result = await strip_markdown(text, "*")
