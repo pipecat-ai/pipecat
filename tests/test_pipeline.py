@@ -1037,6 +1037,42 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         # is pushed, so nothing waits for one to time out.
         assert not timed_out
 
+    async def test_task_cancelled_along_with_its_tasks(self):
+        """asyncio.run() cancels every task left when it exits, so run() is
+        cancelled together with the worker's own tasks and none of them is
+        left to push the CancelFrame."""
+
+        cleaned = []
+
+        class CleanupRecorder(IdentityFilter):
+            async def cleanup(self):
+                await super().cleanup()
+                cleaned.append(self.name)
+
+        pipeline = Pipeline([CleanupRecorder()])
+        worker = PipelineWorker(pipeline)
+
+        started = asyncio.Event()
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            started.set()
+
+        existing = asyncio.all_tasks()
+        run_task = asyncio.create_task(worker.run(WorkerParams(task_manager=TaskManager())))
+        await asyncio.wait_for(started.wait(), timeout=5.0)
+
+        for task in asyncio.all_tasks() - existing:
+            task.cancel()
+
+        done, _ = await asyncio.wait({run_task}, timeout=2.0)
+
+        assert run_task in done
+        assert worker.has_finished()
+
+        # Nothing pushed the CancelFrame, so the processors are only cleaned up.
+        assert len(cleaned) == 1
+
     async def test_task_start_frame_never_reaches_sink(self):
         class StartBlocker(FrameProcessor):
             def __init__(self, **kwargs):
