@@ -284,7 +284,6 @@ class SyncParallelPipeline(BasePipeline):
             return
 
         use_pipeline_order = self._frame_order == FrameOrder.PIPELINE
-        end_frame = frame if isinstance(frame, EndFrame) else None
 
         # The last processor of each pipeline needs to be synchronous otherwise
         # this element won't work. Since we know it should be synchronous we
@@ -348,22 +347,22 @@ class SyncParallelPipeline(BasePipeline):
             # ARRIVAL mode: drain the shared queues in the order frames arrived.
             seen_ids = set()
             while not self._up_queue.empty():
-                frame = await self._up_queue.get()
-                if frame.id not in seen_ids:
-                    await self.push_frame(frame, FrameDirection.UPSTREAM)
-                    seen_ids.add(frame.id)
+                f = await self._up_queue.get()
+                if f.id not in seen_ids:
+                    await self.push_frame(f, FrameDirection.UPSTREAM)
+                    seen_ids.add(f.id)
                 self._up_queue.task_done()
 
             seen_ids = set()
             while not self._down_queue.empty():
-                frame = await self._down_queue.get()
-                if frame.id not in seen_ids:
-                    await self.push_frame(frame, FrameDirection.DOWNSTREAM)
-                    seen_ids.add(frame.id)
+                f = await self._down_queue.get()
+                if f.id not in seen_ids:
+                    await self.push_frame(f, FrameDirection.DOWNSTREAM)
+                    seen_ids.add(f.id)
                 self._down_queue.task_done()
 
-        if end_frame:
-            await self.push_frame(end_frame, direction)
+        if isinstance(frame, EndFrame):
+            await self.push_frame(frame, direction)
 
     async def _start_pipelines(self, frame: StartFrame):
         """Start every pipeline, then pass the StartFrame on once it is through all of them."""
