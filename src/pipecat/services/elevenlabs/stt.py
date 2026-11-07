@@ -698,7 +698,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             None - transcription results are handled via WebSocket responses.
         """
         # The receive loop reconnects a dropped socket; audio arriving
-        # meanwhile is dropped.
+        # meanwhile is buffered by the base class and replayed.
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 # Encode audio as base64

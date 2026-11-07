@@ -341,7 +341,7 @@ class CartesiaSTTService(WebsocketSTTService):
             None - transcription results are handled via WebSocket responses.
         """
         # The receive loop reconnects a dropped socket; audio arriving
-        # meanwhile is dropped.
+        # meanwhile is buffered by the base class and replayed.
         if not self._websocket or self._websocket.state is not State.OPEN:
             yield None
             return
