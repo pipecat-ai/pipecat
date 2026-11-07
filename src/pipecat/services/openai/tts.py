@@ -128,6 +128,7 @@ class OpenAITTSService(TTSService):
         Args:
             api_key: OpenAI API key for authentication. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
+                Custom endpoints may use backend-specific voice names.
             http_client: Custom async HTTP client for API requests, e.g. one with a
                 longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
                 keeps the SDK's connection limits and redirect handling; a bare client
@@ -221,6 +222,7 @@ class OpenAITTSService(TTSService):
         )
 
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
+        self._allow_custom_voices = self._client.base_url.host != "api.openai.com"
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -258,7 +260,7 @@ class OpenAITTSService(TTSService):
         if voice is None:
             yield ErrorFrame(error="OpenAI TTS voice must be specified")
             return
-        if voice not in VALID_VOICES:
+        if not self._allow_custom_voices and voice not in VALID_VOICES:
             yield ErrorFrame(
                 error=f"OpenAI TTS voice {voice!r} is not supported "
                 f"(must be one of: {', '.join(sorted(VALID_VOICES))})"
@@ -269,7 +271,7 @@ class OpenAITTSService(TTSService):
             create_params = {
                 "input": text,
                 "model": self._settings.model,
-                "voice": VALID_VOICES[voice],
+                "voice": VALID_VOICES.get(voice, voice),
                 "response_format": "pcm",
             }
 
