@@ -793,7 +793,7 @@ class ProjectGenerator:
             fmt = subprocess.run(
                 [*ruff, "format", str(project_path)],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
                 check=False,
             )
 
@@ -801,7 +801,7 @@ class ProjectGenerator:
             imports = subprocess.run(
                 [*ruff, "check", "--fix", "--select", "I", str(project_path)],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
                 check=False,
             )
         except (FileNotFoundError, OSError) as e:
