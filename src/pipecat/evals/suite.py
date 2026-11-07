@@ -200,7 +200,7 @@ def capture_pipeline_logs(
         ]
         if sections:
             logs_dir.mkdir(parents=True, exist_ok=True)
-            (logs_dir / f"{prefix}.debug.log").write_text("\n".join(sections))
+            (logs_dir / f"{prefix}.debug.log").write_text("\n".join(sections), encoding="utf-8")
 
 
 def _append_result(
@@ -587,7 +587,7 @@ class EvalManifest:
         """
         path = Path(path).resolve()
         base = path.parent
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         settings = cls._settings(
             data,
             base,
@@ -1074,7 +1074,7 @@ class EvalSuite(BaseObject):
             # problem on the suite's side (spawning, reading the result back).
             run.error = f"error: {type(e).__name__}: {e}"
             with contextlib.suppress(OSError):
-                files.trace.write_text(traceback.format_exc())
+                files.trace.write_text(traceback.format_exc(), encoding="utf-8")
         finally:
             await self._finish(
                 run,
@@ -1128,7 +1128,7 @@ class EvalSuite(BaseObject):
         body_path = run.runner_body_path
         if run.runner_body is not None:
             body_path = files.body
-            body_path.write_text(json.dumps(run.runner_body))
+            body_path.write_text(json.dumps(run.runner_body), encoding="utf-8")
         with files.log.open("wb") as logf:
             return await asyncio.create_subprocess_exec(
                 *self._spawn_argv(run.bot_path, port, body_path),
@@ -1168,7 +1168,7 @@ class EvalSuite(BaseObject):
             "prefix": files.prefix,
             "result_path": str(files.result),
         }
-        files.config.write_text(json.dumps(config))
+        files.config.write_text(json.dumps(config), encoding="utf-8")
         with contextlib.suppress(OSError):
             files.result.unlink()
         with files.harness_log.open("wb") as logf:
@@ -1193,7 +1193,7 @@ class EvalSuite(BaseObject):
                 f"error: harness worker exited {worker.returncode} (see {files.prefix}.harness.log)"
             )
             return worker
-        data = json.loads(files.result.read_text())
+        data = json.loads(files.result.read_text(encoding="utf-8"))
         if run.kind == EvalKind.SIMULATION:
             run.result = _simulation_result_from_dict(data)
         else:
@@ -1234,9 +1234,11 @@ class EvalSuite(BaseObject):
             with contextlib.suppress(OSError):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
-            files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+            files.trace.write_text("\n".join(run.result.debug_log) + "\n", encoding="utf-8")
         if isinstance(run.result, EvalSimulationResult):
-            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
+            files.conversation.write_text(
+                json.dumps(run.result.conversation, indent=2) + "\n", encoding="utf-8"
+            )
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 
