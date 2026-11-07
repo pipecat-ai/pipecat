@@ -25,7 +25,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
-    ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     YesNoQuestion,
@@ -130,7 +130,7 @@ class PipecatToneClassifier(BaseClassifier):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage | None]:
         """Answer the questions with one read of the turn."""
         if not self._model:

@@ -333,7 +333,7 @@ class PerceptionReader(FrameProcessor):
         signals = None
         try:
             results = await self._classifier.ask(
-                state, self._classifier_questions(questions), audio=clip
+                state, self._classifier_questions(questions), inputs=[clip]
             )
             signals = self._signals(results, questions)
             await self.broadcast_frame(PerceptionFrame, perception=signals)

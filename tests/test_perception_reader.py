@@ -99,7 +99,7 @@ class FakeClassifier(BaseClassifier):
         if self._setup_error:
             raise self._setup_error
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, inputs=()):
         self.asked.append((state, dict(questions)))
         await asyncio.sleep(self._delay)
         if self._error:
@@ -310,9 +310,9 @@ class FakeAudioClassifier(BaseClassifier):
     def min_audio_secs(self) -> float:
         return self._min_secs
 
-    async def _ask(self, state, questions, images=(), audio=None):
+    async def _ask(self, state, questions, inputs=()):
         call = len(self.clips)
-        self.clips.append(audio)
+        self.clips.append(next(iter(inputs), None))
         self.states.append(state)
         await asyncio.sleep(self._delays[call] if call < len(self._delays) else 0.0)
         results = dict(RESULTS)

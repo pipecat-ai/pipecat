@@ -104,7 +104,7 @@ async def test_the_request_goes_before_the_file_with_the_api_key():
         return _reply({"hesitant": ANSWERS["hesitant"]})
 
     classifier = HumeAudioClassifier(client=_client(handler))
-    await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+    await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip()])
 
     [request] = seen
     assert request.url.path == "/v0/decisions/file"
@@ -122,7 +122,7 @@ async def test_questions_are_sent_in_humes_own_format():
 
     classifier = HumeAudioClassifier(client=_client(handler))
     await classifier.ask(
-        "A caller.", {"tone": TONE, "hesitant": HESITANT, "energy": ENERGY}, audio=_clip()
+        "A caller.", {"tone": TONE, "hesitant": HESITANT, "energy": ENERGY}, inputs=[_clip()]
     )
 
     assert seen[0]["questions"] == {
@@ -159,7 +159,7 @@ async def test_a_yes_no_question_without_criteria_sends_none():
     await classifier.ask(
         "A caller.",
         {"hesitant": YesNoQuestion(instructions={"ask": "Unsure?", "about": "the speaker"})},
-        audio=_clip(),
+        inputs=[_clip()],
     )
 
     assert seen[0]["questions"]["hesitant"] == {
@@ -173,7 +173,7 @@ async def test_answers_become_typed_results():
     classifier = HumeAudioClassifier(client=_client(lambda request: _reply(ANSWERS)))
 
     results = await classifier.ask(
-        "A caller.", {"tone": TONE, "hesitant": HESITANT, "energy": ENERGY}, audio=_clip()
+        "A caller.", {"tone": TONE, "hesitant": HESITANT, "energy": ENERGY}, inputs=[_clip()]
     )
 
     assert results == {
@@ -202,7 +202,7 @@ async def test_the_clip_is_sent_as_a_16khz_mono_wav():
         return _reply({"hesitant": ANSWERS["hesitant"]})
 
     classifier = HumeAudioClassifier(client=_client(handler))
-    await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip(6, sample_rate=8000))
+    await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip(6, sample_rate=8000)])
 
     with wave.open(io.BytesIO(seen[0]), "rb") as wav:
         assert (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) == (16000, 1, 2)
@@ -220,7 +220,7 @@ async def test_a_clip_shorter_than_five_seconds_is_refused_without_a_request():
     classifier = HumeAudioClassifier(client=_client(handler))
 
     with pytest.raises(ClassifierError):
-        await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip(4.5))
+        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip(4.5)])
 
     assert seen == []
 
@@ -243,6 +243,22 @@ async def test_questions_without_a_clip_are_refused_without_a_request():
 
 
 @pytest.mark.asyncio
+async def test_two_clips_are_refused_without_a_request():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _reply({"hesitant": ANSWERS["hesitant"]})
+
+    classifier = HumeAudioClassifier(client=_client(handler))
+
+    with pytest.raises(ClassifierError, match="one clip of audio, got 2"):
+        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip(), _clip()])
+
+    assert seen == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "state, context",
     [
@@ -260,7 +276,7 @@ async def test_the_state_is_sent_as_the_context(state, context):
         return _reply({"hesitant": ANSWERS["hesitant"]})
 
     classifier = HumeAudioClassifier(client=_client(handler))
-    await classifier.ask(state, {"hesitant": HESITANT}, audio=_clip())
+    await classifier.ask(state, {"hesitant": HESITANT}, inputs=[_clip()])
 
     assert seen[0].get("context") == context
 
@@ -276,7 +292,7 @@ async def test_the_billed_input_tokens_are_counted_and_reported():
         reported.extend(data)
 
     for _ in range(2):
-        await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip()])
     await classifier.cleanup()
 
     assert client.usage.input_tokens == 1800
@@ -295,7 +311,7 @@ async def test_a_busy_hume_is_retried_after_its_retry_after(monkeypatch):
     monkeypatch.setattr("pipecat.classifiers.hume.audio_decisions.client.asyncio.sleep", no_sleep)
     classifier = HumeAudioClassifier(client=_client(lambda request: replies.pop(0)))
 
-    results = await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+    results = await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip()])
 
     assert results["hesitant"] == YesNoResult(probability=0.62)
     assert waits == [0.5]
@@ -312,7 +328,7 @@ async def test_a_long_retry_after_is_reported_without_waiting(monkeypatch):
     classifier = HumeAudioClassifier(client=_client(handler))
 
     with pytest.raises(ClassifierError, match="retry after 30s"):
-        await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip()])
 
     assert len(seen) == 1
 
@@ -331,7 +347,7 @@ async def test_a_rejection_reports_humes_code_and_message():
     )
 
     with pytest.raises(ClassifierError, match="question_invalid Option names must be unique"):
-        await classifier.ask("A caller.", {"tone": TONE}, audio=_clip())
+        await classifier.ask("A caller.", {"tone": TONE}, inputs=[_clip()])
 
 
 @pytest.mark.asyncio
@@ -340,7 +356,7 @@ async def test_a_choice_that_isnt_an_option_is_an_error():
     classifier = HumeAudioClassifier(client=_client(lambda request: _reply({"tone": answer})))
 
     with pytest.raises(ClassifierError):
-        await classifier.ask("A caller.", {"tone": TONE}, audio=_clip())
+        await classifier.ask("A caller.", {"tone": TONE}, inputs=[_clip()])
 
 
 @pytest.mark.asyncio
@@ -350,7 +366,7 @@ async def test_a_question_left_unanswered_is_an_error():
     )
 
     with pytest.raises(ClassifierError, match="no answer for hesitant"):
-        await classifier.ask("A caller.", {"tone": TONE, "hesitant": HESITANT}, audio=_clip())
+        await classifier.ask("A caller.", {"tone": TONE, "hesitant": HESITANT}, inputs=[_clip()])
 
 
 @pytest.mark.asyncio
@@ -381,7 +397,7 @@ async def test_a_connection_that_cant_be_opened_at_setup_is_only_a_warning():
     classifier = HumeAudioClassifier(client=_client(handler))
     await classifier.setup(TaskManager())
 
-    results = await classifier.ask("A caller.", {"hesitant": HESITANT}, audio=_clip())
+    results = await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip()])
 
     assert results["hesitant"] == YesNoResult(probability=0.62)
 
