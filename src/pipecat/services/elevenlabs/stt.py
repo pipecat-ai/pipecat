@@ -201,6 +201,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
+        secondary_languages: ISO-639-1 or ISO-639-3 language codes to consider.
         filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
@@ -210,6 +211,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    secondary_languages: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_background_audio: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -567,6 +569,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_silence_duration_ms=None,
             keyterms=None,
             no_verbatim=None,
+            secondary_languages=None,
             filter_background_audio=None,
         )
 
@@ -770,6 +773,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
             if self._settings.language:
                 params.append(f"language_code={self._settings.language}")
+
+            secondary_languages = self._settings.secondary_languages
+            if is_given(secondary_languages) and secondary_languages is not None:
+                for language in secondary_languages:
+                    params.append(urlencode({"secondary_languages": language}))
 
             params.append(f"audio_format={self._audio_format}")
             params.append(f"commit_strategy={self._commit_strategy.value}")
