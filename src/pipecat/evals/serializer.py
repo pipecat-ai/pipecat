@@ -360,6 +360,8 @@ _REPORTED_EVENT_TYPES = frozenset(
         # its transcriptions and backchannels.
         "bot-output",
         "user-input",
+        # Announced before the LLM response ends; execution may begin later.
+        "llm-function-call-started",
     }
 )
 

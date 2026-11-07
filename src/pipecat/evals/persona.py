@@ -82,6 +82,7 @@ class EvalPersona:
         self._context = LLMContext(tools=ToolsSchema(standard_tools=[END_CALL_SCHEMA]))
         # What the persona has heard of the bot's current turn (text mode).
         self._heard: list[str] = []
+        self._calls_announced = 0
         self._calls_in_progress = 0
         self._hung_up = False
 
@@ -128,14 +129,20 @@ class EvalPersona:
         if self._hung_up:
             return None
         match event["type"]:
+            case "function_call_started":
+                self._calls_announced += 1
             case "function_call":
+                self._calls_announced = max(0, self._calls_announced - 1)
                 self._calls_in_progress += 1
             case "function_call_stopped":
-                self._calls_in_progress = max(0, self._calls_in_progress - 1)
+                if self._calls_in_progress:
+                    self._calls_in_progress -= 1
+                else:
+                    self._calls_announced = max(0, self._calls_announced - 1)
             case "llm_response":
                 if event["text"]:
                     self._heard.append(event["text"])
-                if self._calls_in_progress or not self._heard:
+                if self._calls_announced or self._calls_in_progress or not self._heard:
                     return None
                 text = " ".join(self._heard)
                 self._heard = []

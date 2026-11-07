@@ -32,6 +32,8 @@ scenario ``event:``             RTVI server message(s)
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
+``function_call_started``       ``llm-function-call-started``; a call announced
+                                before its execution, with its name if reported
 ``function_call``               ``llm-function-call-in-progress``; a call made
                                 outside the bot's pipeline and reported into it
                                 (``ExternalFunctionCall*Frame``), such as a
@@ -603,6 +605,8 @@ class EvalEventStream:
             return self._bot_backchannel_event(data) or self._expression_event(data)
         elif msg_type == "user-input":
             return self._user_input_event(data)
+        elif msg_type == "llm-function-call-started":
+            return {"type": "function_call_started", "name": data.get("function_name") or None}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",
