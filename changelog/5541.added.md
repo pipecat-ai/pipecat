@@ -1,0 +1,1 @@
+- Added `noise_reduction` to Inworld Realtime's `AudioInput`, so a session can enable Inworld's near-field or far-field input filter.
