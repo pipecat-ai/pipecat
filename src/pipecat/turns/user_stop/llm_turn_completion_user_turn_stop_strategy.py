@@ -7,6 +7,7 @@
 """User turn stop strategy that decides on the LLM's turn-completion marker."""
 
 import asyncio
+from functools import partial
 
 from loguru import logger
 
@@ -22,16 +23,17 @@ from pipecat.frames.frames import (
     UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
 )
+from pipecat.services.llm_extensions.user_turn_completion import UserTurnCompletionLLMExtension
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 
 
 class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
     """Decides the user is done only when the LLM marks the turn complete.
 
-    Turns on turn-completion markers in the LLM, which then starts every
-    response with ● (the turn is complete), ◐ (the user will continue shortly)
+    Installs the :class:`~pipecat.services.llm_extensions.user_turn_completion.UserTurnCompletionLLMExtension`
+    on the LLM, which then starts every response with ● (the turn is complete), ◐ (the user will continue shortly)
     or ○ (the user needs more time), and reports each marker as a
     :class:`~pipecat.frames.frames.UserTurnCompletionFrame`. The settings update
     reaches every LLM behind an
@@ -132,11 +134,12 @@ class LLMTurnCompletionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_user_started_speaking()
 
     async def _configure_llm(self):
+        # Built per service: the update reaches every LLM behind a switcher, and
+        # an extension belongs to one.
         await self.push_frame(
             LLMUpdateSettingsFrame(
                 delta=LLMSettings(
-                    filter_incomplete_user_turns=True,
-                    user_turn_completion_config=self._config,
+                    extensions=[partial(UserTurnCompletionLLMExtension, self._config)]
                 ),
                 reach_inactive_services=True,
             )

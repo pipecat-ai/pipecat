@@ -50,7 +50,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.turns.user_turn_completion_mixin import (
+from pipecat.turns.user_turn_completion import (
     USER_TURN_COMPLETE_MARKER,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,

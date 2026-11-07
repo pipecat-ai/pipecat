@@ -26,10 +26,11 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_extensions.user_turn_completion import UserTurnCompletionLLMExtension
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import run_test
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
@@ -239,7 +240,7 @@ async def test_an_llm_that_filters_incomplete_turns_is_told_a_reading_doesnt_dec
     await run_test(
         llm,
         frames_to_send=[
-            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[UserTurnCompletionLLMExtension])),
             PerceptionMetadataFrame(service_name="tone", perception=TONE),
         ],
         pipeline_params=EXPRESSIVE,
@@ -260,7 +261,7 @@ async def test_an_llm_that_filters_incomplete_turns_without_perception_gets_no_r
     await run_test(
         llm,
         frames_to_send=[
-            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True))
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[UserTurnCompletionLLMExtension]))
         ],
         pipeline_params=EXPRESSIVE,
     )

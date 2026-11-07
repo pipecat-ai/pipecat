@@ -3,7 +3,7 @@
 `filter_incomplete_user_turns` asks the LLM to begin every response with a
 marker that says whether the user's turn was complete (`●`, then the reply),
 cut off mid-thought (`◐`, alone) or in need of more time (`○`, alone). The
-protocol lives in `pipecat.turns.user_turn_completion_mixin`, and it only works
+protocol lives in `pipecat.services.llm_extensions.user_turn_completion`, and it only works
 as well as the model follows the instructions. This suite measures that across
 every text LLM service in Pipecat, so a prompt change can be checked against
 the whole matrix and a new model can be scored as soon as it appears.
