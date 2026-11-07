@@ -189,6 +189,27 @@ class TestSincStreamAudioResamplerLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_flush_before_any_audio_is_empty(self):
         self.assertEqual(await SincStreamAudioResampler().flush(), b"")
 
+    async def test_flush_without_new_audio_is_empty(self):
+        resampler = SincStreamAudioResampler(clear_after_secs=None)
+        await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
+        self.assertTrue(await resampler.flush())
+
+        self.assertEqual(await resampler.flush(), b"")
+
+        await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
+        await resampler.reset()
+
+        self.assertEqual(await resampler.flush(), b"")
+
+    async def test_flush_after_an_inactivity_clear_is_empty(self):
+        resampler = SincStreamAudioResampler(clear_after_secs=0.2)
+        with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.0):
+            await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
+        with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.5):
+            await resampler.resample(b"", 24000, 8000)
+
+        self.assertEqual(await resampler.flush(), b"")
+
     async def test_reset_discards_the_held_audio(self):
         resampler = SincStreamAudioResampler(clear_after_secs=None)
         await stream(resampler, tone(1000, 24000), chunk_sizes(24000, 960), 24000, 8000)

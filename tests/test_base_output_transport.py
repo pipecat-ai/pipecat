@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
     VolumeFrame,
@@ -689,6 +690,41 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
             self.assertLess(int(samples.max()), 8000 // 4)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_a_turn_without_audio_writes_nothing(self):
+        """A TTS turn that produced no audio writes nothing and starts no bot turn.
+
+        The end of every TTS turn flushes the resampler, which has to give back
+        nothing when no audio went in since the last flush.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            for frame in self._tts_frames(sample_count=3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.8)
+            written = len(transport.write_audio_frame.call_args_list)
+            pushed = len(transport.push_frame.call_args_list)
+
+            await transport.process_frame(
+                TTSStartedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.8)
+
+            self.assertEqual(len(transport.write_audio_frame.call_args_list), written)
+            bot_frames = [
+                call.args[0]
+                for call in transport.push_frame.call_args_list[pushed:]
+                if isinstance(call.args[0], (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
+            ]
+            self.assertEqual(bot_frames, [])
         finally:
             await transport.cancel(CancelFrame())
 
