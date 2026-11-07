@@ -8,7 +8,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.azure.stt import AzureSTTService
@@ -59,6 +59,79 @@ class TestAzureSTTProfanitySetting(unittest.TestCase):
         with patch("pipecat.services.azure.stt.SpeechConfig.set_profanity") as mock_set:
             AzureSTTService(api_key="fake", region="eastus")
             mock_set.assert_not_called()
+
+
+class TestAzureSTTModelSetting(unittest.TestCase):
+    """The ``model`` setting sets ``SpeechConfig.model``, which the Speech SDK
+    sends to Azure to select a recognition model such as MAI-Transcribe-2-Streaming."""
+
+    def test_model_set_on_init(self):
+        service = AzureSTTService(
+            api_key="fake",
+            region="eastus",
+            settings=AzureSTTService.Settings(model="mai-transcribe-2-streaming"),
+        )
+        self.assertEqual(service._speech_config.model, "mai-transcribe-2-streaming")
+        self.assertEqual(
+            service._speech_config.get_property_by_name("SPEECH-ModelName"),
+            "mai-transcribe-2-streaming",
+        )
+
+    def test_model_none_leaves_default(self):
+        service = AzureSTTService(
+            api_key="fake",
+            region="eastus",
+            settings=AzureSTTService.Settings(model=None),
+        )
+        self.assertIsNone(service._settings.model)
+        self.assertEqual(service._speech_config.get_property_by_name("SPEECH-ModelName"), "")
+
+
+class TestAzureSTTModelUpdate(unittest.IsolatedAsyncioTestCase):
+    """Live updates to ``model`` should apply the setting and reconnect when a stream is active."""
+
+    async def test_model_change_triggers_reconnect_when_stream_active(self):
+        service = AzureSTTService(api_key="fake", region="eastus")
+        # Simulate an active audio stream so the service will reconnect.
+        service._audio_stream = object()
+
+        with (
+            patch.object(service, "_disconnect", new_callable=AsyncMock) as mock_disconnect,
+            patch.object(service, "_connect", new_callable=AsyncMock) as mock_connect,
+            patch.object(service, "_apply_model") as mock_apply,
+        ):
+            await service._update_settings(AzureSTTService.Settings(model="new-model"))
+            mock_apply.assert_called_once()
+            mock_disconnect.assert_called_once()
+            mock_connect.assert_called_once()
+
+    async def test_model_change_does_not_reconnect_when_stream_inactive(self):
+        service = AzureSTTService(api_key="fake", region="eastus")
+        # No active stream.
+        service._audio_stream = None
+
+        with (
+            patch.object(service, "_disconnect", new_callable=AsyncMock) as mock_disconnect,
+            patch.object(service, "_connect", new_callable=AsyncMock) as mock_connect,
+            patch.object(service, "_apply_model") as mock_apply,
+        ):
+            await service._update_settings(AzureSTTService.Settings(model="new-model"))
+            mock_apply.assert_called_once()
+            mock_disconnect.assert_not_called()
+            mock_connect.assert_not_called()
+
+    async def test_model_change_updates_speech_config(self):
+        service = AzureSTTService(
+            api_key="fake",
+            region="eastus",
+            settings=AzureSTTService.Settings(model="mai-transcribe-2-streaming"),
+        )
+
+        await service._update_settings(AzureSTTService.Settings(model="other-model"))
+        self.assertEqual(service._speech_config.model, "other-model")
+
+        await service._update_settings(AzureSTTService.Settings(model=None))
+        self.assertEqual(service._speech_config.get_property_by_name("SPEECH-ModelName"), "")
 
 
 class TestAzureSTTSegmentationSilenceTimeout(unittest.TestCase):
