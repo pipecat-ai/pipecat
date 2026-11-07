@@ -9,9 +9,9 @@ import unittest
 from unittest.mock import MagicMock
 
 from pipecat.frames.frames import LLMMessagesAppendFrame, PipelineFlushFrame
-from pipecat.pipeline.worker import PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.workers.llm import LLMWorker, tool
+from pipecat.workers.llm import LLMContextWorker, LLMWorker, tool
 
 
 def _create_worker():
@@ -347,6 +347,43 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         delivered = _get_delivered_frames(worker)
         self.assertEqual(len(delivered), 1)
         self.assertIs(delivered[0][0], frame)
+
+
+class TestPipelineWorkerArguments(unittest.TestCase):
+    def _llm(self):
+        llm = MagicMock()
+        llm._register_direct_function = MagicMock()
+        return llm
+
+    def test_defaults(self):
+        worker = LLMWorker("worker", llm=self._llm())
+        self.assertIsNone(worker._idle_timeout_secs)
+        self.assertTrue(worker.params.enable_metrics)
+        self.assertTrue(worker.params.enable_usage_metrics)
+
+    def test_forwards_pipeline_worker_arguments(self):
+        worker = LLMWorker(
+            "worker",
+            llm=self._llm(),
+            conversation_id="conversation-1",
+            additional_span_attributes={"tenant": "acme"},
+        )
+        self.assertEqual(worker._conversation_id, "conversation-1")
+        self.assertEqual(worker._additional_span_attributes, {"tenant": "acme"})
+
+    def test_caller_params_and_idle_timeout_replace_defaults(self):
+        params = PipelineParams(enable_metrics=False)
+        worker = LLMWorker("worker", llm=self._llm(), params=params, idle_timeout_secs=30)
+        self.assertIs(worker.params, params)
+        self.assertEqual(worker._idle_timeout_secs, 30)
+
+    def test_context_worker_forwards_pipeline_worker_arguments(self):
+        worker = LLMContextWorker(
+            "worker", llm=self._llm(), conversation_id="conversation-1", idle_timeout_secs=30
+        )
+        self.assertEqual(worker._conversation_id, "conversation-1")
+        self.assertEqual(worker._idle_timeout_secs, 30)
+        self.assertTrue(worker.params.enable_metrics)
 
 
 if __name__ == "__main__":
