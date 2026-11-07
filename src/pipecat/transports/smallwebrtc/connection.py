@@ -30,6 +30,8 @@ try:
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
+        RTCRtpCodecCapability,
+        RTCRtpSender,
         RTCSessionDescription,
     )
     from aiortc.jitterbuffer import JitterBuffer
@@ -253,6 +255,20 @@ class SmallWebRTCTrack:
 IceServer = RTCIceServer
 
 
+def _audio_codec_capabilities(names: list[str]) -> list[RTCRtpCodecCapability]:
+    """Map codec names (e.g. ``"PCMA"``) to aiortc's audio capabilities."""
+    capabilities = RTCRtpSender.getCapabilities("audio").codecs
+    selected = []
+    for name in names:
+        mime_type = f"audio/{name}".lower()
+        matches = [c for c in capabilities if c.mimeType.lower() == mime_type]
+        if not matches:
+            supported = sorted({c.mimeType.split("/", 1)[1] for c in capabilities})
+            raise ValueError(f"Unsupported audio codec {name!r}, expected one of {supported}")
+        selected.extend(matches)
+    return selected
+
+
 class SmallWebRTCConnection(BaseObject):
     """WebRTC connection implementation using aiortc.
 
@@ -265,15 +281,20 @@ class SmallWebRTCConnection(BaseObject):
         self,
         ice_servers: list[str] | list[IceServer] | None = None,
         connection_timeout_secs: int = 60,
+        audio_codecs: list[str] | None = None,
     ):
         """Initialize the WebRTC connection.
 
         Args:
             ice_servers: List of ICE servers as URLs or IceServer objects.
             connection_timeout_secs: Timeout in seconds for connecting to the peer.
+            audio_codecs: Audio codec names the answer may use, in order of
+                preference (e.g. ``["PCMA", "PCMU"]`` for a SIP gateway that only
+                speaks G.711). Defaults to aiortc's codecs.
 
         Raises:
             TypeError: If ice_servers contains mixed types or unsupported types.
+            ValueError: If audio_codecs contains a codec aiortc does not support.
         """
         super().__init__()
         if not ice_servers:
@@ -292,6 +313,7 @@ class SmallWebRTCConnection(BaseObject):
             SCREEN_VIDEO_TRANSCEIVER_INDEX: self.screen_video_input_track,
         }
         self.connection_timeout_secs = connection_timeout_secs
+        self._audio_codecs = _audio_codec_capabilities(audio_codecs or [])
 
         self._initialize()
 
@@ -419,6 +441,7 @@ class SmallWebRTCConnection(BaseObject):
     async def _create_answer(self, sdp: str, type: str):
         """Create an SDP answer for the given offer."""
         offer = RTCSessionDescription(sdp=sdp, type=type)
+        self._set_audio_codec_preferences()
         await self._pc.setRemoteDescription(offer)
 
         # For some reason, aiortc is not respecting the SDP for the transceivers to be sendrcv
@@ -431,6 +454,19 @@ class SmallWebRTCConnection(BaseObject):
         await self._pc.setLocalDescription(local_answer)
         logger.debug("Setting the answer after the local description is created")
         self._answer = self._pc.localDescription
+
+    def _set_audio_codec_preferences(self):
+        """Restrict the audio codecs the answer may use.
+
+        aiortc picks the codecs while applying the offer, so the preferences must
+        be set before that, on the transceiver the offer's audio will bind to.
+        """
+        if not self._audio_codecs:
+            return
+        transceiver = next((t for t in self._pc.getTransceivers() if t.kind == "audio"), None)
+        if transceiver is None:
+            transceiver = self._pc.addTransceiver("audio", direction="sendrecv")
+        transceiver.setCodecPreferences(self._audio_codecs)
 
     async def initialize(self, sdp: str, type: str):
         """Initialize the connection with an SDP offer.
