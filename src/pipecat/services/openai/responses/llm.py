@@ -33,6 +33,7 @@ from openai.types.responses import (
     ResponseOutputItemDoneEvent,
     ResponseReasoningItem,
     ResponseReasoningSummaryTextDeltaEvent,
+    ResponseRefusalDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
     ResponseUsage,
@@ -1244,7 +1245,7 @@ class OpenAIResponsesLLMService(
             # the window for abandoning and re-issuing it has closed.
             deadline = None
 
-            if event_type == "response.output_text.delta":
+            if event_type in ("response.output_text.delta", "response.refusal.delta"):
                 await self.stop_ttfb_metrics()
                 delta = event.get("delta", "")
                 has_text = has_text or bool(delta.strip())
@@ -1515,7 +1516,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
         async with _closing(stream) as event_iter:
             async for event in event_iter:
-                if isinstance(event, ResponseTextDeltaEvent):
+                if isinstance(event, (ResponseTextDeltaEvent, ResponseRefusalDeltaEvent)):
                     await self.stop_ttfb_metrics()
                     has_text = has_text or bool(event.delta.strip())
                     await self._push_llm_text(event.delta)
