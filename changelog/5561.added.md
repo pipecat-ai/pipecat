@@ -1,0 +1,1 @@
+- Added `keyterm`, `filler_words`, `vad_threshold`, `smart_turn` and `smart_turn_timeout` to `XAISTTSettings`, covering the rest of xAI's streaming transcription query parameters: keyword biasing, disfluency retention, the voice-activity gate, and the server's semantic end-of-turn detection. All are unset by default, leaving the server's defaults in place.
