@@ -52,10 +52,16 @@ class _FakeVartalaap:
     received: list[dict] = field(default_factory=list)
     headers: list[dict] = field(default_factory=list)
     connections: int = 0
+    # send an error of an utterance that is not the client's as soon as it connects
+    stale_error: bool = False
 
     async def handle(self, websocket):
         self.connections += 1
         self.headers.append(dict(websocket.request.headers))
+        if self.stale_error:
+            await websocket.send(
+                json.dumps({"type": "error", "request_id": "old", "status": 503, "error": "busy"})
+            )
         try:
             async for raw in websocket:
                 msg = json.loads(raw)
@@ -220,6 +226,23 @@ async def test_a_server_error_is_reported_and_the_turn_still_closes():
     assert errors and "503" in errors[0].error and "busy" in errors[0].error
     assert not [f for f in down if isinstance(f, TTSAudioRawFrame)]
     assert [type(f) for f in down].count(TTSStoppedFrame) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stale_error_of_another_utterance_is_ignored():
+    fake = _FakeVartalaap(stale_error=True)
+    server, url = await _serve(fake)
+    try:
+        tts = _ws_service(url)
+        down, up = await run_test(
+            tts, frames_to_send=[TTSSpeakFrame("Hello there."), SleepFrame(0.3)]
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert not [f for f in up if isinstance(f, ErrorFrame)]
+    assert len([f for f in down if isinstance(f, TTSAudioRawFrame)]) == 2
 
 
 def test_utterance_body_sends_only_what_differs_from_the_server_defaults():

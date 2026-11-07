@@ -378,8 +378,14 @@ class VartalaapTTSService(WebsocketTTSService):
                     await self.stop_all_metrics()
                     await self.push_error(error_msg=f"Vartalaap error ({status}): {error}")
                     await self._maybe_close_context(context_id)
-                else:
+                elif request_id is None:
+                    # untagged: the server could not read our message at all
                     await self.push_error(error_msg=f"Vartalaap error ({status}): {error}")
+                else:
+                    # a late error of an utterance that is not ours (before a reconnect)
+                    logger.debug(
+                        f"{self} ignoring error of unknown utterance {request_id}: {error}"
+                    )
                 continue
 
             if request_id not in self._utterances:
