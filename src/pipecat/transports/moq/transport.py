@@ -318,8 +318,10 @@ OPUS_SAMPLE_RATE = 48000
 class _ConsumerFailure(Exception):
     """A failure reading the peer's tracks on a session that is still up.
 
-    The relay is reachable, so a redial would not help; it ends the
-    transport instead of starting an outage.
+    The caller decides how far a redial gets: a subscribe stream erroring is
+    the peer's path through the relay, which only a fresh session resumes,
+    while a fault of our own (a decode failure, say) would be met again on
+    every attempt and ends the transport instead of starting an outage.
     """
 
 
@@ -1086,11 +1088,13 @@ class MOQTransportClient:
 
         A session that drops is redialed with backoff for as long as the
         peer may be missing (``connection_timeout``, see
-        :meth:`_peer_wait_remaining`). A dial the relay refuses on
-        authentication grounds ends the loop at once, since the same
-        token would be refused again. When the loop gives up on a peer it
-        had seen, that peer is reported disconnected first, so a bot's
-        usual ``on_client_disconnected`` handling ends the call.
+        :meth:`_peer_wait_remaining`). So is a session a subscribe stream
+        errored beneath: the relay is reachable either way, but only a
+        fresh session can serve the peer's tracks again. A dial the relay
+        refuses on authentication grounds ends the loop at once, since the
+        same token would be refused again. When the loop gives up on a
+        peer it had seen, that peer is reported disconnected first, so a
+        bot's usual ``on_client_disconnected`` handling ends the call.
         """
         while True:
             error: Exception | None = None
@@ -1099,9 +1103,24 @@ class MOQTransportClient:
             except asyncio.CancelledError:
                 raise
             except _ConsumerFailure as e:
-                await self._report_peer_gone()
-                await self._fail(e.__cause__ if isinstance(e.__cause__, Exception) else e)
-                return
+                cause = e.__cause__
+                if not isinstance(cause, _MoqError):
+                    await self._report_peer_gone()
+                    await self._fail(cause if isinstance(cause, Exception) else e)
+                    return
+                # A subscribe stream failing beneath a live session is the
+                # peer's path through the relay, not the session: a peer that
+                # dropped uncleanly leaves a group range the relay cannot
+                # serve, so the subscription a redial resumes at is errored
+                # (moq-ffi renders it ``Error.Audio("moq: internal error")``)
+                # until a fresh session starts. Drop this one for a new one,
+                # as the served-nothing watchdog does.
+                error = cause
+                peer_left = False
+                logger.warning(
+                    f"MOQ: peer tracks errored on a live session ({cause}); "
+                    f"dropping it for a fresh one"
+                )
             except Exception as e:
                 error = e
                 peer_left = False

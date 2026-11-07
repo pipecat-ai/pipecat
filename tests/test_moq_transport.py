@@ -40,7 +40,8 @@ Areas covered:
    query string included, and host/port still compose a URL.
 
 7. **Client-mode reconnect** — the session loop redials a dropped
-   session within ``connection_timeout``, never retries a refused dial,
+   session within ``connection_timeout``, redials one whose peer
+   subscription errored beneath it, never retries a refused dial,
    reports the peer gone exactly once, and pushes errors with the
    category and permanence the pipeline acts on.
 """
@@ -1627,9 +1628,10 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_error.assert_not_awaited()
         self.assertEqual(cb.on_disconnected.await_count, 2)
 
-    async def test_a_consumer_failure_on_a_live_session_ends_the_transport(self):
-        """The relay is reachable, so a redial would not help; the failure
-        is reported instead of being taken for the peer's tracks ending."""
+    async def test_a_pump_fault_on_a_live_session_ends_the_transport(self):
+        """A fault that is not a subscribe stream error (a decode fault, say)
+        would be met again on every dial, so it is reported instead of being
+        taken for the peer's tracks ending or being redialed away."""
         self.script[:] = [_FakeSession(), _FakeSession()]
         client = self._make_client()
         boom = RuntimeError("decode failed")
@@ -1649,6 +1651,62 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         _message, exc, _category, permanent = cb.on_error.await_args.args
         self.assertIs(exc, boom)
         self.assertFalse(permanent)
+
+    async def test_a_subscribe_failure_on_a_live_session_is_redialed(self):
+        """A peer that dropped uncleanly leaves a group range the relay
+        cannot serve, so the subscription a redial resumes at errors
+        (``Error.Audio("moq: internal error")``) while the session itself is
+        fine. That failure is the peer's path through the relay, not the
+        session, and only a fresh session clears it."""
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            await client._on_peer_available()
+            await client._on_peer_data()
+            if seen == 1:
+                raise moq.Error.Audio("moq: internal error")
+            client._peer_goodbye = True
+            return True
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_error.assert_not_awaited()
+        # The peer never left: its tracks were served again on the new session.
+        self.assertEqual(cb.on_connected.await_count, 2)
+        cb.on_client_connected.assert_awaited_once()
+        cb.on_client_disconnected.assert_awaited_once()
+
+    async def test_a_subscribe_failure_that_never_clears_ends_the_window(self):
+        """The redial a subscribe failure earns is bounded by
+        ``connection_timeout`` like every other one: the peer's tracks never
+        come back, so the loop gives up and reports the peer gone."""
+        self.script[:] = [_FakeSession() for _ in range(1000)]
+        client = self._make_client(connection_timeout=0.05)
+
+        async def consume(_origin):
+            await client._on_peer_available()
+            raise moq.Error.Audio("moq: internal error")
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertGreater(len(self.dials), 1)
+        self.assertLess(len(self.dials), 1000)
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, exc, category, permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, ConnectionError)
+        self.assertIsInstance(exc.__cause__, moq.Error.Audio)
+        self.assertIs(category, ErrorCategory.CONNECTIVITY)
+        self.assertTrue(permanent)
 
     async def test_a_consumer_failure_as_the_session_closes_is_redialed(self):
         """A dropped connection fails the subscriptions a beat before the
