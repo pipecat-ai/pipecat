@@ -17,6 +17,7 @@ regular data frames.
 """
 
 import asyncio
+import weakref
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
@@ -139,7 +140,8 @@ class SyncParallelPipeline(BasePipeline):
 
     System frames (except ``EndFrame``) bypass this mechanism entirely — they are
     forwarded through each pipeline and pushed immediately, since system frames
-    are expected to race ahead of regular data frames.
+    are expected to race ahead of regular data frames. The copies that later
+    come out of the pipelines are dropped.
 
     By default, output frames are pushed in the order they arrive from any pipeline
     (``FrameOrder.ARRIVAL``). Set ``frame_order=FrameOrder.PIPELINE`` to push frames
@@ -174,6 +176,11 @@ class SyncParallelPipeline(BasePipeline):
 
         self._up_queue = asyncio.Queue()
         self._down_queue = asyncio.Queue()
+
+        # Frames already pushed, so the copies that come out of the pipelines
+        # later are dropped. Held weakly: a frame no pipeline holds can't come
+        # out again, so an entry goes away with its frame.
+        self._seen_frames: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
 
         logger.debug(f"Creating {self} pipelines")
         for processors in args:
@@ -280,7 +287,7 @@ class SyncParallelPipeline(BasePipeline):
             elif direction == FrameDirection.DOWNSTREAM:
                 for s in self._sources:
                     await s["processor"].process_frame(frame, direction)
-            await self.push_frame(frame, direction)
+            await self._push_frame_once(frame, direction)
             return
 
         use_pipeline_order = self._frame_order == FrameOrder.PIPELINE
@@ -336,33 +343,31 @@ class SyncParallelPipeline(BasePipeline):
             )
 
         if use_pipeline_order:
-            # Push frames in pipeline definition order, deduplicating by id.
-            seen_ids = set()
+            # Push frames in pipeline definition order.
             for pipeline_frames in frames_per_pipeline:
                 for f in pipeline_frames:
-                    if f.id not in seen_ids:
-                        await self.push_frame(f, direction)
-                        seen_ids.add(f.id)
+                    await self._push_frame_once(f, direction)
         else:
             # ARRIVAL mode: drain the shared queues in the order frames arrived.
-            seen_ids = set()
             while not self._up_queue.empty():
                 f = await self._up_queue.get()
-                if f.id not in seen_ids:
-                    await self.push_frame(f, FrameDirection.UPSTREAM)
-                    seen_ids.add(f.id)
+                await self._push_frame_once(f, FrameDirection.UPSTREAM)
                 self._up_queue.task_done()
 
-            seen_ids = set()
             while not self._down_queue.empty():
                 f = await self._down_queue.get()
-                if f.id not in seen_ids:
-                    await self.push_frame(f, FrameDirection.DOWNSTREAM)
-                    seen_ids.add(f.id)
+                await self._push_frame_once(f, FrameDirection.DOWNSTREAM)
                 self._down_queue.task_done()
 
         if isinstance(frame, EndFrame):
             await self.push_frame(frame, direction)
+
+    async def _push_frame_once(self, frame: Frame, direction: FrameDirection):
+        """Push a frame unless it has already been pushed."""
+        if frame.id in self._seen_frames:
+            return
+        self._seen_frames[frame.id] = frame
+        await self.push_frame(frame, direction)
 
     async def _start_pipelines(self, frame: StartFrame):
         """Start every pipeline, then pass the StartFrame on once it is through all of them."""

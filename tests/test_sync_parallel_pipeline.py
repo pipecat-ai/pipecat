@@ -8,14 +8,14 @@ import asyncio
 import unittest
 from dataclasses import dataclass
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, TextFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, InputAudioRawFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.tests.utils import QueuedFrameProcessor, run_test
+from pipecat.tests.utils import QueuedFrameProcessor, SleepFrame, run_test
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -152,6 +152,27 @@ class TestSyncParallelPipeline(unittest.IsolatedAsyncioTestCase):
             down_frames = await end_pipeline(pipeline, [TextFrame(text="Hello")])
 
             assert [type(f) for f in down_frames] == [TextFrame, TextFrame, EndFrame], frame_order
+
+    async def test_system_frame_pushed_once(self):
+        """A system frame comes out once, even though every pipeline passes it on."""
+        for frame_order in FrameOrder:
+            pipeline = SyncParallelPipeline(
+                [IdentityFilter()], [IdentityFilter()], frame_order=frame_order
+            )
+
+            frames_to_send = [
+                InputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1),
+                SleepFrame(sleep=0.1),
+                TextFrame(text="one"),
+                SleepFrame(sleep=0.1),
+                InputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1),
+            ]
+            expected_down_frames = [InputAudioRawFrame, TextFrame, InputAudioRawFrame]
+            await run_test(
+                pipeline,
+                frames_to_send=frames_to_send,
+                expected_down_frames=expected_down_frames,
+            )
 
     async def test_default_is_arrival(self):
         """The default frame_order should be ARRIVAL."""
