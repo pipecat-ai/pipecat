@@ -58,11 +58,6 @@ MISTRAL_TTFS_P99: float = 1.89
 OPENAI_TTFS_P99: float = 2.01
 OPENAI_REALTIME_TTFS_P99: float = 1.66
 SARVAM_TTFS_P99: float = 1.17
-# Provisional until benchmarked against the REST endpoint; aligned with the
-# other segmented HTTP STT services (Fal, Groq, OpenAI).
-SARVAM_HTTP_TTFS_P99: float = 2.00
-# Provisional until benchmarked against the realtime endpoint.
-SARVAM_REALTIME_TTFS_P99: float = 1.00
 SMALLEST_TTFS_P99: float = 1.59
 SONIOX_TTFS_P99: float = 0.35
 SPEECHMATICS_TTFS_P99: float = 0.74
@@ -71,4 +66,6 @@ TOGETHER_TTFS_P99: float = 1.00
 
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99
+SARVAM_HTTP_TTFS_P99: float = DEFAULT_TTFS_P99
+SARVAM_REALTIME_TTFS_P99: float = DEFAULT_TTFS_P99
 WHISPER_TTFS_P99: float = DEFAULT_TTFS_P99
