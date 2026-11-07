@@ -147,6 +147,55 @@ def _connect_failure_cause(*candidates: BaseException | None) -> Exception | Non
     return None
 
 
+_MAX_INLINED_SCHEMA_NODES = 100_000
+
+
+def _inline_defs(schema: Any, defs: dict[str, Any], recursive: set[str]) -> Any:
+    """Replace each ``#/$defs/<name>`` reference in a tool schema with its definition.
+
+    Only the ``properties`` and ``required`` of a tool's input schema reach the LLM,
+    so its ``$defs`` are dropped and a reference into them would point at nothing.
+    A reference back into a definition being expanded (a recursive model) keeps
+    only the keywords beside it, so it accepts any value.
+
+    Args:
+        schema: The schema to process.
+        defs: The ``$defs`` of the tool's input schema.
+        recursive: Collects the references that recursed.
+
+    Returns:
+        A copy of the schema with its references inlined.
+
+    Raises:
+        ValueError: If the copy would exceed ``_MAX_INLINED_SCHEMA_NODES`` dicts and
+            lists, as each reference gets its own copy of its definition.
+    """
+    nodes = 0
+
+    def inline(node: Any, expanding: tuple[str, ...]) -> Any:
+        nonlocal nodes
+        if isinstance(node, (dict, list)):
+            nodes += 1
+            if nodes > _MAX_INLINED_SCHEMA_NODES:
+                raise ValueError(f"inlining exceeds {_MAX_INLINED_SCHEMA_NODES} schema nodes")
+        if isinstance(node, list):
+            return [inline(item, expanding) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            siblings = {k: inline(v, expanding) for k, v in node.items() if k != "$ref"}
+            if ref in expanding:
+                recursive.add(ref)
+                return siblings
+            target = defs.get(ref.removeprefix("#/$defs/"))
+            if isinstance(target, dict):
+                return {**inline(target, expanding + (ref,)), **siblings}
+        return {k: inline(v, expanding) for k, v in node.items()}
+
+    return inline(schema, ())
+
+
 class _ToolWrapperWithCleanup:
     """Tool call wrapper that carries the cleanup releasing its backing resource.
 
@@ -530,6 +579,16 @@ class MCPClient(BaseObject):
             # Fixed arguments are injected on every call, so hide them from the model.
             properties = {k: v for k, v in properties.items() if k not in fixed}
             required = [r for r in required if r not in fixed]
+
+        defs = tool_schema["input_schema"].get("$defs")
+        if defs:
+            recursive: set[str] = set()
+            properties = _inline_defs(properties, defs, recursive)
+            if recursive:
+                logger.warning(
+                    f"{self} tool '{tool_name}' has a recursive schema"
+                    f" ({', '.join(sorted(recursive))}); any value is accepted where it recurses"
+                )
 
         schema = FunctionSchema(
             name=tool_name,
