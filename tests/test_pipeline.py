@@ -209,7 +209,7 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         await run_test(pipeline, frames_to_send=frames_to_send)
         del frames_to_send
 
-        self.assertEqual([i for i in sent_ids if i in pipeline._seen_ids], [kept.id])
+        self.assertEqual([i for i in sent_ids if i in pipeline._seen_frames], [kept.id])
 
     async def test_parallel_internal_frames_buffered_during_start(self):
         """Frames pushed by internal processors during StartFrame processing
