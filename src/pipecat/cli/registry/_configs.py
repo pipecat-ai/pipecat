@@ -75,6 +75,7 @@ SERVICE_CONFIGS = {
     ),
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
+    "rime_stt": 'RimeSTTService(api_key=os.getenv("RIME_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
