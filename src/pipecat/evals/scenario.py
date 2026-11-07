@@ -326,7 +326,7 @@ def _load_mapping(path: Path) -> dict:
     Raises:
         ValueError: If the top level is not a mapping.
     """
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top level must be a mapping")
