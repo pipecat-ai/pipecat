@@ -201,6 +201,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
+        secondary_languages: ISO-639-1 or ISO-639-3 language codes to consider.
         filter_background_audio: Whether ElevenLabs filters out background audio before transcription.
     """
 
@@ -500,7 +501,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             include_timestamps: Whether to include word-level timestamps in transcripts.
             enable_logging: Whether to enable logging on ElevenLabs' side.
             include_language_detection: Whether to include language detection in transcripts.
-            secondary_languages: ISO-639-1 or ISO-639-3 language codes to consider.
         """
 
         language_code: str | None = None
@@ -512,7 +512,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         include_timestamps: bool = False
         enable_logging: bool = False
         include_language_detection: bool = False
-        secondary_languages: list[str] | None = None
 
     def __init__(
         self,
@@ -570,6 +569,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             min_silence_duration_ms=None,
             keyterms=None,
             no_verbatim=None,
+            secondary_languages=None,
             filter_background_audio=None,
         )
 
@@ -592,7 +592,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 include_timestamps = params.include_timestamps
                 enable_logging = params.enable_logging
                 include_language_detection = params.include_language_detection
-                default_settings.secondary_languages = params.secondary_languages
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
