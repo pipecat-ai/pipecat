@@ -25,7 +25,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -285,7 +286,8 @@ def language_to_zoom_ai_language(language: Language) -> str:
 class ZoomAISTTSettings(STTSettings):
     """Settings for :class:`ZoomAISTTService`.
 
-    Changing a setting reconnects with a new Scribe session.
+    Changing a setting reconnects with a new Scribe session, except
+    ``speaker_format``, which is applied locally.
 
     Parameters:
         silence_duration_ms: Milliseconds of silence that end a turn in Scribe's
@@ -296,10 +298,11 @@ class ZoomAISTTSettings(STTSettings):
             Not used with ``vad_force_turn_endpoint=True``, where Scribe's voice
             activity detection is off.
         diarization: Whether Scribe labels each completed transcript with a
-            speaker. Off by default. The labels are in the Scribe event attached
-            as ``TranscriptionFrame.result``: ``speaker``, plus ``speaker_segments``
-            with each one's span when several speakers spoke. Scribe's speaker
-            tags are removed from the transcript text.
+            speaker. Off by default. Each transcript carries Scribe's label (e.g.
+            ``"Speaker 1"``) in ``speaker``, and one in which the speaker changed
+            is split into one frame per speaker. A transcript text polishing
+            reworded too much to split has no speaker. Scribe's speaker tags are
+            removed from the transcript text.
         language_detection: Scribe language detection mode
             (``config.language_detection.mode``). ``None`` turns it off. A
             detected language Scribe reports is in ``TranscriptionFrame.language``;
@@ -311,6 +314,10 @@ class ZoomAISTTSettings(STTSettings):
             the Scribe event attached as ``TranscriptionFrame.result``
             (``transcript``); if polishing fails, the recognized text is used.
             Off by default.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
 
     ``extra`` holds Scribe request fields this class has no setting for, shaped
     like the request (e.g. ``{"config": {"profanity_filter": True}}``). It is
@@ -323,6 +330,10 @@ class ZoomAISTTSettings(STTSettings):
     language_detection: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vocabulary: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_polishing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class ZoomAISTTService(WebsocketSTTService):
@@ -411,6 +422,7 @@ class ZoomAISTTService(WebsocketSTTService):
             language_detection=None,
             vocabulary=None,
             text_polishing=False,
+            speaker_format=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -520,7 +532,7 @@ class ZoomAISTTService(WebsocketSTTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta and reconnect so the new session config takes effect."""
         changed = await super()._update_settings(delta)
-        if changed:
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
             await self._request_reconnect()
         return changed
 
@@ -785,15 +797,8 @@ class ZoomAISTTService(WebsocketSTTService):
                 event.get("language"), self._view.language_detection, self._settings.language
             )
             await self.emit_stt_usage_metrics()
-            await self.push_frame(
-                TranscriptionFrame(
-                    text=text,
-                    user_id=self._user_id,
-                    timestamp=time_now_iso8601(),
-                    language=language,
-                    result=event,
-                    finalized=True,
-                )
+            await self._push_transcription_runs(
+                self._runs(event, text), language=language, result=event, finalized=True
             )
             await self._handle_transcription(text, True, language)
         await self._end_open_turn()
@@ -825,16 +830,32 @@ class ZoomAISTTService(WebsocketSTTService):
             event.get("language"), self._view.language_detection, self._settings.language
         )
         await self.emit_stt_usage_metrics()
-        await self.push_frame(
-            TranscriptionFrame(
-                text=text,
-                user_id=self._user_id,
-                timestamp=time_now_iso8601(),
-                language=language,
-                result=event,
-            )
+        await self._push_transcription_runs(
+            self._runs(event, text), language=language, result=event
         )
         await self._handle_transcription(text, True, language)
+
+    def _runs(
+        self, event: dict[str, Any], text: str
+    ) -> list[tuple[TranscriptionSpeaker | None, str]]:
+        """Split a completed transcript into runs by speaker.
+
+        Scribe labels each transcript with a ``speaker`` and, only when the
+        speaker changed partway through, adds ``speaker_segments`` with each
+        speaker's part of the text.
+        """
+        if not self._view.diarization:
+            return [(None, text)]
+        segments = event.get("speaker_segments")
+        if isinstance(segments, list) and segments:
+            words = [
+                (_clean(segment.get("transcript")), segment.get("speaker"))
+                for segment in segments
+                if isinstance(segment, dict)
+            ]
+            return self._diarized_runs(text, words)
+        speaker = self._speaker(event.get("speaker"))
+        return [(speaker, self._apply_speaker_format(text, speaker))]
 
     async def _end_open_turn(self):
         if self._user_turn_open:

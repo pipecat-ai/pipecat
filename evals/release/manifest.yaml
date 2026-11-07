@@ -462,6 +462,11 @@ suite:
       data: {stt: deepgram}
     scenarios: [scripted/speaker_diarization]
   - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/meta
+    runner_body:
+      data: {stt: meta}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
     name: speaker-diarization/nvidia
     runner_body:
       data: {stt: nvidia}
@@ -485,6 +490,11 @@ suite:
     name: speaker-diarization/xai
     runner_body:
       data: {stt: xai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/zoom_ai
+    runner_body:
+      data: {stt: zoom_ai}
     scenarios: [scripted/speaker_diarization]
 
   #

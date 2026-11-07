@@ -109,6 +109,13 @@ def create_stt(name: str) -> STTService:
                 show_speaker_label=True, speaker_format=SPEAKER_FORMAT
             ),
         )
+    if name == "meta":
+        from pipecat.services.meta.stt import MetaSTTService
+
+        return MetaSTTService(
+            api_key=os.environ["META_API_KEY"],
+            settings=MetaSTTService.Settings(mode="DIARIZATION", speaker_format=SPEAKER_FORMAT),
+        )
     if name == "nvidia":
         from pipecat.services.nvidia.stt import NvidiaSTTService
 
@@ -149,6 +156,13 @@ def create_stt(name: str) -> STTService:
         return XAISTTService(
             api_key=os.environ["XAI_API_KEY"],
             settings=XAISTTService.Settings(diarize=True, speaker_format=SPEAKER_FORMAT),
+        )
+    if name == "zoom_ai":
+        from pipecat.services.zoom_ai.stt import ZoomAISTTService
+
+        return ZoomAISTTService(
+            api_key=os.environ["ZOOM_AI_API_KEY"],
+            settings=ZoomAISTTService.Settings(diarization=True, speaker_format=SPEAKER_FORMAT),
         )
     raise ValueError(f"Unknown STT service: {name}")
 
