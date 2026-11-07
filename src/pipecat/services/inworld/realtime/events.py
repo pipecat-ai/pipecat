@@ -86,7 +86,7 @@ class TurnDetection(BaseModel):
         type: Detection type. "server_vad" for standard VAD, "semantic_vad"
             for semantic-based detection.
         eagerness: How eagerly to detect end of turn, for "semantic_vad".
-            Options: "low", "medium", "high", "auto".
+            Options: "low", "medium", "high".
         create_response: Whether to automatically create a response on turn end.
         interrupt_response: Whether user speech interrupts the current response.
         threshold: Speech detection cutoff (0.0-1.0), for "server_vad".
@@ -115,13 +115,13 @@ class InputTranscription(BaseModel):
         model: The STT model to use for transcription.
         language: BCP-47 language code (e.g. "en", "es"). The model
             auto-detects the language when omitted.
-        prompt: Transcription guidance: vocabulary hints, domain context,
-            formatting preferences.
+        prompts: Expected words or phrases, such as names or domain
+            vocabulary, to help the STT model recognize them.
     """
 
     model: str | None = None
     language: str | None = None
-    prompt: str | None = None
+    prompts: list[str] | None = None
 
 
 #
