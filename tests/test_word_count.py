@@ -22,6 +22,27 @@ class TestCountSpokenWords(unittest.TestCase):
         self.assertEqual(count_spoken_words("Hello 你好"), 3)
         self.assertEqual(count_spoken_words("100元"), 2)
 
+    def test_supplementary_cjk_characters_count_individually(self):
+        for codepoint in (
+            0x20000,  # Extension B
+            0x2A700,  # Extension C
+            0x2B740,  # Extension D
+            0x2B820,  # Extension E
+            0x2CEB0,  # Extension F
+            0x2EBF0,  # Extension I
+            0x2F800,  # Compatibility Ideographs Supplement
+            0x30000,  # Extension G
+            0x31350,  # Extension H
+            0x323B0,  # Extension J
+        ):
+            with self.subTest(codepoint=hex(codepoint)):
+                self.assertEqual(count_spoken_words(chr(codepoint) * 2), 2)
+
+    def test_supplementary_cjk_characters_separate_other_runs(self):
+        self.assertEqual(count_spoken_words("𠮷𠮷"), 2)
+        self.assertEqual(count_spoken_words("Hello𠮷𠮷100"), 4)
+        self.assertEqual(count_spoken_words("𠮷、𠮷。"), 2)
+
     def test_hangul_stays_one_token(self):
         self.assertEqual(count_spoken_words("안녕하세요"), 1)
         self.assertEqual(count_spoken_words("안녕 하세요"), 2)
