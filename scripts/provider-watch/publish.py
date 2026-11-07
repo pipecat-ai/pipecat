@@ -71,7 +71,7 @@ class Shell:
     """Runs git and gh; tests swap in a fake."""
 
     def run(self, *args: str, cwd: Path | None = None, check: bool = True) -> str:
-        result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+        result = subprocess.run(args, cwd=cwd, capture_output=True, encoding="utf-8")
         if check and result.returncode != 0:
             raise RuntimeError(
                 f"{' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}"
