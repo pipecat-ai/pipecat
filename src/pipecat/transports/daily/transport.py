@@ -1088,8 +1088,7 @@ class DailyTransportClient(EventHandler):
         if not session_id:
             return "Can't send DTMF if 'sessionId' is not set"
 
-        # Update 'sessionId' field.
-        settings["sessionId"] = session_id
+        settings = {**settings, "sessionId": session_id}
 
         future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
@@ -1110,8 +1109,7 @@ class DailyTransportClient(EventHandler):
         if not session_id:
             return "Can't transfer SIP call if 'sessionId' is not set"
 
-        # Update 'sessionId' field.
-        settings["sessionId"] = session_id
+        settings = {**settings, "sessionId": session_id}
 
         future = self._get_event_loop().create_future()
         self._client.sip_call_transfer(settings, completion=completion_callback(future))
@@ -1132,7 +1130,7 @@ class DailyTransportClient(EventHandler):
         if not session_id:
             return "Can't perform SIP REFER if 'sessionId' is not set"
 
-        settings["sessionId"] = session_id
+        settings = {**settings, "sessionId": session_id}
 
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
