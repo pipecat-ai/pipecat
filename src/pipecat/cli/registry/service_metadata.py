@@ -941,6 +941,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="heygen_tts",
+            label="HeyGen TTS",
+            package="pipecat-ai",
+            class_name=["HeyGenTTSService"],
+            env_prefix="HEYGEN",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "83548de556df48ba8c09c42a57c51d85"},
+        ),
+        ServiceDefinition(
             value="inworld_tts",
             label="Inworld",
             package="pipecat-ai",
