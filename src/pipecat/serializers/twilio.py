@@ -211,6 +211,7 @@ class TwilioFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            await self._output_resampler.reset()
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):

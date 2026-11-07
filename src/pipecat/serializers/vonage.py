@@ -89,6 +89,7 @@ class VonageFrameSerializer(FrameSerializer):
         """
         if isinstance(frame, InterruptionFrame):
             # Clear the audio buffer to stop playback immediately
+            await self._output_resampler.reset()
             answer = {"action": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):

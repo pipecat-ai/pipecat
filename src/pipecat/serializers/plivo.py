@@ -136,6 +136,7 @@ class PlivoFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            await self._output_resampler.reset()
             answer = {"event": "clearAudio", "streamId": self._stream_id}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
