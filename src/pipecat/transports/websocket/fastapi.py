@@ -563,7 +563,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             Whether the transport took the frame. A serializer that emits no
             payload has still taken it; see :meth:`FrameSerializer.serialize`.
         """
-        if self._client.is_closing or not self._client.is_connected:
+        # Serializers may hang up a phone call when they receive a terminal frame.
+        if (self._client.is_closing or not self._client.is_connected) and not isinstance(
+            frame, (EndFrame, CancelFrame)
+        ):
             return False
 
         if not self._params.serializer:
@@ -572,6 +575,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         success = True
         try:
             payload = await self._params.serializer.serialize(frame)
+            if self._client.is_closing or not self._client.is_connected:
+                return False
             if payload:
                 # Optional protocol-level audio packetization:
                 # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
