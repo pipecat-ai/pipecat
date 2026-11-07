@@ -265,7 +265,8 @@ class AWSPollyTTSService(TTSService):
             **kwargs,
         )
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
+        # Explicit or environment keys. Without them, each client takes its
+        # credentials from the session's default chain, which renews them.
         self._aws_params = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,

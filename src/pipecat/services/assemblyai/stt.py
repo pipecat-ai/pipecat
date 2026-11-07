@@ -241,6 +241,14 @@ class AssemblyAISTTSettings(STTSettings):
             model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
+        max_speakers: Hard cap on the number of speaker labels, an integer in
+            [1, 10]. Once the cap is reached, further speakers are merged into
+            the closest existing label rather than given a new one, so leave a
+            little headroom above the number of speakers expected; a cap set too
+            high can over-split a single speaker. Only used when
+            ``speaker_labels`` is enabled. Defaults to None (not sent).
+        filter_profanity: Replace profanity in transcribed text with asterisks.
+            Defaults to None (not sent; the server leaves text unfiltered).
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
@@ -257,9 +265,10 @@ class AssemblyAISTTSettings(STTSettings):
             reply, used to improve transcription of the user's next turn (short
             answers, spelled-out entities, disambiguation). Only applicable to
             U3 Pro models; clipped to ~1500 characters and reset on reconnect. Set this
-            for a known opening line, or call
-            :meth:`AssemblyAISTTService.update_agent_context` to update it
-            mid-session. Defaults to None (not sent).
+            for a known opening line; the service sends each of the agent's replies
+            as context on its own. To replace it mid-session, push an
+            ``STTUpdateSettingsFrame`` with ``agent_context``. Defaults to None
+            (not sent).
         previous_context_n_turns: Maximum number of prior conversation entries
             (user transcripts and any ``agent_context`` values) carried forward as
             context for each transcription. Integer in [0, 100]; set to 0 to disable
@@ -297,6 +306,8 @@ class AssemblyAISTTSettings(STTSettings):
     language_codes: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filter_profanity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -413,6 +424,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_codes=None,
             format_turns=True,
             speaker_labels=None,
+            max_speakers=None,
+            filter_profanity=None,
             vad_threshold=None,
             domain=None,
             continuous_partials=True,
@@ -589,8 +602,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._encoding = encoding
 
         self._termination_event = asyncio.Event()
-        self._received_termination = False
-        self._connected = False
 
         self._receive_task = None
 
@@ -849,6 +860,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             "language_code": s.language_code,
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
+            "max_speakers": s.max_speakers,
+            "filter_profanity": s.filter_profanity,
             "vad_threshold": s.vad_threshold,
             "domain": s.domain,
         }
@@ -983,50 +996,41 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Disconnect from the AssemblyAI service.
 
-        Sends termination message, waits for acknowledgment, and cleans up.
+        On an open connection, sends any buffered audio and a termination
+        message and waits for the acknowledgment. Then stops the receive loop,
+        including a reconnect it has in progress, and closes the websocket.
         """
         await super()._disconnect()
 
-        if not self._connected or not self._websocket:
-            return
-
-        try:
-            self._termination_event.clear()
-            self._received_termination = False
-
-            if self._websocket.state is State.OPEN:
-                # Send any remaining audio
-                if len(self._audio_buffer) > 0:
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                if self._audio_buffer:
                     await self._websocket.send(bytes(self._audio_buffer))
                     self._audio_buffer.clear()
 
-                # Send termination message and wait for acknowledgment
-                try:
-                    await self._websocket.send(json.dumps({"type": "Terminate"}))
+                # The receive loop sets the event on the acknowledgment, so it
+                # must still be running while we wait.
+                self._termination_event.clear()
+                await self._websocket.send(json.dumps({"type": "Terminate"}))
+                await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
+            except TimeoutError:
+                logger.warning(f"{self} timed out waiting for termination message from server")
+            except Exception as e:
+                await self.push_error(error_msg=f"Error terminating session: {e}", exception=e)
 
-                    try:
-                        await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
-                    except TimeoutError:
-                        logger.warning("Timed out waiting for termination message from server")
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
-                except Exception as e:
-                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            # Clean up tasks and connection
-            if self._receive_task:
-                await self.cancel_task(self._receive_task)
-                self._receive_task = None
-
-            await self._disconnect_websocket()
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Establish the websocket connection to AssemblyAI."""
@@ -1045,12 +1049,10 @@ class AssemblyAISTTService(WebsocketSTTService):
                 ws_url,
                 additional_headers=headers,
             )
-            self._connected = True
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} Connected to AssemblyAI WebSocket")
         except Exception as e:
             self._websocket = None
-            self._connected = False
             await self.push_error(error_msg=f"Unable to connect to AssemblyAI: {e}", exception=e)
 
     async def _disconnect_websocket(self):
@@ -1063,7 +1065,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
-            self._connected = False
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -1146,14 +1147,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
-        self._received_termination = True
         self._termination_event.set()
 
         logger.info(
             f"Session Terminated: Audio Duration={message.audio_duration_seconds}s, "
             f"Session Duration={message.session_duration_seconds}s"
         )
-        await self.push_frame(EndFrame())
 
     async def _handle_transcription(self, message: TurnMessage):
         """Handle transcription results with two turn detection modes.
@@ -1394,7 +1393,7 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         default_settings = self.Settings(
-            model="universal-3-5-pro",
+            model="universal-3-6-pro",
             language=Language.EN,
             prompt=None,
             keyterms_prompt=None,

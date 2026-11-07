@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 
 
@@ -40,6 +41,15 @@ class TestInworldRealtimeContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session_keys), 2)
         self.assertNotEqual(session_keys[0], session_keys[1])
 
+    async def test_runtime_temperature_is_sent_in_a_session_update(self):
+        service = InworldRealtimeLLMService(api_key="test")
+        service._send_session_update = AsyncMock()
+
+        await service._update_settings(InworldRealtimeLLMService.Settings(temperature=0.3))
+
+        service._send_session_update.assert_awaited_once()
+        self.assertEqual(service._settings.session_properties.temperature, 0.3)
+
     async def test_tool_update_does_not_consume_server_vad_user_turn(self):
         context = LLMContext([{"role": "developer", "content": "Be helpful."}])
         service = InworldRealtimeLLMService(api_key="test")
@@ -64,13 +74,14 @@ class TestInworldRealtimeContext(unittest.IsolatedAsyncioTestCase):
                 {"role": "tool", "tool_call_id": "call-1", "content": '{"temp": 22}'},
             ]
         )
-        await service._handle_context(context)
+        # The assistant aggregator pushes the context back upstream after a tool result.
+        await service._handle_context(context, FrameDirection.UPSTREAM)
 
         self.assertTrue(service._server_vad_handled_turn)
         service.send_client_event.assert_not_awaited()
 
         context.add_message({"role": "user", "content": "What is the weather?"})
-        await service._handle_context(context)
+        await service._handle_context(context, FrameDirection.DOWNSTREAM)
 
         self.assertFalse(service._server_vad_handled_turn)
         service.send_client_event.assert_not_awaited()

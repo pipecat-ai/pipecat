@@ -71,8 +71,10 @@ class IdleFrameProcessor(FrameProcessor):
 
     async def cleanup(self):
         """Clean up resources and cancel pending tasks."""
+        await super().cleanup()
         if self._idle_task:
             await self.cancel_task(self._idle_task)
+            self._idle_task = None
 
     def _create_idle_task(self):
         """Create and start the idle monitoring task."""

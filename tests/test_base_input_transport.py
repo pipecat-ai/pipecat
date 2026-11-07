@@ -10,7 +10,10 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock
 
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.frames.frames import (
+    FilterEnableFrame,
+    FilterUpdateSettingsFrame,
     InputAudioRawFrame,
     InputTransportStartAudioStreamingFrame,
 )
@@ -48,6 +51,21 @@ class TestBaseInputTransportFrameAudio(unittest.IsolatedAsyncioTestCase):
             await transport.start_audio_in_streaming()
         self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
         transport._start_audio_in_streaming.assert_called_once()
+
+
+class TestBaseInputTransportFilterFrames(unittest.IsolatedAsyncioTestCase):
+    def _transport(self) -> BaseInputTransport:
+        audio_in_filter = AsyncMock(spec=BaseAudioFilter)
+        return BaseInputTransport(TransportParams(audio_in_filter=audio_in_filter))
+
+    async def test_filter_control_frames_go_to_input_filter(self):
+        for frame in (FilterEnableFrame(enable=False), FilterUpdateSettingsFrame(settings={})):
+            with self.subTest(frame=frame.name):
+                transport = self._transport()
+                transport.push_frame = AsyncMock()
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+                transport._params.audio_in_filter.process_frame.assert_called_once_with(frame)
+                transport.push_frame.assert_not_called()
 
 
 if __name__ == "__main__":

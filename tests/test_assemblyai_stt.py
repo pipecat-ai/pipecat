@@ -14,8 +14,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
+from pipecat.services.assemblyai.models import AssemblyAIConnectionParams, TerminationMessage
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -63,6 +65,14 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
 def test_default_model_is_universal_3_6_pro():
     # universal-3-6-pro is the default model sent to AssemblyAI.
     service = AssemblyAISTTService(api_key="test-key")
+    assert _query(service)["speech_model"] == ["universal-3-6-pro"]
+
+
+def test_deprecated_connection_params_default_to_universal_3_6_pro():
+    with pytest.warns(DeprecationWarning):
+        service = AssemblyAISTTService(
+            api_key="test-key", connection_params=AssemblyAIConnectionParams()
+        )
     assert _query(service)["speech_model"] == ["universal-3-6-pro"]
 
 
@@ -1109,6 +1119,26 @@ def test_speech_started_proposes_turn_without_interrupting():
     assert events == [("broadcast", ProposedUserStartedSpeakingFrame)]
 
 
+def test_termination_acknowledges_without_ending_pipeline():
+    # The server sends Termination in reply to our Terminate, including on a
+    # settings-triggered reconnect, so it must not end the pipeline.
+    service = AssemblyAISTTService(api_key="test-key")
+    pushed = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = fake_push_frame
+
+    message = TerminationMessage(
+        type="Termination", audio_duration_seconds=1, session_duration_seconds=2
+    )
+    asyncio.run(service._handle_termination(message))
+
+    assert service._termination_event.is_set()
+    assert pushed == []
+
+
 def test_should_interrupt_rides_on_recommended_strategies():
     # should_interrupt no longer gates a local broadcast; it configures the
     # strategies the service recommends via its metadata frame.
@@ -1125,3 +1155,39 @@ def test_should_interrupt_rides_on_recommended_strategies():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_disconnect_terminates_an_open_session_before_closing():
+    service = AssemblyAISTTService(api_key="test-key")
+    service._audio_buffer.extend(b"\1\2")
+    events = []
+
+    class FakeWebsocket:
+        state = State.OPEN
+
+        async def send(self, message):
+            events.append(("send", message))
+            if message == json.dumps({"type": "Terminate"}):
+                # The receive loop sets this on the server's Termination reply.
+                service._termination_event.set()
+
+        async def close(self):
+            events.append("close")
+
+    async def fake_cancel_task(task, timeout=None):
+        events.append(("cancel", task))
+
+    service._websocket = FakeWebsocket()
+    service._receive_task = "receive-task"
+    service.cancel_task = fake_cancel_task
+
+    asyncio.run(service._disconnect())
+
+    assert events == [
+        ("send", b"\1\2"),
+        ("send", json.dumps({"type": "Terminate"})),
+        ("cancel", "receive-task"),
+        "close",
+    ]
+    assert service._receive_task is None
+    assert service._websocket is None

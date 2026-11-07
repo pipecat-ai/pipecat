@@ -4,17 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import gc
 import unittest
+import weakref
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
 
 
@@ -363,6 +369,50 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(turn_events, expected_events)
         self.assertEqual(turn_observer._turn_count, 1)
+
+    async def test_cleanup_cancels_pending_turn_end_timer(self):
+        """Test that cleanup cancels the turn end timer and releases what it holds.
+
+        The pipeline can be torn down before the observer receives its EndFrame
+        or CancelFrame, so cleanup is the last chance to cancel the timer.
+        """
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=10)
+        processor = IdentityFilter()
+
+        turn_ended = []
+
+        @turn_observer.event_handler("on_turn_ended")
+        async def on_turn_ended(observer, turn_number, duration, was_interrupted):
+            turn_ended.append(turn_number)
+
+        def pushed(frame):
+            return FramePushed(
+                source=processor,
+                destination=processor,
+                frame=frame,
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+            )
+
+        await turn_observer.on_push_frame(pushed(StartFrame()))
+        await turn_observer.on_push_frame(pushed(BotStartedSpeakingFrame()))
+        stopped = pushed(BotStoppedSpeakingFrame())
+        stopped_ref = weakref.ref(stopped)
+        await turn_observer.on_push_frame(stopped)
+        del stopped
+
+        timer = turn_observer._end_turn_timer
+        self.assertIsNotNone(timer)
+
+        await turn_observer.cleanup()
+
+        self.assertTrue(timer.cancelled())
+        self.assertIsNone(turn_observer._end_turn_timer)
+        # The timer's callback no longer holds the frame data (and the pipeline).
+        gc.collect()
+        self.assertIsNone(stopped_ref())
+        await asyncio.sleep(0)
+        self.assertEqual(turn_ended, [])
 
 
 if __name__ == "__main__":

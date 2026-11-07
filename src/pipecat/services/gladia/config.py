@@ -80,7 +80,7 @@ class TranslationConfig(BaseModel):
 
     Parameters:
         target_languages: List of target language codes for translation
-        model: Translation model to use ("base" or "enhanced")
+        model: Translation model to use ("base", "batch" or "enhanced"). Gladia defaults to "batch"
         match_original_utterances: Whether to align translations with original utterances
         lipsync: Whether to enable lip-sync optimization for translations
         context_adaptation: Whether to enable context-aware translation adaptation

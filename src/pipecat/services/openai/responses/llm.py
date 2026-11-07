@@ -35,11 +35,11 @@ from openai.types.responses import (
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
+    ResponseUsage,
 )
 from pydantic import BaseModel
-from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.services.open_ai_responses_adapter import (
+from pipecat.adapters.llm.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMAdapter,
     OpenAIResponsesLLMInvocationParams,
 )
@@ -62,8 +62,10 @@ from pipecat.services.llm_service import (
     WebsocketLLMService,
     WebsocketReconnectedError,
 )
+from pipecat.services.openai._errors import classify_openai_error
 from pipecat.services.openai.base_llm import OPENAI_MODEL_WITHOUT_RESPONSE_SCHEMA
 from pipecat.services.settings import LLMSettings
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -105,12 +107,13 @@ class _ResponseTimeoutError(_RetryableError):
 class OpenAIResponsesReasoningConfig(BaseModel):
     """Reasoning configuration for reasoning-capable OpenAI Responses models.
 
-    Only reasoning-capable models use this — the gpt-5.x series and the o-series.
-    The service's default model, ``gpt-4.1``, does not reason, so this config has
-    no effect there; select a reasoning-capable model to use it. See OpenAI's
-    reasoning guide (https://platform.openai.com/docs/guides/reasoning) and model
-    list (https://platform.openai.com/docs/models) to choose one and to check
-    which effort levels it accepts.
+    Only reasoning-capable models use this — the mainline gpt series from gpt-5
+    onward and the o-series. The service's default model, ``gpt-4.1``, does not
+    reason, so this config has no effect there; select a reasoning-capable model
+    to use it. See OpenAI's reasoning guide
+    (https://platform.openai.com/docs/guides/reasoning) and model list
+    (https://platform.openai.com/docs/models) to choose one and to check which
+    effort levels it accepts.
 
     Reasoning models use internal reasoning tokens before producing a response.
     This controls how much reasoning they do and whether a human-readable summary
@@ -148,10 +151,11 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
         reasoning: Reasoning configuration for reasoning-capable models. ``None``
-            (the default) leaves reasoning unconfigured — the service then disables
-            reasoning by default for whatever models possible, to keep latency low
-            for real-time voice. Note that the default model, ``gpt-4.1``, does
-            not reason.
+            (the default) leaves reasoning unconfigured: the service then sends
+            the lowest effort OpenAI documents for the model, for the fastest
+            responses, and logs what it sent. Models Pipecat doesn't list, and
+            any model when ``use_provider_thinking_default`` is set, run at
+            OpenAI's default. The default model, ``gpt-4.1``, does not reason.
     """
 
     # Override inherited LLMSettings fields to also accept the OpenAI SDK's
@@ -177,14 +181,46 @@ def _is_o_series(model: str) -> bool:
     return bool(re.match(r"o\d", model.lower()))
 
 
-def _rejects_effort_none(model: str) -> bool:
-    """Whether a reasoning model rejects ``effort="none"`` with an API error.
+# The lowest reasoning effort OpenAI documents for each model, sent when the
+# caller doesn't configure ``reasoning``, keyed by model name. The pro models
+# accept nothing below "medium", and gpt-5-pro only "high".
+_THINKING_DEFAULTS: dict[str, str] = {
+    "gpt-5": "minimal",
+    "gpt-5-mini": "minimal",
+    "gpt-5-nano": "minimal",
+    "gpt-5-pro": "high",
+    "gpt-5.1": "none",
+    "gpt-5.2": "none",
+    "gpt-5.2-pro": "medium",
+    "gpt-5.4": "none",
+    "gpt-5.4-mini": "none",
+    "gpt-5.4-nano": "none",
+    "gpt-5.4-pro": "medium",
+    "gpt-5.5": "none",
+    "gpt-5.5-pro": "medium",
+    "gpt-5.6-luna": "none",
+    "gpt-5.6-sol": "none",
+    "gpt-5.6-terra": "none",
+    "gpt-6-astra": "low",
+    "gpt-6-luna": "none",
+    "gpt-6-sol": "none",
+    "gpt-6.1-sol": "low",
+    "gpt-6.1-terra": "none",
+    "o1": "low",
+    "o1-pro": "low",
+    "o3": "low",
+    "o3-mini": "low",
+    "o3-pro": "low",
+    "o4-mini": "low",
+}
 
-    The reasoning-first o-series and ``gpt-6-astra`` accept only a positive
-    effort level, so reasoning cannot be switched off for them.
+
+def _model_name(model: str) -> str:
+    """The name a model id refers to, the key it's looked up by in ``_THINKING_DEFAULTS``.
+
+    A dated snapshot (``gpt-5-2025-08-07``) gets its model's entry.
     """
-    model = model.lower()
-    return _is_o_series(model) or model.startswith("gpt-6-astra")
+    return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model.lower())
 
 
 def _model_supports_reasoning(model: str) -> bool | None:
@@ -259,9 +295,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use: "auto", "default", "flex",
-                "scale", "fast" or "priority". "fast" is OpenAI's low-latency
-                tier, the name that replaced "priority"; both values are
-                accepted.
+                "scale", "fast", "priority" or "ultrafast". "fast" is OpenAI's
+                low-latency tier, the name that replaced "priority"; both values
+                are accepted. "ultrafast" is the access-controlled Ultrafast
+                Processing tier, which shortens the time between output tokens
+                on the models that offer it.
             settings: Runtime-updatable settings.
             retry_timeout_secs: How long an inference may go without producing
                 output before it is abandoned and re-issued, when
@@ -354,6 +392,17 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         """Check if this service can generate processing metrics."""
         return True
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a content-filter rejection as ``ErrorCategory.CONTENT_FILTERED``.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the status code.
+        """
+        return classify_openai_error(exception)
+
     def _build_response_params(self, invocation_params: OpenAIResponsesLLMInvocationParams) -> dict:
         """Build parameters for a Responses API call.
 
@@ -405,13 +454,13 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             # turns, preserving reasoning context across the conversation.
             params["include"] = ["reasoning.encrypted_content"]
             self._warn_if_reasoning_unsupported()
-        else:
-            # No reasoning configured: disable it by default on the gpt-5.x series
-            # for real-time latency (see the helper).
-            self._maybe_disable_reasoning(params)
 
         # Extra settings
         params.update(self._settings.extra)
+
+        # Applied last, so reasoning configured in the settings or in extra wins
+        # over the low-latency default.
+        self._maybe_apply_thinking_default(params)
 
         return params
 
@@ -452,8 +501,9 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
         )
 
         params = self._build_response_params(invocation_params)
@@ -514,24 +564,31 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
 
     # -- reasoning ------------------------------------------------------------
 
-    def _maybe_disable_reasoning(self, params: dict):
-        """Disable reasoning by default on the mainline gpt series for real-time voice.
+    def _maybe_apply_thinking_default(self, params: dict):
+        """Send the model's lowest reasoning effort when no reasoning is configured.
 
-        When the caller hasn't configured ``reasoning``, request ``effort="none"``
-        for whatever models possible. Note that this is a no-op for models like
-        ``gpt-5.4`` that already default to ``none``. Some models are left at the
-        provider default: those that reject ``effort="none"`` outright (see
-        :func:`_rejects_effort_none`), and gpt-4.x and earlier, which don't reason
-        at all. Mirrors Gemini's ``_maybe_unset_thinking_budget``, which disables
-        or minimizes thinking on its latency-sensitive models.
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``reasoning``, from the settings or from
+        ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set. The first request for each model
+        logs the effort sent, or that the model runs at OpenAI's default,
+        warning for an unlisted reasoning model.
 
         Args:
             params: The response params dict (modified in place).
         """
-        model = assert_given(self._settings.model)
-        # Lower reasoning only for models that reason *and* accept effort="none".
-        if model and _model_supports_reasoning(model) and not _rejects_effort_none(model):
-            params["reasoning"] = {"effort": "none"}
+        if "reasoning" in params:
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = _THINKING_DEFAULTS.get(_model_name(model))
+        self._apply_thinking_default(
+            params,
+            model,
+            {"reasoning": {"effort": effort}} if effort is not None else None,
+            can_think=bool(_model_supports_reasoning(model)),
+            provider="OpenAI",
+            settings_fields="`reasoning`",
+        )
 
     def _warn_if_reasoning_unsupported(self):
         """Log a clear error when reasoning is configured on a model that can't use it.
@@ -551,7 +608,8 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         logger.error(
             f"{self}: `reasoning` is configured but model '{model}' does not support "
             "reasoning, so requests will fail. Reasoning is supported only by "
-            "reasoning-capable models — the gpt-5.x series and the o-series; see "
+            "reasoning-capable models — the mainline gpt series from gpt-5 onward "
+            "and the o-series; see "
             "OpenAI's reasoning guide (https://platform.openai.com/docs/guides/reasoning). "
             "Remove the `reasoning` setting or select a reasoning-capable model."
         )
@@ -584,10 +642,63 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             LLMMessagesAppendFrame([self.get_llm_adapter().create_llm_specific_message(message)])
         )
 
+    async def _report_empty_response(
+        self,
+        response_id: str | None,
+        output: list[dict],
+        *,
+        incremental: bool | None = None,
+    ):
+        """Report a completed response that produced no text and no function call.
+
+        Nothing reaches the TTS for such a response, so the bot stays silent
+        until the user speaks again. The warning lists the response's output
+        items (a message with its content types, e.g. ``message[refusal]``) to
+        show why, and the non-fatal error lets the application react.
+
+        Args:
+            response_id: The response id.
+            output: The response's ``output`` items, as dicts.
+            incremental: Whether the request sent only the new input items via
+                ``previous_response_id``. None for a transport that always sends
+                the full context.
+        """
+        items = []
+        for item in output:
+            item_type = item.get("type", "unknown")
+            if item_type == "message":
+                content_types = ",".join(
+                    c.get("type", "unknown") for c in item.get("content") or []
+                )
+                item_type = f"message[{content_types}]"
+            items.append(item_type)
+        details = f"output: {items}"
+        if incremental is not None:
+            details += f", incremental: {incremental}"
+        logger.warning(
+            f"{self}: Response {response_id} completed with no text or function call ({details})"
+        )
+        await self.push_error(
+            error_msg=f"LLM response {response_id} completed with no text or function call"
+        )
+
 
 # ---------------------------------------------------------------------------
 # WebSocket variant (default / recommended)
 # ---------------------------------------------------------------------------
+
+# Lanes the WebSocket service's responses go on. A connection runs at most 16
+# responses at once, abandoned ones included.
+_LANE_COUNT = 16
+
+# The events that end a response on its lane: it completed, failed or was cut
+# short, or its request got an error.
+_RESPONSE_END_EVENT_TYPES = (
+    "response.completed",
+    "response.failed",
+    "response.incomplete",
+    "error",
+)
 
 
 class OpenAIResponsesLLMService(
@@ -643,11 +754,13 @@ class OpenAIResponsesLLMService(
         self._previous_input_hash: str | None = None
         self._previous_input_length: int | None = None
         self._previous_response_output: list | None = None
+        self._previous_response_lane: str | None = None
 
-        # Response cancellation state
-        self._current_response_id: str | None = None  # ID of current non-cancelled response
-        self._cancel_pending_response: bool = False
-        self._needs_drain: bool = False
+        # Response lanes (see _choose_next_response_lane): the lane of the
+        # response in flight, from its response.create until its last event,
+        # and the lanes still draining an abandoned response.
+        self._current_response_lane: str | None = None
+        self._draining_lanes: set[str] = set()
 
     # -- WebsocketLLMService interface ----------------------------------------
 
@@ -677,7 +790,7 @@ class OpenAIResponsesLLMService(
         finally:
             self._websocket = None
             self._clear_previous_response_state()
-            self._clear_cancellation_state()
+            self._clear_lane_state()
 
     async def cleanup(self):
         """Release resources at teardown."""
@@ -858,73 +971,49 @@ class OpenAIResponsesLLMService(
         self._previous_input_length = None
         self._previous_input_hash = None
         self._previous_response_output = None
+        self._previous_response_lane = None
 
-    # -- response cancellation ------------------------------------------------
+    # -- response lanes -------------------------------------------------------
 
-    def _clear_cancellation_state(self):
-        """Clear response cancellation tracking state."""
-        self._current_response_id = None
-        self._cancel_pending_response = False
-        self._needs_drain = False
+    def _clear_lane_state(self):
+        """Clear response lane tracking state."""
+        self._current_response_lane = None
+        self._draining_lanes.clear()
 
-    async def _drain_cancelled_response(self):
-        """Drain events from a cancelled response before starting a new one.
+    async def _choose_next_response_lane(self) -> str:
+        """Choose the lane for the next response.
 
-        After a cancellation, the WebSocket may still have in-flight events
-        from the cancelled response.  We must drain them before sending a
-        new ``response.create`` — we can't simply filter them inline because
-        the API doesn't provide a reliable way to correlate events to a
-        specific response (e.g. delta events carry neither a
-        ``response_id`` nor any intermediary identifier that could be
-        traced back to one).
+        Every response goes on a named lane of the connection (the API's
+        ``stream_id``), so each of its events says which lane it came from.
+        That lets a cancelled response be abandoned rather than waited for:
+        WebSocket mode can't stop a response (it ignores ``response.cancel``),
+        so an abandoned response drains from its lane while the next one runs
+        on another, and its events are discarded as they arrive. The lane is
+        free again once the response ends.
 
-        This method reads and discards events until a terminal event
-        (``response.completed``, ``response.failed``, or
-        ``response.incomplete``) arrives, ensuring the connection is clean.
-        If draining times out or the connection drops, clears cancellation
-        state and returns — ``_ensure_connected`` will handle reconnection
-        before the next inference.
+        The lane chosen isn't draining, since a lane runs its responses one at
+        a time, and isn't the previous response's lane. Each lane caches only
+        its latest response, so an abandoned response on the previous
+        response's lane would evict the previous response when it ended, and
+        the next request couldn't continue from it. Continuing from another
+        lane's response (a fork) costs no more than continuing on the same
+        lane.
+
+        If every lane is taken, the connection is closed, which ends the
+        abandoned responses; the next send opens a new one.
+
+        Returns:
+            The lane, as its ``stream_id``.
         """
-        if not self._websocket:
-            self._clear_cancellation_state()
-            return
-
-        logger.debug(f"{self}: Draining cancelled response events")
-        try:
-            while True:
-                raw = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
-                event = json.loads(raw)
-                event_type = event.get("type")
-
-                # If we were cancelled before response.created, the first
-                # event here will be response.created for the cancelled
-                # request — send cancel now that we have the id.
-                if event_type == "response.created" and self._cancel_pending_response:
-                    response_id = event.get("response", {}).get("id")
-                    logger.debug(
-                        f"{self}: Received response.created for pending-cancel "
-                        f"response {response_id} — sending response.cancel"
-                    )
-                    self._cancel_pending_response = False
-                    if response_id:
-                        try:
-                            await self._ws_send(
-                                {"type": "response.cancel", "response_id": response_id}
-                            )
-                        except Exception:
-                            pass
-                    continue
-
-                if event_type in ("response.completed", "response.failed", "response.incomplete"):
-                    logger.debug(
-                        f"{self}: Cancelled response terminated with {event_type} — "
-                        f"connection is clean"
-                    )
-                    self._clear_cancellation_state()
-                    return
-        except (TimeoutError, WebsocketReconnectedError, ConnectionClosed) as e:
-            logger.warning(f"{self}: Error draining cancelled response: {e}")
-            self._clear_cancellation_state()
+        for i in range(_LANE_COUNT):
+            lane = f"lane-{i}"
+            if lane != self._previous_response_lane and lane not in self._draining_lanes:
+                return lane
+        logger.debug(
+            f"{self}: Every lane is draining or holds the previous response — reconnecting"
+        )
+        await self._disconnect_websocket()
+        return "lane-0"
 
     # -- frame processing -----------------------------------------------------
 
@@ -944,30 +1033,14 @@ class OpenAIResponsesLLMService(
                 await self._process_context(frame.context)
             except asyncio.CancelledError:
                 # The pipeline cancelled us (e.g. due to an interruption).
-                # Ask the server to stop generating and flag that we need
-                # to drain stale events before the next inference.  We
-                # can't just send a new response.create and filter stale
-                # events inline — the API doesn't provide a reliable way
-                # to correlate events to a specific response.
-                if self._current_response_id:
+                # The response drains from its lane, and the next one goes on
+                # another (see _choose_next_response_lane).
+                if self._current_response_lane:
                     logger.debug(
-                        f"{self}: Cancelled during response {self._current_response_id} "
-                        f"— sending response.cancel"
+                        f"{self}: Abandoning the response on {self._current_response_lane}"
                     )
-                    try:
-                        await self._ws_send(
-                            {"type": "response.cancel", "response_id": self._current_response_id}
-                        )
-                    except Exception:
-                        pass
-                else:
-                    logger.debug(
-                        f"{self}: Cancelled before response.created "
-                        f"— will cancel on next response.created"
-                    )
-                    self._cancel_pending_response = True
-                self._current_response_id = None
-                self._needs_drain = True
+                    self._draining_lanes.add(self._current_response_lane)
+                    self._current_response_lane = None
                 raise
             except Exception as e:
                 await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
@@ -994,19 +1067,14 @@ class OpenAIResponsesLLMService(
         Args:
             context: The LLM context containing conversation history.
         """
-        # If a previous response was cancelled, drain its remaining events
-        # before starting a new one.
-        if self._needs_drain:
-            await self._drain_cancelled_response()
+        lane = await self._choose_next_response_lane()
 
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         full_input = invocation_params["input"]
@@ -1022,8 +1090,16 @@ class OpenAIResponsesLLMService(
         async def send_and_receive(params: dict, output_timeout_secs: float | None = None):
             await self._ensure_connected()
             await self.start_ttfb_metrics()
-            await self._ws_send({"type": "response.create", **params})
-            await self._receive_response_events(context, full_input, output_timeout_secs)
+            # Set before sending: a cancellation during the send may still let
+            # the response go out, and its lane must then count as draining.
+            self._current_response_lane = lane
+            await self._ws_send({"type": "response.create", "stream_id": lane, **params})
+            await self._receive_response_events(
+                context,
+                full_input,
+                output_timeout_secs,
+                incremental="previous_response_id" in params,
+            )
 
         async def cleanup():
             self._clear_previous_response_state()
@@ -1038,8 +1114,8 @@ class OpenAIResponsesLLMService(
             )
             return  # Success
         except _ResponseTimeoutError:
-            # Dropping the connection discards the abandoned response's events,
-            # so the retry starts on a clean socket with no draining needed.
+            # Dropping the connection also ends the response that produced
+            # nothing, so the retry starts on a clean socket.
             logger.warning(
                 f"{self}: No output within {self._retry_timeout_secs}s — reconnecting "
                 f"and retrying with full context ({len(full_input)} items)"
@@ -1079,8 +1155,29 @@ class OpenAIResponsesLLMService(
             await cleanup()
             raise
 
+    async def _report_event_usage(self, usage: dict | None):
+        """Report the token usage of a response received over the WebSocket."""
+        if not usage:
+            return
+        input_details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
+        tokens = LLMTokenUsage(
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            cache_read_input_tokens=input_details.get("cached_tokens", 0),
+            cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
+            reasoning_tokens=output_details.get("reasoning_tokens", 0),
+        )
+        await self.start_llm_usage_metrics(tokens)
+
     async def _receive_response_events(
-        self, context: LLMContext, full_input: list, output_timeout_secs: float | None = None
+        self,
+        context: LLMContext,
+        full_input: list,
+        output_timeout_secs: float | None = None,
+        *,
+        incremental: bool = False,
     ):
         """Receive and process WebSocket events until the response completes.
 
@@ -1092,6 +1189,8 @@ class OpenAIResponsesLLMService(
                 the first output event arrives the wait becomes unbounded, since
                 by then content is already on its way downstream and re-issuing
                 would duplicate it. None waits indefinitely throughout.
+            incremental: Whether the request sent only the new input items via
+                ``previous_response_id``.
 
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
@@ -1103,6 +1202,8 @@ class OpenAIResponsesLLMService(
         function_calls: dict[str, dict[str, str]] = {}
         current_arguments: dict[str, str] = {}
         reasoning_summary_open = False
+        has_text = False
+        lane = self._current_response_lane
 
         deadline = time.monotonic() + output_timeout_secs if output_timeout_secs else None
 
@@ -1121,9 +1222,22 @@ class OpenAIResponsesLLMService(
 
             event_type = event.get("type")
 
+            # An event on another lane is a draining lane's, from an abandoned
+            # response; the lane is free again once that response ends. Events
+            # with no stream_id concern the connection, and so the response in
+            # flight.
+            event_lane = event.get("stream_id")
+            if event_lane is not None and event_lane != lane:
+                if event_type in _RESPONSE_END_EVENT_TYPES:
+                    self._draining_lanes.discard(event_lane)
+                continue
+
+            if event_type in _RESPONSE_END_EVENT_TYPES:
+                self._current_response_lane = None
+
             if event_type == "response.created":
-                self._current_response_id = event.get("response", {}).get("id")
-                logger.debug(f"{self}: Response started: {self._current_response_id}")
+                response_id = event.get("response", {}).get("id")
+                logger.debug(f"{self}: Response started: {response_id}")
                 continue
 
             # Anything past response.created means the response is under way, so
@@ -1132,7 +1246,9 @@ class OpenAIResponsesLLMService(
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
-                await self._push_llm_text(event.get("delta", ""))
+                delta = event.get("delta", "")
+                has_text = has_text or bool(delta.strip())
+                await self._push_llm_text(delta)
 
             elif event_type == "response.reasoning_summary_text.delta":
                 await self.stop_ttfb_metrics()
@@ -1190,19 +1306,7 @@ class OpenAIResponsesLLMService(
 
             elif event_type == "response.completed":
                 response = event.get("response", {})
-                usage = response.get("usage")
-                if usage:
-                    input_details = usage.get("input_tokens_details") or {}
-                    output_details = usage.get("output_tokens_details") or {}
-                    tokens = LLMTokenUsage(
-                        prompt_tokens=usage.get("input_tokens", 0),
-                        completion_tokens=usage.get("output_tokens", 0),
-                        total_tokens=usage.get("total_tokens", 0),
-                        cache_read_input_tokens=input_details.get("cached_tokens", 0),
-                        cache_creation_input_tokens=input_details.get("cache_write_tokens", 0),
-                        reasoning_tokens=output_details.get("reasoning_tokens", 0),
-                    )
-                    await self.start_llm_usage_metrics(tokens)
+                await self._report_event_usage(response.get("usage"))
 
                 self._full_model_name = response.get("model")
 
@@ -1210,17 +1314,27 @@ class OpenAIResponsesLLMService(
                 # Include the response output so the hash covers the assistant's
                 # reply — the server already knows it, so we won't resend it.
                 response_id = response.get("id")
+                response_output = response.get("output") or []
                 if response_id:
-                    response_output = response.get("output") or []
                     self._store_previous_response_state(response_id, full_input, response_output)
+                    self._previous_response_lane = lane
+
+                if not has_text and not function_calls:
+                    await self._report_empty_response(
+                        response_id, response_output, incremental=incremental
+                    )
 
                 break  # Response complete
 
             elif event_type in ("response.failed", "response.incomplete"):
                 response = event.get("response", {})
-                status_details = response.get("status_details") or {}
-                error_info = status_details.get("error") or {}
-                error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
+                # A response cut short or failed is still billed for its tokens.
+                await self._report_event_usage(response.get("usage"))
+                error_msg = (
+                    (response.get("error") or {}).get("message")
+                    or (response.get("incomplete_details") or {}).get("reason")
+                    or f"Response {event_type.split('.')[-1]}"
+                )
                 await self.push_error(error_msg=f"LLM response error: {error_msg}")
                 break
 
@@ -1298,6 +1412,12 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         else:
             await self.push_frame(frame, direction)
 
+    async def _report_usage(self, usage: ResponseUsage | None):
+        """Report a response's token usage, if it carries any."""
+        if not usage:
+            return
+        await self.start_llm_usage_metrics(self._token_usage(usage))
+
     async def _create_stream(self, params: dict) -> AsyncStream[ResponseStreamEvent]:
         """Open a streaming Responses API request, retrying once on timeout.
 
@@ -1319,16 +1439,44 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             logger.debug(f"{self}: Retrying response creation due to timeout")
             return await self._client.responses.create(**params)
 
+    def _token_usage(self, usage: ResponseUsage) -> LLMTokenUsage:
+        """Convert a response's usage into Pipecat's token usage.
+
+        Subclasses for servers that report usage fields OpenAI doesn't override
+        this.
+
+        Args:
+            usage: The usage reported with the response.
+
+        Returns:
+            The token usage to report.
+        """
+        # Third-party Responses API servers may omit fields the OpenAI SDK treats
+        # as required. The SDK's lenient streaming decoder leaves anything omitted
+        # as None — at the top level (token counts), as a missing detail
+        # sub-object, or as a missing field inside one. Coalesce each to 0 so a
+        # partial usage payload can't raise or leak None into metrics.
+        input_details = usage.input_tokens_details
+        output_details = usage.output_tokens_details
+        return LLMTokenUsage(
+            prompt_tokens=usage.input_tokens or 0,
+            completion_tokens=usage.output_tokens or 0,
+            total_tokens=usage.total_tokens or 0,
+            cache_read_input_tokens=(input_details.cached_tokens or 0) if input_details else 0,
+            cache_creation_input_tokens=(getattr(input_details, "cache_write_tokens", None) or 0)
+            if input_details
+            else 0,
+            reasoning_tokens=(output_details.reasoning_tokens or 0) if output_details else 0,
+        )
+
     @traced_llm
     async def _process_context(self, context: LLMContext):
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating response from universal context "
-            f"{adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=assert_given(self._settings.system_instruction)
+        invocation_params = await adapter.get_llm_invocation_params(
+            context,
+            system_instruction=assert_given(self._settings.system_instruction),
         )
 
         params = self._build_response_params(invocation_params)
@@ -1342,6 +1490,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         current_arguments: dict[str, str] = {}  # item_id -> accumulated arguments
         reasoning_summary_open = False
         stream_errored = False
+        has_text = False
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -1368,6 +1517,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
             async for event in event_iter:
                 if isinstance(event, ResponseTextDeltaEvent):
                     await self.stop_ttfb_metrics()
+                    has_text = has_text or bool(event.delta.strip())
                     await self._push_llm_text(event.delta)
 
                 elif isinstance(event, ResponseReasoningSummaryTextDeltaEvent):
@@ -1426,41 +1576,20 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
-                    if response.usage:
-                        usage = response.usage
-                        # Third-party Responses API servers may omit fields the
-                        # OpenAI SDK treats as required. The SDK's lenient
-                        # streaming decoder leaves anything omitted as None — at
-                        # the top level (token counts), as a missing detail
-                        # sub-object, or as a missing field inside one. Coalesce
-                        # each to 0 so a partial usage payload can't raise or
-                        # leak None into metrics.
-                        input_details = usage.input_tokens_details
-                        output_details = usage.output_tokens_details
-                        tokens = LLMTokenUsage(
-                            prompt_tokens=usage.input_tokens or 0,
-                            completion_tokens=usage.output_tokens or 0,
-                            total_tokens=usage.total_tokens or 0,
-                            cache_read_input_tokens=(input_details.cached_tokens or 0)
-                            if input_details
-                            else 0,
-                            cache_creation_input_tokens=(
-                                getattr(input_details, "cache_write_tokens", None) or 0
-                            )
-                            if input_details
-                            else 0,
-                            reasoning_tokens=(output_details.reasoning_tokens or 0)
-                            if output_details
-                            else 0,
-                        )
-                        await self.start_llm_usage_metrics(tokens)
+                    await self._report_usage(response.usage)
 
                     # This field is used by @traced_llm for more detailed
                     # model name in tracing spans
                     self._full_model_name = response.model
 
+                    if not has_text and not function_calls:
+                        await self._report_empty_response(
+                            response.id, [item.model_dump() for item in response.output]
+                        )
+
                 elif isinstance(event, ResponseFailedEvent):
-                    # As with usage above, the detail objects and their fields
+                    await self._report_usage(event.response.usage)
+                    # As with usage, the detail objects and their fields
                     # are only as reliable as the server; coalesce to a generic
                     # message so a sparse payload still reports something.
                     error = event.response.error
@@ -1472,6 +1601,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                     break
 
                 elif isinstance(event, ResponseIncompleteEvent):
+                    await self._report_usage(event.response.usage)
                     details = event.response.incomplete_details
                     reason = details.reason if details else None
                     await self.push_error(

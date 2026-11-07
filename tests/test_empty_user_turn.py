@@ -41,7 +41,7 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.text.base_text_aggregator import AggregationType
+from pipecat.utils.text.base_text_aggregator import TextType
 
 USER_TURN_STOP_TIMEOUT = 0.2
 USER_SPEECH_TIMEOUT = 0.1
@@ -105,7 +105,7 @@ def _bot_speaking() -> list[Frame]:
         SleepFrame(),
         LLMFullResponseStartFrame(),
         BotStartedSpeakingFrame(),
-        TTSTextFrame("Where would", aggregated_by=AggregationType.WORD),
+        TTSTextFrame("Where would", text_type=TextType.WORD),
         SleepFrame(),
     ]
 

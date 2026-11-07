@@ -87,6 +87,10 @@ class Language(StrEnum):
     # Breton
     BR = "br"
 
+    # Bodo
+    BRX = "brx"
+    BRX_IN = "brx-IN"
+
     # Bosnian
     BS = "bs"
     BS_BA = "bs-BA"
@@ -126,6 +130,10 @@ class Language(StrEnum):
     DE_BE = "de-BE"
     DE_CH = "de-CH"
     DE_DE = "de-DE"
+
+    # Dogri
+    DOI = "doi"
+    DOI_IN = "doi-IN"
 
     # Greek
     EL = "el"
@@ -322,6 +330,10 @@ class Language(StrEnum):
     KO = "ko"
     KO_KR = "ko-KR"
 
+    # Kashmiri
+    KS = "ks"
+    KS_IN = "ks-IN"
+
     # Kurdish
     KU = "ku"
 
@@ -381,6 +393,10 @@ class Language(StrEnum):
     MN = "mn"
     MN_MN = "mn-MN"
 
+    # Manipuri
+    MNI = "mni"
+    MNI_IN = "mni-IN"
+
     # Marathi
     MR = "mr"
     MR_IN = "mr-IN"
@@ -407,6 +423,7 @@ class Language(StrEnum):
 
     # Nepali
     NE = "ne"
+    NE_IN = "ne-IN"
     NE_NP = "ne-NP"
 
     # Dutch
@@ -454,6 +471,11 @@ class Language(StrEnum):
 
     # Sanskrit
     SA = "sa"
+    SA_IN = "sa-IN"
+
+    # Santali
+    SAT = "sat"
+    SAT_IN = "sat-IN"
 
     # Sindhi
     SD = "sd"

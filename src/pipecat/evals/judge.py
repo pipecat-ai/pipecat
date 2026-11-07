@@ -21,8 +21,8 @@ was offered. Two classifiers come with Pipecat:
 - :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`, over any
   Pipecat LLM service with ``run_inference()``: OpenAI, Ollama, Together,
   and others. This is the default.
-- :class:`~pipecat.classifiers.jev.classifier.JevClassifier`, over TypeSafe's
-  Jev, a hosted classification model. Jev answers in a few hundred
+- :class:`~pipecat.classifiers.typesafe.jev.classifier.JevClassifier`, over
+  TypeSafe's Jev, a hosted classification model. Jev answers in a few hundred
   milliseconds, costs little, and its probabilities are calibrated, so a
   scenario can tell a sure verdict from a close call.
 
@@ -101,8 +101,8 @@ same question about the same conversation twice costs one call.
 The explainer:
 
 A classifier gives no reasons, so the judge asks an LLM of its own, the
-explainer, for them. It judges the same conversation with the prompts in
-this module, in a one-shot inference outside the pipeline, and is asked for:
+explainer, for them, in a one-shot inference outside the pipeline with the
+prompts in this module. It is asked for:
 
 - every ``no``, on a reply, a function call, a turn or a goal;
 - every verdict the classifier is unsure of, meaning a confidence below
@@ -113,15 +113,18 @@ this module, in a one-shot inference outside the pipeline, and is asked for:
 - never a ``continue``, which is only a request to wait for more text.
 
 ``explain_below: 0`` limits it to the ``no`` verdicts, and a value above 1
-sends it every verdict (useful for comparing a classifier against the LLM).
+has every verdict explained.
 
-The explainer is asked the same question and makes its own judgement, which
-costs a full LLM call. For a simulation, it judges the whole run in one call
-if any verdict needs a reason, and its reasons go only to the verdicts that
-need one. Either way, the explainer never changes a verdict: the
-classifier's stands. If the explainer agrees, its reason is used, followed
-by the probabilities. If it disagrees, the reason says so ("the explainer
-judged yes: ...").
+The explainer never decides a verdict. It is told the classifier's and asked
+what in the conversation supports it, so the reason points to evidence for the
+verdict that counts, not to how the classifier reached it. Its reason takes the
+place of the probabilities as the verdict's ``reason``, and the probabilities
+stay in ``probabilities``. For a simulation, every verdict of the run that needs
+a reason is explained in one call. Each question names the reasons it wants in
+a response schema, so an LLM that can enforce one answers in exactly that
+shape, and a question whose call fails or times out, or whose answer leaves a
+reason out, is asked once more. A verdict still without a reason keeps the
+probabilities.
 
 When a call fails:
 
@@ -155,9 +158,8 @@ import asyncio
 import hashlib
 import json
 import re
-import warnings
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar, cast
 
 from loguru import logger
@@ -175,136 +177,55 @@ from pipecat.evals.services import classifier_from_config, llm_service_from_conf
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.deprecation import warn_deprecated
 
 _R = TypeVar("_R")
 
-JUDGE_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge evaluating a conversation between a user and a "
-    "bot under test. The 'user' messages are the user; the 'assistant' messages are "
-    "the bot's replies. Judge only the bot's most recent reply — which may have "
-    "arrived as several consecutive 'assistant' messages — against the given "
-    "criterion, using the earlier turns only as context. The reply may still be "
-    "streaming in. "
-    "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
-    "transcription, so it may contain homophones, misspellings, split or merged words, and "
-    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
-    "spelling. In particular, treat a number as the same value whether it is spelled out, "
-    "written as a digit, or transcribed as a homophone: 'for' and 'fore' mean 'four' (4), and "
-    "'to' and 'too' mean 'two' (2). Never answer 'no' solely because of a transcription error "
-    "when the intended spoken meaning satisfies the criterion. "
-    "Respond ONLY with a JSON object on a single line containing two fields: "
-    '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
-    'Use "yes" if the reply satisfies the criterion. '
-    'Use "continue" if the bot has not given its answer yet: it says it is checking, '
-    "looking something up, fetching, working on something, or that it will report back. "
-    "The answer is still coming, so there is nothing to judge yet. This holds however "
-    'long and however fluent the reply is: "The system is checking the current '
-    'conditions for you right now." is waiting, not answering. A greeting or an '
-    'obviously incomplete fragment is also "continue". '
-    'Use "no" only when the bot has given its answer and that answer fails the '
-    'criterion. If the bot has not answered yet, always use "continue", never "no". '
-    "Do not include any other text, explanation, or markdown."
-)
-
-# Transient final user message appended for the explainer's call. The
-# conversation it refers to ("the bot's most recent reply") is the LLMContext
-# built from the judge's transcript; this just poses the question.
-JUDGE_ASK_TEMPLATE = (
-    "Does the bot's most recent reply satisfy this criterion?\n\n"
-    "Criterion: {criterion}\n\n"
-    "Answer yes, no, or continue."
-)
-
-# The instructions for a reply when ``continue`` isn't allowed: every judged
-# reply is a final answer, so the verdict is yes or no.
-JUDGE_FINAL_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge evaluating a conversation between a user and a "
-    "bot under test. The 'user' messages are the user; the 'assistant' messages are "
-    "the bot's replies. Judge only the bot's most recent reply — which may have "
-    "arrived as several consecutive 'assistant' messages — against the given "
-    "criterion, using the earlier turns only as context. The reply is the bot's final "
-    "answer. "
-    "When the bot spoke its reply, the 'assistant' text is an automatic speech-to-text "
-    "transcription, so it may contain homophones, misspellings, split or merged words, and "
-    "missing punctuation. Always judge it by the intended spoken meaning, never by its exact "
-    "spelling. In particular, treat a number as the same value whether it is spelled out, "
-    "written as a digit, or transcribed as a homophone: 'for' and 'fore' mean 'four' (4), and "
-    "'to' and 'too' mean 'two' (2). Never answer 'no' solely because of a transcription error "
-    "when the intended spoken meaning satisfies the criterion. "
-    "Respond ONLY with a JSON object on a single line containing two fields: "
-    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
-    'Use "yes" if the reply satisfies the criterion and "no" if it does not. '
-    "Do not include any other text, explanation, or markdown."
-)
-
-JUDGE_FINAL_ASK_TEMPLATE = (
-    "Does the bot's most recent reply satisfy this criterion?\n\n"
-    "Criterion: {criterion}\n\n"
-    "Answer yes or no."
-)
-
-# The instructions for an ``eval:`` on a function call. The call is the
-# subject, and the conversation is context for it, so the verdict is yes or
-# no: a call is not a partial reply, and there is nothing to wait for.
-JUDGE_CALL_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge evaluating a function call made by a bot under "
-    "test in a conversation with a user. The 'user' messages are the user; the "
-    "'assistant' messages are the bot's replies so far, given only as context for the "
-    "call. Judge only the call you are asked about, by its name and its arguments, "
-    "against the given criterion. "
-    "When the bot spoke its replies, the 'assistant' text is an automatic speech-to-text "
-    "transcription, so it may contain homophones, misspellings, split or merged words, and "
-    "missing punctuation; judge it by the intended spoken meaning. "
-    "Respond ONLY with a JSON object on a single line containing two fields: "
-    '{"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
-    'Use "yes" if the call satisfies the criterion and "no" if it does not. '
-    "Do not include any other text, explanation, or markdown."
-)
-
-# The ask for an ``eval:`` on a function call. It names the call and gives its
-# arguments as JSON, so the verdict is about that call rather than about what
-# the bot said around it.
-JUDGE_CALL_ASK_TEMPLATE = (
-    "The bot called the function `{name}` with arguments `{args}`. "
-    "Does this call satisfy this criterion?\n\n"
-    "Criterion: {criterion}\n\n"
-    "Answer yes or no."
-)
-
-
-RUN_JUDGE_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge evaluating a complete conversation between a user "
-    "and a bot under test, given as a transcript. The bot's replies are numbered 'Bot "
-    "turn 1', 'Bot turn 2', and so on; the user's lines are marked 'User'; a line "
-    "marked '[tool call]' is a function the bot called at that point, and a completed "
-    "call is stronger evidence of an action (a booking, a lookup) than the bot saying "
-    "it did it. "
-    "You are given criteria, each with a name, that every bot reply is judged against "
-    "on its own, in the light of the conversation before it, and a goal that the "
-    "conversation as a whole is judged against. A criterion that forbids something "
-    "('never ...', 'does not ...') or that applies only in a situation ('when ...', "
-    "'if ...') is satisfied by a reply that does not do the forbidden thing or is not "
-    "in that situation; do not fault a reply for something the criterion does not ask "
-    "of it. "
+# The explainer's instructions, for every question it is asked. The classifier
+# has decided: the explainer is told the verdict and says what in the
+# conversation supports it, so a reason always explains the verdict that counts.
+EXPLAIN_SYSTEM_INSTRUCTION = (
+    "You explain the verdicts a judge gave on a conversation between a user and a bot "
+    "under test. The 'user' messages are the user; the 'assistant' messages are the bot's "
+    "replies. The judge's verdicts are final. For each verdict you are asked about, say in "
+    "one short sentence what the bot said or did that makes it right, naming it; never "
+    "just restate the verdict, and never argue for a different verdict. When a criterion "
+    "does not apply to a reply, say what the reply does instead and why that is outside "
+    "what the criterion covers. "
     "When the bot spoke its replies, its text is an automatic speech-to-text "
     "transcription, so it may contain homophones, misspellings, split or merged words, "
-    "and missing punctuation. Always judge it by the intended spoken meaning, never by "
-    "its exact spelling. "
-    "Respond ONLY with a JSON object on a single line of the form "
-    '{"goal": {"verdict": "yes" | "no", "reason": "<one short sentence>"}, '
-    '"turns": {"<criterion name>": ["yes" | "no", ...]}, '
-    '"reasons": {"<criterion name>": {"<bot turn number>": "<one short sentence>"}}}. '
-    'Under "turns", give every criterion an array with exactly one entry per bot '
-    'turn, in order. Under "reasons", give a reason only for the turns you '
-    'answered "no". Do not include any other text, explanation, or markdown.'
+    "and missing punctuation; read it by its intended spoken meaning. "
+    "Respond ONLY with the JSON object the question describes, on a single line, with no "
+    "other text or markdown."
 )
 
-RUN_JUDGE_ASK_TEMPLATE = (
+# The ask for a reply's verdict, after the conversation so far.
+EXPLAIN_REPLY_ASK_TEMPLATE = (
+    "The judge's verdict: the bot's most recent reply {outcome} this criterion.\n\n"
+    "Criterion: {criterion}\n\n"
+    'Answer with {{"reason": "<one short sentence>"}}.'
+)
+
+# The ask for a function call's verdict; the conversation so far is context.
+EXPLAIN_CALL_ASK_TEMPLATE = (
+    "The bot called the function `{name}` with arguments `{args}`. The judge's verdict: "
+    "this call {outcome} this criterion.\n\n"
+    "Criterion: {criterion}\n\n"
+    'Answer with {{"reason": "<one short sentence>"}}.'
+)
+
+# The ask for a simulation run's verdicts: the transcript, with the bot's turns
+# numbered and its tool calls inline, what the run was judged on, and the
+# verdicts to explain, one per line.
+EXPLAIN_RUN_ASK_TEMPLATE = (
     "Transcript:\n{transcript}\n\n"
-    "Criteria for every bot reply:\n{criteria}\n\n"
-    "Goal for the conversation as a whole: {success}\n\n"
-    "Answer with the JSON described, one array entry per bot turn: there are "
-    "{turn_count} bot turns."
+    "A line marked '[tool call]' is a function the bot called at that point.\n\n"
+    "Criteria every bot reply was judged on:\n{criteria}\n\n"
+    "Goal the conversation as a whole was judged on: {success}\n\n"
+    "The judge's verdicts to explain:\n{verdicts}\n\n"
+    'Answer with {{"goal": "<reason>", "turns": {{"<criterion name>": '
+    '{{"<bot turn number>": "<reason>"}}}}}}, a reason for each verdict listed and '
+    "nothing else."
 )
 
 
@@ -316,15 +237,19 @@ class JudgeVerdict:
         verdict: ``"yes"`` (satisfies), ``"no"`` (substantive answer that fails),
             or ``"continue"`` (interim/filler/incomplete — re-judge once more text
             arrives).
-        reason: One-sentence justification.
+        reason: The explainer's one-sentence reason for the verdict, or the
+            classifier's probabilities when nothing explained it.
         raw_response: The judge's raw answer, for diagnostics.
         confidence: How sure the judge is of the verdict, from 0 to 1.
+        probabilities: The probability of each outcome the classifier was
+            offered; empty when the question failed.
     """
 
     verdict: str
     reason: str
     raw_response: str
     confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -344,13 +269,6 @@ class RunVerdicts:
     goal: JudgeVerdict
     turns: dict[str, list[JudgeVerdict]]
 
-
-# The reason a verdict carries when the explainer's call failed.
-EXPLAINER_FAILED = "explainer call failed"
-# The reason a verdict carries when the judge gave none.
-_NO_VERDICT = "(judge gave no verdict)"
-# The reason a verdict carries when the judge gave the verdict without one.
-NO_REASON = "(no reason given)"
 
 # The questions the judge asks, each followed by the criterion and the notes
 # that go with every question; see ``EvalJudge._instructions``.
@@ -417,8 +335,8 @@ class EvalJudge:
             still working toward its answer, so the harness waits for more of
             it). A suite whose judged replies are all final answers turns it
             off, and a reply is then ``yes`` or ``no``.
-        max_tokens: Cap on the explainer's response length. Default 200 —
-            enough for a verdict and a short reason.
+        max_tokens: Cap on the explainer's response length for one reason.
+            Default 200, enough for a short sentence.
     """
 
     def __init__(
@@ -442,7 +360,7 @@ class EvalJudge:
             explainer: The LLM asked for the reason behind a verdict.
             explain_below: A ``yes`` less sure than this is explained too.
             allow_continue: Whether a reply may be judged ``continue``.
-            max_tokens: Cap on the explainer's response length.
+            max_tokens: Cap on the explainer's response length for one reason.
             service: The LLM service that classifies and explains, in place of
                 ``classifier``.
 
@@ -459,11 +377,10 @@ class EvalJudge:
         if classifier is None:
             raise ValueError("EvalJudge needs a classifier to decide the verdicts")
         if not isinstance(classifier, BaseClassifier):
-            warnings.warn(
-                "Passing an LLM service to `EvalJudge` is deprecated since 1.12.0 and will be "
-                "removed in 2.0.0. Pass `LLMClassifier(llm=service)`, with the service itself "
-                "as the `explainer` for the reasons.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`EvalJudge(llm_service)` is deprecated since 1.12.0 and will be "
+                "removed in 2.0.0. Use `EvalJudge(LLMClassifier(llm=service))` instead. Pass "
+                "the service itself as the `explainer` for the reasons.",
                 stacklevel=2,
             )
             service = cast("LLMService[Any]", classifier)
@@ -471,12 +388,9 @@ class EvalJudge:
             explainer = explainer if explainer is not None else service
         self._classifier = classifier
         self._explainer = (
-            _Explainer(explainer, max_tokens=max_tokens, allow_continue=allow_continue)
-            if explainer is not None
-            else None
+            _Explainer(explainer, max_tokens=max_tokens) if explainer is not None else None
         )
         self._explain_below = explain_below
-        self._allow_continue = allow_continue
         self._reply_outcomes = (
             _REPLY_OUTCOMES
             if allow_continue
@@ -606,8 +520,8 @@ class EvalJudge:
                     and self._explainer
                     and self._needs_reason(verdict)
                 ):
-                    explanation = await self._explainer.explain(self._transcript, criterion)
-                    verdict = self._explained(verdict, explanation)
+                    reason = await self._explainer.explain(self._transcript, criterion, verdict)
+                    verdict = self._with_reason(verdict, reason)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -638,10 +552,10 @@ class EvalJudge:
             else:
                 verdict = self._yes_no_verdict(answer)
                 if self._explainer and self._needs_reason(verdict):
-                    explanation = await self._explainer.explain_call(
-                        self._transcript, name, args, criterion
+                    reason = await self._explainer.explain_call(
+                        self._transcript, name, args, criterion, verdict
                     )
-                    verdict = self._explained(verdict, explanation)
+                    verdict = self._with_reason(verdict, reason)
             self._cache[key] = verdict
         return self._cache[key]
 
@@ -684,11 +598,10 @@ class EvalJudge:
                 cast("str", transcript),
             )
         if transcript is not None:
-            warnings.warn(
-                "`transcript` parameter of `EvalJudge.evaluate_run` is deprecated since 1.11.0 "
-                "and will be removed in 2.0.0. Feed the judge with `add_user_message`, "
-                "`add_assistant_message` and `add_tool_call` instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`EvalJudge.evaluate_run(transcript=...)` is deprecated since 1.11.0 and will "
+                "be removed in 2.0.0. Use `add_user_message`, `add_assistant_message` and "
+                "`add_tool_call` instead.",
                 stacklevel=2,
             )
         conversation = list(self._transcript if transcript is None else transcript)
@@ -768,25 +681,25 @@ class EvalJudge:
         criteria: dict[str, str],
         success: str,
     ) -> RunVerdicts:
-        """The run's verdicts, those that need a reason given the explainer's; it judges the run once."""
-        everything = [verdicts.goal, *(v for vs in verdicts.turns.values() for v in vs)]
-        if self._explainer is None or not any(self._needs_reason(v) for v in everything):
+        """The run's verdicts, those that need a reason given the explainer's; it explains them in one call."""
+        goal = verdicts.goal if self._needs_reason(verdicts.goal) else None
+        turns = {
+            name: {turn: v for turn, v in enumerate(turn_verdicts, 1) if self._needs_reason(v)}
+            for name, turn_verdicts in verdicts.turns.items()
+        }
+        if self._explainer is None or (goal is None and not any(turns.values())):
             return verdicts
-        explanation = await self._explainer.explain_run(transcript, criteria, success)
-
-        def explain(verdict: JudgeVerdict, reasoned: JudgeVerdict | None) -> JudgeVerdict:
-            if reasoned is None or reasoned.verdict == "none" or not self._needs_reason(verdict):
-                return verdict
-            return self._explained(verdict, reasoned)
-
-        turns: dict[str, list[JudgeVerdict]] = {}
-        for name, turn_verdicts in verdicts.turns.items():
-            reasoned = explanation.turns.get(name, [])
-            turns[name] = [
-                explain(verdict, reasoned[i] if i < len(reasoned) else None)
-                for i, verdict in enumerate(turn_verdicts)
-            ]
-        return RunVerdicts(goal=explain(verdicts.goal, explanation.goal), turns=turns)
+        reasons = await self._explainer.explain_run(transcript, criteria, success, goal, turns)
+        return RunVerdicts(
+            goal=self._with_reason(verdicts.goal, reasons.goal),
+            turns={
+                name: [
+                    self._with_reason(v, reasons.turns.get(name, {}).get(turn, ""))
+                    for turn, v in enumerate(turn_verdicts, 1)
+                ]
+                for name, turn_verdicts in verdicts.turns.items()
+            },
+        )
 
     async def _yes_no(self, state, instructions: str) -> YesNoResult | None:
         """The probability of yes, or ``None`` when the question failed."""
@@ -886,6 +799,7 @@ class EvalJudge:
             reason=EvalJudge._probabilities(answer.probabilities),
             raw_response=answer.model_dump_json(),
             confidence=answer.confidence,
+            probabilities=dict(answer.probabilities),
         )
 
     @staticmethod
@@ -897,6 +811,7 @@ class EvalJudge:
             reason=f"P(yes)={probability:.2f}",
             raw_response=answer.model_dump_json(),
             confidence=max(probability, 1 - probability),
+            probabilities={"yes": probability, "no": 1 - probability},
         )
 
     @staticmethod
@@ -913,6 +828,7 @@ class EvalJudge:
             reason=EvalJudge._probabilities(answer.probabilities),
             raw_response=answer.model_dump_json(),
             confidence=1 - fails if passed else fails,
+            probabilities=dict(answer.probabilities),
         )
 
     @staticmethod
@@ -926,107 +842,117 @@ class EvalJudge:
         return JudgeVerdict(verdict=verdict, reason="judge call failed", raw_response="")
 
     @staticmethod
-    def _explained(verdict: JudgeVerdict, explanation: JudgeVerdict) -> JudgeVerdict:
-        """The verdict with the explainer's reason, noting when the explainer disagreed."""
-        if explanation.verdict == verdict.verdict:
-            given = explanation.reason and explanation.reason != NO_REASON
-            reason = f"{explanation.reason} ({verdict.reason})" if given else verdict.reason
-        else:
-            reason = f"{verdict.reason}; the explainer judged {explanation.verdict}: {explanation.reason}"
-        return JudgeVerdict(
-            verdict=verdict.verdict,
-            reason=reason,
-            raw_response=verdict.raw_response,
-            confidence=verdict.confidence,
-        )
+    def _with_reason(verdict: JudgeVerdict, reason: str) -> JudgeVerdict:
+        """The verdict with the explainer's reason in place of the probabilities, when it gave one."""
+        return replace(verdict, reason=reason) if reason else verdict
+
+
+# How long the explainer has to answer a question before it is asked again.
+_EXPLAINER_TIMEOUT_S = 60.0
+
+
+@dataclass
+class _RunReasons:
+    """The explainer's reasons for a run's verdicts.
+
+    Parameters:
+        goal: The goal verdict's reason; empty when it was not asked or not given.
+        turns: Per criterion name, the reason for each turn asked about, by turn number.
+    """
+
+    goal: str
+    turns: dict[str, dict[int, str]]
 
 
 class _Explainer:
-    """Asks an LLM the question a classifier answered, for the reason behind it.
+    """Asks an LLM why the classifier gave its verdicts, telling it each verdict.
 
-    Its answers are cached by question and conversation, so explaining the
-    same verdict twice costs one call.
+    Each question names the reasons it wants in a response schema, so a
+    service that can enforce one answers in exactly that shape. A question
+    whose call fails, or whose answer lacks a reason it asked for, is asked
+    once more. Its answers are cached by question and conversation, so
+    explaining the same verdict twice costs one call. A reason is empty when
+    it was still not given.
 
     Args:
         service: A pipecat LLM service with a ``run_inference()`` method
             (i.e. ``BaseOpenAILLMService`` or any subclass: OpenAI, Ollama, etc.).
-        max_tokens: Cap on the explainer's response length. Default 200 —
-            enough for a JSON verdict + short reason.
-        allow_continue: Whether a reply may be judged ``continue``; when
-            ``False``, a reply is ``yes`` or ``no``. It follows the judge's
-            own setting, so both are asked the same question.
+        max_tokens: Cap on the explainer's response length for one reason.
+            Default 200, enough for a short sentence in JSON.
     """
 
-    def __init__(
-        self, service: LLMService[Any], *, max_tokens: int = 200, allow_continue: bool = True
-    ):
+    def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
         """Initialize the explainer with a configured pipecat LLM service.
 
         Args:
             service: A pipecat LLM service exposing ``run_inference()``.
-            max_tokens: Cap on the explainer's response length.
-            allow_continue: Whether a reply may be judged ``continue``.
+            max_tokens: Cap on the explainer's response length for one reason.
         """
         self._service = service
         self._max_tokens = max_tokens
-        self._allow_continue = allow_continue
-        self._cache: dict[str, JudgeVerdict] = {}
-        self._run_cache: dict[str, RunVerdicts] = {}
+        self._cache: dict[str, str] = {}
+        self._run_cache: dict[str, _RunReasons] = {}
 
     @property
     def service(self) -> LLMService[Any]:
         """The LLM service that answers."""
         return self._service
 
-    async def explain(self, transcript: Sequence[dict], criterion: str) -> JudgeVerdict:
-        """Judge whether the bot's latest reply satisfies ``criterion``, and say why.
+    async def explain(
+        self, transcript: Sequence[dict], criterion: str, verdict: JudgeVerdict
+    ) -> str:
+        """Why the bot's latest reply got ``verdict`` on ``criterion``.
 
         Args:
             transcript: The conversation so far, as the judge kept it.
             criterion: Natural-language description of what the reply should express.
+            verdict: The classifier's ``yes`` or ``no``.
 
         Returns:
-            The explainer's own verdict, with a one-sentence reason.
+            A one-sentence reason, or ``""`` when the call failed.
         """
-        if self._allow_continue:
-            ask = JUDGE_ASK_TEMPLATE.format(criterion=criterion)
-            return await self._evaluate(transcript, criterion, JUDGE_SYSTEM_INSTRUCTION, ask)
-        ask = JUDGE_FINAL_ASK_TEMPLATE.format(criterion=criterion)
-        verdict = await self._evaluate(transcript, criterion, JUDGE_FINAL_SYSTEM_INSTRUCTION, ask)
-        if verdict.verdict == "continue":
-            # An answer that ignored the yes/no instructions counts as a no.
-            return JudgeVerdict(
-                verdict="no", reason=verdict.reason, raw_response=verdict.raw_response
-            )
-        return verdict
+        ask = EXPLAIN_REPLY_ASK_TEMPLATE.format(
+            outcome=self._satisfies(verdict), criterion=criterion
+        )
+        return await self._reason(transcript, criterion, ask)
 
     async def explain_call(
-        self, transcript: Sequence[dict], name: str, args: dict | None, criterion: str
-    ) -> JudgeVerdict:
-        """Judge whether a function call the bot made satisfies ``criterion``, and say why.
-
-        The ask names the call and its arguments, the conversation so far is
-        context, and the verdict is yes or no: a call is not a partial reply,
-        so there is nothing to wait for.
+        self,
+        transcript: Sequence[dict],
+        name: str,
+        args: dict | None,
+        criterion: str,
+        verdict: JudgeVerdict,
+    ) -> str:
+        """Why a function call the bot made got ``verdict`` on ``criterion``.
 
         Args:
             transcript: The conversation so far, as the judge kept it.
             name: The function's name.
             args: The call's arguments, shown to the explainer as JSON.
             criterion: Natural-language description of what the call should be.
+            verdict: The classifier's ``yes`` or ``no``.
 
         Returns:
-            The explainer's own verdict, with a one-sentence reason.
+            A one-sentence reason, or ``""`` when the call failed.
         """
-        ask = JUDGE_CALL_ASK_TEMPLATE.format(
-            name=name, args=json.dumps(args or {}, ensure_ascii=False), criterion=criterion
+        ask = EXPLAIN_CALL_ASK_TEMPLATE.format(
+            name=name,
+            args=json.dumps(args or {}, ensure_ascii=False),
+            outcome=self._satisfies(verdict),
+            criterion=criterion,
         )
-        return await self._evaluate(transcript, criterion, JUDGE_CALL_SYSTEM_INSTRUCTION, ask)
+        return await self._reason(transcript, criterion, ask)
 
     async def explain_run(
-        self, transcript: Sequence[dict], criteria: dict[str, str], success: str
-    ) -> RunVerdicts:
-        """Judge the whole conversation in one call: every bot turn on every criterion, and the goal.
+        self,
+        transcript: Sequence[dict],
+        criteria: dict[str, str],
+        success: str,
+        goal: JudgeVerdict | None,
+        turns: dict[str, dict[int, JudgeVerdict]],
+    ) -> _RunReasons:
+        """Why a whole conversation's verdicts were given, in one call.
 
         The conversation goes in the question, bot turns numbered and tool
         calls inline. A bot turn is a run of reply segments with nothing else
@@ -1034,14 +960,13 @@ class _Explainer:
 
         Args:
             transcript: The conversation, as the judge kept it.
-            criteria: The per-turn criteria to decide, by name.
-            success: The goal criterion, decided over the whole conversation.
+            criteria: The per-turn criteria the turns were judged on, by name.
+            success: The goal criterion the whole conversation was judged on.
+            goal: The goal's verdict to explain, or ``None``.
+            turns: Per criterion name, the turn verdicts to explain, by turn number.
 
         Returns:
-            The goal's verdict and, per criterion, a verdict per bot turn in
-            order, each with a reason for a ``no``. A verdict of ``none`` is
-            one the explainer did not give: a turn it left out, a goal it did
-            not answer, or a call that failed.
+            The reasons for the verdicts asked about; a reason not given is empty.
         """
         lines: list[str] = []
         turn = 0
@@ -1056,77 +981,88 @@ class _Explainer:
                 lines.append(f"[tool call] {entry['content']}")
             else:
                 lines.append(f"User: {entry['content']}")
+        verdicts = []
+        if goal is not None:
+            verdicts.append(f"- goal: {'achieved' if goal.passed else 'not achieved'}")
+        for name, by_turn in turns.items():
+            for number, verdict in by_turn.items():
+                verdicts.append(f"- {name}, bot turn {number}: {self._turn_outcome(verdict)}")
         listed = "\n".join(f"- {name}: {criterion}" for name, criterion in criteria.items())
-        ask = RUN_JUDGE_ASK_TEMPLATE.format(
+        ask = EXPLAIN_RUN_ASK_TEMPLATE.format(
             transcript="\n".join(lines) or "(nothing was said)",
             criteria=listed or "(none)",
             success=success,
-            turn_count=turn,
+            verdicts="\n".join(verdicts),
         )
         key = _cache_key(ask, [])
         if key not in self._run_cache:
-            # Room for a verdict per turn per criterion, a reason per "no", and
-            # the goal's verdict; a budget sized for one verdict cuts it short.
-            budget = max(300, 4 * turn * len(criteria) + 60 * len(criteria) + 80)
-            response = await self._ask(
-                success, [], RUN_JUDGE_SYSTEM_INSTRUCTION, ask, max_tokens=budget
-            )
-            if response is None:
-                failed = JudgeVerdict(verdict="none", reason=EXPLAINER_FAILED, raw_response="")
-                self._run_cache[key] = RunVerdicts(
-                    goal=failed, turns={name: [failed] * turn for name in criteria}
-                )
-            else:
-                self._run_cache[key] = self._parse_run_verdicts(response, list(criteria), turn)
+            # Room for a reason per verdict; a budget sized for one cuts it short.
+            budget = max(300, 50 * len(verdicts) + 80)
+            schema = self._run_schema(goal, turns)
+            reasons = _RunReasons(goal="", turns={})
+            for attempt in (1, 2):
+                response = await self._ask(success, [], ask, schema, max_tokens=budget)
+                reasons = self._filled(reasons, self._parse_run_reasons(response or "", turns))
+                given = [reasons.goal] if goal is not None else []
+                given += [
+                    reason for by_turn in reasons.turns.values() for reason in by_turn.values()
+                ]
+                if all(given):
+                    break
+                if attempt == 1:
+                    logger.warning("Explainer left reasons out, asking again")
+            self._run_cache[key] = reasons
         return self._run_cache[key]
 
-    async def _evaluate(
-        self, transcript: Sequence[dict], criterion: str, instruction: str, ask: str
-    ) -> JudgeVerdict:
-        # The spoken conversation only: a reply is judged on what was said.
+    async def _reason(self, transcript: Sequence[dict], criterion: str, ask: str) -> str:
+        """The reason the explainer gives to ``ask`` after the spoken conversation."""
         messages = [e for e in transcript if e["role"] != "tool"]
         key = _cache_key(ask, messages)
         if key not in self._cache:
-            response = await self._ask(criterion, messages, instruction, ask)
-            if response is None:
-                self._cache[key] = JudgeVerdict(
-                    verdict="no", reason=EXPLAINER_FAILED, raw_response=""
-                )
-            else:
-                self._cache[key] = self._parse_verdict(response)
+            schema = self._object({"reason": {"type": "string"}})
+            reason = ""
+            for _ in (1, 2):
+                response = await self._ask(criterion, messages, ask, schema)
+                reason = self._parse_reason(response) if response else ""
+                if reason:
+                    break
+            self._cache[key] = reason
         return self._cache[key]
 
     async def _ask(
         self,
         criterion: str,
         messages: list,
-        instruction: str,
         ask: str,
+        schema: dict[str, Any],
         *,
         max_tokens: int | None = None,
     ) -> str | None:
-        """The explainer's raw answer to ``ask``, or ``None`` when the call failed or said nothing."""
+        """The explainer's raw answer to ``ask``, in ``schema``'s shape, or ``None`` when the call failed or said nothing."""
         # Copy the conversation and append the transient ask, so neither the ask
         # nor the answer ever lands in the persistent context.
         context = LLMContext(messages=list(messages))
         context.add_message({"role": "user", "content": ask})
 
         # Log the conversation the explainer is about to read, before its answer,
-        # so the debug log shows exactly what it saw (handy when a terse or
-        # mis-transcribed reply gets an unexpected verdict). A run-level ask
-        # carries the transcript itself, so that is what to show.
+        # so the debug log shows exactly what it saw. A run-level ask carries the
+        # transcript itself, so that is what to show.
         transcript = "\n".join(f"  [{m.get('role')}] {m.get('content')}" for m in messages)
         logger.debug(
-            "Explainer evaluating {!r} over conversation:\n{}",
+            "Explainer explaining {!r} over conversation:\n{}",
             criterion,
             transcript or "\n".join(f"  {line}" for line in ask.splitlines()),
         )
 
         try:
-            response = await self._service.run_inference(
-                context=context,
-                max_tokens=self._max_tokens if max_tokens is None else max_tokens,
-                system_instruction=instruction,
+            response = await asyncio.wait_for(
+                self._service.run_inference(
+                    context=context,
+                    max_tokens=self._max_tokens if max_tokens is None else max_tokens,
+                    system_instruction=EXPLAIN_SYSTEM_INSTRUCTION,
+                    response_schema=schema,
+                ),
+                _EXPLAINER_TIMEOUT_S,
             )
         except Exception as e:
             logger.error(f"Explainer call failed: {e.__class__.__name__} ({e})")
@@ -1138,113 +1074,94 @@ class _Explainer:
         return response
 
     @staticmethod
-    def _parse_verdict(response: str) -> JudgeVerdict:
-        """Parse the explainer's response. Tolerant of extra whitespace and code fences."""
-        cleaned = response.strip()
-        # Strip markdown code fences if the model ignored instructions
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-
-        # Parse the first JSON object and ignore anything around it. Some models
-        # ignore "respond ONLY with JSON" and wrap the verdict in prose (e.g. a trailing
-        # "Let me know if you'd like to evaluate further turns!"); raw_decode from the
-        # first '{' parses the object and stops, leaving the trailing text out.
-        start = cleaned.find("{")
-        if start != -1:
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
-                verdict = str(obj.get("verdict", "")).strip().lower()
-                if verdict not in ("yes", "no", "continue"):
-                    verdict = "no"
-                reason = str(obj.get("reason", "")).strip()
-                return JudgeVerdict(
-                    verdict=verdict,
-                    reason=reason or NO_REASON,
-                    raw_response=response,
-                )
-            except (json.JSONDecodeError, AttributeError):
-                pass
-
-        # Fallback: scan for a verdict keyword in the raw text.
-        lowered = cleaned.lower()
-        if "continue" in lowered:
-            return JudgeVerdict(
-                verdict="continue", reason="(unstructured continue)", raw_response=response
-            )
-        if "yes" in lowered and "no" not in lowered:
-            return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
-        if "no" in lowered and "yes" not in lowered:
-            return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
-        return JudgeVerdict(
-            verdict="no",
-            reason=f"could not parse explainer response: {response!r}",
-            raw_response=response,
-        )
-
-    @staticmethod
-    def _parse_run_verdicts(response: str, names: list[str], turn_count: int) -> RunVerdicts:
-        """Parse the run answer into the goal's verdict and one per turn per criterion.
-
-        Anything missing or malformed is a ``none`` with a reason, and the raw
-        answer is logged, so a bad answer never passes a turn silently.
-        """
-        obj = _Explainer._judge_json(response)
-        goal = obj.get("goal")
-        if not isinstance(goal, dict):
-            goal = {}
-        answer = str(goal.get("verdict", "")).strip().lower()
-        goal_verdict = answer if answer in ("yes", "no") else "none"
-        goal_reason = str(goal.get("reason", "")).strip()
-        if goal_verdict == "none":
-            goal_reason = _NO_VERDICT
-        elif goal_verdict == "no" and not goal_reason:
-            goal_reason = NO_REASON
-        return RunVerdicts(
-            goal=JudgeVerdict(verdict=goal_verdict, reason=goal_reason, raw_response=response),
+    def _filled(reasons: _RunReasons, answer: _RunReasons) -> _RunReasons:
+        """``reasons``, with the ones it lacks taken from ``answer``."""
+        return _RunReasons(
+            goal=reasons.goal or answer.goal,
             turns={
-                name: _Explainer._turn_verdicts(obj, name, turn_count, response) for name in names
+                name: {
+                    number: reasons.turns.get(name, {}).get(number) or reason
+                    for number, reason in by_turn.items()
+                }
+                for name, by_turn in answer.turns.items()
             },
         )
 
     @staticmethod
-    def _turn_verdicts(obj: dict, name: str, turn_count: int, response: str) -> list[JudgeVerdict]:
-        """One verdict per bot turn for criterion ``name``; a turn left out is a ``none``.
-
-        Criterion names match case-insensitively; a ``reasons`` entry, keyed by
-        the turn number, gives a ``no`` its reason.
-        """
-        turns_by_name = {
-            str(k).lower(): v for k, v in (obj.get("turns") or {}).items() if isinstance(v, list)
+    def _object(properties: dict[str, Any]) -> dict[str, Any]:
+        """A schema for an object with exactly these properties, all required."""
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
         }
-        reasons_by_name = {
-            str(k).lower(): v for k, v in (obj.get("reasons") or {}).items() if isinstance(v, dict)
-        }
-        answers = turns_by_name.get(name.lower(), [])
-        reasons = reasons_by_name.get(name.lower(), {})
-        if len(answers) != turn_count:
-            logger.warning(
-                f"Explainer gave {len(answers)} verdict(s) for {name!r} over {turn_count} bot "
-                f"turn(s); its answer was: {response!r}"
-            )
-        verdicts = []
-        for index in range(turn_count):
-            answer = answers[index] if index < len(answers) else None
-            if isinstance(answer, dict):
-                answer = answer.get("verdict")
-            if answer is None:
-                verdicts.append(
-                    JudgeVerdict(verdict="none", reason=_NO_VERDICT, raw_response=response)
-                )
-                continue
-            verdict = "yes" if str(answer).strip().lower() == "yes" else "no"
-            reason = str(reasons.get(str(index + 1), "")).strip()
-            if verdict == "no" and not reason:
-                reason = NO_REASON
-            verdicts.append(JudgeVerdict(verdict=verdict, reason=reason, raw_response=response))
-        return verdicts
 
     @staticmethod
-    def _judge_json(response: str) -> dict:
+    def _run_schema(
+        goal: JudgeVerdict | None, turns: dict[str, dict[int, JudgeVerdict]]
+    ) -> dict[str, Any]:
+        """The run answer's schema: the goal's reason when it is asked, and each asked turn's by its number."""
+        reason = {"type": "string"}
+        properties: dict[str, Any] = {"goal": reason} if goal is not None else {}
+        asked = {name: by_turn for name, by_turn in turns.items() if by_turn}
+        if asked:
+            properties["turns"] = _Explainer._object(
+                {
+                    name: _Explainer._object({str(number): reason for number in by_turn})
+                    for name, by_turn in asked.items()
+                }
+            )
+        return _Explainer._object(properties)
+
+    @staticmethod
+    def _satisfies(verdict: JudgeVerdict) -> str:
+        """A yes or a no as the ask words it."""
+        return "satisfies" if verdict.passed else "does not satisfy"
+
+    @staticmethod
+    def _turn_outcome(verdict: JudgeVerdict) -> str:
+        """A turn's verdict as the ask words it: which outcome the classifier chose."""
+        if not verdict.passed:
+            return "fails the criterion"
+        probabilities = verdict.probabilities
+        if probabilities.get("not_applicable", 0.0) > probabilities.get("meets", 0.0):
+            return "passes because the criterion does not apply to it"
+        return "meets the criterion"
+
+    @staticmethod
+    def _parse_reason(response: str) -> str:
+        """The reason in the answer: its JSON ``reason``, or the answer itself when it is plain text."""
+        reason = _Explainer._json_object(response).get("reason")
+        return str(reason).strip() if reason else response.strip()
+
+    @staticmethod
+    def _parse_run_reasons(response: str, turns: dict[str, dict[int, JudgeVerdict]]) -> _RunReasons:
+        """The reasons in the run answer, for the turns asked about; one not given is empty.
+
+        Criterion names match case-insensitively, and a turn is the number in
+        its key, so ``"bot turn 2"`` reads as turn 2. An answer that is not the
+        expected JSON gives no reasons, and is logged.
+        """
+        obj = _Explainer._json_object(response)
+        if not obj:
+            logger.warning(f"Explainer answer was not the expected JSON: {response!r}")
+        goal = obj.get("goal")
+        if isinstance(goal, dict):
+            goal = goal.get("reason")
+        given: dict[str, dict[int, str]] = {}
+        for name, by_turn in (obj.get("turns") or {}).items():
+            if isinstance(by_turn, dict):
+                numbered = ((re.search(r"\d+", str(k)), v) for k, v in by_turn.items())
+                given[str(name).lower()] = {int(m.group()): str(v) for m, v in numbered if m}
+        reasons = {
+            name: {n: given.get(name.lower(), {}).get(n, "").strip() for n in by_turn}
+            for name, by_turn in turns.items()
+        }
+        return _RunReasons(goal=str(goal or "").strip(), turns=reasons)
+
+    @staticmethod
+    def _json_object(response: str) -> dict:
         """The JSON object in the answer, or ``{}`` when there is none; a fenced or prefaced answer still parses."""
         cleaned = response.strip()
         if cleaned.startswith("```"):
@@ -1255,9 +1172,8 @@ class _Explainer:
                 parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
                 if isinstance(parsed, dict):
                     return parsed
-            except (json.JSONDecodeError, AttributeError):
+            except json.JSONDecodeError:
                 pass
-        logger.warning(f"Explainer answer was not the expected JSON: {response!r}")
         return {}
 
 

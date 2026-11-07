@@ -188,8 +188,9 @@ def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
     without decrementing the budget.
 
     After the *n* alnum chars are consumed, advances further past any immediately
-    following punctuation (e.g. the ``,`` in ``"questions,"`` or the ``.`` in
-    ``"done."``), stopping before the next space, alnum char, or XML tag.
+    following punctuation or tags (e.g. the ``,`` in ``"questions,"`` or the
+    ``</card>.`` in ``"4111</card>."``), stopping before the next space or alnum
+    char.
 
     Args:
         text: The source text to scan.
@@ -197,7 +198,7 @@ def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
         n: Number of alphanumeric characters to consume.
 
     Returns:
-        New position in *text* after consuming *n* alnum chars and trailing punctuation.
+        New position in *text* after consuming *n* alnum chars and what follows them.
     """
     pos = start_pos
     count = 0
@@ -213,7 +214,13 @@ def advance_by_alnums(text: str, start_pos: int, n: int) -> int:
 
     while pos < len(text):
         if text[pos] == "<":
-            break
+            # A tag goes with the word it touches, so with none consumed it is
+            # left for the next word.
+            end = text.find(">", pos)
+            if end == -1 or not count:
+                break
+            pos = end + 1
+            continue
         if text[pos].isalnum() or text[pos].isspace():
             break
         pos += 1

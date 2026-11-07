@@ -27,6 +27,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechify.tts import SpeechifyHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -38,6 +39,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -63,10 +68,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             aiohttp_session=session,
             settings=SpeechifyHttpTTSService.Settings(
                 voice=os.getenv("SPEECHIFY_VOICE_ID", "geffen_32"),
-                # simba-3.2 is English only. Use simba-3.0 for other languages; the
-                # legacy simba-english and simba-multilingual models cannot produce
-                # the speech marks this service relies on.
-                model="simba-3.2",
+                # simba-3.5 speaks 48 languages with every voice. The legacy
+                # simba-english and simba-multilingual models cannot produce the
+                # speech marks this service relies on.
+                model="simba-3.5",
             ),
         )
 

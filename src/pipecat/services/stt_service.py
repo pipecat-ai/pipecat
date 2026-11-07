@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -16,6 +15,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
 from pipecat.audio.utils import pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
@@ -42,7 +42,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
@@ -495,14 +495,12 @@ class STTService(AIService):
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Passing a dict via STTUpdateSettingsFrame(settings={...}) is deprecated "
-                        "since 0.0.104, use STTUpdateSettingsFrame(delta=STTSettings(...)) instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                warn_deprecated(
+                    "`STTUpdateSettingsFrame(settings={...})` is deprecated since 0.0.104 and "
+                    "will be removed in 2.0.0. Use "
+                    "`STTUpdateSettingsFrame(delta=STTSettings(...))` instead.",
+                    stacklevel=2,
+                )
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, STTMuteFrame):
@@ -617,9 +615,6 @@ class STTService(AIService):
         Called when the user's full turn has ended and the transcription has been
         received. Re-enables reconnection and triggers any deferred reconnect that
         was requested while the user was speaking.
-
-        Args:
-            frame: The user stopped speaking frame.
         """
         self._can_reconnect = True
         if self._need_reconnect:
@@ -751,7 +746,8 @@ class STTService(AIService):
         When keepalive is enabled, this task checks periodically if the connection
         has been idle (no audio sent) for longer than keepalive_timeout seconds.
         If so, it generates silent 16-bit mono PCM audio and passes it to
-        _send_keepalive() for service-specific formatting and sending.
+        _send_keepalive() for service-specific formatting and sending. A failed
+        send is logged and the loop keeps going.
         """
         # This task is only started when a keepalive timeout is configured.
         assert self._keepalive_timeout is not None
@@ -771,7 +767,6 @@ class STTService(AIService):
                 logger.trace(f"{self} sent keepalive silence")
             except Exception as e:
                 logger.warning(f"{self} keepalive error: {e}")
-                break
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the service is ready to send keepalive.
@@ -845,12 +840,14 @@ class SegmentedSTTService(STTService):
         self._trailing_silence_secs = trailing_silence_secs
         self._content = None
         self._wave = None
-        self._audio_buffer = bytearray()
-        self._audio_buffer_size_1s = 0
-        self._user_speaking = False
-        # Segments awaiting transcription, drained in order by _segment_task;
-        # None tells the task to finish.
-        self._segment_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._speech_buffer = SpeechSegmentBuffer()
+        # Numbers the user's speech segments, so a transcript can tell whether
+        # its segment is still the latest.
+        self._segment_count = 0
+        self._transcribing_segment = 0
+        # Segments awaiting transcription, with their numbers, drained in order
+        # by _segment_task; None tells the task to finish.
+        self._segment_queue: asyncio.Queue[tuple[bytes, int] | None] = asyncio.Queue()
         self._segment_task: asyncio.Task | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -860,7 +857,7 @@ class SegmentedSTTService(STTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._audio_buffer_size_1s = self.sample_rate * 2
+        self._speech_buffer.set_sample_rate(self.sample_rate)
 
     async def start(self, frame: StartFrame):
         """Start the service and its transcription task.
@@ -892,6 +889,11 @@ class SegmentedSTTService(STTService):
         await self._cancel_segment_task()
         await super().cancel(frame)
 
+    async def cleanup(self):
+        """Stop the transcription task at teardown."""
+        await super().cleanup()
+        await self._cancel_segment_task()
+
     @property
     def wants_wav_segments(self) -> bool:
         """Whether segments are passed to :meth:`run_stt` as a WAV container.
@@ -904,17 +906,19 @@ class SegmentedSTTService(STTService):
         return True
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame, marking TranscriptionFrames as finalized.
+        """Push a frame, marking a TranscriptionFrame finalized when its segment is the latest.
 
-        Segmented STT services process complete speech segments and return a single
-        TranscriptionFrame per segment, so every transcription is inherently finalized.
+        Once the user speaks again, the transcript of an earlier segment covers
+        only the words before they resumed, so it isn't finalized, the same way
+        :class:`STTService` drops a pending finalize when the user starts
+        speaking.
 
         Args:
             frame: The frame to push.
             direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, TranscriptionFrame):
-            frame.finalized = True
+            frame.finalized = self._transcribing_segment == self._segment_count
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -927,18 +931,17 @@ class SegmentedSTTService(STTService):
             await self._handle_user_stopped_speaking(frame)
 
     async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._user_speaking = True
+        self._speech_buffer.start()
+        self._segment_count += 1
 
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        self._user_speaking = False
+        segment = self._speech_buffer.stop()
 
         # A service that can no longer work can't transcribe this segment.
         if not self.is_usable:
-            self._audio_buffer.clear()
             return
 
-        pcm = bytes(self._audio_buffer) + self._trailing_silence()
-        self._audio_buffer.clear()
+        pcm = segment + self._trailing_silence()
 
         # The padded segment is what the provider receives, so it is what
         # usage measures. Usage is reported before transcription so tracing
@@ -953,15 +956,16 @@ class SegmentedSTTService(STTService):
             # WAV container would make them misread the 44-byte header as audio.
             audio = pcm
 
-        await self._segment_queue.put(audio)
+        await self._segment_queue.put((audio, self._segment_count))
 
     async def _segment_task_handler(self):
         """Transcribe queued segments one at a time, in order, until told to finish."""
         running = True
         while running:
-            audio = await self._segment_queue.get()
-            running = audio is not None
-            if audio:
+            segment = await self._segment_queue.get()
+            running = segment is not None
+            if segment:
+                audio, self._transcribing_segment = segment
                 try:
                     await self.process_generator(self.run_stt(audio))
                 except Exception as e:
@@ -996,13 +1000,7 @@ class SegmentedSTTService(STTService):
         else:
             self._user_id = ""
 
-        # If the user is speaking the audio buffer will keep growing.
-        self._audio_buffer += frame.audio
-
-        # If the user is not speaking we keep just a little bit of audio.
-        if not self._user_speaking and len(self._audio_buffer) > self._audio_buffer_size_1s:
-            discarded = len(self._audio_buffer) - self._audio_buffer_size_1s
-            self._audio_buffer = self._audio_buffer[discarded:]
+        self._speech_buffer.append(frame.audio)
 
 
 class WebsocketSTTService(STTService, WebsocketService):
@@ -1079,18 +1077,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         await self._disconnect()
         await self._connect()
-
-    async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Reconnect and restart keepalive task.
-
-        The keepalive task breaks out of its loop on send errors, so it may
-        be dead after the websocket failure that triggered this reconnect.
-        """
-        result = await super()._reconnect_websocket(attempt_number)
-        if result:
-            await self._cancel_keepalive_task()
-            self._create_keepalive_task()
-        return result
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the websocket is open and ready for keepalive."""

@@ -44,6 +44,9 @@ _MAX_KEYTERM_CHARS = 1200
 # Keyterms are only honored by the ink-2 and ink-preview model families.
 _KEYTERM_MODEL_PREFIXES = ("ink-2", "ink-preview")
 
+# Silence-based finalization is only honored by ink-whisper.
+_FINALIZATION_MODEL_PREFIX = "ink-whisper"
+
 
 def _prepare_keyterms(keyterms: list[str] | None | NotGiven) -> list[str]:
     """Normalize keyterms to the limits Cartesia accepts on a connection.
@@ -91,9 +94,17 @@ class CartesiaSTTSettings(STTSettings):
             model are ignored with a warning. Cartesia binds keyterms to a connection,
             so updating this setting at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
+        min_volume: Volume threshold, between 0.0 and 1.0, below which audio
+            counts as silence for automatic transcript finalization. Only
+            honored by ink-whisper models.
+        max_silence_duration_secs: Seconds of silence after which Cartesia
+            finalizes a transcript on its own. Only honored by ink-whisper
+            models.
     """
 
     keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_volume: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_silence_duration_secs: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @deprecated(
@@ -241,6 +252,8 @@ class CartesiaSTTService(WebsocketSTTService):
             model="ink-whisper",
             language=Language.EN.value,
             keyterm=None,
+            min_volume=None,
+            max_silence_duration_secs=None,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
@@ -340,12 +353,9 @@ class CartesiaSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
-        # If the connection is not open (closed or closing), reconnect
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
         if not self._websocket or self._websocket.state is not State.OPEN:
-            await self._connect()
-
-        if self._websocket is None:
-            logger.warning(f"{self}: websocket unavailable after reconnect, dropping audio")
             yield None
             return
 
@@ -360,7 +370,9 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await super()._connect()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -411,6 +423,21 @@ class CartesiaSTTService(WebsocketSTTService):
                     logger.warning(
                         f"keyterms are only supported on {supported} models; "
                         f"ignoring keyterms for model {self._settings.model!r}"
+                    )
+            finalization = [
+                (name, getattr(self._settings, name))
+                for name in ("min_volume", "max_silence_duration_secs")
+                if is_given(getattr(self._settings, name))
+                and getattr(self._settings, name) is not None
+            ]
+            if finalization:
+                if str(self._settings.model).startswith(_FINALIZATION_MODEL_PREFIX):
+                    params.extend((name, str(value)) for name, value in finalization)
+                else:
+                    logger.warning(
+                        f"{', '.join(name for name, _ in finalization)} are only supported on "
+                        f"{_FINALIZATION_MODEL_PREFIX} models; ignoring them for model "
+                        f"{self._settings.model!r}"
                     )
             # Cartesia expects spaces inside a keyterm as %20, which urlencode
             # only emits with quote_via=quote.

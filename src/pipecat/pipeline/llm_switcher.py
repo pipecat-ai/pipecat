@@ -8,7 +8,7 @@
 
 from typing import Any, cast
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
 from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.pipeline.service_switcher import (
     ServiceSwitcher,

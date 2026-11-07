@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 from loguru import logger
 
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -1267,6 +1267,17 @@ class TestAsyncToolCancellationExposure(unittest.IsolatedAsyncioTestCase):
         self._sync(service)
         self.assertEqual(self._advertised(service), {cancel_tool_name("write_report")})
         self.assertIn(cancel_tool_name("write_report"), service._functions)
+
+    def test_built_in_tools_are_sent_alone_when_there_are_no_others(self):
+        service = MockLLMService()
+        service.register_function(
+            "write_report", self._handler, cancel_on_interruption=False, cancellable_by_llm=True
+        )
+        self._sync(service)
+        converted = service.get_llm_adapter().from_standard_tools(NOT_GIVEN)
+        self.assertEqual(
+            [t["function"]["name"] for t in converted], [cancel_tool_name("write_report")]
+        )
 
     def test_the_cancel_tool_does_not_ask_for_a_tool_call_id(self):
         # Requiring it would make every cancellation go looking for an id first,

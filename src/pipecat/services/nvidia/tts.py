@@ -97,10 +97,18 @@ class NvidiaTTSSettings(TTSSettings):
             expects values in the range ``1`` to ``40``.
         synthesis_mode: Whether to synthesize one sentence per request or stitch
             multiple sentences across a single streaming request.
+        custom_configuration: Model-specific key/value parameters forwarded to the
+            synthesizer, e.g. Magpie's streaming controls ``flush``,
+            ``chunk_len_threshold`` and ``max_chunk_threshold``, or Chatterbox's
+            ``exaggeration_factor``. See
+            https://docs.nvidia.com/nim/speech/latest/tts/customization.html
     """
 
     quality: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     synthesis_mode: NvidiaTTSSynthesisMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    custom_configuration: dict[str, str] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass
@@ -219,6 +227,7 @@ class NvidiaTTSService(TTSService):
             language=Language.EN_US,
             quality=20,
             synthesis_mode=NvidiaTTSSynthesisMode.PER_SENTENCE,
+            custom_configuration=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -327,14 +336,15 @@ class NvidiaTTSService(TTSService):
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
-    def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
+    async def _create_synthesis_config(self) -> rtts.RivaSynthesisConfigResponse:  # pyright: ignore[reportAttributeAccessIssue]
         """Fetch and validate synthesis configuration from the server."""
         if not self._service:
             raise RuntimeError("TTS service not initialized")
 
         try:
-            config = self._service.stub.GetRivaSynthesisConfig(
-                rtts.RivaSynthesisConfigRequest()  # pyright: ignore[reportAttributeAccessIssue]
+            config = await asyncio.to_thread(
+                self._service.stub.GetRivaSynthesisConfig,
+                rtts.RivaSynthesisConfigRequest(),  # pyright: ignore[reportAttributeAccessIssue]
             )
             return config
         except grpc.RpcError as e:
@@ -372,7 +382,7 @@ class NvidiaTTSService(TTSService):
         """
         await super().setup(setup)
         self._initialize_client()
-        self._config = self._create_synthesis_config()
+        self._config = await self._create_synthesis_config()
         self._load_zero_shot_audio_prompt()
         logger.debug(f"Initialized NvidiaTTSService with model: {self._settings.model}")
 
@@ -444,6 +454,9 @@ class NvidiaTTSService(TTSService):
             req.voice_name = voice
         if self._custom_dictionary:
             req.custom_dictionary = self._custom_dictionary
+        if self._settings.custom_configuration:
+            for key, value in self._settings.custom_configuration.items():
+                req.custom_configuration[key] = str(value)
         if self._zero_shot_audio_prompt_data is not None:
             req.zero_shot_data.audio_prompt = self._zero_shot_audio_prompt_data
             if self._audio_prompt_encoding is not None:

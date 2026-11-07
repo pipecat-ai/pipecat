@@ -168,6 +168,21 @@ class CachingTTSService(TTSService):
         await self._inner.cleanup()
         await super().cleanup()
 
+    async def synthesize(self, text: str) -> bytes:
+        """Return the audio for ``text``, from cache or by driving the inner service.
+
+        Args:
+            text: The utterance to synthesize.
+
+        Returns:
+            The utterance as 16-bit mono PCM, at this service's sample rate.
+        """
+        audio = bytearray()
+        async for frame in self.run_tts(text, self.create_context_id()):
+            if isinstance(frame, TTSAudioRawFrame):
+                audio.extend(frame.audio)
+        return bytes(audio)
+
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Emit the audio for ``text`` from cache, or by driving the inner service.
 

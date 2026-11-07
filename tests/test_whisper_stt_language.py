@@ -77,3 +77,16 @@ def test_mlx_missing_or_blank_model_is_rejected_at_construction(model):
 
     with pytest.raises(ValueError, match="Whisper model must be specified"):
         WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))
+
+
+@pytest.mark.asyncio
+async def test_mlx_accepts_a_runtime_language_change():
+    from pipecat.services.whisper.stt import WhisperSTTServiceMLX
+
+    service = WhisperSTTServiceMLX()
+    service.push_error = MagicMock()
+
+    changed = await service._update_settings(WhisperSTTServiceMLX.Settings(language=Language.FR))
+
+    assert "language" in changed
+    service.push_error.assert_not_called()

@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from enum import Enum, auto
 
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
 
 
 class _LookaheadState(Enum):
@@ -63,7 +63,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         Returns:
             The text that has been accumulated in the buffer.
         """
-        return Aggregation(text=self._text.strip(" "), type=AggregationType.SENTENCE)
+        return Aggregation(text=self._text.strip(" "), type=TextType.SENTENCE)
 
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text and yield completed aggregations.
@@ -80,9 +80,9 @@ class SimpleTextAggregator(BaseTextAggregator):
         Yields:
             Aggregation objects (sentences in SENTENCE mode, tokens in TOKEN mode).
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             if text:
-                yield Aggregation(text=text, type=AggregationType.TOKEN)
+                yield Aggregation(text=text, type=TextType.TOKEN)
             return
 
         # Process text character by character
@@ -94,7 +94,9 @@ class SimpleTextAggregator(BaseTextAggregator):
             if result:
                 yield result
 
-    async def _check_sentence_with_lookahead(self, char: str) -> Aggregation | None:
+    async def _check_sentence_with_lookahead(
+        self, char: str, *, protected_end: int = 0
+    ) -> Aggregation | None:
         """Check a possible sentence ending using text that arrives after it.
 
         ``char`` is already appended to ``self._text``. Punctuation starts a
@@ -118,6 +120,10 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         Args:
             char: The character just appended to the aggregation buffer.
+            protected_end: Buffer offset before which no sentence boundary is
+                accepted. Subclasses pass the end of the last closed tag or
+                pattern, so punctuation inside it (``<spell>St. Louis</spell>``)
+                never splits the text.
 
         Returns:
             Aggregation if a sentence boundary is confirmed, otherwise None.
@@ -132,10 +138,18 @@ class SimpleTextAggregator(BaseTextAggregator):
             # Including "?" could make the terminal-punctuation fallback accept
             # the whole buffer. This temporary slice does not discard the "?".
             candidate = self._text[:-1] if is_punctuation else self._text
+            if protected_end:
+                # Blank out punctuation up to protected_end with equal-width
+                # spaces, so boundary offsets still refer to self._text.
+                protected = "".join(
+                    " " if c in SENTENCE_ENDING_PUNCTUATION else c
+                    for c in candidate[:protected_end]
+                )
+                candidate = protected + candidate[protected_end:]
             eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
                 result = Aggregation(
-                    text=self._text[:eos_marker].strip(" "), type=AggregationType.SENTENCE
+                    text=self._text[:eos_marker].strip(" "), type=TextType.SENTENCE
                 )
                 # Keep the lookahead text for the next sentence ("N" in "Hello. N").
                 self._text = self._text[eos_marker:]
@@ -205,14 +219,14 @@ class SimpleTextAggregator(BaseTextAggregator):
         Returns:
             Any remaining text as a sentence, or None if buffer is empty or in TOKEN mode.
         """
-        if self._aggregation_type == AggregationType.TOKEN:
+        if self._aggregation_type == TextType.TOKEN:
             return None
 
         if self._text:
             # Return whatever we have in the buffer
             result = self._text
             await self.reset()
-            return Aggregation(text=result.strip(" "), type=AggregationType.SENTENCE)
+            return Aggregation(text=result.strip(" "), type=TextType.SENTENCE)
         return None
 
     async def handle_interruption(self):

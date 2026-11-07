@@ -169,10 +169,13 @@ class BaseObject(ABC):
 
         This method should be called when the object is no longer needed.
         It waits for all currently executing event handler tasks to finish
-        before returning.
+        before returning, except the one it is called from, since a task
+        can't wait for itself.
         """
-        if self._event_tasks:
-            event_names, tasks = zip(*self._event_tasks)
+        current = asyncio.current_task()
+        event_tasks = [(name, task) for name, task in self._event_tasks if task is not current]
+        if event_tasks:
+            event_names, tasks = zip(*event_tasks)
             logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
@@ -247,7 +250,9 @@ class BaseObject(ABC):
 
         event_handler = self._event_handlers[event_name]
 
-        for handler in event_handler.handlers:
+        # Iterate over a copy, so that a handler that adds or removes handlers
+        # for this event doesn't change which handlers this call runs.
+        for handler in list(event_handler.handlers):
             if event_handler.is_sync:
                 # Just run the handler.
                 await self._run_handler(event_handler.name, handler, *args, **kwargs)

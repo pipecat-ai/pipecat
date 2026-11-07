@@ -19,16 +19,24 @@ from openai import (
     NOT_GIVEN as OPENAI_NOT_GIVEN,
 )
 from openai import (
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
+    BadRequestError,
     DefaultAsyncHttpxClient,
+    UnprocessableEntityError,
 )
 from openai._types import NotGiven as OpenAINotGiven
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    OpenAILLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -40,8 +48,10 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.openai._errors import classify_openai_error
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -91,6 +101,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     Settings = OpenAILLMSettings
     _settings: Settings
+
+    # Set by services for providers other than OpenAI. Without a key the OpenAI
+    # client falls back to OPENAI_API_KEY and would send it to that provider.
+    _requires_api_key = False
 
     supports_developer_role: bool = True
     """Whether this service's API supports the "developer" message role.
@@ -205,7 +219,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 attempt produces no output within ``retry_timeout_secs``. The
                 retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
+
+        Raises:
+            ValueError: If the service is for a provider other than OpenAI and
+                ``api_key`` is empty.
         """
+        if self._requires_api_key and not api_key:
+            raise ValueError(f"{type(self).__name__} requires an api_key.")
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-4.1",
@@ -333,11 +354,9 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             Async stream of chat completion chunks.
         """
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
-        )
+        self._log_llm_response(context)
 
-        params_from_context = adapter.get_llm_invocation_params(
+        params_from_context = await adapter.get_llm_invocation_params(
             context,
             system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
@@ -455,7 +474,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        invocation_params = adapter.get_llm_invocation_params(
+        invocation_params = await adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             convert_developer_to_user=not self.supports_developer_role,
@@ -487,6 +506,45 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         response = await self._client.chat.completions.create(**params)
 
         return response.choices[0].message.content
+
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        """Convert a chat completion's usage into Pipecat's token usage.
+
+        Follows OpenAI's convention, where ``completion_tokens`` includes the
+        reasoning tokens reported in ``completion_tokens_details``. Providers
+        that report reasoning elsewhere, or apart from ``completion_tokens``,
+        override this.
+
+        Args:
+            usage: The usage reported with the completion.
+
+        Returns:
+            The token usage to report.
+        """
+        cached_tokens = (
+            usage.prompt_tokens_details.cached_tokens if usage.prompt_tokens_details else None
+        )
+        # Tokens written into the prompt cache, billed above the input rate.
+        # Providers without prompt caching omit the field, which reads as "not
+        # reported" rather than zero.
+        cache_write_tokens = (
+            getattr(usage.prompt_tokens_details, "cache_write_tokens", None)
+            if usage.prompt_tokens_details
+            else None
+        )
+        reasoning_tokens = (
+            usage.completion_tokens_details.reasoning_tokens
+            if usage.completion_tokens_details
+            else None
+        )
+        return LLMTokenUsage(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            cache_read_input_tokens=cached_tokens,
+            cache_creation_input_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+        )
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
@@ -533,32 +591,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             async with _closing(chunk_stream) as chunk_iter:
                 async for chunk in chunk_iter:
                     if chunk.usage:
-                        cached_tokens = (
-                            chunk.usage.prompt_tokens_details.cached_tokens
-                            if chunk.usage.prompt_tokens_details
-                            else None
-                        )
-                        # Tokens written into the prompt cache, billed above the
-                        # input rate. Providers without prompt caching omit the
-                        # field, which reads as "not reported" rather than zero.
-                        cache_write_tokens = (
-                            getattr(chunk.usage.prompt_tokens_details, "cache_write_tokens", None)
-                            if chunk.usage.prompt_tokens_details
-                            else None
-                        )
-                        reasoning_tokens = (
-                            chunk.usage.completion_tokens_details.reasoning_tokens
-                            if chunk.usage.completion_tokens_details
-                            else None
-                        )
-                        token_usage = LLMTokenUsage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
-                            cache_read_input_tokens=cached_tokens,
-                            cache_creation_input_tokens=cache_write_tokens,
-                            reasoning_tokens=reasoning_tokens,
-                        )
+                        token_usage = self._token_usage(chunk.usage)
 
                     if chunk.model and self.get_full_model_name() != chunk.model:
                         self.set_full_model_name(chunk.model)
@@ -652,6 +685,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
             await self.run_function_calls(function_calls)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a content-filter rejection as ``ErrorCategory.CONTENT_FILTERED``.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the status code.
+        """
+        return classify_openai_error(exception)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
@@ -671,8 +715,39 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             except TIMEOUT_EXCEPTIONS as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except LLMContextConversionError as e:
+                await self.push_error(error_msg=str(e), exception=e)
+                # A conversion failure (e.g. an unsupported file MIME type, corrupt
+                # base64 data) can't reach the API at all, but is just as much
+                # evidence of an invalid file as a rejection from OpenAI itself, so
+                # it gets the same best-effort cleanup.
+                frame.context.remove_invalid_file_message()
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                # Only the payload-shaped errors (bad request, unprocessable
+                # content, payload too large — the latter has no dedicated
+                # OpenAI exception class, so match its status code) are
+                # grounds to remove a pending file message on a best-effort
+                # basis. The rest of the 4xx range — auth, permissions,
+                # not-found, rate limiting — says nothing about whether our
+                # request (or its file) was bad, and removing the file there
+                # would discard it for no benefit: the file isn't what needs
+                # fixing before the next retry can succeed. When a message is
+                # removed as a result of this error, the fault lay in
+                # application-supplied content and the context is repaired, so
+                # the error is pushed as APPLICATION instead of letting the
+                # rejection classify as permanent and cost the service its
+                # usability. A content-filter rejection keeps its own category
+                # even when a file is removed, since no response is coming.
+                removed = (
+                    isinstance(e, (BadRequestError, UnprocessableEntityError))
+                    or (isinstance(e, APIStatusError) and e.status_code == 413)
+                ) and frame.context.remove_invalid_file_message()
+                await self.push_error(
+                    error_msg=f"Error during completion: {e}",
+                    exception=e,
+                    category=classify_openai_error(e)
+                    or (ErrorCategory.APPLICATION if removed else None),
+                )
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

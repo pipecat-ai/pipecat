@@ -40,7 +40,6 @@ importing this module is cheap.
 
 import importlib
 import os
-import warnings
 from typing import TYPE_CHECKING, Any
 
 from pipecat.classifiers.base_classifier import BaseClassifier
@@ -49,7 +48,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 if TYPE_CHECKING:
@@ -168,10 +167,9 @@ def tts_service_from_config(
         if name == "kokoro":
             inner = kokoro_service(voice_cfg)
         elif name == "cartesia":
-            warnings.warn(
-                "`service: cartesia` in `user.speech` is deprecated since 1.9.0 and will be "
+            warn_deprecated(
+                "`user.speech.service: cartesia` is deprecated since 1.9.0 and will be "
                 "removed in 2.0.0. Use `factory` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
             inner = _cartesia_service(voice_cfg)
@@ -434,10 +432,9 @@ def llm_service_from_config(config: dict | None, *, where: str) -> LLMService[An
     if service_name == "ollama":
         return ollama_service(config)
     if service_name == "openai":
-        warnings.warn(
-            f"`service: openai` in `{where}` is deprecated since 1.9.0 and will be removed in "
+        warn_deprecated(
+            f"`{where}.service: openai` is deprecated since 1.9.0 and will be removed in "
             "2.0.0. Use `factory` instead.",
-            DeprecationWarning,
             stacklevel=2,
         )
         return _openai_service(config)

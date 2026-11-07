@@ -27,6 +27,7 @@ from pipecat.services.nvidia.stt import NvidiaSTTService
 from pipecat.services.nvidia.tts import NvidiaTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -40,6 +41,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -57,7 +62,20 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
+    stt = NvidiaSTTService(
+        api_key=os.environ["NVIDIA_API_KEY"],
+        # To tell speakers apart, enable speaker diarization. Each run of words
+        # from one speaker is pushed as its own transcription frame, with the
+        # NVIDIA speaker tag ("1", "2", ...) in the frame's `user_id`.
+        # `speaker_format` optionally labels the text, so the LLM can see who said
+        # what.
+        #
+        # settings=NvidiaSTTService.Settings(
+        #     speaker_diarization=True,
+        #     diarization_max_speakers=2,
+        #     speaker_format="Speaker {speaker}: {text}",
+        # ),
+    )
 
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],

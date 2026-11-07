@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
@@ -166,6 +167,18 @@ class HeyGenOutputTransport(BaseOutputTransport):
         self._resampler = create_stream_resampler()
 
         self._event_id = None
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The HeyGen avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.

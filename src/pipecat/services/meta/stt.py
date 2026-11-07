@@ -21,6 +21,7 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat import version as pipecat_version
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
@@ -311,7 +312,9 @@ class MetaSTTService(WebsocketSTTService):
         """Establish the WebSocket connection and start the receive task."""
         await super()._connect()
         await self._connect_websocket()
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -348,7 +351,10 @@ class MetaSTTService(WebsocketSTTService):
                 )
 
             websocket = await self._websocket_connect(
-                f"{self._url}?sessionId=stream-{uuid.uuid4()}"
+                f"{self._url}?sessionId=stream-{uuid.uuid4()}",
+                additional_headers={
+                    "User-Agent": f"Meta/1.0 (integration=Pipecat/{pipecat_version()})"
+                },
             )
             self._websocket = websocket
 

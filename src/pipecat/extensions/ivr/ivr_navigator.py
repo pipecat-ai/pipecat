@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMMessagesUpdateFrame,
@@ -151,12 +152,17 @@ class IVRProcessor(FrameProcessor):
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
+        elif isinstance(frame, InterruptionFrame):
+            # Drop the text of the interrupted response, including a tag left open
+            await self._aggregator.handle_interruption()
+            await self.push_frame(frame, direction)
+
         elif isinstance(frame, LLMTextFrame):
             # Process text through the pattern aggregator
             async for result in self._aggregator.aggregate(frame.text):
                 # Push aggregated text that doesn't contain XML patterns
                 await self.push_frame(
-                    AggregatedTextFrame(text=result.text, aggregated_by=result.type),
+                    AggregatedTextFrame(text=result.text, text_type=result.type),
                     direction,
                 )
 
@@ -165,7 +171,7 @@ class IVRProcessor(FrameProcessor):
             remaining = await self._aggregator.flush()
             if remaining:
                 await self.push_frame(
-                    AggregatedTextFrame(text=remaining.text, aggregated_by=remaining.type),
+                    AggregatedTextFrame(text=remaining.text, text_type=remaining.type),
                     direction,
                 )
             # Push the end frame

@@ -11,6 +11,7 @@ sub-pipelines concurrently, with coordination for system frames and proper
 handling of pipeline lifecycle events.
 """
 
+import weakref
 from itertools import chain
 
 from loguru import logger
@@ -49,7 +50,10 @@ class ParallelPipeline(BasePipeline):
 
         self._pipelines = []
 
-        self._seen_ids = set()
+        # Frames that have come out of a branch, so the copies from the other
+        # branches are dropped. Held weakly: a frame no branch holds can't come
+        # out again, so an entry goes away with its frame.
+        self._seen_frames: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
         self._frame_counter: dict[int, int] = {}
         self._synchronizing: bool = False
         self._buffered_frames: list[tuple[Frame, FrameDirection]] = []
@@ -123,6 +127,9 @@ class ParallelPipeline(BasePipeline):
             TypeError: If any processor list argument is not actually a list.
         """
         await super().setup(setup)
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
         await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
@@ -170,8 +177,8 @@ class ParallelPipeline(BasePipeline):
         to prevent them from escaping the parallel pipeline before all branches
         have finished processing the lifecycle frame.
         """
-        if frame.id not in self._seen_ids:
-            self._seen_ids.add(frame.id)
+        if frame.id not in self._seen_frames:
+            self._seen_frames[frame.id] = frame
             if self._synchronizing:
                 self._buffered_frames.append((frame, direction))
             else:

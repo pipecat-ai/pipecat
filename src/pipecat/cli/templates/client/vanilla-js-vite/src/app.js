@@ -39,6 +39,8 @@ class VoiceChatClient {
         option.textContent = 'SmallWebRTC';
       } else if (transport === 'daily') {
         option.textContent = 'Daily';
+      } else if (transport === 'livekit') {
+        option.textContent = 'LiveKit';
       } else if (transport === 'websocket') {
         option.textContent = 'WebSocket';
       }

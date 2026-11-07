@@ -218,6 +218,17 @@ def _self_signed_pem(tmp_path):
     return str(pem_path), expected
 
 
+# A relay's stream Cancel as the transcript and catalog readers report it.
+_RELAY_CANCEL = moq.Error.Protocol(
+    moq.ProtocolError(
+        scope=moq.ErrorScope.STREAM,
+        code=1,
+        kind=moq.ProtocolKind.CANCEL,
+        message="cancelled",
+    )
+)
+
+
 # The runner module pulls in FastAPI/uvicorn (the `runner` extra). Skip
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
@@ -233,7 +244,18 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_normal_close_is_peer_gone(self):
         """Session-level normal close counts as the peer leaving too."""
-        self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
+        self.assertTrue(
+            _is_peer_gone(
+                moq.Error.Protocol(
+                    moq.ProtocolError(
+                        scope=moq.ErrorScope.SESSION,
+                        code=0,
+                        kind=moq.ProtocolKind.CANCEL,
+                        message="webtransport error: closed",
+                    )
+                )
+            )
+        )
 
     def test_dropped_producer_is_peer_gone(self):
         """A peer that vanishes mid-call drops its producer without finishing.
@@ -248,14 +270,58 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_shutdown_variants_are_peer_gone(self):
         """``Cancelled``/``Closed`` are typed, so they need no message match."""
-        self.assertTrue(_is_peer_gone(moq.Error.Cancelled("cancelled")))
-        self.assertTrue(_is_peer_gone(moq.Error.Closed("closed")))
+        self.assertTrue(_is_peer_gone(moq.Error.Cancelled()))
+        self.assertTrue(_is_peer_gone(moq.Error.Closed()))
+
+    def test_gracefully_closed_track_is_peer_gone(self):
+        """A peer that finishes its session cleanly closes with code 0 —
+        "no error" by moq-net convention — which the audio reader renders
+        as the message tail."""
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: no error")))
+
+    def test_cancelled_track_is_peer_gone(self):
+        """A relay cancels the subscription when the peer's publishing session
+        ends. The transcript and catalog readers report a ``CANCEL`` kind; the
+        audio reader renders the error to a string, so only its reason says
+        so, bare or behind moq-mux's prefix."""
+        for error in (
+            _RELAY_CANCEL,
+            moq.Error.Audio("cancelled"),
+            moq.Error.Audio("moq: cancelled"),
+        ):
+            with self.subTest(error=error):
+                self.assertTrue(_is_peer_gone(error))
 
     def test_other_moq_errors_propagate(self):
-        self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
+        """Only a whole reason counts; an error that merely mentions
+        cancellation is a failure."""
+        for error in (
+            moq.Error.Mux("json: expected value at line 1 column 1"),
+            moq.Error.Audio("moq: request cancelled early"),
+            moq.Error.JsonTrack("cancelled by application: bad record"),
+        ):
+            with self.subTest(error=error):
+                self.assertFalse(_is_peer_gone(error))
 
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
+
+    def test_unknown_code_text_is_peer_gone(self):
+        """A 0.14 peer's reset renders as ``unknown code=N`` under 0.15's
+        decode tables; the peer-gone codes cover NotFound and Unroutable
+        alongside the normal closes."""
+        for code in (13, 24, 25, 30):
+            with self.subTest(code=code):
+                self.assertTrue(_is_peer_gone(moq.Error.Audio(f"moq: unknown code={code}")))
+
+    def test_unrecognized_unknown_code_text_propagates(self):
+        self.assertFalse(_is_peer_gone(moq.Error.Audio("moq: unknown code=50")))
+
+    def test_legacy_code_on_a_protocol_error_is_peer_gone(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=30, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertTrue(_is_peer_gone(moq.Error.Protocol(details)))
 
 
 fastapi = pytest.importorskip("fastapi")
@@ -514,11 +580,13 @@ class TestMOQTransportInit(unittest.TestCase):
     These assertions stop a future refactor from re-introducing it.
     """
 
-    def _make_transport(self):
+    def _make_transport(self, **params_kwargs):
         """Construct a MOQTransport with the moq library's origin mocked so we
         don't need a real QUIC stack just to check that the producer methods
         got called."""
-        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        params_kwargs.setdefault("audio_in_enabled", True)
+        params_kwargs.setdefault("audio_out_enabled", True)
+        params = MOQParams(**params_kwargs)
 
         # A broadcast is created ON an origin, so patch the origin and observe
         # what __init__ asks it for without standing up an actual broadcast.
@@ -563,6 +631,25 @@ class TestMOQTransportInit(unittest.TestCase):
         transport, broadcast, _track, _moq = self._make_transport()
         self.assertIsNone(transport._client._audio_out)
         broadcast.publish_audio.assert_not_called()
+
+    def test_audio_on_defers_the_announce_to_open_audio_track(self):
+        """moq-rs 0.5 routes only announced broadcasts, and the announce
+        belongs after the last track a configuration creates — with audio
+        on, the audio track ``open_audio_track`` adds."""
+        transport, broadcast, _track, _moq = self._make_transport()
+        broadcast.announce.assert_not_called()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
+
+    def test_audio_off_announces_after_the_transcript_track(self):
+        """With audio out disabled ``open_audio_track`` opens nothing, so the
+        transcript is the last track and ``__init__`` announces — without
+        this the peer can't route the transcript until a redial announces
+        the rebuilt broadcast."""
+        transport, broadcast, _track, _moq = self._make_transport(audio_out_enabled=False)
+        broadcast.announce.assert_called_once()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
 
     def test_broadcast_paths_built_from_params(self):
         """``<namespace>/<participant_id>`` and ``<namespace>/<peer_id>``
@@ -659,6 +746,13 @@ class TestMOQTransportInit(unittest.TestCase):
         kwargs = self._client_kwargs()
         self.assertNotIn("tls_roots", kwargs)
         self.assertNotIn("tls_fingerprints", kwargs)
+
+    def test_library_reconnect_is_off(self):
+        """The transport owns retry (``_run_client``'s redial with backoff,
+        stall watchdog, fresh publisher per dial); the library's reconnect
+        wraps a refused session's close in a retry-timeout error, hiding
+        the code ``_is_unauthorized`` reads."""
+        self.assertIs(self._client_kwargs()["reconnect"], False)
 
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
@@ -762,6 +856,15 @@ class TestIsNormalClose(unittest.TestCase):
         """A browser leaving mid-call drops its mic producer without finishing."""
         self.assertTrue(_is_normal_close(self._audio_error("moq: remote error: code=24")))
 
+    def test_cancelled_reason_is_normal(self):
+        """The reason form of ``Cancel``, as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: cancelled")))
+
+    def test_no_error_reason_is_normal(self):
+        """The reason form of a code-0 graceful close (``close(0)``, "no
+        error" by moq-net convention), as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: no error")))
+
     def test_cancel_and_closed_are_normal(self):
         for code in (0, 25):
             with self.subTest(code=code):
@@ -779,6 +882,39 @@ class TestIsNormalClose(unittest.TestCase):
 
     def test_non_moq_exception_is_not_normal(self):
         self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
+
+    def test_unknown_code_text_is_normal(self):
+        """moq-ffi 0.4 decodes with 0.15's tables, where 0.14's codes are
+        unregistered; a 0.14 peer's reset renders as ``unknown code=N``."""
+        for code in (24, 25):
+            with self.subTest(code=code):
+                self.assertTrue(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_unknown_code_text_real_failures_are_not_normal(self):
+        for code in (5, 26, 240):
+            with self.subTest(code=code):
+                self.assertFalse(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_legacy_code_on_a_protocol_error_is_normal(self):
+        """0.15's stream table decodes 0.14's Cancel as Internal and has no
+        entry for Dropped or Closed; the verbatim wire code still
+        identifies the hangup."""
+        for code, kind in (
+            (0, moq.ProtocolKind.INTERNAL),
+            (24, moq.ProtocolKind.UNKNOWN),
+            (25, moq.ProtocolKind.UNKNOWN),
+        ):
+            with self.subTest(code=code):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.STREAM, code=code, kind=kind, message="reset"
+                )
+                self.assertTrue(_is_normal_close(moq.Error.Protocol(details)))
+
+    def test_unrecognized_protocol_code_is_not_normal(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(_is_normal_close(moq.Error.Protocol(details)))
 
 
 # ----------------------------------------------------------------------
@@ -890,6 +1026,101 @@ class TestTranscriptRecords(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------
+# Encoder epoch re-anchoring
+# ----------------------------------------------------------------------
+
+
+class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
+    """``reset_epoch`` drops the encoder's pending samples and lookahead
+    and publishes a discontinuity, so a mid-utterance delivery stall must
+    not trip it; only the first write and a real idle gap re-anchor."""
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = 24000
+        return client
+
+    async def test_first_write_re_anchors(self):
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_delivery_stall_does_not_re_anchor(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 0.1
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_not_called()
+
+    async def test_an_idle_gap_re_anchors(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 1.0
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_pacing_reset_mid_sleep_re_anchors(self):
+        """``reset_audio_pacing`` (interruption) can land while a paced
+        write sleeps. The write must complete — re-anchored like a fresh
+        write — with the frame written and the clock advanced."""
+        client = self._client_with_audio()
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        await write
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertAlmostEqual(
+            client._publish_audio_clock, time.monotonic() + duration_s, delta=0.1
+        )
+
+    async def test_a_late_wake_keeps_the_clock_on_schedule(self):
+        """With a budget at or below the event loop's wake-up delay the
+        pacing sleep always ends past the clock. The clock must stay on
+        schedule; absorbing the wake-up delay each write publishes slower
+        than real time and runs the player's buffer dry."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=0)
+        )
+        clock = time.monotonic() + 0.05
+        client._publish_audio_clock = clock
+        await client.publish_audio(b"\x00" * 480)
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertEqual(client._publish_audio_clock, clock + duration_s)
+
+    async def test_a_teardown_mid_sleep_drops_the_write(self):
+        """``_run``'s finally clears ``_audio_out`` while a paced write
+        sleeps (peer left with a full buffer). The write must return
+        without raising and without touching the closed producer."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client._audio_out = None
+        await write
+        producer.write.assert_not_called()
+
+    async def test_a_teardown_and_reset_mid_sleep_drops_the_write(self):
+        """A teardown and a pacing reset landing in the same sleep must
+        not re-anchor the closed producer's epoch."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        client._audio_out = None
+        await write
+        producer.reset_epoch.assert_not_called()
+        producer.write.assert_not_called()
+
+
+# ----------------------------------------------------------------------
 # Runner arguments: relay_url
 # ----------------------------------------------------------------------
 
@@ -964,7 +1195,12 @@ class _FakeSession:
 
 
 # What moq-ffi raises from ``Session.closed()`` when the relay refused the token.
-_UNAUTHORIZED_CLOSE = "transport: webtransport error: closed: code=6 reason=unauthorized"
+_UNAUTHORIZED_CLOSE = moq.ProtocolError(
+    scope=moq.ErrorScope.SESSION,
+    code=2,
+    kind=moq.ProtocolKind.UNAUTHORIZED,
+    message="unauthorized",
+)
 
 
 class _FakeClient:
@@ -1187,7 +1423,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dials, [self.URL] * 3)
 
     async def test_a_refused_first_dial_is_not_retried(self):
-        self.script[:] = [moq.Error.Forbidden("403 denied")]
+        self.script[:] = [moq.Error.Forbidden()]
         client = self._make_client()
         self._peer_stays(client)
         await asyncio.wait_for(client._run(), timeout=2)
@@ -1208,7 +1444,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         refuses the redial. The peer it had is reported gone, then the
         refusal."""
         first = _FakeSession()
-        self.script[:] = [first, moq.Error.Unauthorized("401 expired")]
+        self.script[:] = [first, moq.Error.Unauthorized()]
         client = self._make_client()
         self._peer_stays(client)
 
@@ -1358,7 +1594,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0]["seq"] for call in new_stream.append.call_args_list], [0, 1])
         self.assertEqual(new_stream.append.call_args_list[1].args[0]["type"], "b")
         self.assertIsNot(client._audio_out, old_audio)
-        client._publish_broadcast.publish_audio.assert_called_once()
+        client._publish_broadcast.encode_audio.assert_called_once()
 
     async def test_peer_tracks_ending_without_goodbye_redial_and_the_peer_comes_back(self):
         """A relay between the peers failing ends the peer's tracks the way a
@@ -1779,22 +2015,29 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     subscription itself. That is the peer's tracks ending, which the session
     loop answers with a retry and then a redial, not a transport failure."""
 
-    DROPPED = moq.Error.Protocol("dropped")
+    DROPPED = moq.Error.Protocol(
+        moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM,
+            code=13,
+            kind=moq.ProtocolKind.NOT_FOUND,
+            message="dropped",
+        )
+    )
 
     async def test_a_refused_catalog_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_not_called()
+        peer_broadcast.decode_audio.assert_not_called()
 
     async def test_a_refused_audio_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
-        peer_broadcast.subscribe_audio = AsyncMock(side_effect=self.DROPPED)
+        peer_broadcast.decode_audio = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_awaited_once()
+        peer_broadcast.decode_audio.assert_awaited_once()
 
     async def test_a_refused_transcript_subscribe_ends_the_transcript_pump(self):
         client, _stream = _client_with_fake_moq()
@@ -1831,28 +2074,132 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_error.assert_not_awaited()
 
 
+class _FakeTrackEndingWith:
+    """Stands in for a track consumer: yields scripted items, then raises ``error``."""
+
+    def __init__(self, items, error):
+        self._items = list(items)
+        self._error = error
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._items:
+            raise self._error
+        return self._items.pop(0)
+
+    def cancel(self):
+        pass
+
+
+class TestTrackCancelledAsPeerGone(unittest.IsolatedAsyncioTestCase):
+    """A relay cancels a live subscription when the session publishing the
+    broadcast ends, including when a reconnecting peer replaces its broadcast
+    with a fresh one. That is the peer's tracks ending: the session loop
+    subscribes again rather than failing the transport."""
+
+    async def test_cancelled_audio_ends_the_audio_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        peer_broadcast.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        await client._forward_peer_audio(peer_broadcast)
+        client._callbacks.on_audio_received.assert_awaited_once()
+
+    async def test_the_peer_is_followed_to_its_fresh_broadcast(self):
+        """Through the real pumps: the first broadcast's audio and transcript
+        are cancelled mid-call, and the transport subscribes to the peer's
+        fresh broadcast and carries on until the peer says goodbye."""
+        client, _stream = _client_with_fake_moq()
+        client._task_manager = TaskManager()
+        client._peer_connected = True
+        first = MagicMock(name="first_broadcast")
+        first.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        first.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        first.subscribe_json_stream = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [{"label": "rtvi-ai", "type": "client-ready", "seq": 0, "epoch": "e1"}],
+                _RELAY_CANCEL,
+            )
+        )
+        fresh = MagicMock(name="fresh_broadcast")
+        fresh.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([]))
+        fresh.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream(
+                [
+                    {"label": "rtvi-ai", "type": "client-message", "seq": 0, "epoch": "e2"},
+                    {"label": "moq-transport", "type": "session-ending", "seq": 1, "epoch": "e2"},
+                ]
+            )
+        )
+        broadcasts = iter([first, fresh])
+        origin = MagicMock(name="subscribe_origin")
+        origin.consume.return_value.announced_broadcast.side_effect = lambda _path: _FakeAnnounced(
+            next(broadcasts)
+        )
+        gone = await asyncio.wait_for(client._consume_peer(origin), timeout=2)
+        self.assertTrue(gone)
+        self.assertTrue(client._peer_goodbye)
+        fresh.subscribe_json_stream.assert_awaited_once()
+        client._callbacks.on_audio_received.assert_awaited_once()
+        self.assertEqual(client._callbacks.on_message_received.await_count, 2)
+        client._callbacks.on_error.assert_not_awaited()
+
+
 class TestIsUnauthorized(unittest.TestCase):
     """A refused token shows up either as an HTTP status on the dial or as
     the session closing with moq-net's ``Unauthorized`` code."""
 
     def test_http_refusals_count(self):
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized("401")))
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden("403")))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized()))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden()))
 
     def test_unauthorized_session_close_counts(self):
         self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(_UNAUTHORIZED_CLOSE)))
 
     def test_other_closes_do_not(self):
-        for message in (
-            "transport: webtransport error: closed: code=4 reason=transport",
-            "transport: webtransport error: closed: code=0 reason=remote err",
-            "webtransport error: closed",
+        for kind, code, message in (
+            (moq.ProtocolKind.PROTOCOL_VIOLATION, 3, "transport"),
+            (moq.ProtocolKind.CANCEL, 0, "remote err"),
+            (moq.ProtocolKind.SESSION_CLOSED, 9, "closed"),
         ):
-            with self.subTest(message=message):
-                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(message)))
+            with self.subTest(kind=kind):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.SESSION, code=code, kind=kind, message=message
+                )
+                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_0_14_relay_refusal_counts(self):
+        """A 0.14 relay closes a refused session with the old registry's
+        Unauthorized code, which 0.15's session table decodes as
+        ``KEY_VALUE_FORMATTING``."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.SESSION,
+            code=6,
+            kind=moq.ProtocolKind.KEY_VALUE_FORMATTING,
+            message="key-value formatting error",
+        )
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_stream_scope_code_6_does_not(self):
+        """Only the session-scope decode (KEY_VALUE_FORMATTING) marks a
+        refusal; stream code 6 is unregistered in 0.15's table."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=6, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
 
     def test_non_moq_errors_do_not(self):
-        self.assertFalse(moq_transport._is_unauthorized(ConnectionError(_UNAUTHORIZED_CLOSE)))
+        self.assertFalse(moq_transport._is_unauthorized(ConnectionError("unauthorized")))
 
 
 # ----------------------------------------------------------------------
@@ -1885,7 +2232,7 @@ class TestErrorsReachThePipeline(unittest.IsolatedAsyncioTestCase):
             seen.append((message, exception))
             fired.set()
 
-        exc = moq.Error.Unauthorized("401")
+        exc = moq.Error.Unauthorized()
         await transport._on_error("401", exc, ErrorCategory.AUTHENTICATION, False)
 
         # Event handlers run in a background task.

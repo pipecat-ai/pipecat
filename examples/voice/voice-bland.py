@@ -27,6 +27,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -40,6 +41,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -62,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = BlandTTSService(
         api_key=os.environ["BLAND_API_KEY"],
         settings=BlandTTSService.Settings(
-            voice="2f29fdbb-c55e-4add-9c7c-93437ebf379d",  # River
+            voice="29158307-9893-4149-8a75-bc9ce313d64e",  # Karen
         ),
     )
 

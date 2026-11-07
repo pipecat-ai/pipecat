@@ -70,6 +70,7 @@ For BaseLLMAdapter helpers:
 2. _resolve_system_instruction: conflict resolution between context and settings
 """
 
+import base64
 import subprocess
 import sys
 import unittest
@@ -79,28 +80,37 @@ from unittest.mock import patch
 from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 from openai._types import NotGiven as OpenAINotGiven
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
-from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
-from pipecat.adapters.services.deepseek_adapter import DeepSeekLLMAdapter
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
-from pipecat.adapters.services.gemini_live_adapter import GeminiLiveLLMAdapter
-from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
-from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.llm.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
+from pipecat.adapters.llm.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.llm.services.bedrock_adapter import (
+    AWSBedrockLLMAdapter,
+    _sanitize_bedrock_document_name,
+)
+from pipecat.adapters.llm.services.deepseek_adapter import DeepSeekLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GeminiLLMAdapter,
+    gemini_text_bookmark_matches,
+)
+from pipecat.adapters.llm.services.gemini_live_adapter import GeminiLiveLLMAdapter
+from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.llm.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
+from pipecat.adapters.llm.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+from pipecat.utils.deprecation import _warned_sites
 
 
-class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
+class TestOpenAIGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     # In production, BaseOpenAILLMService always passes convert_developer_to_user
     # to the adapter (True or False depending on the service's supports_developer_role).
     # Tests below use False to simulate native OpenAI usage, except for the
@@ -110,7 +120,107 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         """Sets up a common adapter instance for all tests."""
         self.adapter = OpenAILLMAdapter()
 
-    def test_standard_messages_passed_through_unchanged(self):
+    async def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file OpenAI never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:text/plain;base64,aGVsbG8=",
+                        "filename": "notes.txt",
+                        "mime_type": "text/plain",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            await self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIn("Unsupported 'file' MIME type", str(ctx.exception))
+
+    async def test_unsupported_file_url_raises_conversion_error(self):
+        """Test that a file_url message raises instead of silently dropping the file.
+
+        OpenAI Chat can't consume non-image URLs, so without resolved content
+        in a file resolver's cache the conversion must fail loudly.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {"url": "https://example.com/doc.pdf", "mime_type": "application/pdf"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            await self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+
+        self.assertIn("Unresolved file URL", str(ctx.exception))
+
+    async def test_image_file_url_converted_to_image_url(self):
+        """Test that a file_url with an image MIME type becomes image_url content.
+
+        OpenAI Chat supports public image URLs natively via image_url, so an
+        image sent as a file_url shouldn't be rejected as an unsupported file.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {"url": "https://example.com/photo.jpg", "mime_type": "image/jpeg"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
+
+        content = params["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "https://example.com/photo.jpg")
+
+    async def test_image_file_base64_converted_to_image_url(self):
+        """Test that an inline image file becomes image_url content with a data URL.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        data_url = "data:image/png;base64,aGVsbG8="
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {"file_data": data_url, "filename": "a.png", "mime_type": "image/png"},
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
+
+        content = params["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], data_url)
+
+    async def test_standard_messages_passed_through_unchanged(self):
         """Test that LLMStandardMessage objects are passed through unchanged to OpenAI params."""
         # Create standard messages (OpenAI format)
         standard_messages: list[LLMStandardMessage] = [
@@ -123,7 +233,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=standard_messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         # Verify messages are passed through unchanged
         self.assertEqual(params["messages"], standard_messages)
@@ -134,14 +246,16 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][1]["content"], "Hello, how are you?")
         self.assertEqual(params["messages"][2]["content"], "I'm doing well, thank you for asking!")
 
-    def test_tools_absent_yields_openai_sentinel(self):
+    async def test_tools_absent_yields_openai_sentinel(self):
         """A context without tools yields the sentinel the SDK omits from the request."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         self.assertIsInstance(params["tools"], OpenAINotGiven)
 
-    def test_llm_specific_message_filtering(self):
+    async def test_llm_specific_message_filtering(self):
         """Test that OpenAI-specific messages are included and others are filtered out."""
         # Create messages with different LLM-specific ones
         messages = [
@@ -162,7 +276,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         # Should only include standard messages and OpenAI-specific ones
         # (3 total: system, standard user, openai assistant)
@@ -175,7 +291,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
             params["messages"][2], {"role": "assistant", "content": "OpenAI specific response"}
         )
 
-    def test_complex_message_content_preserved(self):
+    async def test_complex_message_content_preserved(self):
         """Test that complex message content (like multi-part messages) is preserved."""
         # Create a message with complex content structure (text + image)
         complex_image_message = {
@@ -209,7 +325,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         # Verify complex content is preserved
         self.assertEqual(len(params["messages"]), 3)
@@ -233,7 +351,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(text_content[1]["text"], "1. First, I'll examine the visual elements")
         self.assertEqual(text_content[2]["text"], "2. Then I'll provide my conclusions")
 
-    def test_system_instructions_preserved_throughout_messages(self):
+    async def test_system_instructions_preserved_throughout_messages(self):
         """Test that OpenAI adapter preserves system instructions sprinkled throughout messages."""
         # Create messages with system instructions at different positions
         messages = [
@@ -250,7 +368,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         # OpenAI should preserve all messages unchanged, including multiple system messages
         self.assertEqual(len(params["messages"]), 7)
@@ -271,13 +391,13 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][4]["role"], "user")
         self.assertEqual(params["messages"][6]["role"], "assistant")
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction alone is prepended as a system message."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context, system_instruction="Be helpful.", convert_developer_to_user=False
         )
 
@@ -285,20 +405,22 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "Be helpful.")
         self.assertEqual(params["messages"][1]["role"], "user")
 
-    def test_initial_system_message_only(self):
+    async def test_initial_system_message_only(self):
         """Initial system message without system_instruction passes through."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=False
+        )
 
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0]["role"], "system")
         self.assertEqual(params["messages"][0]["content"], "You are helpful.")
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns but allows both."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -306,8 +428,8 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
             mock_logger.warning.assert_called_once()
@@ -318,7 +440,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "Be concise.")
         self.assertEqual(params["messages"][1]["content"], "You are helpful.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message does NOT warn."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -326,8 +448,8 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
             mock_logger.warning.assert_not_called()
@@ -336,7 +458,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["content"], "Be concise.")
         self.assertEqual(params["messages"][1]["role"], "developer")
 
-    def test_warning_fires_only_once(self):
+    async def test_warning_fires_only_once(self):
         """Conflict warning fires only once per adapter instance."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -344,16 +466,16 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
-            self.adapter.get_llm_invocation_params(
+            await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
             mock_logger.warning.assert_called_once()
 
-    def test_developer_messages_converted_to_user(self):
+    async def test_developer_messages_converted_to_user(self):
         """Developer messages are converted to user role when convert_developer_to_user is True."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -361,13 +483,15 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
         self.assertEqual(context.get_messages()[0]["role"], "developer")
 
-    def test_developer_conversion_does_not_affect_other_roles(self):
+    async def test_developer_conversion_does_not_affect_other_roles(self):
         """convert_developer_to_user only affects developer messages, not system/user/assistant."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "System prompt."},
@@ -377,7 +501,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][0]["role"], "system")
         self.assertEqual(params["messages"][1]["role"], "user")
@@ -386,12 +512,12 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][3]["role"], "assistant")
 
 
-class TestGeminiGetLLMInvocationParams(unittest.TestCase):
+class TestGeminiGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = GeminiLLMAdapter()
 
-    def test_malformed_message_raises_conversion_error(self):
+    async def test_malformed_message_raises_conversion_error(self):
         """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
@@ -405,13 +531,13 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=[malformed_message])
 
         with self.assertRaises(LLMContextConversionError) as ctx:
-            self.adapter.get_llm_invocation_params(context)
+            await self.adapter.get_llm_invocation_params(context)
 
         # The underlying cause is preserved for debugging.
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
-    def test_standard_messages_converted_to_gemini_format(self):
+    async def test_standard_messages_converted_to_gemini_format(self):
         """Test that LLMStandardMessage objects are converted to Gemini Content format."""
         # Create standard messages (OpenAI format)
         standard_messages: list[LLMStandardMessage] = [
@@ -424,7 +550,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=standard_messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Verify system instruction is extracted
         self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
@@ -446,7 +572,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(model_msg.parts), 1)
         self.assertEqual(model_msg.parts[0].text, "I'm doing well, thank you for asking!")
 
-    def test_llm_specific_message_filtering(self):
+    async def test_llm_specific_message_filtering(self):
         """Test that Gemini-specific messages are included and others are filtered out."""
         # Create messages with different LLM-specific ones
         messages = [
@@ -467,7 +593,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Should only include standard messages and Gemini-specific ones
         # (2 total: converted standard user + gemini model)
@@ -483,7 +609,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][1].role, "model")
         self.assertEqual(params["messages"][1].parts[0].text, "Gemini specific response")
 
-    def test_complex_message_content_preserved(self):
+    async def test_complex_message_content_preserved(self):
         """Test that complex message content (like multi-part messages) is preserved and converted.
 
         This test covers image, audio, and multi-text content conversion to Gemini format.
@@ -543,7 +669,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Verify system instruction
         self.assertEqual(
@@ -605,7 +731,75 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         for i, expected_text in enumerate(expected_texts):
             self.assertEqual(model_with_text.parts[i].text, expected_text)
 
-    def test_single_system_instruction_converted_to_user(self):
+    async def test_file_url_converted_to_file_uri_part(self):
+        """Test that a supported file_url becomes a Gemini file_uri Part.
+
+        The developer API consumes its own Files API URIs directly, so those
+        pass through as `Part.from_uri` rather than being inlined.
+        """
+        url = "https://generativelanguage.googleapis.com/v1beta/files/abc"
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": url,
+                            "mime_type": "application/pdf",
+                            "filename": "report.pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+
+        context = LLMContext(messages=messages)
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        part = params["messages"][0].parts[0]
+        self.assertEqual(part.file_data.file_uri, url)
+        self.assertEqual(part.file_data.mime_type, "application/pdf")
+
+    async def test_file_base64_uses_cached_raw_bytes(self):
+        """Test that conversion consumes bytes cached by the file resolution pass.
+
+        The cache exists so the file's base64 isn't re-decoded on every
+        conversational turn; using it must take precedence over decoding
+        the data URL.
+        """
+        from pipecat.utils.file_resolver import FileResolver
+
+        data_url = "data:application/pdf;base64,aGVsbG8="
+        cached = b"cached raw bytes"
+        resolver = FileResolver()
+        resolver._bytes_cache[data_url] = cached
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_base64",
+                        "file": {
+                            "file_data": data_url,
+                            "filename": "a.pdf",
+                            "mime_type": "application/pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+
+        context = LLMContext(messages=messages)
+        self.adapter.file_resolver = resolver
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        part = params["messages"][0].parts[0]
+        self.assertEqual(part.inline_data.data, cached)
+        self.assertEqual(part.inline_data.mime_type, "application/pdf")
+
+    async def test_single_system_instruction_converted_to_user(self):
         """Test that when there's only a system instruction, it gets converted to user message."""
         # Create context with only a system message
         messages = [
@@ -613,7 +807,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # When there's only one message, it's converted to user in-place (not extracted)
         # so system_instruction is None
@@ -624,7 +818,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0].role, "user")
         self.assertEqual(params["messages"][0].parts[0].text, "You are a helpful assistant.")
 
-    def test_multiple_system_instructions_handling(self):
+    async def test_multiple_system_instructions_handling(self):
         """Test that first system instruction is extracted, later ones converted to user messages."""
         # Create messages with multiple system instructions
         messages = [
@@ -638,7 +832,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # First system instruction should be extracted
         self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
@@ -669,43 +863,45 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # Should have 2 model messages (converted from assistant)
         self.assertEqual(len(model_messages), 2)
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction alone becomes the system_instruction parameter."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be helpful."
+        )
 
         self.assertEqual(params["system_instruction"], "Be helpful.")
 
-    def test_initial_system_message_only(self):
+    async def test_initial_system_message_only(self):
         """Initial system message is extracted as system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_initial_developer_message_becomes_user(self):
+    async def test_initial_developer_message_becomes_user(self):
         """Initial developer message without system_instruction becomes user, not system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsNone(params["system_instruction"])
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0].role, "user")
         self.assertEqual(params["messages"][0].parts[0].text, "Extra context.")
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -713,15 +909,15 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_called_once()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -729,15 +925,15 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_non_initial_system_message_not_extracted(self):
+    async def test_non_initial_system_message_not_extracted(self):
         """Non-initial system message is converted to user, not extracted as system instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -745,7 +941,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
             {"role": "user", "content": "How are you?"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # No system instruction should be extracted from non-initial position
         self.assertIsNone(params["system_instruction"])
@@ -753,14 +949,14 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         # (we check that 3 messages are present, meaning no extraction happened)
         self.assertEqual(len(params["messages"]), 3)
 
-    def test_subsequent_developer_messages_converted_to_user(self):
+    async def test_subsequent_developer_messages_converted_to_user(self):
         """Subsequent developer messages are converted to user role."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
             {"role": "developer", "content": "More instructions"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["messages"]), 2)
         # Second message (developer) should be converted to user in Google format
@@ -937,7 +1133,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
 
     PLACEHOLDER = b"skip_thought_signature_validator"
 
-    def test_unsigned_tool_call_gets_placeholder_signature(self):
+    async def test_unsigned_tool_call_gets_placeholder_signature(self):
         """A tool call converted from a standard message carries the placeholder."""
         messages = [
             {"role": "user", "content": "Switch to Gemini."},
@@ -954,7 +1150,7 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
             {"role": "tool", "tool_call_id": "call_1", "content": '{"ok": true}'},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         call_part = params["messages"][1].parts[0]
         self.assertEqual(call_part.function_call.id, "call_1")
@@ -986,7 +1182,21 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
 
         self.assertTrue(all(p.thought_signature is None for m in messages for p in m.parts))
 
-    def test_ensure_last_message_is_user_appends_when_trailing_model(self):
+    def test_text_bookmark_matching(self):
+        """A text bookmark names a reply it equals or shares a prefix with, whitespace aside."""
+        cases = [
+            ("Hello there.", "Hello there.", True),
+            ("Hello there.", "Hello", True),  # interrupted reply
+            ("Hello", "Hello there.", True),  # signature with the first chunk
+            ("Hello  there.\n", " Hello there.", True),
+            ("Hello there.", "Goodbye.", False),
+            ("Hello there.", "  ", False),
+        ]
+        for bookmark_text, text, expected in cases:
+            with self.subTest(bookmark_text=bookmark_text, text=text):
+                self.assertEqual(gemini_text_bookmark_matches(bookmark_text, text), expected)
+
+    async def test_ensure_last_message_is_user_appends_when_trailing_model(self):
         """ensure_last_message_is_user=True appends a user message after a trailing model turn."""
         context = LLMContext(
             messages=[
@@ -994,11 +1204,13 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Let me check on that."},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual([m.role for m in params["messages"]], ["user", "model", "user"])
         self.assertEqual(params["messages"][-1].parts[0].text, ".")
 
-    def test_ensure_last_message_is_user_after_function_response_and_model_text(self):
+    async def test_ensure_last_message_is_user_after_function_response_and_model_text(self):
         """A settled tool result followed by spoken filler ends with a user turn."""
         context = LLMContext(
             messages=[
@@ -1017,12 +1229,14 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Let me check on that."},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual(params["messages"][-2].role, "model")
         self.assertEqual(params["messages"][-1].role, "user")
         self.assertEqual(params["messages"][-1].parts[0].text, ".")
 
-    def test_ensure_last_message_is_user_off_keeps_trailing_model(self):
+    async def test_ensure_last_message_is_user_off_keeps_trailing_model(self):
         """Without the flag (default), a trailing model turn is preserved."""
         context = LLMContext(
             messages=[
@@ -1030,10 +1244,10 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Hi there!"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
         self.assertEqual([m.role for m in params["messages"]], ["user", "model"])
 
-    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+    async def test_ensure_last_message_is_user_noop_when_trailing_user(self):
         """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
         context = LLMContext(
             messages=[
@@ -1042,17 +1256,19 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
                 {"role": "user", "content": "How are you?"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][-1].parts[0].text, "How are you?")
 
 
-class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
+class TestGeminiLiveGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = GeminiLiveLLMAdapter()
 
-    def test_standard_messages_converted_to_gemini_format(self):
+    async def test_standard_messages_converted_to_gemini_format(self):
         """Test that messages with no tool calls are converted just like Gemini's."""
         standard_messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -1061,11 +1277,11 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=standard_messages)
 
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
-        self.assertEqual(params, GeminiLLMAdapter().get_llm_invocation_params(context))
+        self.assertEqual(params, await GeminiLLMAdapter().get_llm_invocation_params(context))
 
-    def test_llm_specific_message_filtering(self):
+    async def test_llm_specific_message_filtering(self):
         """Test that Gemini Live-specific messages are included and others are filtered out."""
         messages = [
             GeminiLLMAdapter().create_llm_specific_message(
@@ -1077,12 +1293,12 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0].parts[0].text, "Gemini Live specific response")
 
-    def test_tool_call_and_result_summarized_as_text(self):
+    async def test_tool_call_and_result_summarized_as_text(self):
         """Test that a tool call and its result are summarized as text messages."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "What's the weather?"},
@@ -1103,7 +1319,7 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["messages"]), 3)
         # The call is a model turn, its result a user turn.
@@ -1119,7 +1335,7 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         self.assertIn("get_weather", result_message.parts[0].text)
         self.assertIn("nice", result_message.parts[0].text)
 
-    def test_parallel_tool_calls_summarized_together(self):
+    async def test_parallel_tool_calls_summarized_together(self):
         """Test that a message calling several functions is summarized as one message."""
         messages: list[LLMStandardMessage] = [
             {
@@ -1140,7 +1356,7 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["messages"]), 1)
         parts = params["messages"][0].parts
@@ -1149,12 +1365,12 @@ class TestGeminiLiveGetLLMInvocationParams(unittest.TestCase):
         self.assertIn("get_restaurant", parts[0].text)
 
 
-class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
+class TestAnthropicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AnthropicLLMAdapter()
 
-    def test_malformed_message_raises_conversion_error(self):
+    async def test_malformed_message_raises_conversion_error(self):
         """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
@@ -1168,13 +1384,70 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=[malformed_message])
 
         with self.assertRaises(LLMContextConversionError) as ctx:
-            self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+            await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # The underlying cause is preserved for debugging.
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
-    def test_standard_messages_converted_to_anthropic_format(self):
+    async def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file Anthropic never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:text/plain;base64,aGVsbG8=",
+                        "filename": "notes.txt",
+                        "mime_type": "text/plain",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        self.assertIn("Unsupported 'file' MIME type", str(ctx.exception))
+
+    async def test_image_file_base64_converted_to_image_block(self):
+        """Test that an inline image file becomes an Anthropic base64 image block.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:image/png;base64,aGVsbG8=",
+                        "filename": "a.png",
+                        "mime_type": "image/png",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        item = params["messages"][0]["content"][0]
+        self.assertEqual(item["type"], "image")
+        self.assertEqual(
+            item["source"],
+            {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="},
+        )
+
+    async def test_standard_messages_converted_to_anthropic_format(self):
         """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
         # Create standard messages
         standard_messages: list[LLMStandardMessage] = [
@@ -1187,7 +1460,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=standard_messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Verify system instruction is extracted
         self.assertEqual(params["system"], "You are a helpful assistant.")
@@ -1206,7 +1479,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["role"], "assistant")
         self.assertEqual(assistant_msg["content"], "I'm doing well, thank you!")
 
-    def test_llm_specific_message_filtering(self):
+    async def test_llm_specific_message_filtering(self):
         """Test that Anthropic-specific messages are included and others are filtered out."""
         # Create anthropic-specific message content
         anthropic_message_content = {
@@ -1236,7 +1509,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Should only have 2 messages after merging consecutive user messages: merged user + standard response
         # (openai and google specific filtered out, standard + anthropic-specific merged)
@@ -1257,7 +1530,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         # Second message: standard response
         self.assertEqual(params["messages"][1]["content"], "Response")
 
-    def test_consecutive_same_role_messages_merged(self):
+    async def test_consecutive_same_role_messages_merged(self):
         """Test that consecutive messages with the same role are merged into multi-content blocks."""
         messages = [
             {"role": "user", "content": "First user message"},
@@ -1271,7 +1544,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Should have 2 messages after merging (1 user, 1 assistant)
         self.assertEqual(len(params["messages"]), 2)
@@ -1298,7 +1571,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["content"][1]["type"], "text")
         self.assertEqual(assistant_msg["content"][1]["text"], "Second assistant message")
 
-    def test_empty_text_converted_to_empty_placeholder(self):
+    async def test_empty_text_converted_to_empty_placeholder(self):
         """Test that empty text content is converted to "(empty)" string."""
         messages = [
             {"role": "user", "content": ""},  # Empty string
@@ -1315,7 +1588,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Check that empty string content was converted
         user_msg = params["messages"][0]
@@ -1327,7 +1600,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["content"][0]["text"], "(empty)")
         self.assertEqual(assistant_msg["content"][1]["text"], "Valid text")
 
-    def test_complex_message_content_preserved(self):
+    async def test_complex_message_content_preserved(self):
         """Test that complex message structures (text + image) are properly converted to Anthropic format."""
         # Create a complex message with both text and image content
         complex_message = {
@@ -1351,7 +1624,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Verify complex message structure is preserved and converted
         self.assertEqual(len(params["messages"]), 2)
@@ -1376,7 +1649,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(user_msg["content"][2]["type"], "text")
         self.assertEqual(user_msg["content"][2]["text"], "Please describe it in detail.")
 
-    def test_multiple_system_instructions_handling(self):
+    async def test_multiple_system_instructions_handling(self):
         """Test that first system instruction is extracted, later ones converted to user messages."""
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -1389,7 +1662,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # System instruction should be extracted from first message
         self.assertEqual(params["system"], "You are a helpful assistant.")
@@ -1405,7 +1678,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "user")
         self.assertEqual(params["messages"][2]["content"], "Remember to be concise.")
 
-    def test_single_system_message_converted_to_user(self):
+    async def test_single_system_message_converted_to_user(self):
         """Test that a single system message is converted to user role when no other messages exist."""
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -1415,7 +1688,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # System should be NOT_GIVEN since we only have one message
         from anthropic import NOT_GIVEN
@@ -1427,23 +1700,23 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
 
-    def test_single_system_message_conversion_does_not_mutate_source_context(self):
+    async def test_single_system_message_conversion_does_not_mutate_source_context(self):
         """Converting a lone system message to user leaves the source context unchanged."""
         context = LLMContext(messages=[{"role": "system", "content": "You are helpful."}])
 
-        self.adapter.get_llm_invocation_params(
+        await self.adapter.get_llm_invocation_params(
             context, enable_prompt_caching=False, system_instruction="Be concise."
         )
 
         self.assertEqual(context.get_messages()[0]["role"], "system")
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction alone becomes the system parameter."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context, enable_prompt_caching=False, system_instruction="Be helpful."
         )
 
@@ -1451,11 +1724,11 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
-    def test_prompt_caching_marks_system_instruction(self):
+    async def test_prompt_caching_marks_system_instruction(self):
         """Prompt caching adds a reusable breakpoint to the system prompt."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=True,
             system_instruction="Be helpful.",
@@ -1472,11 +1745,11 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
             ],
         )
 
-    def test_prompt_caching_keeps_system_instruction_as_string_when_disabled(self):
+    async def test_prompt_caching_keeps_system_instruction_as_string_when_disabled(self):
         """Without prompt caching, the system prompt keeps its string form."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=False,
             system_instruction="Be helpful.",
@@ -1484,23 +1757,23 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["system"], "Be helpful.")
 
-    def test_prompt_caching_leaves_system_omitted_when_not_configured(self):
+    async def test_prompt_caching_leaves_system_omitted_when_not_configured(self):
         """Caching does not add a system block when no system prompt exists."""
         from anthropic import NOT_GIVEN
 
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=True)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=True)
 
         self.assertIs(params["system"], NOT_GIVEN)
 
-    def test_prompt_caching_system_instruction_ttl(self):
+    async def test_prompt_caching_system_instruction_ttl(self):
         """The system prompt's cache breakpoint carries the configured TTL."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
         for ttl in (None, "5m", "1h"):
             with self.subTest(ttl=ttl):
-                params = self.adapter.get_llm_invocation_params(
+                params = await self.adapter.get_llm_invocation_params(
                     context,
                     enable_prompt_caching=True,
                     system_instruction="Be helpful.",
@@ -1510,11 +1783,11 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 [system_block] = params["system"]
                 self.assertEqual(system_block["cache_control"].get("ttl"), ttl)
 
-    def test_prompt_caching_system_instruction_ttl_ignored_when_disabled(self):
+    async def test_prompt_caching_system_instruction_ttl_ignored_when_disabled(self):
         """A TTL doesn't mark the system prompt when prompt caching is disabled."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
 
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=False,
             system_instruction="Be helpful.",
@@ -1523,7 +1796,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["system"], "Be helpful.")
 
-    def test_initial_developer_message_becomes_user(self):
+    async def test_initial_developer_message_becomes_user(self):
         """Initial developer message without system_instruction becomes user, not system."""
         from anthropic import NOT_GIVEN
 
@@ -1533,14 +1806,14 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         self.assertEqual(params["system"], NOT_GIVEN)
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -1548,8 +1821,8 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
                 system_instruction="Be concise.",
@@ -1560,7 +1833,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
 
         self.assertEqual(params["system"], "Be concise.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -1569,8 +1842,8 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
                 system_instruction="Be concise.",
@@ -1582,7 +1855,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
 
-    def test_subsequent_developer_messages_converted_to_user(self):
+    async def test_subsequent_developer_messages_converted_to_user(self):
         """Subsequent developer messages are converted to user role."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -1590,13 +1863,13 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
             {"role": "developer", "content": "More instructions"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # Developer message was converted to "user"
         self.assertEqual(params["messages"][2]["role"], "user")
         self.assertEqual(params["messages"][2]["content"], "More instructions")
 
-    def test_initial_system_discarded_when_system_instruction_provided(self):
+    async def test_initial_system_discarded_when_system_instruction_provided(self):
         """Initial system message is discarded when system_instruction is provided."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "Old instruction."},
@@ -1604,8 +1877,8 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger"):
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger"):
+            params = await self.adapter.get_llm_invocation_params(
                 context,
                 enable_prompt_caching=False,
                 system_instruction="New instruction.",
@@ -1616,7 +1889,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
 
-    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+    async def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
         """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
         context = LLMContext(
             messages=[
@@ -1624,14 +1897,14 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Hi there!"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context, enable_prompt_caching=False, ensure_last_message_is_user=True
         )
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
 
-    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+    async def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
         """Without the flag (default), a trailing assistant message is preserved."""
         context = LLMContext(
             messages=[
@@ -1639,11 +1912,11 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Hi there!"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][-1]["role"], "assistant")
 
-    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+    async def test_ensure_last_message_is_user_noop_when_trailing_user(self):
         """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
         context = LLMContext(
             messages=[
@@ -1652,21 +1925,21 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "user", "content": "How are you?"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context, enable_prompt_caching=False, ensure_last_message_is_user=True
         )
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"], "How are you?")
 
-    def test_ensure_last_message_is_user_handles_empty_list(self):
+    async def test_ensure_last_message_is_user_handles_empty_list(self):
         """ensure_last_message_is_user=True handles an empty context."""
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             LLMContext(), enable_prompt_caching=False, ensure_last_message_is_user=True
         )
         self.assertEqual(len(params["messages"]), 0)
 
-    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+    async def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
         """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
         context = LLMContext(
             messages=[
@@ -1680,13 +1953,13 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             context, enable_prompt_caching=False, ensure_last_message_is_user=True
         )
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"][0]["type"], "tool_result")
 
-    def test_thought_converted_to_thinking_block(self):
+    async def test_thought_converted_to_thinking_block(self):
         """A signed thought becomes a thinking block merged into the assistant message."""
         context = LLMContext(
             messages=[
@@ -1698,7 +1971,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "It's sunny."},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         # The thought and the response merge into a single assistant message,
         # with the thinking block first.
@@ -1709,7 +1982,7 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         )
         self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
 
-    def test_thought_with_empty_text_preserved(self):
+    async def test_thought_with_empty_text_preserved(self):
         """A signed thought with no text still round-trips as a thinking block.
 
         Models that default to ``display: "omitted"`` return thinking blocks whose
@@ -1726,14 +1999,14 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "It's sunny."},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         self.assertEqual(len(params["messages"]), 2)
         content = params["messages"][1]["content"]
         self.assertEqual(content[0], {"type": "thinking", "thinking": "", "signature": "sig"})
         self.assertEqual(content[1], {"type": "text", "text": "It's sunny."})
 
-    def test_thought_without_signature_dropped(self):
+    async def test_thought_without_signature_dropped(self):
         """A thought with no signature can't be round-tripped, so it's skipped."""
         context = LLMContext(
             messages=[
@@ -1745,19 +2018,19 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "It's sunny."},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+        params = await self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
 
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0]["content"], "What's the weather?")
         self.assertEqual(params["messages"][1]["content"], "It's sunny.")
 
 
-class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
+class TestAWSBedrockGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = AWSBedrockLLMAdapter()
 
-    def test_malformed_message_raises_conversion_error(self):
+    async def test_malformed_message_raises_conversion_error(self):
         """Test that a malformed message raises LLMContextConversionError, preserving the underlying cause."""
         # A data URL with no comma has no base64 payload, so the adapter's
         # url.split(",")[1] raises IndexError during conversion.
@@ -1771,13 +2044,176 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=[malformed_message])
 
         with self.assertRaises(LLMContextConversionError) as ctx:
-            self.adapter.get_llm_invocation_params(context)
+            await self.adapter.get_llm_invocation_params(context)
 
         # The underlying cause is preserved for debugging.
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
-    def test_standard_messages_converted_to_aws_bedrock_format(self):
+    async def test_unsupported_file_mime_type_raises_conversion_error(self):
+        """Test that an unsupported file MIME type raises instead of silently dropping the file.
+
+        A silent drop would leave the file's accompanying text in context
+        forever, referencing a file Bedrock never actually receives.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "please summarize"},
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:application/zip;base64,aGVsbG8=",
+                        "filename": "notes.zip",
+                        "mime_type": "application/zip",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            await self.adapter.get_llm_invocation_params(context)
+
+        self.assertIn("Unsupported 'file' MIME type for Bedrock", str(ctx.exception))
+
+    async def test_unsupported_s3_url_raises_conversion_error(self):
+        """Test that a non-S3 file_url raises instead of silently dropping the file.
+
+        Bedrock only consumes s3:// URIs directly, so without resolved content
+        in a file resolver's cache the conversion must fail loudly.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {
+                        "url": "https://example.com/doc.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        with self.assertRaises(LLMContextConversionError) as ctx:
+            await self.adapter.get_llm_invocation_params(context)
+
+        self.assertIn("Unresolved file URL", str(ctx.exception))
+
+    async def test_file_base64_document_name_is_sanitized_for_bedrock(self):
+        """Test that an ordinary filename is sanitized to satisfy Bedrock's document name rules.
+
+        Bedrock rejects document names containing anything other than
+        alphanumerics, whitespace, hyphens, parentheses, and square brackets
+        (e.g. no "."), which an ordinary filename like "notes.pdf" violates.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:application/pdf;base64,aGVsbG8=",
+                        "filename": "notes.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["name"], "notes pdf")
+
+    async def test_file_url_document_name_is_sanitized_for_bedrock(self):
+        """Test that document name sanitization also applies to the S3-URL file path."""
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_url",
+                    "file": {
+                        "url": "s3://bucket/notes.pdf",
+                        "filename": "notes.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["name"], "notes pdf")
+
+    async def test_file_base64_image_mime_type_converted_to_image_block(self):
+        """An image sent as file_base64 becomes a Bedrock image block, not a document.
+
+        Bedrock's Converse API distinguishes image blocks from document
+        blocks, so a base64 image shouldn't be rejected as an unsupported
+        file just because it arrived via the generic file path.
+        """
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": "data:image/png;base64,aGVsbG8=",
+                        "filename": "photo.png",
+                        "mime_type": "image/png",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        image = params["messages"][0]["content"][0]["image"]
+        self.assertEqual(image["format"], "png")
+        self.assertEqual(image["source"]["bytes"], base64.b64decode("aGVsbG8="))
+
+    async def test_file_base64_uses_cached_raw_bytes(self):
+        """Test that conversion consumes bytes cached by the file resolution pass.
+
+        The cache exists so the file's base64 isn't re-decoded on every
+        conversational turn; using it must take precedence over decoding
+        the data URL.
+        """
+        from pipecat.utils.file_resolver import FileResolver
+
+        data_url = "data:application/pdf;base64,aGVsbG8="
+        cached = b"cached raw bytes"
+        resolver = FileResolver()
+        resolver._bytes_cache[data_url] = cached
+        message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "file_base64",
+                    "file": {
+                        "file_data": data_url,
+                        "filename": "a.pdf",
+                        "mime_type": "application/pdf",
+                    },
+                },
+            ],
+        }
+        context = LLMContext(messages=[message])
+
+        self.adapter.file_resolver = resolver
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        document = params["messages"][0]["content"][0]["document"]
+        self.assertEqual(document["source"]["bytes"], cached)
+
+    async def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
         # Create standard messages
         standard_messages: list[LLMStandardMessage] = [
@@ -1790,7 +2226,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=standard_messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Verify system instruction is extracted (in AWS Bedrock format)
         self.assertIsInstance(params["system"], list)
@@ -1815,7 +2251,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(assistant_msg["content"]), 1)
         self.assertEqual(assistant_msg["content"][0]["text"], "I'm doing well, thank you!")
 
-    def test_llm_specific_message_filtering(self):
+    async def test_llm_specific_message_filtering(self):
         """Test that AWS-specific messages are included and others are filtered out."""
         # Create aws-specific message content (which is what AWS Bedrock uses)
         aws_message_content = {
@@ -1842,7 +2278,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Should only have 2 messages after merging consecutive user messages: merged user + standard response
         # (openai and google specific filtered out, standard + aws-specific merged)
@@ -1861,7 +2297,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         # Second message: standard response
         self.assertEqual(params["messages"][1]["content"][0]["text"], "Response")
 
-    def test_consecutive_same_role_messages_merged(self):
+    async def test_consecutive_same_role_messages_merged(self):
         """Test that consecutive messages with the same role are merged into multi-content blocks."""
         messages = [
             {"role": "user", "content": "First user message"},
@@ -1875,7 +2311,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Should have 2 messages after merging (1 user, 1 assistant)
         self.assertEqual(len(params["messages"]), 2)
@@ -1897,7 +2333,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["content"][0]["text"], "First assistant message")
         self.assertEqual(assistant_msg["content"][1]["text"], "Second assistant message")
 
-    def test_empty_text_converted_to_empty_placeholder(self):
+    async def test_empty_text_converted_to_empty_placeholder(self):
         """Test that empty text content is converted to "(empty)" string."""
         messages = [
             {"role": "user", "content": ""},  # Empty string
@@ -1914,7 +2350,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Check that empty string content was converted
         user_msg = params["messages"][0]
@@ -1927,7 +2363,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(assistant_msg["content"][0]["text"], "(empty)")
         self.assertEqual(assistant_msg["content"][1]["text"], "Valid text")
 
-    def test_complex_message_content_preserved(self):
+    async def test_complex_message_content_preserved(self):
         """Test that complex message structures (text + image) are properly converted to AWS Bedrock format."""
         # Create a complex message with both text and image content
         # Use a valid base64 string for the image
@@ -1954,7 +2390,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # Verify complex message structure is preserved and converted
         self.assertEqual(len(params["messages"]), 2)
@@ -1976,7 +2412,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         # Check second text part (moved to third position)
         self.assertEqual(user_msg["content"][2]["text"], "Please describe it in detail.")
 
-    def test_multiple_system_instructions_handling(self):
+    async def test_multiple_system_instructions_handling(self):
         """Test that first system instruction is extracted, later ones converted to user messages."""
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -1989,7 +2425,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # System instruction should be extracted from first message (in AWS Bedrock format)
         self.assertIsInstance(params["system"], list)
@@ -2007,7 +2443,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "user")
         self.assertEqual(params["messages"][2]["content"][0]["text"], "Remember to be concise.")
 
-    def test_single_system_message_handling(self):
+    async def test_single_system_message_handling(self):
         """Test that a single system message is converted to user role when no other messages exist."""
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -2017,7 +2453,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         # When there's only one message, it's converted to user in-place (not extracted)
         # so system is None
@@ -2030,17 +2466,19 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
             params["messages"][0]["content"][0]["text"], "You are a helpful assistant."
         )
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction alone becomes the system parameter."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be helpful."
+        )
 
         self.assertEqual(params["system"], [{"text": "Be helpful."}])
 
-    def test_initial_developer_message_becomes_user(self):
+    async def test_initial_developer_message_becomes_user(self):
         """Initial developer message without system_instruction becomes user, not system."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -2048,14 +2486,14 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsNone(params["system"])
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"][0]["text"], "Extra context.")
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -2063,15 +2501,15 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_called_once()
 
         self.assertEqual(params["system"], [{"text": "Be concise."}])
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -2079,8 +2517,8 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_not_called()
@@ -2088,7 +2526,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["system"], [{"text": "Be concise."}])
         self.assertEqual(params["messages"][0]["role"], "user")
 
-    def test_subsequent_developer_messages_converted_to_user(self):
+    async def test_subsequent_developer_messages_converted_to_user(self):
         """Subsequent developer messages are converted to user role."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -2096,11 +2534,11 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
             {"role": "developer", "content": "More instructions"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][2]["role"], "user")
 
-    def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
+    async def test_ensure_last_message_is_user_appends_when_trailing_assistant(self):
         """ensure_last_message_is_user=True appends a user message after a trailing assistant."""
         context = LLMContext(
             messages=[
@@ -2108,12 +2546,14 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Hi there!"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"], [{"text": "."}])
 
-    def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
+    async def test_ensure_last_message_is_user_off_keeps_trailing_assistant(self):
         """Without the flag (default), a trailing assistant message is preserved."""
         context = LLMContext(
             messages=[
@@ -2121,11 +2561,11 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
                 {"role": "assistant", "content": "Hi there!"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][-1]["role"], "assistant")
 
-    def test_ensure_last_message_is_user_noop_when_trailing_user(self):
+    async def test_ensure_last_message_is_user_noop_when_trailing_user(self):
         """ensure_last_message_is_user=True does nothing when the list already ends with a user."""
         context = LLMContext(
             messages=[
@@ -2134,18 +2574,20 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
                 {"role": "user", "content": "How are you?"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][-1]["role"], "user")
 
-    def test_ensure_last_message_is_user_handles_empty_list(self):
+    async def test_ensure_last_message_is_user_handles_empty_list(self):
         """ensure_last_message_is_user=True handles an empty context."""
-        params = self.adapter.get_llm_invocation_params(
+        params = await self.adapter.get_llm_invocation_params(
             LLMContext(), ensure_last_message_is_user=True
         )
         self.assertEqual(len(params["messages"]), 0)
 
-    def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
+    async def test_ensure_last_message_is_user_noop_when_tool_result_trailing(self):
         """ensure_last_message_is_user=True does nothing when a tool result (user role) trails."""
         context = LLMContext(
             messages=[
@@ -2159,11 +2601,13 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
                 {"role": "tool", "content": "Sunny, 22°C", "tool_call_id": "t1"},
             ]
         )
-        params = self.adapter.get_llm_invocation_params(context, ensure_last_message_is_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, ensure_last_message_is_user=True
+        )
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertIn("toolResult", params["messages"][-1]["content"][0])
 
-    def test_image_before_text_does_not_raise_unbound_local_error(self):
+    async def test_image_before_text_does_not_raise_unbound_local_error(self):
         """Regression test for issue #4724: image placed before text must not raise UnboundLocalError.
 
         When a user message's content list places the image *before* the text (e.g. a
@@ -2188,7 +2632,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=[message])
 
         # Must not raise — previously threw UnboundLocalError.
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         user_msg = params["messages"][0]
         self.assertEqual(user_msg["role"], "user")
@@ -2198,7 +2642,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertIn("image", content[0])
         self.assertEqual(content[1]["text"], "What do you see?")
 
-    def test_image_after_text_reordered_to_first(self):
+    async def test_image_after_text_reordered_to_first(self):
         """Image placed after text is reordered to come before text (existing behaviour)."""
         message: LLMStandardMessage = {
             "role": "user",
@@ -2213,7 +2657,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
             ],
         }
         context = LLMContext(messages=[message])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         user_msg = params["messages"][0]
         content = user_msg["content"]
@@ -2222,8 +2666,91 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertIn("image", content[0])
         self.assertEqual(content[1]["text"], "What do you see?")
 
+    async def test_thought_converted_to_reasoning_content(self):
+        """A signed thought becomes a reasoning block merged into the assistant message."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "t1", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ],
+                },
+                {"role": "tool", "content": "Sunny", "tool_call_id": "t1"},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
 
-class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
+        # The thought and the tool call merge into a single assistant message,
+        # with the reasoning first.
+        self.assertEqual(len(params["messages"]), 3)
+        content = params["messages"][1]["content"]
+        self.assertEqual(
+            content[0],
+            {"reasoningContent": {"reasoningText": {"text": "Let me check.", "signature": "sig"}}},
+        )
+        self.assertEqual(content[1]["toolUse"]["toolUseId"], "t1")
+
+    async def test_thought_without_signature_dropped(self):
+        """A thought with no signature can't be passed back, so it's skipped."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(llm="aws", message={"type": "thought", "text": "[REDACTED]"}),
+                {"role": "assistant", "content": "It's sunny."},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][1]["content"], [{"text": "It's sunny."}])
+
+    def test_thought_signature_elided_from_logs(self):
+        """Reasoning signatures are elided from logged messages."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "What's the weather?"},
+                LLMSpecificMessage(
+                    llm="aws",
+                    message={"type": "thought", "text": "Let me check.", "signature": "sig"},
+                ),
+            ]
+        )
+        messages = self.adapter.get_messages_for_logging(context)
+
+        reasoning = messages[1]["content"][0]["reasoningContent"]["reasoningText"]
+        self.assertEqual(reasoning, {"text": "Let me check.", "signature": "..."})
+
+
+class TestSanitizeBedrockDocumentName(unittest.TestCase):
+    """Tests for bedrock_adapter._sanitize_bedrock_document_name."""
+
+    def test_dot_and_underscore_replaced_with_whitespace(self):
+        self.assertEqual(_sanitize_bedrock_document_name("my_notes.pdf"), "my notes pdf")
+
+    def test_allowed_characters_preserved(self):
+        self.assertEqual(
+            _sanitize_bedrock_document_name("Report (v2) [final] - draft"),
+            "Report (v2) [final] - draft",
+        )
+
+    def test_consecutive_whitespace_collapsed(self):
+        self.assertEqual(_sanitize_bedrock_document_name("weird   spacing"), "weird spacing")
+
+    def test_leading_and_trailing_whitespace_stripped(self):
+        self.assertEqual(_sanitize_bedrock_document_name("  notes.txt  "), "notes txt")
+
+    def test_empty_or_fully_disallowed_name_falls_back_to_document(self):
+        self.assertEqual(_sanitize_bedrock_document_name(""), "document")
+        self.assertEqual(_sanitize_bedrock_document_name("..."), "document")
+
+
+class TestPerplexityGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     # Perplexity doesn't support the "developer" role, so PerplexityLLMService
     # sets supports_developer_role = False. Tests below pass
     # convert_developer_to_user=True to match production behavior.
@@ -2232,7 +2759,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         """Sets up a common adapter instance for all tests."""
         self.adapter = PerplexityLLMAdapter()
 
-    def test_standard_messages_pass_through(self):
+    async def test_standard_messages_pass_through(self):
         """Test that a valid [user, assistant, user] sequence passes through unchanged."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -2241,7 +2768,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "user")
@@ -2251,7 +2780,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "user")
         self.assertEqual(params["messages"][2]["content"], "How are you?")
 
-    def test_initial_system_message_preserved(self):
+    async def test_initial_system_message_preserved(self):
         """Test that a valid [system, user, assistant, user] sequence passes through unchanged."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -2261,7 +2790,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 4)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -2270,7 +2801,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "assistant")
         self.assertEqual(params["messages"][3]["role"], "user")
 
-    def test_consecutive_same_role_messages_merged(self):
+    async def test_consecutive_same_role_messages_merged(self):
         """Test that consecutive user messages are merged into list-of-dicts content."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "First message"},
@@ -2280,7 +2811,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 3)
 
@@ -2297,7 +2830,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][1]["role"], "assistant")
         self.assertEqual(params["messages"][2]["role"], "user")
 
-    def test_non_initial_system_converted_to_user(self):
+    async def test_non_initial_system_converted_to_user(self):
         """Test that non-initial system messages are converted to user and merged with adjacent user."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -2308,7 +2841,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         # system(initial), user, assistant, merged(system→user + user)
         self.assertEqual(len(params["messages"]), 4)
@@ -2324,7 +2859,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(merged["content"][0]["text"], "Be concise.")
         self.assertEqual(merged["content"][1]["text"], "Tell me about Python.")
 
-    def test_multiple_system_messages_at_start_preserved(self):
+    async def test_multiple_system_messages_at_start_preserved(self):
         """Test that multiple consecutive system messages at start pass through unchanged."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -2333,7 +2868,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -2343,7 +2880,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["role"], "user")
         self.assertEqual(params["messages"][2]["content"], "Hello")
 
-    def test_trailing_assistant_removed(self):
+    async def test_trailing_assistant_removed(self):
         """Test that a trailing assistant message is removed."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -2351,13 +2888,15 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Hello")
 
-    def test_only_system_messages_preserved(self):
+    async def test_only_system_messages_preserved(self):
         """Test that system-only contexts are left unchanged (no system→user conversion).
 
         We intentionally do not convert trailing system messages to "user"
@@ -2370,12 +2909,14 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "system")
 
-    def test_system_exposed_after_trailing_assistant_removed(self):
+    async def test_system_exposed_after_trailing_assistant_removed(self):
         """Test that a system message exposed by trailing assistant removal stays system.
 
         It's important that initial system messages are never converted to
@@ -2389,14 +2930,16 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         # Trailing assistant removed → [system], system stays as-is
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "system")
         self.assertEqual(params["messages"][0]["content"], "You are helpful.")
 
-    def test_consecutive_assistants_merged_then_trailing_removed(self):
+    async def test_consecutive_assistants_merged_then_trailing_removed(self):
         """Test that consecutive assistant messages are merged, then trailing assistant is removed."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -2405,7 +2948,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         # After merging assistants we get [user, assistant(merged)], then trailing
         # assistant is removed, leaving just [user]
@@ -2413,7 +2958,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Hello")
 
-    def test_tool_messages_preserved(self):
+    async def test_tool_messages_preserved(self):
         """Test that tool messages pass through without modification."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "What's the weather?"},
@@ -2427,7 +2972,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(len(params["messages"]), 4)
         self.assertEqual(params["messages"][0]["role"], "user")
@@ -2436,7 +2983,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["content"], "Sunny, 72F")
         self.assertEqual(params["messages"][3]["role"], "user")
 
-    def test_developer_message_converted_to_user(self):
+    async def test_developer_message_converted_to_user(self):
         """Developer messages are converted to user role."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -2445,12 +2992,14 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
 
-    def test_developer_message_merged_with_adjacent_user(self):
+    async def test_developer_message_merged_with_adjacent_user(self):
         """Developer→user conversion merges with adjacent user messages."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Be concise."},
@@ -2460,7 +3009,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         # developer→user merged with following user
         self.assertEqual(len(params["messages"]), 3)
@@ -2471,15 +3022,17 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(merged["content"][0]["text"], "Be concise.")
         self.assertEqual(merged["content"][1]["text"], "Hello")
 
-    def test_empty_messages(self):
+    async def test_empty_messages(self):
         """Test that empty messages list returns empty."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"], [])
 
 
-class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
+class TestDeepSeekGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     # DeepSeek doesn't support the "developer" role, so DeepSeekLLMService
     # sets supports_developer_role = False. Tests below pass
     # convert_developer_to_user=True to match production behavior.
@@ -2495,7 +3048,7 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
             "function": {"name": "get_weather", "arguments": '{"location": "LA"}'},
         }
 
-    def test_tool_call_message_gets_empty_reasoning_content(self):
+    async def test_tool_call_message_gets_empty_reasoning_content(self):
         """An assistant tool-call message without reasoning_content gets an empty one."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Weather in LA?"},
@@ -2504,14 +3057,16 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         assistant = params["messages"][1]
         self.assertEqual(assistant["role"], "assistant")
         self.assertEqual(assistant["reasoning_content"], "")
         self.assertEqual(assistant["tool_calls"], [self._tool_call()])
 
-    def test_spoken_text_before_tool_call_also_stamped(self):
+    async def test_spoken_text_before_tool_call_also_stamped(self):
         """Assistant text recorded before a tool call (e.g. spoken via TTS) is stamped too."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Weather in LA?"},
@@ -2521,13 +3076,15 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][1]["content"], "Let me check on that.")
         self.assertEqual(params["messages"][1]["reasoning_content"], "")
         self.assertEqual(params["messages"][2]["reasoning_content"], "")
 
-    def test_existing_reasoning_content_preserved(self):
+    async def test_existing_reasoning_content_preserved(self):
         """An assistant message that already carries reasoning_content is left alone."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Weather in LA?"},
@@ -2539,11 +3096,13 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][1]["reasoning_content"], "Need the weather tool.")
 
-    def test_non_assistant_messages_untouched(self):
+    async def test_non_assistant_messages_untouched(self):
         """System, user, and tool messages never get the field."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -2554,13 +3113,15 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         for i in (0, 1, 3, 4):
             self.assertNotIn("reasoning_content", params["messages"][i])
         self.assertEqual(params["messages"][2]["reasoning_content"], "")
 
-    def test_context_messages_not_mutated(self):
+    async def test_context_messages_not_mutated(self):
         """Stamping produces copies; the context's own message dicts are unchanged."""
         assistant: LLMStandardMessage = {"role": "assistant", "content": "Hi!"}
         messages: list[LLMStandardMessage] = [
@@ -2569,56 +3130,58 @@ class TestDeepSeekGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+        params = await self.adapter.get_llm_invocation_params(
+            context, convert_developer_to_user=True
+        )
 
         self.assertEqual(params["messages"][1]["reasoning_content"], "")
         self.assertNotIn("reasoning_content", assistant)
         self.assertNotIn("reasoning_content", context.get_messages()[1])
 
 
-class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
+class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = OpenAIResponsesLLMAdapter()
 
-    def test_simple_user_assistant_messages(self):
+    async def test_simple_user_assistant_messages(self):
         """Simple user/assistant text messages are converted correctly."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0], {"role": "user", "content": "Hello"})
         self.assertEqual(params["input"][1], {"role": "assistant", "content": "Hi there!"})
 
-    def test_system_role_converted_to_developer(self):
+    async def test_system_role_converted_to_developer(self):
         """System role messages are converted to developer role."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["input"][0]["role"], "developer")
         self.assertEqual(params["input"][0]["content"], "You are helpful.")
 
-    def test_developer_role_kept_as_developer(self):
+    async def test_developer_role_kept_as_developer(self):
         """Developer role messages are kept as developer role."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["input"][0]["role"], "developer")
         self.assertEqual(params["input"][0]["content"], "Extra context.")
 
-    def test_system_message_without_system_instruction_no_warning(self):
+    async def test_system_message_without_system_instruction_no_warning(self):
         """System message without system_instruction does not trigger a warning."""
         adapter = OpenAIResponsesLLMAdapter()
         messages: list[LLMStandardMessage] = [
@@ -2627,11 +3190,11 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            adapter.get_llm_invocation_params(context)
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            await adapter.get_llm_invocation_params(context)
             mock_logger.warning.assert_not_called()
 
-    def test_system_message_with_system_instruction_triggers_warning(self):
+    async def test_system_message_with_system_instruction_triggers_warning(self):
         """System message + system_instruction triggers a conflict warning."""
         adapter = OpenAIResponsesLLMAdapter()
         messages: list[LLMStandardMessage] = [
@@ -2640,13 +3203,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
             warning_msg = mock_logger.warning.call_args[0][0]
             self.assertIn("system_instruction", warning_msg)
 
-    def test_developer_message_with_system_instruction_no_warning(self):
+    async def test_developer_message_with_system_instruction_no_warning(self):
         """Developer message + system_instruction does NOT trigger a warning."""
         adapter = OpenAIResponsesLLMAdapter()
         messages: list[LLMStandardMessage] = [
@@ -2655,15 +3218,17 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await adapter.get_llm_invocation_params(
+                context, system_instruction="Be concise."
+            )
             mock_logger.warning.assert_not_called()
 
         # Developer message stays as developer, system_instruction becomes instructions
         self.assertEqual(params["input"][0]["role"], "developer")
         self.assertEqual(params["instructions"], "Be concise.")
 
-    def test_non_initial_system_message_no_warning(self):
+    async def test_non_initial_system_message_no_warning(self):
         """Non-initial system messages are converted without a warning."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
@@ -2672,14 +3237,16 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await adapter.get_llm_invocation_params(
+                context, system_instruction="Be helpful."
+            )
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["input"][1]["role"], "developer")
         self.assertEqual(params["input"][1]["content"], "New instruction")
 
-    def test_conflict_warning_fires_only_once(self):
+    async def test_conflict_warning_fires_only_once(self):
         """The conflict warning fires only once per adapter instance."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -2688,12 +3255,12 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
-            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+            await adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
 
-    def test_assistant_tool_calls_to_function_call(self):
+    async def test_assistant_tool_calls_to_function_call(self):
         """Assistant messages with tool_calls produce function_call input items."""
         messages = [
             {
@@ -2711,7 +3278,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 1)
         fc = params["input"][0]
@@ -2720,7 +3287,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(fc["name"], "get_weather")
         self.assertEqual(fc["arguments"], '{"location": "SF"}')
 
-    def test_multiple_tool_calls(self):
+    async def test_multiple_tool_calls(self):
         """Multiple tool calls in one assistant message produce multiple function_call items."""
         messages = [
             {
@@ -2743,13 +3310,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0]["name"], "get_weather")
         self.assertEqual(params["input"][1]["name"], "get_restaurant")
 
-    def test_tool_message_to_function_call_output(self):
+    async def test_tool_message_to_function_call_output(self):
         """Tool role messages produce function_call_output input items."""
         messages = [
             {
@@ -2759,7 +3326,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 1)
         fco = params["input"][0]
@@ -2767,7 +3334,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(fco["call_id"], "call_123")
         self.assertEqual(fco["output"], '{"temperature": "72"}')
 
-    def test_mixed_conversation(self):
+    async def test_mixed_conversation(self):
         """Mixed conversation with text + function calls converts correctly."""
         messages = [
             {"role": "user", "content": "What's the weather in SF?"},
@@ -2789,7 +3356,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             {"role": "assistant", "content": "It's 72 degrees in SF."},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 4)
         self.assertEqual(params["input"][0]["role"], "user")
@@ -2797,7 +3364,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["input"][2]["type"], "function_call_output")
         self.assertEqual(params["input"][3]["role"], "assistant")
 
-    def test_multimodal_text_conversion(self):
+    async def test_multimodal_text_conversion(self):
         """Multimodal text content parts are converted to input_text."""
         messages = [
             {
@@ -2808,14 +3375,14 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         content = params["input"][0]["content"]
         self.assertEqual(len(content), 1)
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[0]["text"], "What's in this image?")
 
-    def test_multimodal_image_conversion(self):
+    async def test_multimodal_image_conversion(self):
         """Multimodal image_url content parts are converted to input_image."""
         messages = [
             {
@@ -2830,7 +3397,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         content = params["input"][0]["content"]
         self.assertEqual(len(content), 2)
@@ -2839,7 +3406,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(content[1]["image_url"], "data:image/jpeg;base64,abc123")
         self.assertEqual(content[1]["detail"], "auto")
 
-    def test_multimodal_image_with_detail(self):
+    async def test_multimodal_image_with_detail(self):
         """Image content parts preserve the detail setting when provided."""
         messages = [
             {
@@ -2853,12 +3420,92 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         content = params["input"][0]["content"]
         self.assertEqual(content[0]["detail"], "high")
 
-    def test_tools_schema_flattening(self):
+    async def test_image_file_url_converted_to_input_image(self):
+        """A file_url with an image MIME type becomes input_image, not input_file.
+
+        The Responses API supports public image URLs directly via
+        input_image, so an image sent as a file_url shouldn't be mishandled
+        as a generic file.
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": "https://example.com/photo.jpg",
+                            "mime_type": "image/jpeg",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_image")
+        self.assertEqual(content[0]["image_url"], "https://example.com/photo.jpg")
+
+    async def test_non_image_file_url_converted_to_input_file(self):
+        """A file_url with a non-image MIME type becomes input_file."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_url",
+                        "file": {
+                            "url": "https://example.com/doc.pdf",
+                            "mime_type": "application/pdf",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_file")
+        self.assertEqual(content[0]["file_url"], "https://example.com/doc.pdf")
+
+    async def test_image_file_base64_converted_to_input_image(self):
+        """An inline image file becomes input_image content with a data URL.
+
+        An image can arrive as a file_base64 item (e.g. a URL the file
+        resolution pass fetched and inlined), not only as image_url.
+        """
+        data_url = "data:image/png;base64,aGVsbG8="
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file_base64",
+                        "file": {
+                            "file_data": data_url,
+                            "filename": "a.png",
+                            "mime_type": "image/png",
+                        },
+                    },
+                ],
+            }
+        ]
+        context = LLMContext(messages=messages)
+        params = await self.adapter.get_llm_invocation_params(context)
+
+        content = params["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_image")
+        self.assertEqual(content[0]["image_url"], data_url)
+
+    async def test_tools_schema_flattening(self):
         """Tools schema with nested function dict is flattened to Responses API format."""
         weather_fn = FunctionSchema(
             name="get_weather",
@@ -2870,7 +3517,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         )
         tools = ToolsSchema(standard_tools=[weather_fn])
         context = LLMContext(tools=tools)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         tool_list = params["tools"]
         self.assertEqual(len(tool_list), 1)
@@ -2880,20 +3527,20 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(tool["description"], "Get the current weather")
         self.assertIn("properties", tool["parameters"])
 
-    def test_tools_absent_yields_openai_sentinel(self):
+    async def test_tools_absent_yields_openai_sentinel(self):
         """A context without tools yields the sentinel the SDK omits from the request."""
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsInstance(params["tools"], OpenAINotGiven)
 
-    def test_empty_messages(self):
+    async def test_empty_messages(self):
         """Empty messages list produces empty input list."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
         self.assertEqual(params["input"], [])
 
-    def test_llm_specific_message_passthrough(self):
+    async def test_llm_specific_message_passthrough(self):
         """LLMSpecificMessage with llm='openai_responses' passes through."""
         specific_msg = self.adapter.create_llm_specific_message(
             {"type": "function_call", "call_id": "x", "name": "foo", "arguments": "{}"}
@@ -2903,13 +3550,13 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             specific_msg,
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0]["role"], "user")
         self.assertEqual(params["input"][1]["type"], "function_call")
 
-    def test_reasoning_message_becomes_reasoning_item(self):
+    async def test_reasoning_message_becomes_reasoning_item(self):
         """A persisted reasoning message converts to a Responses reasoning item."""
         reasoning_msg = self.adapter.create_llm_specific_message(
             {
@@ -2920,7 +3567,7 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             }
         )
         context = LLMContext(messages=[reasoning_msg])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(
             params["input"][0],
@@ -2932,24 +3579,24 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
             },
         )
 
-    def test_reasoning_precedes_assistant_message(self):
+    async def test_reasoning_precedes_assistant_message(self):
         """Reasoning round-trips positioned before the assistant reply it produced."""
         reasoning_msg = self.adapter.create_llm_specific_message(
             {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENCRYPTED"}
         )
         context = LLMContext(messages=[reasoning_msg, {"role": "assistant", "content": "Hello!"}])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["input"][0]["type"], "reasoning")
         self.assertEqual(params["input"][1]["role"], "assistant")
 
-    def test_reasoning_without_encrypted_content_omits_field(self):
+    async def test_reasoning_without_encrypted_content_omits_field(self):
         """encrypted_content is optional; omit it rather than send null."""
         reasoning_msg = self.adapter.create_llm_specific_message(
             {"type": "reasoning", "id": "rs_2", "summary": []}
         )
         context = LLMContext(messages=[reasoning_msg])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["input"][0]["type"], "reasoning")
         self.assertEqual(params["input"][0]["id"], "rs_2")
@@ -2959,87 +3606,91 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         """Adapter identifier is 'openai_responses'."""
         self.assertEqual(self.adapter.id_for_llm_specific_messages, "openai_responses")
 
-    def test_system_instruction_with_messages_sets_instructions(self):
+    async def test_system_instruction_with_messages_sets_instructions(self):
         """When system_instruction is provided and input is non-empty, sets instructions."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be helpful."
+        )
 
         self.assertEqual(params["instructions"], "Be helpful.")
         self.assertEqual(len(params["input"]), 1)
         self.assertEqual(params["input"][0]["role"], "user")
 
-    def test_system_instruction_with_empty_input_becomes_developer_message(self):
+    async def test_system_instruction_with_empty_input_becomes_developer_message(self):
         """When system_instruction is provided but input is empty, it becomes a developer message."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be helpful."
+        )
 
         self.assertNotIn("instructions", params)
         self.assertEqual(len(params["input"]), 1)
         self.assertEqual(params["input"][0]["role"], "developer")
         self.assertEqual(params["input"][0]["content"], "Be helpful.")
 
-    def test_no_system_instruction_omits_instructions(self):
+    async def test_no_system_instruction_omits_instructions(self):
         """When no system_instruction is provided, instructions key is absent."""
         context = LLMContext(messages=[{"role": "user", "content": "Hi"}])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertNotIn("instructions", params)
 
 
-class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
+class TestOpenAIRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.adapter = OpenAIRealtimeLLMAdapter()
 
-    def test_system_message_extracted_as_instruction(self):
+    async def test_system_message_extracted_as_instruction(self):
         """Initial system message is extracted as system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_developer_message_becomes_user(self):
+    async def test_developer_message_becomes_user(self):
         """Developer message is converted to user, not extracted as system instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsNone(params["system_instruction"])
         # Developer converted to user, then packed with the other user message
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_subsequent_developer_message_becomes_user(self):
+    async def test_subsequent_developer_message_becomes_user(self):
         """Non-initial developer message is converted to user."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "developer", "content": "Extra context."},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         # Developer message converted to user
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_empty_messages(self):
+    async def test_empty_messages(self):
         """Empty messages list returns empty."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"], [])
         self.assertIsNone(params["system_instruction"])
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -3047,15 +3698,15 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_called_once()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -3063,75 +3714,97 @@ class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction without context system message returns system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be concise."
+        )
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
 
-class TestGrokRealtimeGetLLMInvocationParams(unittest.TestCase):
+class TestRealtimePackedHistoryKeepsNonAscii(unittest.IsolatedAsyncioTestCase):
+    async def test_packed_history_is_not_escaped(self):
+        """Multi-message history packed into one text item keeps non-ASCII text readable."""
+        for cls in (
+            OpenAIRealtimeLLMAdapter,
+            GrokRealtimeLLMAdapter,
+            InworldRealtimeLLMAdapter,
+            AzureVoiceLiveLLMAdapter,
+        ):
+            with self.subTest(adapter=cls.__name__):
+                messages: list[LLMStandardMessage] = [
+                    {"role": "user", "content": "मेरा ऑर्डर कहाँ है?"},
+                    {"role": "assistant", "content": "आपका ऑर्डर कल पहुँचेगा।"},
+                ]
+                params = await cls().get_llm_invocation_params(LLMContext(messages=messages))
+                text = params["messages"][0].content[0].text
+                self.assertIn("मेरा ऑर्डर कहाँ है?", text)
+                self.assertIn("आपका ऑर्डर कल पहुँचेगा।", text)
+
+
+class TestGrokRealtimeGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.adapter = GrokRealtimeLLMAdapter()
 
-    def test_system_message_extracted_as_instruction(self):
+    async def test_system_message_extracted_as_instruction(self):
         """Initial system message is extracted as system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_developer_message_becomes_user(self):
+    async def test_developer_message_becomes_user(self):
         """Developer message is converted to user, not extracted as system instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsNone(params["system_instruction"])
         # Developer converted to user, then packed with the other user message
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_subsequent_developer_message_becomes_user(self):
+    async def test_subsequent_developer_message_becomes_user(self):
         """Non-initial developer message is converted to user."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "developer", "content": "Extra context."},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_empty_messages(self):
+    async def test_empty_messages(self):
         """Empty messages list returns empty."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"], [])
         self.assertIsNone(params["system_instruction"])
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -3139,15 +3812,15 @@ class TestGrokRealtimeGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_called_once()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -3155,55 +3828,57 @@ class TestGrokRealtimeGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction without context system message returns system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be concise."
+        )
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
 
-class TestAWSNovaSonicGetLLMInvocationParams(unittest.TestCase):
+class TestAWSNovaSonicGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.adapter = AWSNovaSonicLLMAdapter()
 
-    def test_system_message_extracted_as_instruction(self):
+    async def test_system_message_extracted_as_instruction(self):
         """Initial system message is extracted as system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         self.assertEqual(len(params["messages"]), 1)
 
-    def test_developer_message_becomes_user(self):
+    async def test_developer_message_becomes_user(self):
         """Developer message is converted to user, not extracted as system instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertIsNone(params["system_instruction"])
         # Both messages should be present (developer as user, plus the real user)
         self.assertEqual(len(params["messages"]), 2)
 
-    def test_subsequent_developer_message_becomes_user(self):
+    async def test_subsequent_developer_message_becomes_user(self):
         """Non-initial developer message is converted to user."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -3211,13 +3886,13 @@ class TestAWSNovaSonicGetLLMInvocationParams(unittest.TestCase):
             {"role": "assistant", "content": "Hi"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = await self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(params["system_instruction"], "You are helpful.")
         # Developer becomes user, plus assistant
         self.assertEqual(len(params["messages"]), 2)
 
-    def test_both_system_instruction_and_system_message_warns(self):
+    async def test_both_system_instruction_and_system_message_warns(self):
         """system_instruction + initial system message warns and uses system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -3225,15 +3900,15 @@ class TestAWSNovaSonicGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_called_once()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_both_system_instruction_and_developer_message_no_warning(self):
+    async def test_both_system_instruction_and_developer_message_no_warning(self):
         """system_instruction + initial developer message: no warning, developer becomes user."""
         messages: list[LLMStandardMessage] = [
             {"role": "developer", "content": "Extra context."},
@@ -3241,21 +3916,23 @@ class TestAWSNovaSonicGetLLMInvocationParams(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            params = self.adapter.get_llm_invocation_params(
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
+            params = await self.adapter.get_llm_invocation_params(
                 context, system_instruction="Be concise."
             )
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
-    def test_system_instruction_only(self):
+    async def test_system_instruction_only(self):
         """system_instruction without context system message returns system_instruction."""
         messages: list[LLMStandardMessage] = [
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+        params = await self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be concise."
+        )
 
         self.assertEqual(params["system_instruction"], "Be concise.")
 
@@ -3320,7 +3997,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         ]
 
         adapter = OpenAILLMAdapter()
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             content = adapter._extract_initial_system(messages, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
 
@@ -3346,7 +4023,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_both_system_discard(self):
         """Resolve with discard=True: system_instruction wins, warns."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 "from context", "from settings", discard_context_system=True
             )
@@ -3357,7 +4034,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_both_system_keep(self):
         """Resolve with discard=False: warns but returns system_instruction."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 "from context", "from settings", discard_context_system=False
             )
@@ -3367,7 +4044,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
 
     def test_resolve_only_system_instruction(self):
         """Only system_instruction: returns it, no warning."""
-        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.llm.base_llm_adapter.logger") as mock_logger:
             result = self.adapter._resolve_system_instruction(
                 None, "from settings", discard_context_system=True
             )
@@ -3392,7 +4069,7 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestTrailingUserMessageInjection(unittest.TestCase):
+class TestTrailingUserMessageInjection(unittest.IsolatedAsyncioTestCase):
     """Model gating for the no-prefill trailing-user-message injection.
 
     Claude 4.6+ models reject requests whose message list ends with an
@@ -3449,7 +4126,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         )
         self.assertFalse(service._should_inject_trailing_user_message())
 
-    def test_anthropic_invocation_params_append_trailing_user(self):
+    async def test_anthropic_invocation_params_append_trailing_user(self):
         """A trailing assistant message gets a user message appended, request-only."""
         service = self._anthropic(model="claude-sonnet-4-6")
         context = LLMContext(
@@ -3458,14 +4135,14 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
                 {"role": "assistant", "content": "◐"},
             ]
         )
-        params = service._get_llm_invocation_params(context)
+        params = await service._get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][-1]["role"], "user")
         self.assertEqual(params["messages"][-1]["content"], [{"type": "text", "text": "."}])
         # The stored context is never mutated — the fix applies to the request only.
         self.assertEqual(context.messages[-1]["role"], "assistant")
 
-    def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
+    async def test_anthropic_invocation_params_untouched_when_prefill_supported(self):
         """Legacy prefill-supporting models keep the trailing assistant message."""
         service = self._anthropic(model="claude-haiku-4-5")
         context = LLMContext(
@@ -3474,7 +4151,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
                 {"role": "assistant", "content": "◐"},
             ]
         )
-        params = service._get_llm_invocation_params(context)
+        params = await service._get_llm_invocation_params(context)
 
         self.assertEqual(params["messages"][-1]["role"], "assistant")
 
@@ -3517,7 +4194,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
             service = self._google(model=model)
             self.assertEqual(service._should_inject_trailing_user_message(), expected, model)
 
-    def test_google_stream_params_append_trailing_user(self):
+    async def test_google_stream_params_append_trailing_user(self):
         """A trailing model turn gets a user turn appended, request-only."""
         from unittest.mock import AsyncMock
 
@@ -3530,7 +4207,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
             ]
         )
         adapter = service.get_llm_adapter()
-        params = adapter.get_llm_invocation_params(
+        params = await adapter.get_llm_invocation_params(
             context,
             ensure_last_message_is_user=service._should_inject_trailing_user_message(),
         )
@@ -3540,7 +4217,7 @@ class TestTrailingUserMessageInjection(unittest.TestCase):
         self.assertEqual(context.messages[-1]["role"], "assistant")
 
 
-class TestContextSystemMessageDeprecation(unittest.TestCase):
+class TestContextSystemMessageDeprecation(unittest.IsolatedAsyncioTestCase):
     """Every adapter warns when the system prompt is carried in the context."""
 
     def _context(self):
@@ -3551,24 +4228,24 @@ class TestContextSystemMessageDeprecation(unittest.TestCase):
             ]
         )
 
-    def _invoke(self, adapter, system_instruction):
+    async def _invoke(self, adapter, system_instruction):
         if isinstance(adapter, OpenAILLMAdapter):
-            return adapter.get_llm_invocation_params(
+            return await adapter.get_llm_invocation_params(
                 self._context(),
                 system_instruction=system_instruction,
                 convert_developer_to_user=False,
             )
         if isinstance(adapter, AnthropicLLMAdapter):
-            return adapter.get_llm_invocation_params(
+            return await adapter.get_llm_invocation_params(
                 self._context(),
                 system_instruction=system_instruction,
                 enable_prompt_caching=False,
             )
-        return adapter.get_llm_invocation_params(
+        return await adapter.get_llm_invocation_params(
             self._context(), system_instruction=system_instruction
         )
 
-    def test_every_adapter_warns_with_or_without_system_instruction(self):
+    async def test_every_adapter_warns_with_or_without_system_instruction(self):
         adapters = [
             OpenAILLMAdapter,
             OpenAIResponsesLLMAdapter,
@@ -3583,21 +4260,24 @@ class TestContextSystemMessageDeprecation(unittest.TestCase):
         for cls in adapters:
             for system_instruction in (None, "Be concise."):
                 with self.subTest(adapter=cls.__name__, system_instruction=system_instruction):
+                    # Every adapter warns from the same line, so start each one
+                    # from an empty record of warned sites.
+                    _warned_sites.clear()
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
-                        self._invoke(cls(), system_instruction)
+                        await self._invoke(cls(), system_instruction)
                     messages = [
                         str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)
                     ]
                     self.assertTrue(messages, "expected a DeprecationWarning")
                     self.assertIn("system_instruction", messages[0])
 
-    def test_warns_once_per_adapter(self):
+    async def test_warns_once_per_adapter(self):
         adapter = OpenAILLMAdapter()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self._invoke(adapter, None)
-            self._invoke(adapter, None)
+            await self._invoke(adapter, None)
+            await self._invoke(adapter, None)
         deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
         self.assertEqual(len(deprecations), 1)
 
@@ -3609,13 +4289,14 @@ class TestContextSystemMessageDeprecation(unittest.TestCase):
         an interpreter whose filters ignore the category.
         """
         script = (
-            "from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter\n"
+            "import asyncio\n"
+            "from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter\n"
             "from pipecat.processors.aggregators.llm_context import LLMContext\n"
             "ctx = LLMContext(messages=["
             "{'role': 'system', 'content': 'Be helpful.'},"
             "{'role': 'user', 'content': 'hi'}])\n"
-            "OpenAILLMAdapter().get_llm_invocation_params("
-            "ctx, system_instruction=None, convert_developer_to_user=False)\n"
+            "asyncio.run(OpenAILLMAdapter().get_llm_invocation_params("
+            "ctx, system_instruction=None, convert_developer_to_user=False))\n"
         )
         result = subprocess.run(
             [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script],
@@ -3625,14 +4306,41 @@ class TestContextSystemMessageDeprecation(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("is deprecated since 1.9.0", result.stderr)
 
-    def test_no_warning_without_a_context_system_message(self):
+    async def test_no_warning_without_a_context_system_message(self):
         context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            OpenAILLMAdapter().get_llm_invocation_params(
+            await OpenAILLMAdapter().get_llm_invocation_params(
                 context, system_instruction="Be concise.", convert_developer_to_user=False
             )
         self.assertFalse([w for w in caught if issubclass(w.category, DeprecationWarning)])
+
+
+class TestSyncGetLLMInvocationParamsOverride(unittest.TestCase):
+    def test_sync_override_warns_at_class_definition(self):
+        """The warning survives the default DeprecationWarning filter and names the subclass's file."""
+        with warnings.catch_warnings(record=True) as caught:
+            # Python's default filter for a module other than __main__.
+            warnings.simplefilter("ignore", DeprecationWarning)
+
+            class SyncAdapter(OpenAILLMAdapter):
+                def get_llm_invocation_params(self, context, **kwargs):  # type: ignore[override]
+                    return {}
+
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        self.assertIn("SyncAdapter", str(caught[0].message))
+        self.assertEqual(caught[0].filename, __file__)
+
+    def test_async_override_does_not_warn(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            class AsyncAdapter(OpenAILLMAdapter):
+                async def get_llm_invocation_params(self, context, **kwargs):  # type: ignore[override]
+                    return await super().get_llm_invocation_params(context, **kwargs)
+
+        self.assertEqual(caught, [])
 
 
 if __name__ == "__main__":

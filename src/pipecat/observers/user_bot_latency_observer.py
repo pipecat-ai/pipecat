@@ -14,7 +14,6 @@ name each part of the timeline, including the parts no service measures.
 """
 
 import time
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
@@ -43,7 +42,7 @@ from pipecat.metrics.metrics import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 
 class TTFBBreakdownMetrics(BaseModel):
@@ -571,10 +570,9 @@ class UserBotLatencyObserver(BaseObserver):
             **kwargs: Additional arguments passed to parent class.
         """
         if max_frames is not None:
-            warnings.warn(
-                "`max_frames` parameter of `UserBotLatencyObserver` is deprecated since 1.12.0 "
+            warn_deprecated(
+                "`UserBotLatencyObserver(max_frames=...)` is deprecated since 1.12.0 "
                 "and will be removed in 2.0.0. No replacement.",
-                DeprecationWarning,
                 stacklevel=2,
             )
         super().__init__(observe_every_push=False, **kwargs)

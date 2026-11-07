@@ -28,6 +28,7 @@ from pipecat.metrics.metrics import (
     TurnMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class MetricsLogObserver(BaseObserver):
@@ -77,12 +78,9 @@ class MetricsLogObserver(BaseObserver):
         super().__init__(observe_every_push=False, **kwargs)
         # Normalize deprecated types in include_metrics
         if include_metrics and SmartTurnMetricsData in include_metrics:
-            import warnings
-
-            warnings.warn(
-                "SmartTurnMetricsData is deprecated in include_metrics, "
-                "use TurnMetricsData instead.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`include_metrics=[SmartTurnMetricsData]` is deprecated since 0.0.104 and "
+                "will be removed in 2.0.0. Use `TurnMetricsData` instead.",
                 stacklevel=2,
             )
             include_metrics = (include_metrics - {SmartTurnMetricsData}) | {TurnMetricsData}

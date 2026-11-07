@@ -43,7 +43,7 @@ class JSONMessageSerializer(MessageSerializer):
 
     def __init__(self):
         """Create a serializer with default adapters for `LLMContext` and `ToolsSchema`."""
-        from pipecat.adapters.schemas.tools_schema import ToolsSchema
+        from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
         from pipecat.bus.adapters import LLMContextAdapter, ToolsSchemaAdapter
         from pipecat.processors.aggregators.llm_context import LLMContext
 
@@ -87,13 +87,14 @@ class JSONMessageSerializer(MessageSerializer):
 
     def _serialize_value(self, value: Any) -> Any:
         """Recursively serialize a value to a JSON-compatible representation."""
-        if isinstance(value, _JSON_NATIVE):
-            return value
+        # Before the native types: a StrEnum or IntEnum is also a str or int.
         if isinstance(value, Enum):
             return {
                 "__type__": f"{type(value).__module__}.{type(value).__name__}",
                 "__data__": value.name,
             }
+        if isinstance(value, _JSON_NATIVE):
+            return value
         if isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
         if isinstance(value, list):
@@ -103,8 +104,11 @@ class JSONMessageSerializer(MessageSerializer):
         if isinstance(value, BaseModel):
             return {
                 "__type__": f"{type(value).__module__}.{type(value).__name__}",
+                # Skip unset nulls so they stay out of the rebuilt model's `model_fields_set`.
                 "__data__": {
-                    k: self._serialize_value(v) for k, v in value.__dict__.items() if v is not None
+                    k: self._serialize_value(v)
+                    for k, v in value.__dict__.items()
+                    if v is not None or k in value.model_fields_set
                 },
             }
         if callable(value):
@@ -119,10 +123,9 @@ class JSONMessageSerializer(MessageSerializer):
             fields = {}
             for f in dataclasses.fields(value):
                 v = getattr(value, f.name)
-                if v is None:
-                    continue
                 serialized = self._serialize_value(v)
-                if serialized is not None:
+                # Preserve explicit nulls without retaining unsupported values.
+                if v is None or serialized is not None:
                     fields[f.name] = serialized
             return {
                 "__type__": f"{type(value).__module__}.{type(value).__name__}",

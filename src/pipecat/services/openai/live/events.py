@@ -144,6 +144,9 @@ class SessionConfig(BaseModel):
         delegation: Delegation mode. Omitted selects client delegation. The
             mode is immutable: switching needs a new session.
         input: Prior text-only conversation messages. Startup-only.
+        store: Whether the server keeps the session for 30 days, as a
+            downloadable recording and as a source for a fork. Startup-only;
+            the server default is false.
     """
 
     model: str
@@ -151,6 +154,7 @@ class SessionConfig(BaseModel):
     audio: AudioConfig | None = None
     delegation: ClientDelegationConfig | ResponsesDelegationConfig | None = None
     input: list[InputItem] | None = None
+    store: bool | None = None
 
 
 class SessionUpdateConfig(BaseModel):

@@ -82,6 +82,23 @@ def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
     return mixed_audio.astype(np.int16).tobytes()
 
 
+def scale_audio(audio: bytes, factor: float) -> bytes:
+    """Scale the volume of an audio stream by multiplying its samples.
+
+    The audio is assumed to be 16-bit signed integer PCM data.
+
+    Args:
+        audio: Audio as raw bytes (16-bit signed integers).
+        factor: The multiplier for every sample: 1.0 leaves the audio
+            unchanged, 0.5 halves it.
+
+    Returns:
+        Scaled audio data as raw bytes with samples clipped to 16-bit range.
+    """
+    data = np.frombuffer(audio, dtype=np.int16).astype(np.float32) * factor
+    return np.clip(data, -32768, 32767).astype(np.int16).tobytes()
+
+
 def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
     """Interleave left and right mono audio channels into stereo audio.
 
@@ -368,7 +385,8 @@ def detect_speech_onset(
     if sample_rate <= 0:
         return None
 
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    # A trailing partial sample can't be read as int16; ignore it.
+    samples = np.frombuffer(pcm_bytes[: len(pcm_bytes) & ~1], dtype=np.int16)
     if samples.size == 0:
         return None
 
