@@ -51,7 +51,7 @@ class PipecatToneReaderModel:
             threads: The CPU threads for one read.
         """
         model_dir = Path(model_dir)
-        self.config = json.loads((model_dir / "config.json").read_text())
+        self.config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
         self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
         self._tokenizer.enable_truncation(self.config["max_len"])
         self._tokenizer.no_padding()

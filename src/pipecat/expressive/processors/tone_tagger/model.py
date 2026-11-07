@@ -46,7 +46,7 @@ class PipecatToneTaggerModel:
             threads: The CPU threads for one sentence.
         """
         model_dir = Path(model_dir)
-        self.config = json.loads((model_dir / "config.json").read_text())
+        self.config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
         self._layout = Layout(**self.config["layout"])
         self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
         options = ort.SessionOptions()
