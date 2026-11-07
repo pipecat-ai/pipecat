@@ -1,0 +1,1 @@
+- Fixed IPA stress placement for nasal vowels with Unicode-composed diacritics.
