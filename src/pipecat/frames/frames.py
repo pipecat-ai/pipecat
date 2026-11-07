@@ -524,10 +524,12 @@ class TTSTextFrame(AggregatedTextFrame):
         segment_id: ID of the AggregatedTextFrame this text is part of, when the
             TTS service built it from one. A word reported by the TTS carries the
             ID of the sentence or other segment it was spoken in.
-        delivery: The delivery this text is spoken in, such as ``["cheerful"]``, and
+        delivery: The delivery this text is spoken in, such as ``["warm"]``, and
             ``"emphasis"`` for stressed words; empty for the voice's baseline.
-            None when the text carries no delivery. Part of expressive
-            conversation (alpha).
+            None when the text carries no delivery. Each name is as written in
+            its tag, so a universal name such as ``warm`` stays universal
+            whatever the service calls it. Part of expressive conversation
+            (alpha).
     """
 
     segment_id: int | None = None
@@ -1510,6 +1512,22 @@ class UserMuteStoppedFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class PerceptionFrame(SystemFrame):
+    """A reading of how the user spoke, broadcast as soon as a producer has one.
+
+    A perception producer broadcasts every reading it makes, whether or not a
+    transcription is there to carry it yet, so processors and clients can act
+    on it right away. The LLM is given the reading a transcription carries in
+    its ``perception``. Part of expressive conversation (alpha).
+
+    Parameters:
+        perception: The reading.
+    """
+
+    perception: list[PerceptionSignal]
 
 
 @dataclass

@@ -86,11 +86,11 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-google-http.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-google-interactions.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-gradium.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
-    scenarios: [scripted/capital_question]
-  - bot: voice/voice-hume.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-inworld.py
     scenarios: [scripted/capital_question]
@@ -160,6 +160,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-zoom-ai.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-zoom-ai-turn-detection.py
+    scenarios: [scripted/capital_question]
 
   #
   # Realtime (speech-to-speech): one bot per provider, each exercising a
@@ -183,6 +185,8 @@ suite:
   - bot: realtime/realtime-openai.py
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-ultravox-async-tool.py
+    scenarios: [scripted/weather_function_call_audio]
+  - bot: realtime/realtime-zoom-ai.py
     scenarios: [scripted/weather_function_call_audio]
 
   #
@@ -216,8 +220,16 @@ suite:
     scenarios:
       - scripted/weather_function_call
       - scripted/weather_and_restaurant
+  - bot: function-calling/function-calling-google-interactions.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-google-vertex.py
     scenarios: [scripted/weather_function_call]
+  - bot: function-calling/function-calling-google-interactions-vertex.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/weather_and_restaurant
   - bot: function-calling/function-calling-grok.py
     scenarios: [scripted/weather_function_call]
   - bot: function-calling/function-calling-groq.py
@@ -275,6 +287,12 @@ suite:
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
+  - bot: function-calling/function-calling-google-interactions-async.py
+    scenarios:
+      - scripted/weather_function_call
+      - scripted/async_tool
+      - scripted/async_tool_cancellation
+      - scripted/function_call_timeout
   - bot: function-calling/function-calling-openai-async.py
     scenarios:
       - scripted/weather_function_call
@@ -306,6 +324,8 @@ suite:
     scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-google-video.py
     scenarios: [scripted/describe_image]
+  - bot: function-calling/function-calling-google-interactions-video.py
+    scenarios: [scripted/describe_image]
   - bot: function-calling/function-calling-moondream-video.py
     scenarios: [scripted/describe_image]
 
@@ -316,6 +336,15 @@ suite:
   #
   - bot: mcp/mcp-stdio.py
     scenarios: [scripted/mcp_memory]
+
+  #
+  # Thinking: a thinking model makes two tool calls in sequence, the second
+  # depending on the first's result, then answers a follow-up about them.
+  #
+  - bot: thinking/thinking-functions-google.py
+    scenarios: [scripted/flight_taxi]
+  - bot: thinking/thinking-functions-google-interactions.py
+    scenarios: [scripted/flight_taxi]
 
   #
   # Vision: the bot is handed an image (a cat) on connect via --runner-body and
@@ -343,6 +372,10 @@ suite:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
   - bot: vision/vision-gemini-flash.py
+    runner_body:
+      path: scenarios/vision-cat.yaml
+    scenarios: [scripted/vision_describe]
+  - bot: vision/vision-google-interactions.py
     runner_body:
       path: scenarios/vision-cat.yaml
     scenarios: [scripted/vision_describe]
@@ -391,6 +424,13 @@ suite:
     scenarios: [scripted/empty_user_turn]
 
   #
+  # Turn completion decided by a classifier (Jev) instead of LLM markers: the
+  # LLM runs only once the classifier says the user's turn is complete.
+  #
+  - bot: turn-management/turn-management-classifier-turn-completion.py
+    scenarios: [scripted/classifier_turn_completion]
+
+  #
   # DTMF: the caller drives a keypad phone menu (IVR) with DTMF tones instead of
   # speech. The bot's DTMFAggregator turns each keypress into a transcription the
   # LLM responds to, so the harness can assert on the resulting transcription and
@@ -413,18 +453,30 @@ suite:
   # the tags expressive_conversation asks for, so it runs perception alone.
   # The Tone tagger bot's LLM writes plain words and a tagger writes the tags.
   #
+  - bot: expressive-conversation/expressive-conversation-azure.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-cartesia.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-elevenlabs.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-fish.py
     scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-gemini.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-inworld.py
+    scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-minimax.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-mistral.py
+    scenarios: [scripted/expressive_conversation]
+  - bot: expressive-conversation/expressive-conversation-soniox.py
     scenarios: [scripted/expressive_conversation]
   - bot: expressive-conversation/expressive-conversation-tone.py
     scenarios: [scripted/perception]
   - bot: expressive-conversation/expressive-conversation-tone-tagger.py
     scenarios: [scripted/expression_tagger, scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-hume-audio-decisions.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services

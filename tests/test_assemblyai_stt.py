@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
 from pipecat.services.assemblyai.models import AssemblyAIConnectionParams, TerminationMessage
@@ -1154,3 +1155,39 @@ def test_should_interrupt_rides_on_recommended_strategies():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_disconnect_terminates_an_open_session_before_closing():
+    service = AssemblyAISTTService(api_key="test-key")
+    service._audio_buffer.extend(b"\1\2")
+    events = []
+
+    class FakeWebsocket:
+        state = State.OPEN
+
+        async def send(self, message):
+            events.append(("send", message))
+            if message == json.dumps({"type": "Terminate"}):
+                # The receive loop sets this on the server's Termination reply.
+                service._termination_event.set()
+
+        async def close(self):
+            events.append("close")
+
+    async def fake_cancel_task(task, timeout=None):
+        events.append(("cancel", task))
+
+    service._websocket = FakeWebsocket()
+    service._receive_task = "receive-task"
+    service.cancel_task = fake_cancel_task
+
+    asyncio.run(service._disconnect())
+
+    assert events == [
+        ("send", b"\1\2"),
+        ("send", json.dumps({"type": "Terminate"})),
+        ("cancel", "receive-task"),
+        "close",
+    ]
+    assert service._receive_task is None
+    assert service._websocket is None

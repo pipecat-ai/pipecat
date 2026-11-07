@@ -33,7 +33,7 @@ dependencies = [
     "loguru~=0.7.3",
     "loudness>=0.2.0,<1",
     "Markdown>=3.7,<4",
-    "sentencex==1.0.32",
+    "sentencex==1.0.34",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<14",
     "protobuf>=5.29.6,<7",
@@ -41,13 +41,10 @@ dependencies = [
     # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
     "pydantic>=2.13; python_full_version >= '3.14'",
     "python-dotenv>=1.0.0,<2.0.0",
-    "resampy~=0.4.3",
     "soundfile~=0.13.1",
     "soxr~=1.0.0",
     "openai>=1.74.0,<4",
     "typing_extensions>=4.9",
-    # Pinning numba to resolve package dependencies
-    "numba>=0.61.2,<1",
     "wait_for2>=0.4.1,<1; python_version<'3.12'",
     "websockets>=13.1",
     "pyyaml>=6,<7",
@@ -72,7 +69,7 @@ pipecat = "pipecat.cli.main:run"
 pc = "pipecat.cli.main:run"
 
 [project.optional-dependencies]
-aic = [ "aic-sdk~=3.3.1" ]
+aic = [ "aic-sdk~=3.4.0" ]
 anthropic = [ "anthropic>=0.49.0,<2" ]
 assemblyai = []
 asyncai = []
@@ -109,7 +106,7 @@ grok = []
 groq = [ "groq>=0.23.0,<2" ]
 gstreamer = [ "pygobject>=3.52.0,<4" ]
 heygen = [ "livekit>=1.0.13,<2" ]
-hume = [ "hume>=0.11.2,<1" ]
+hume = [ "hume>=0.11.2,<1", "httpx[http2]>=0.27,<1" ]
 inception = []
 inworld = []
 jev = [ "pipecat-ai[typesafe]" ]
@@ -145,6 +142,8 @@ piper = [ "piper-tts>=1.3.0,<2", "requests>=2.32.5,<3" ]
 pocket-tts = [ "pocket-tts>=2.1.0,<3" ]
 qwen = []
 redis = ["redis[hiredis]>=5.0.0"]
+# Pinning numba to resolve package dependencies
+resampy = [ "resampy~=0.4.3", "numba>=0.61.2,<1" ]
 resembleai = []
 rime = [ "rime-api~=0.4.0" ]
 runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.3.0"]
@@ -153,7 +152,7 @@ sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
 silero = []
-simli = [ "simli-ai~=2.0.1"]
+simli = [ "simli-ai~=2.1.0"]
 smallest = []
 soniox = []
 soundfile = []
@@ -173,7 +172,7 @@ websocket = [ "fastapi>=0.115.6,<1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = []
 xtts = []
-zoom-ai = []
+zoom-ai = [ "httpx[http2]>=0.27,<1" ]
 
 # CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
 # install stays lean; install with `pip install "pipecat-ai[cli]"`.

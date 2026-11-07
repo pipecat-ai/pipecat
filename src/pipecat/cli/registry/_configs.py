@@ -178,6 +178,26 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "google_interactions_llm": (
+        "GoogleInteractionsLLMService(\n"
+        '        api_key=os.getenv("GOOGLE_API_KEY"),\n'
+        "        settings=GoogleInteractionsLLMService.Settings(\n"
+        '            model=os.getenv("GOOGLE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "google_interactions_vertex_llm": (
+        "GoogleInteractionsVertexLLMService(\n"
+        '        project_id=os.getenv("GOOGLE_PROJECT_ID"),\n'
+        '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
+        '        location=os.getenv("GOOGLE_LOCATION"),\n'
+        "        settings=GoogleInteractionsVertexLLMService.Settings(\n"
+        '            model=os.getenv("GOOGLE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "google_vertex_llm": (
         "GoogleVertexLLMService(\n"
         '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
@@ -480,14 +500,6 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "hume_tts": (
-        "HumeTTSService(\n"
-        '        api_key=os.getenv("HUME_API_KEY"),\n'
-        "        settings=HumeTTSService.Settings(\n"
-        '            voice=os.getenv("HUME_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "inworld_tts": (
         "InworldTTSService(\n"
         '        api_key=os.getenv("INWORLD_API_KEY"),\n'
@@ -725,6 +737,14 @@ SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"
         ")\n"

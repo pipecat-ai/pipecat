@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMMessagesUpdateFrame,
@@ -150,6 +151,11 @@ class IVRProcessor(FrameProcessor):
             ]
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
+
+        elif isinstance(frame, InterruptionFrame):
+            # Drop the text of the interrupted response, including a tag left open
+            await self._aggregator.handle_interruption()
+            await self.push_frame(frame, direction)
 
         elif isinstance(frame, LLMTextFrame):
             # Process text through the pattern aggregator

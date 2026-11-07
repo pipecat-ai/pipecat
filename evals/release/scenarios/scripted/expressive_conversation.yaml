@@ -60,10 +60,9 @@ scenarios:
 
       - user: "Why did the scarecrow win an award? Because he was outstanding in his field."
         expect:
-          # Each TTS names its laugh its own way, as a sound or a delivery.
+          # A laugh has the same universal names on every TTS.
           - event: llm_response
-            eval: "the reply laughs with a tag, such as [[laughter]], [[laughs]], [[chuckles]] or <<laughing>>"
-          # [[laughter]], [[chuckling]] or <<laughing>>, as the TTS performed it.
+            eval: "the reply laughs with a tag, such as [[laugh]] or [[chuckle]]"
           - event: expression
             check_from: turn_start
             eval: "the bot laughs or chuckles, as a sound or a delivery"

@@ -119,6 +119,9 @@ class SmallestTTSSettings(TTSSettings):
             synthesis voice: ``"EU"`` reads ``05/03/2024`` day-first ("fifth
             March, twenty twenty four"), ``"US"`` month-first ("May third,
             twenty twenty four"). If None, the API default (``"US"``) applies.
+        number_pronunciation_language: Language used to read numerals, currency,
+            times and dates, independent of the synthesis language. If None, the
+            API reads them in the synthesis language.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -127,6 +130,9 @@ class SmallestTTSSettings(TTSSettings):
         default_factory=lambda: NOT_GIVEN
     )
     date_format: Literal["EU", "US"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    number_pronunciation_language: Language | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -209,6 +215,7 @@ class SmallestTTSService(InterruptibleTTSService):
             math_notation=None,
             content_filter=None,
             date_format=None,
+            number_pronunciation_language=None,
         )
 
         if settings is not None:
@@ -316,6 +323,14 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.date_format is not None:
             msg["date_format"] = self._settings.date_format
 
+        npl = self._settings.number_pronunciation_language
+        if npl is not None:
+            # Unlike `language`, which the base class converts on write, this
+            # field is service-specific and is mapped here.
+            msg["number_pronunciation_language"] = (
+                self.language_to_service_language(npl) if isinstance(npl, Language) else npl
+            )
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -360,8 +375,9 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, math_notation, content_filter, date_format, voice, language)
-        take effect on the next ``_build_msg`` call without reconnecting.
+        All fields (model, speed, math_notation, content_filter, date_format,
+        number_pronunciation_language, voice, language) take effect on the next
+        ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 

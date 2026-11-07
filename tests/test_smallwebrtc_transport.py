@@ -58,6 +58,7 @@ from pipecat.transports.smallwebrtc.connection import (  # noqa: E402
 from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
+    RawAudioTrack,
     SmallWebRTCCallbacks,
     SmallWebRTCClient,
     SmallWebRTCTransport,
@@ -485,6 +486,35 @@ class TestTrackStatus(unittest.IsolatedAsyncioTestCase):
                 ("microphone", False),
             ],
         )
+
+
+class TestDroppedOutputTrack(unittest.IsolatedAsyncioTestCase):
+    """A write waiting on an output track ends when the track is dropped, or it would time out."""
+
+    async def asyncSetUp(self):
+        self.client, self.connection = _make_client()
+        self.track = RawAudioTrack(16_000)
+        self.client._audio_output_track = self.track
+        self.write = self.track.add_audio_bytes(bytes(640))
+
+    async def asyncTearDown(self):
+        await self.connection._pc.close()
+
+    async def test_stopping_the_track_ends_the_write(self):
+        self.track.stop()
+
+        self.assertTrue(self.write.done())
+        self.assertFalse(self.write.result())
+
+    async def test_peer_disconnected_ends_the_write(self):
+        await self.client._handle_peer_disconnected()
+
+        self.assertTrue(self.write.done())
+
+    async def test_client_closed_ends_the_write(self):
+        await self.client._handle_client_closed()
+
+        self.assertTrue(self.write.done())
 
 
 class TestSmallWebRTCTransportNames(unittest.TestCase):

@@ -16,6 +16,8 @@ from pipecat.expressive.expression import (
     SPEED_DELIVERY,
     DeliveryScope,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
     ExpressionTerm,
 )
 
@@ -116,13 +118,16 @@ class CartesiaExpressionAdapter(BaseExpressionAdapter):
             ],
             pause_range_ms=(100, 5000),
             delivery_scope=DeliveryScope.SENTENCE,
-            tagger_vocabulary={
-                "calm": ["calm", "peaceful", "serene"],
-                "warm": ["content", "happy"],
-                "excited": ["excited", "enthusiastic"],
-                "sad": ["sad", "disappointed"],
-                "laugh": ["laughter"],
-                "chuckle": ["laughter"],
+            service_vocabulary={
+                ExpressionDelivery.CALM: ["calm", "peaceful", "serene"],
+                ExpressionDelivery.WARM: ["content", "happy"],
+                ExpressionDelivery.EXCITED: ["excited", "enthusiastic"],
+                ExpressionDelivery.SAD: ["sad", "disappointed"],
+                ExpressionSound.LAUGH: ["laughter"],
+                ExpressionSound.CHUCKLE: ["laughter"],
+                ExpressionDelivery.TRUSTING: ["trust"],
+                ExpressionDelivery.ANTICIPATING: ["anticipation"],
+                ExpressionDelivery.CONTEMPTUOUS: ["contempt"],
             },
         )
 

@@ -1,1 +1,0 @@
-- `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` now send `reasoning.effort="none"` for `gpt-6.1-terra` when reasoning isn't configured, matching the other models whose lowest documented effort is `none`.

@@ -1,0 +1,1 @@
+- Fixed `XAISTTService`'s docstring to list `opus` as an accepted `encoding`.

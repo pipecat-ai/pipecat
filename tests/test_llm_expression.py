@@ -9,13 +9,17 @@
 import pytest
 from loguru import logger
 
-from pipecat.expressive.expression import ExpressionCapabilities, ExpressionTerm
-from pipecat.expressive.instructions import expression_instructions
+from pipecat.expressive.expression import ExpressionCapabilities, ExpressionSound, ExpressionTerm
+from pipecat.expressive.instructions import (
+    expression_instructions,
+    perception_turn_completion_instructions,
+)
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import (
     ExpressionMetadataFrame,
     Frame,
+    LLMUpdateSettingsFrame,
     PerceptionMetadataFrame,
     TTSMetadataFrame,
 )
@@ -23,14 +27,18 @@ from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import run_test
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 EXPRESSIVE = PipelineParams(enable_expressive_conversation=True)
 
 CALM_HAPPY = ExpressionCapabilities(
     delivery=[ExpressionTerm("calm"), ExpressionTerm("happy")], pause_range_ms=(100, 3000)
 )
-LAUGHTER = ExpressionCapabilities(sounds=[ExpressionTerm("laughter")])
+LAUGHTER = ExpressionCapabilities(
+    sounds=[ExpressionTerm("laughter")], service_vocabulary={ExpressionSound.LAUGH: ["laughter"]}
+)
 
 
 def _llm(name: str | None = None) -> OpenAILLMService:
@@ -222,6 +230,44 @@ async def test_perception_without_tts_expression_is_taught_without_presets_or_wa
         f"APP\n\n{expression_instructions(None, perception=TONE)}\n\nApologize once."
     )
     assert not [w for w in warnings if "expression policy" in w]
+
+
+@pytest.mark.asyncio
+async def test_an_llm_that_filters_incomplete_turns_is_told_a_reading_doesnt_decide_them():
+    llm = _llm()
+
+    await run_test(
+        llm,
+        frames_to_send=[
+            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            PerceptionMetadataFrame(service_name="tone", perception=TONE),
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    config = UserTurnCompletionConfig()
+    completion = config.completion_instructions
+    note = perception_turn_completion_instructions(*config.markers)
+    assert llm._settings.system_instruction == (
+        f"APP\n\n{expression_instructions(None, perception=TONE)}\n\n{completion}\n\n{note}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_llm_that_filters_incomplete_turns_without_perception_gets_no_reading_note():
+    llm = _llm()
+
+    await run_test(
+        llm,
+        frames_to_send=[
+            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True))
+        ],
+        pipeline_params=EXPRESSIVE,
+    )
+
+    assert llm._settings.system_instruction == (
+        f"APP\n\n{UserTurnCompletionConfig().completion_instructions}"
+    )
 
 
 @pytest.mark.asyncio

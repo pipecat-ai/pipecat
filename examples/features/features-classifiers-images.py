@@ -57,7 +57,7 @@ async def main(classifier: BaseClassifier):
         results = await classifier.yes_no(
             "A frame from the user's camera.",
             {"person": YesNoQuestion(instructions="Is there a person in the frame?")},
-            images=[image],
+            inputs=[image],
         )
         print(f"person: {results['person'].probability:.2f}")
 
@@ -74,7 +74,7 @@ async def main(classifier: BaseClassifier):
                     },
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         subject = results["subject"]
         print(f"subject: {subject.choice} ({subject.confidence:.2f})")
@@ -87,7 +87,7 @@ async def main(classifier: BaseClassifier):
                     levels=["far away", "a few steps away", "close-up"],
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         print(f"distance: {results['distance'].score:.2f} on a scale of 3")
     finally:

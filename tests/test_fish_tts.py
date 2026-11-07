@@ -69,6 +69,16 @@ async def test_drama_3_model_is_sent_in_handshake():
 
 
 @pytest.mark.asyncio
+async def test_socket_accepts_audio_messages_over_1_mib():
+    service = FishAudioTTSService(api_key="key")
+    service._websocket_connect = AsyncMock(return_value=AsyncMock())
+
+    await service._connect_websocket()
+
+    assert service._websocket_connect.await_args.kwargs["max_size"] == 16 * 1024 * 1024
+
+
+@pytest.mark.asyncio
 async def test_start_message_omits_unset_request_settings():
     request = await _start_request()
 
@@ -149,7 +159,8 @@ async def test_short_audio_chunks_are_kept():
 class TestS2ExpressionAdapter:
     def test_capabilities(self):
         capabilities = FishAudioS2ExpressionAdapter().capabilities()
-        assert capabilities.free_text_delivery and capabilities.free_text_sounds
+        assert capabilities.allows_free_text_sounds
+        assert capabilities.allows_free_text_delivery
         assert capabilities.emphasis
         assert "laughing" in [term.name for term in capabilities.sounds]
         # A delivery tag separates its names by spaces.

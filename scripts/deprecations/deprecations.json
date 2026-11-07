@@ -300,6 +300,50 @@
       "location": "pipecat/bus/bridge_processor.py"
     },
     {
+      "subject": "BaseClassifier.ask.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.choice.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.score.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.yes_no.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
       "subject": "pipecat.classifiers.jev.classifier",
       "module": "pipecat.classifiers.jev.classifier",
       "kind": "module",
@@ -1662,6 +1706,28 @@
       "replacement": "TransportParams.video_in_sources",
       "message": "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in 2.0.0. Use `TransportParams.video_in_sources` or `BaseTransport.capture_participant_video()` instead.",
       "location": "pipecat/runner/utils.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.create_resumed_response",
+      "module": "pipecat.serializers.genesys",
+      "kind": "method",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "GenesysAudioHookSerializer.create_resume_request",
+      "message": "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` instead.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.on_pause",
+      "module": "pipecat.serializers.genesys",
+      "kind": "event",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_paused",
+      "message": "Use ``on_paused`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
     },
     {
       "subject": "AnthropicLLMService.InputParams",
@@ -3292,6 +3358,17 @@
       "location": "pipecat/services/groq/tts.py"
     },
     {
+      "subject": "HumeTTSService",
+      "module": "pipecat.services.hume.tts",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`HumeTTSService` is deprecated since 1.16.0 and will be removed in 2.0.0. No replacement. Hume shuts down its TTS API on November 13, 2026.",
+      "location": "pipecat/services/hume/tts.py"
+    },
+    {
       "subject": "HumeTTSService.InputParams",
       "module": "pipecat.services.hume.tts",
       "kind": "class",
@@ -4510,6 +4587,17 @@
       "relation": "use_existing",
       "replacement": "SimliVideoService.Settings",
       "message": "`SimliVideoService.InputParams` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `SimliVideoService.Settings` instead.",
+      "location": "pipecat/services/simli/video.py"
+    },
+    {
+      "subject": "SimliVideoService.is_trinity_avatar",
+      "module": "pipecat.services.simli.video",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
       "location": "pipecat/services/simli/video.py"
     },
     {

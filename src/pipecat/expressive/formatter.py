@@ -22,14 +22,14 @@ it streams tokens. :class:`ExpressionFormatter` handles each unit in three steps
 
 With ElevenLabs' audio tags, one sentence goes::
 
-    "<<cheerful>> It's [[laughs]] ^^back^^ up."       the unit, as the LLM wrote it
+    "<<warm>> It's [[laugh]] ^^back^^ up."            the unit, as the LLM wrote it
     "It's back up."                                   shown to clients
-    "[cheerful] It's [laughs] BACK up."               sent to ElevenLabs
+    "[warmly] It's [laughs] BACK up."                 sent to ElevenLabs
 
 The tags are:
 
 - ``<<name>>`` sets the delivery the words after it are spoken in, until the
-  next delivery tag replaces it or the response ends: ``<<cheerful>>``. A name
+  next delivery tag replaces it or the response ends: ``<<warm>>``. A name
   may be several words, as in ``<<soft tone>>``. ``<<neutral>>`` returns to the
   voice's baseline. Delivery tags aren't segments of their own; the delivery
   travels with the :class:`Text` it applies to.
@@ -42,10 +42,9 @@ The tags are:
 - ``[[name]]`` is a :class:`Sound`, a sound at one point (``[[laugh]]``), or a
   :class:`Pause`, ``[[pause N]]`` for N milliseconds.
 
-The brackets decide a tag's kind, except that a name the TTS service declares
-keeps its declared kind in the other kind's brackets: ``[[cheerful]]`` still
-sets a delivery when ``cheerful`` is a declared delivery. LLMs make that slip,
-so it is logged as a warning.
+The brackets decide a tag's kind, except that a universal name, or one the TTS
+service declares, keeps its kind in the other kind's brackets: ``[[warm]]``
+still sets a delivery. LLMs make that slip, so it is logged as a warning.
 
 The formatter reads whole units: an aggregator such as
 :class:`~pipecat.utils.text.skip_tags_aggregator.SkipTagsAggregator`, given
@@ -54,9 +53,12 @@ left unfinished at the end of a unit is removed, never spoken.
 
 The service's
 :class:`~pipecat.adapters.tts.base_expression_adapter.BaseExpressionAdapter`
-says what it can perform and formats each piece in its provider's markup.
-What the service can't perform is left out of the request, and kept in the
-unit's text for the context.
+says what it can perform and formats each piece in its provider's markup. A
+universal name, such as ``warm`` or ``laugh``, is sent as the name the service
+performs it by (:meth:`~pipecat.expressive.expression.ExpressionCapabilities.delivery_name`),
+such as ElevenLabs' ``warmly``; everything else about the unit keeps the names as
+written. What the service can't perform is left out of the request, and kept in
+the unit's text for the context.
 
 **Alpha.** The tag syntax and these types are likely to change between releases.
 """
@@ -74,6 +76,8 @@ from pipecat.expressive.expression import (
     NEUTRAL_DELIVERY,
     DeliveryScope,
     ExpressionCapabilities,
+    ExpressionDelivery,
+    ExpressionSound,
 )
 from pipecat.frames.frames import TextType
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, StartEndTags
@@ -106,7 +110,7 @@ _PAUSE = re.compile(r"pause (\d+)")
 # Spaces and tabs left side by side where a tag stood between two words.
 _SPACES = re.compile(r"[ \t]{2,}")
 # Punctuation that closes the words before a tag written ahead of it, as in
-# "Hi [[laughs]], there.": what ends a sentence, and what ends a clause.
+# "Hi [[laugh]], there.": what ends a sentence, and what ends a clause.
 _CLOSING_PUNCTUATION = re.compile(
     "["
     + re.escape(
@@ -145,7 +149,7 @@ class Text:
 class Sound:
     """A sound made at one point, such as a laugh.
 
-    In ``"Hi [[laughs]]"``, the sound is ``Sound("laughs", 3, 13)``.
+    In ``"Hi [[laugh]]"``, the sound is ``Sound("laugh", 3, 12)``.
 
     Parameters:
         name: The sound, as written between the brackets.
@@ -164,10 +168,7 @@ class Sound:
 
     def performed_by(self, capabilities: ExpressionCapabilities | None) -> bool:
         """Whether a service with these capabilities makes the sound."""
-        return capabilities is not None and (
-            capabilities.free_text_sounds
-            or any(term.name == self.name for term in capabilities.sounds)
-        )
+        return capabilities is not None and capabilities.sound_name(self.name) is not None
 
     def reported(self, capabilities: ExpressionCapabilities) -> tuple[TextType, str]:
         """The sound as reported to clients: its text type and its text."""
@@ -222,10 +223,10 @@ class ExpressionSpan:
     :class:`~pipecat.expressive.spoken.SpokenExpression` can find which spans
     the text of each word the service reports covers.
 
-    For ``"<<calm>> Hi [[laughs]]"`` on a service that performs both::
+    For ``"<<calm>> Hi [[laugh]]"`` on a service that performs both::
 
         ExpressionSpan(8, 12, delivery=["calm"])
-        ExpressionSpan(12, 22, sound=(TextType.EXPRESSION_SOUND, "laughs"))
+        ExpressionSpan(12, 21, sound=(TextType.EXPRESSION_SOUND, "laugh"))
 
     Parameters:
         start: Where the stretch starts in the unit.
@@ -274,21 +275,21 @@ class ExpressionFormatter:
 
         formatter = ExpressionFormatter(lambda: adapter, owner=tts)
 
-        segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
-        # [Text(" It's ", ("cheerful",), 12, 18),
-        #  Sound("laughs", 18, 28),
-        #  Text(" ", ("cheerful",), 28, 29),
-        #  Text("back", ("cheerful", "emphasis"), 31, 35),
-        #  Text(" up.", ("cheerful",), 37, 41)]
+        segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
+        # [Text(" It's ", ("warm",), 8, 14),
+        #  Sound("laugh", 14, 23),
+        #  Text(" ", ("warm",), 23, 24),
+        #  Text("back", ("warm", "emphasis"), 26, 30),
+        #  Text(" up.", ("warm",), 32, 36)]
 
         ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
         # "It's back up."
 
         request = await formatter.format(segments, TextType.SENTENCE, transform, trim)
-        # With ElevenLabs' audio tags, request.text is "[cheerful] It's [laughs] BACK up."
+        # With ElevenLabs' audio tags, request.text is "[warmly] It's [laughs] BACK up."
 
         formatter.parse("Bye.")
-        # [Text("Bye.", ("cheerful",), 0, 4)]: still cheerful
+        # [Text("Bye.", ("warm",), 0, 4)]: still warm
     """
 
     def __init__(self, adapter: Callable[[], BaseExpressionAdapter], owner: object):
@@ -347,11 +348,16 @@ class ExpressionFormatter:
         response_delivery = self._active_delivery
         if whole:
             self._active_delivery = ()
-        # The names the service declares keep their kind in either brackets.
+        # The names the service declares, and the universal names it performs,
+        # keep their kind in either brackets.
         capabilities = self.capabilities()
         declared = capabilities or ExpressionCapabilities()
-        sounds = {term.name for term in declared.sounds}
-        delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)}
+        sounds = {term.name for term in declared.sounds} | {
+            name for name in ExpressionSound if declared.sound_name(name)
+        }
+        delivery = {NEUTRAL_DELIVERY, *(term.name for term in declared.delivery)} | {
+            name for name in ExpressionDelivery if declared.delivery_name(name)
+        }
         segments: list[Segment] = []
         position = 0
         for match in _TAG.finditer(text):
@@ -393,12 +399,12 @@ class ExpressionFormatter:
 
         This is the unit's text as clients are shown it::
 
-            segments = formatter.parse("<<cheerful>> It's [[laughs]] ^^back^^ up.")
+            segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
             ExpressionFormatter.shown_text(segments, TextType.SENTENCE)
             # "It's back up."
 
         A tag is removed as a word, with the space before it when punctuation
-        follows it: ``"Hi [[laughs]], there."`` is shown as ``"Hi, there."``,
+        follows it: ``"Hi [[laugh]], there."`` is shown as ``"Hi, there."``,
         and so is ``"Hi <<calm>>, there."``.
 
         Args:
@@ -431,20 +437,21 @@ class ExpressionFormatter:
         formatted by the adapter in the delivery the service can perform. Sounds
         and pauses are formatted at their places, except that punctuation
         written after one stays with the words before it, where the service
-        reports it: ``"Hi [[laughs]], there."`` asks for ``"Hi, [laughs]
+        reports it: ``"Hi [[laugh]], there."`` asks ElevenLabs for ``"Hi, [laughs]
         there."``. A sentence's request is trimmed at both ends; a streamed
         token keeps its spacing.
 
-        Cartesia has no emphasis, and changes emotion only between sentences::
+        Cartesia names ``warm`` and ``laugh`` its own way, has no emphasis, and
+        changes emotion only between sentences::
 
-            segments = formatter.parse("<<happy>> It's [[laughter]] ^^back^^ up.")
+            segments = formatter.parse("<<warm>> It's [[laugh]] ^^back^^ up.")
             request = await formatter.format(segments, TextType.SENTENCE, transform, trim)
-            # text:  '<emotion value="happy"/> It's [laughter] back up.'
-            # spans: [ExpressionSpan(9, 15, delivery=["happy"]),
-            #           ExpressionSpan(15, 27, sound=(EXPRESSION_SOUND, "laughter")),
-            #           ExpressionSpan(27, 28, delivery=["happy"]),
-            #           ExpressionSpan(30, 34, delivery=["happy"]),  # no emphasis
-            #           ExpressionSpan(36, 40, delivery=["happy"])]
+            # text:  '<emotion value="content"/> It's [laughter] back up.'
+            # spans: [ExpressionSpan(8, 14, delivery=["warm"]),
+            #           ExpressionSpan(14, 23, sound=(EXPRESSION_SOUND, "laugh")),
+            #           ExpressionSpan(23, 24, delivery=["warm"]),
+            #           ExpressionSpan(26, 30, delivery=["warm"]),  # no emphasis
+            #           ExpressionSpan(32, 36, delivery=["warm"])]
 
         Args:
             segments: The unit's segments.
@@ -482,7 +489,9 @@ class ExpressionFormatter:
                 continue
             delivery = self._performed_delivery(list(segment.delivery), capabilities)
             if sentence_delivery is not None:
-                delivery = sentence_delivery
+                # Stress stays on its own words, which a service stresses in its text.
+                stressed = [EMPHASIS_DELIVERY] if EMPHASIS_DELIVERY in delivery else []
+                delivery = sentence_delivery + stressed
             spans.append(ExpressionSpan(segment.start, segment.end, delivery=delivery))
             if not segment.text.strip():
                 # Spacing before the unit's first words is trimmed as they are.
@@ -500,14 +509,18 @@ class ExpressionFormatter:
                 trimmed = True
             words = await transform(words, text_type) if words is not None else None
             if words is not None:
-                parts.append(self._format(words, delivery))
+                parts.append(self._format(words, _service_delivery(delivery, capabilities)))
                 last_delivery = delivery
         if last_delivery is not None and text_type != TextType.TOKEN:
-            parts.append(self._adapter().format_end(last_delivery))
+            parts.append(self._adapter().format_end(_service_delivery(last_delivery, capabilities)))
         request = _SPACES.sub(" ", "".join(parts))
         # A streamed token with no words of its own goes on in the delivery
         # before it.
-        delivery = first_delivery if first_delivery is not None else self._formatted_delivery
+        delivery = (
+            _service_delivery(first_delivery, capabilities)
+            if first_delivery is not None
+            else self._formatted_delivery
+        )
         return FormattedRequest(
             text=request if text_type == TextType.TOKEN else request.strip(),
             spans=spans,
@@ -535,13 +548,13 @@ class ExpressionFormatter:
         It is the delivery its words start in, and any span's, which such a
         service can perform only over the whole request: ``"Your code is
         <<slow: A B 7>>."`` is spoken slowly. Emphasis is the exception, as
-        stress over a whole sentence stresses nothing. Clients are told the
-        delivery that was requested.
+        stress over a whole sentence stresses nothing: it stays on its own
+        words. Clients are told the delivery that was requested.
         """
         words = [s for s in segments if isinstance(s, Text) and s.text.strip()]
         if not words:
             return None
-        delivery = list(words[0].delivery)
+        delivery = [t for t in words[0].delivery if t != EMPHASIS_DELIVERY]
         for segment in words:
             spread = (t for t in segment.span if t != EMPHASIS_DELIVERY and t not in delivery)
             delivery += spread
@@ -614,7 +627,7 @@ class ExpressionFormatter:
         self._active_delivery = () if name in ("", NEUTRAL_DELIVERY) else (name,)
 
     def _format(self, text: str, delivery: list[str]) -> str:
-        """Format words to send to the TTS in their delivery."""
+        """Format words to send to the TTS in their delivery, by the service's names."""
         # Leading spacing stays outside the markup, between the words.
         words = text.lstrip()
         formatted = self._adapter().format_text(words, delivery, self._formatted_delivery)
@@ -630,13 +643,7 @@ class ExpressionFormatter:
             if name == EMPHASIS_DELIVERY:
                 supported = bool(capabilities and capabilities.emphasis)
             else:
-                supported = bool(
-                    capabilities
-                    and (
-                        capabilities.free_text_delivery
-                        or any(term.name == name for term in capabilities.delivery)
-                    )
-                )
+                supported = bool(capabilities and capabilities.delivery_name(name))
             if supported:
                 performed.append(name)
             else:
@@ -649,7 +656,7 @@ class ExpressionFormatter:
         """Format a sound or pause the service can perform."""
         if isinstance(segment, Pause):
             return self._adapter().format_pause(segment.duration_within(capabilities))
-        return self._adapter().format_sound(segment.name)
+        return self._adapter().format_sound(capabilities.sound_name(segment.name) or segment.name)
 
     def _warn_unperformed(self, tag: str):
         if tag not in self._unperformed:
@@ -663,7 +670,7 @@ def strip_expression_tags(text: str) -> str:
     The words are spaced as clients are shown them, as by
     :meth:`ExpressionFormatter.shown_text`::
 
-        strip_expression_tags("<<cheerful>> It's [[laughs]] ^^back^^ up.")
+        strip_expression_tags("<<warm>> It's [[laugh]] ^^back^^ up.")
         # "It's back up."
 
     Args:
@@ -681,10 +688,22 @@ def _delivery_name(text: str) -> str:
     return " ".join(text.split())
 
 
+def _service_delivery(
+    delivery: list[str], capabilities: ExpressionCapabilities | None
+) -> list[str]:
+    """A performed delivery by the names the service performs it by."""
+    if capabilities is None:
+        return delivery
+    return [
+        name if name == EMPHASIS_DELIVERY else capabilities.delivery_name(name) or name
+        for name in delivery
+    ]
+
+
 def _move_closing_punctuation(segments: list[Segment]) -> list[Segment]:
     """Move punctuation written after a tag onto the words before it.
 
-    A tag is removed as a word, so in ``"Hi [[laughs]], there."`` the comma
+    A tag is removed as a word, so in ``"Hi [[laugh]], there."`` the comma
     closes ``"Hi"``: the words become ``"Hi,"`` and ``" there."``, with the
     sound between them, where a service reports the comma. Words follow a tag
     when a sound or pause stands between them, or the gap a delivery tag left.

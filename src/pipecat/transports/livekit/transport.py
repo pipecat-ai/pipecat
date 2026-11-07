@@ -769,12 +769,14 @@ class LiveKitTransportClient:
             # for the same participant.
             await self._close_audio_stream(participant.identity)
             self._audio_tracks[participant.identity] = track
-            audio_stream = rtc.AudioStream(track)
-            task = self._task_manager.create_task(
-                self._process_audio_stream(audio_stream, participant.identity),
-                f"{self}::_process_audio_stream",
-            )
-            self._audio_streams[participant.identity] = (audio_stream, task)
+            # Nothing reads ``_audio_queue`` without audio input.
+            if self._params.audio_in_enabled:
+                audio_stream = rtc.AudioStream(track)
+                task = self._task_manager.create_task(
+                    self._process_audio_stream(audio_stream, participant.identity),
+                    f"{self}::_process_audio_stream",
+                )
+                self._audio_streams[participant.identity] = (audio_stream, task)
             await self._callbacks.on_audio_track_subscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             video_source = _video_source(publication)
@@ -1510,16 +1512,14 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use LiveKit's native publish_dtmf method for telephone events.
 
-        LiveKit's DTMF API sends a single tone per call, so when
-        ``frame.buttons`` contains multiple entries only the first one is
-        sent.
+        LiveKit's DTMF API sends a single tone per call, so each button is
+        published in order.
 
         Args:
             frame: The DTMF frame to write.
         """
-        if not frame.buttons:
-            return
-        await self._client.send_dtmf(frame.buttons[0].value)
+        for button in frame.buttons or []:
+            await self._client.send_dtmf(button.value)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
