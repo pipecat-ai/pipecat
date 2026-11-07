@@ -647,12 +647,13 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             await asyncio.sleep(0.2)
 
-            # Every input sample reaches the transport, give or take the
-            # silence the last partial chunk is padded with.
+            # Every input sample reaches the transport, followed by the few
+            # milliseconds the resampler's filter delays the audio by, and the
+            # silence the last partial chunk is padded with: at most one chunk.
             expected = in_samples * self.OUT_RATE // self.TTS_RATE
             written = len(self._written(transport)) // 2
             self.assertGreaterEqual(written, expected)
-            self.assertLess(written, expected + sender.audio_chunk_size // 2)
+            self.assertLessEqual(written, expected + sender.audio_chunk_size // 2)
         finally:
             await transport.cancel(CancelFrame())
 
@@ -671,8 +672,9 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
             already_written = len(transport.write_audio_frame.call_args_list)
 
-            # The next turn is entirely negative, so anything positive in it is
-            # left over from the turn that was cut short.
+            # The next turn is entirely negative. The resampler's filter rings
+            # by up to about a tenth of a sudden step, while audio left over
+            # from the turn that was cut short would come back near +8000.
             for frame in self._constant_frames(-8000, 8000):
                 await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
             await transport.process_frame(
@@ -686,7 +688,7 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
-            self.assertLessEqual(int(samples.max()), 0)
+            self.assertLess(int(samples.max()), 8000 // 4)
         finally:
             await transport.cancel(CancelFrame())
 

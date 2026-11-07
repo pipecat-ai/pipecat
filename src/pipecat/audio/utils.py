@@ -19,8 +19,8 @@ import loudness
 import numpy as np
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.resamplers.sinc_stream_resampler import SincStreamAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
 
 # Normal speech usually results in many samples between ±500 to ±5000, depending on loudness and mic gain.
 # So we are using a threshold that is well below what real speech produces.
@@ -42,13 +42,16 @@ def create_file_resampler(**kwargs) -> BaseAudioResampler:
 def create_stream_resampler(**kwargs) -> BaseAudioResampler:
     """Create a stream audio resampler instance.
 
+    Its output keeps pace with its input, so audio that has already been paced
+    stays evenly paced after resampling.
+
     Args:
         **kwargs: Additional keyword arguments passed to the resampler constructor.
 
     Returns:
-        A configured SOXRStreamAudioResampler instance.
+        A configured SincStreamAudioResampler instance.
     """
-    return SOXRStreamAudioResampler(**kwargs)
+    return SincStreamAudioResampler(**kwargs)
 
 
 def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
