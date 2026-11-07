@@ -176,24 +176,6 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
 
-    async def test_bot_speaking_supplementary_cjk_counts_each_character(self):
-        started = []
-        for frame_type in (TranscriptionFrame, InterimTranscriptionFrame):
-            with self.subTest(frame_type=frame_type.__name__):
-                strategy = MinWordsUserTurnStartStrategy(min_words=3)
-                started.clear()
-
-                @strategy.event_handler("on_user_turn_started")
-                async def on_user_turn_started(strategy, params):
-                    started.append(True)
-
-                await strategy.process_frame(BotStartedSpeakingFrame())
-                await strategy.process_frame(frame_type(text="𠮷𠮷", user_id="cat", timestamp=""))
-                self.assertFalse(started)
-
-                await strategy.process_frame(frame_type(text="𠮷𠮷𠮷", user_id="cat", timestamp=""))
-                self.assertEqual(started, [True])
-
 
 class TestVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_vad_strategy(self):

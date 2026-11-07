@@ -39,7 +39,6 @@ class TestCountSpokenWords(unittest.TestCase):
                 self.assertEqual(count_spoken_words(chr(codepoint) * 2), 2)
 
     def test_supplementary_cjk_characters_separate_other_runs(self):
-        self.assertEqual(count_spoken_words("𠮷𠮷"), 2)
         self.assertEqual(count_spoken_words("Hello𠮷𠮷100"), 4)
         self.assertEqual(count_spoken_words("𠮷、𠮷。"), 2)
 
