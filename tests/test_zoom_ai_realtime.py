@@ -771,12 +771,12 @@ async def test_a_completed_reply_restarts_the_reconnect_count():
 async def test_bursty_16khz_audio_is_resampled_without_losing_any(monkeypatch):
     """Deltas arrive in bursts with gaps over 0.2 s; none of the audio may be dropped."""
     import numpy as np
-    import soxr
 
-    import pipecat.audio.resamplers.soxr_stream_resampler as soxr_stream
+    import pipecat.audio.resamplers.sinc_stream_resampler as sinc_stream
+    from pipecat.audio.utils import create_stream_resampler
 
     clock = {"t": 0.0}
-    monkeypatch.setattr(soxr_stream.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(sinc_stream.time, "time", lambda: clock["t"])
     tone = (np.sin(np.arange(16000 * 2) * 2 * np.pi * 220 / 16000) * 8000).astype(np.int16)
     pcm = tone.tobytes()
     cuts = [0, *range(4001, len(pcm), 4000), len(pcm)]  # ~125 ms each, cut mid-sample
@@ -810,10 +810,13 @@ async def test_bursty_16khz_audio_is_resampled_without_losing_any(monkeypatch):
     audio = b"".join(
         base64.b64decode(e["delta"]) for e in out if e["type"] == "response.output_audio.delta"
     )
-    want = soxr.resample(tone, 16000, 24000, quality="VHQ")
+    # The whole tone resampled in one go, its tail flushed.
+    resampler = create_stream_resampler(clear_after_secs=None)
+    whole = await resampler.resample(pcm, 16000, 24000) + await resampler.flush()
+    want = np.frombuffer(whole, dtype=np.int16)
     got = np.frombuffer(audio, dtype=np.int16)
     assert len(got) == len(want)  # nothing dropped at the gaps, the tail flushed at the end
-    assert np.abs(got.astype(int) - want.astype(int)).max() <= 2
+    assert np.abs(got.astype(int) - want.astype(int)).max() <= 1
     assert out[-1]["type"] == "response.output_audio.done"
 
 
