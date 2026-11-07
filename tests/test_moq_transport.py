@@ -685,13 +685,49 @@ class TestMOQTransportInit(unittest.TestCase):
             transport = MOQTransport(params=params, host="localhost", port=4080)
         return transport._client._bind
 
-    def test_serve_mode_defaults_the_bind_to_the_port(self):
-        """Serve mode needs a concrete listen address; unset, it falls
-        back to the constructor's port."""
-        self.assertEqual(self._bind_for(serve=True), "[::]:4080")
+    def test_serve_mode_default_bind_is_dual_stack_ipv6_on_posix(self):
+        """Serve mode needs a concrete listen address; unset, it falls back
+        to the constructor's port. On POSIX "[::]" is dual-stack, so it
+        stays the default there."""
+        with patch("sys.platform", "linux"):
+            self.assertEqual(self._bind_for(serve=True), "[::]:4080")
+
+    def test_serve_mode_default_bind_is_ipv4_wildcard_on_windows(self):
+        """On Windows "[::]" binds IPv6-only (IPV6_V6ONLY defaults on and
+        moq-rs can't clear it), so the IPv4 QUIC clients a bot actually
+        gets — Chromium's WebTransport dial among them — would get
+        ERR_CONNECTION_RESET. The default must be the IPv4 wildcard."""
+        with patch("sys.platform", "win32"):
+            self.assertEqual(self._bind_for(serve=True), "0.0.0.0:4080")
 
     def test_serve_mode_honors_an_explicit_bind(self):
         self.assertEqual(self._bind_for(serve=True, bind="[::]:9000"), "[::]:9000")
+
+    def test_explicit_ipv6_serve_bind_on_windows_logs_a_warning(self):
+        """An explicit "[::]" bind on Windows is honored — but it is the
+        one bind that silently breaks IPv4 callers there, so say so at
+        startup instead of failing at connect time."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, serve=True, bind="[::]:9000"
+        )
+        with patch("sys.platform", "win32"):
+            with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+                moq_mock.BroadcastProducer.return_value = MagicMock()
+                with patch("pipecat.transports.moq.transport.logger") as log:
+                    transport = MOQTransport(params=params, host="localhost", port=4080)
+        self.assertEqual(transport._client._bind, "[::]:9000")
+        log.warning.assert_called_once()
+
+    def test_explicit_ipv4_serve_bind_on_windows_does_not_warn(self):
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, serve=True, bind="0.0.0.0:9000"
+        )
+        with patch("sys.platform", "win32"):
+            with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+                moq_mock.BroadcastProducer.return_value = MagicMock()
+                with patch("pipecat.transports.moq.transport.logger") as log:
+                    MOQTransport(params=params, host="localhost", port=4080)
+        log.warning.assert_not_called()
 
     def test_client_mode_binds_ephemeral_by_default(self):
         """None means moq.Client picks an ephemeral source port — the
