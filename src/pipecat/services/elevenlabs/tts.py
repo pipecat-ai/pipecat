@@ -296,7 +296,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
-        pause_frame_processing: bool = True,
+        pause_frame_processing: bool = False,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -356,7 +356,7 @@ class ElevenLabsTTSService(ElevenLabsTTSBase):
                     Will be removed in 2.0.0.
 
             pause_frame_processing: Whether to hold incoming frames after a turn
-                until its audio has played. With False, contexts synthesize
+                until its audio has played. By default contexts synthesize
                 concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
                 at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.

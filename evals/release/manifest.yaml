@@ -68,6 +68,18 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-elevenlabs-dialogue.py
     scenarios: [scripted/capital_question]
+  # Several TTSSpeakFrames pushed at once, each synthesized in its own
+  # context, on the TTS services that synthesize contexts concurrently.
+  - bot: voice/voice-concurrent-tts.py
+    name: voice/voice-concurrent-tts-cartesia
+    runner_body:
+      data: { tts: cartesia }
+    scenarios: [scripted/concurrent_tts_contexts]
+  - bot: voice/voice-concurrent-tts.py
+    name: voice/voice-concurrent-tts-elevenlabs
+    runner_body:
+      data: { tts: elevenlabs }
+    scenarios: [scripted/concurrent_tts_contexts]
   - bot: voice/voice-fal.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-fish.py
