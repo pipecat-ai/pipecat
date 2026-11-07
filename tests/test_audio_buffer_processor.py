@@ -11,6 +11,7 @@ import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     AudioBufferStartRecordingFrame,
@@ -32,6 +33,9 @@ from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughResampler:
+    async def flush(self) -> bytes:
+        return b""
+
     async def resample(
         self, audio: bytes, in_rate: int, out_rate: int
     ) -> bytes:  # pragma: no cover - trivial
@@ -74,6 +78,48 @@ async def _make_processor(
     if start:
         await processor.start_recording()
     return processor
+
+
+class TestRecordingResamplerTail(unittest.IsolatedAsyncioTestCase):
+    async def _check_recording(self, frame_type, track):
+        processor = await _make_processor()
+        processor._input_resampler = create_stream_resampler(clear_after_secs=None)
+        processor._output_resampler = create_stream_resampler(clear_after_secs=None)
+        recordings = []
+        recorded = asyncio.Queue()
+
+        async def on_track_audio_data(_, user, bot, sample_rate, num_channels):
+            recorded.put_nowait((user, bot))
+
+        processor.add_event_handler("on_track_audio_data", on_track_audio_data)
+        try:
+            for sample in (1000, 0):
+                await processor.start_recording()
+                frame = frame_type(
+                    audio=struct.pack("<2400h", *([sample] * 2400)),
+                    sample_rate=24000,
+                    num_channels=1,
+                )
+                await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+                await processor.stop_recording()
+                recordings.append(await asyncio.wait_for(recorded.get(), timeout=1))
+
+            self.assertEqual(len(recordings), 2)
+            self.assertEqual(len(recordings[0][track]), 1600 * 2)
+            self.assertNotEqual(recordings[0][track], bytes(1600 * 2))
+            self.assertEqual(len(recordings[1][track]), 1600 * 2)
+            # SOXR's int16 output includes one-bit dithering, even for silence.
+            self.assertLessEqual(
+                max(abs(sample) for sample in struct.unpack("<1600h", recordings[1][track])), 1
+            )
+        finally:
+            await processor.cleanup()
+
+    async def test_user_recording_preserves_resampled_tail(self):
+        await self._check_recording(InputAudioRawFrame, 0)
+
+    async def test_bot_recording_preserves_resampled_tail(self):
+        await self._check_recording(OutputAudioRawFrame, 1)
 
 
 async def _capture_track_audio(processor: AudioBufferProcessor) -> tuple[bytes, bytes]:
