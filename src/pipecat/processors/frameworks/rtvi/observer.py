@@ -641,7 +641,7 @@ class RTVIObserver(BaseObserver):
                     tool_call_id=tool_call_id,
                     cancelled=cancelled,
                     function_name=function_name if named else None,
-                    result=(result if result else None) if full and not cancelled else None,
+                    result=result if full and not cancelled else None,
                 )
             )
         await self.send_rtvi_message(message)
