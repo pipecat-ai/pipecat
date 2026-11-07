@@ -2274,8 +2274,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # If an image frame has been added to the context, let's run inference.
             run_llm = await self._maybe_append_image_to_context(image_frame)
 
-        # Run inference if the function call result requires it.
-        if frame.result:
+        # Run inference if the function call result requires it. A falsy result
+        # such as {} or 0 is still a result; only None completes the call
+        # without running the LLM (e.g. a tool that already spoke its answer).
+        if frame.result is not None:
             if properties and properties.run_llm is not None:
                 # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
@@ -2356,7 +2358,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Injects an intermediate developer message into the context without
         removing the call from the in-progress map.
         """
-        if not frame.result:
+        if frame.result is None:
             logger.warning(f"{self} result_callback called with is_final=False but no result!")
             return
 
@@ -2376,7 +2378,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         deferred = self._is_deferred(in_progress_frame)
         del self._function_calls_in_progress[frame.tool_call_id]
 
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
 
         if deferred:
             # The conversation moved on while the call ran, so the LLM is told

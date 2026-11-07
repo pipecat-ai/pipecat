@@ -627,7 +627,11 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         text: interactive when the model should say something about it,
         plain text for it to take in otherwise.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
         if is_final:
             await self._send_tool_result(frame.tool_call_id, result)
