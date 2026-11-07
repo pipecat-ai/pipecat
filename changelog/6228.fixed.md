@@ -1,0 +1,1 @@
+- Fixed TTS iterator resampling losing buffered audio at the end of a synthesis or between delayed chunks.
