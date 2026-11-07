@@ -356,6 +356,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             # Call Bedrock without streaming
             response = await client.converse(**request_params)
 
+            self._handle_stop_reason(response.get("stopReason"))
+
             # Extract the response text
             if (
                 "output" in response
@@ -674,6 +676,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                             except json.JSONDecodeError:
                                 logger.error(f"Failed to parse tool arguments: {json_accumulator}")
 
+                    # The event that ends the message carries why the model stopped
+                    elif "messageStop" in event:
+                        self._handle_stop_reason(event["messageStop"].get("stopReason"))
+
                     # Handle usage metrics if available
                     if "metadata" in event and "usage" in event["metadata"]:
                         usage = event["metadata"]["usage"]
@@ -764,6 +770,23 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
+
+    def _handle_stop_reason(self, stop_reason: str | None):
+        """Log why the model stopped generating, when it stopped for a notable reason.
+
+        Anything other than a normal stop leaves the turn short of what the model
+        would otherwise have said: the output hit the token limit or the context
+        window, or a guardrail or content filter withheld it. Whatever text did
+        arrive is still passed on.
+
+        Args:
+            stop_reason: The ``stopReason`` of a Converse response or of a streamed
+                ``messageStop`` event.
+        """
+        if stop_reason in (None, "end_turn", "tool_use", "stop_sequence"):
+            return
+
+        logger.warning(f"{self}: response incomplete, the model stopped for {stop_reason}")
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
