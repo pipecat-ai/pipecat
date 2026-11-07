@@ -39,6 +39,37 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("#", result)
         self.assertIn("Title", result)
 
+    async def test_atx_headers(self):
+        for level in range(1, 7):
+            marker = "#" * level
+            with self.subTest(level=level):
+                self.assertEqual(await strip_markdown(f"{marker} Title {marker}", "*"), "Title")
+
+        cases = {
+            "## Subtitle ###": "Subtitle",
+            "## Title ##\n\nBody": "Title\n\nBody",
+            "## Title ##  \r\nBody": "Title\r\nBody",
+            "## ##": "",
+            "#\nBody": "\nBody",
+            "#\r\nBody": "\r\nBody",
+            "## Title   ": "Title   ",
+            "# Press `#`": "Press #",
+            "# **Title ##**": "Title ##",
+            "# [Press #](https://example.com)": "Press #",
+            "# Press #```removed```": "Press #",
+            "# Press #~~~removed~~~": "Press #",
+            "# - item ##": "- item",
+            "# --- ##": "---",
+            "## C#": "C#",
+            "## Title#": "Title#",
+            r"## Literal \#": r"Literal \#",
+            "####### Literal ##": "####### Literal ##",
+            "Text # Title ##": "Text # Title ##",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
     async def test_inline_code(self):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
