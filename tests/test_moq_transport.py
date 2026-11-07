@@ -2049,7 +2049,12 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     async def test_any_other_subscribe_error_still_propagates(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
-        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=moq.Error.Protocol("boom"))
+        boom = moq.Error.Protocol(
+            moq.ProtocolError(
+                scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="boom"
+            )
+        )
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=boom)
         with self.assertRaises(moq.Error.Protocol):
             await client._forward_peer_audio(peer_broadcast)
 
