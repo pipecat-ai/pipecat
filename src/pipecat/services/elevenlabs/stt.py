@@ -42,6 +42,114 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
+_ELEVENLABS_LANGUAGE_MAP: dict[Language, str] = {
+    Language.AF: "afr",  # Afrikaans
+    Language.AM: "amh",  # Amharic
+    Language.AR: "ara",  # Arabic
+    Language.HY: "hye",  # Armenian
+    Language.AS: "asm",  # Assamese
+    Language.AST: "ast",  # Asturian
+    Language.AZ: "aze",  # Azerbaijani
+    Language.BE: "bel",  # Belarusian
+    Language.BN: "ben",  # Bengali
+    Language.BS: "bos",  # Bosnian
+    Language.BG: "bul",  # Bulgarian
+    Language.MY: "mya",  # Burmese
+    Language.YUE: "yue",  # Cantonese
+    Language.CA: "cat",  # Catalan
+    Language.CEB: "ceb",  # Cebuano
+    Language.NY: "nya",  # Chichewa
+    Language.HR: "hrv",  # Croatian
+    Language.CS: "ces",  # Czech
+    Language.DA: "dan",  # Danish
+    Language.NL: "nld",  # Dutch
+    Language.EN: "eng",  # English
+    Language.ET: "est",  # Estonian
+    Language.FIL: "fil",  # Filipino
+    Language.FI: "fin",  # Finnish
+    Language.FR: "fra",  # French
+    Language.FF: "ful",  # Fulah
+    Language.GL: "glg",  # Galician
+    Language.LG: "lug",  # Ganda
+    Language.KA: "kat",  # Georgian
+    Language.DE: "deu",  # German
+    Language.EL: "ell",  # Greek
+    Language.GU: "guj",  # Gujarati
+    Language.HA: "hau",  # Hausa
+    Language.HE: "heb",  # Hebrew
+    Language.HI: "hin",  # Hindi
+    Language.HU: "hun",  # Hungarian
+    Language.IS: "isl",  # Icelandic
+    Language.IG: "ibo",  # Igbo
+    Language.ID: "ind",  # Indonesian
+    Language.GA: "gle",  # Irish
+    Language.IT: "ita",  # Italian
+    Language.JA: "jpn",  # Japanese
+    Language.JV: "jav",  # Javanese
+    Language.KEA: "kea",  # Kabuverdianu
+    Language.KN: "kan",  # Kannada
+    Language.KK: "kaz",  # Kazakh
+    Language.KM: "khm",  # Khmer
+    Language.KO: "kor",  # Korean
+    Language.KU: "kur",  # Kurdish
+    Language.KY: "kir",  # Kyrgyz
+    Language.LO: "lao",  # Lao
+    Language.LV: "lav",  # Latvian
+    Language.LN: "lin",  # Lingala
+    Language.LT: "lit",  # Lithuanian
+    Language.LUO: "luo",  # Luo
+    Language.LB: "ltz",  # Luxembourgish
+    Language.MK: "mkd",  # Macedonian
+    Language.MS: "msa",  # Malay
+    Language.ML: "mal",  # Malayalam
+    Language.MT: "mlt",  # Maltese
+    Language.ZH: "zho",  # Mandarin Chinese
+    Language.MI: "mri",  # Māori
+    Language.MR: "mar",  # Marathi
+    Language.MN: "mon",  # Mongolian
+    Language.NE: "nep",  # Nepali
+    Language.NSO: "nso",  # Northern Sotho
+    Language.NO: "nor",  # Norwegian
+    Language.OC: "oci",  # Occitan
+    Language.OR: "ori",  # Odia
+    Language.PS: "pus",  # Pashto
+    Language.FA: "fas",  # Persian
+    Language.PL: "pol",  # Polish
+    Language.PT: "por",  # Portuguese
+    Language.PA: "pan",  # Punjabi
+    Language.RO: "ron",  # Romanian
+    Language.RU: "rus",  # Russian
+    Language.SR: "srp",  # Serbian
+    Language.SN: "sna",  # Shona
+    Language.SD: "snd",  # Sindhi
+    Language.SK: "slk",  # Slovak
+    Language.SL: "slv",  # Slovenian
+    Language.SO: "som",  # Somali
+    Language.ES: "spa",  # Spanish
+    Language.SW: "swa",  # Swahili
+    Language.SV: "swe",  # Swedish
+    Language.TA: "tam",  # Tamil
+    Language.TG: "tgk",  # Tajik
+    Language.TE: "tel",  # Telugu
+    Language.TH: "tha",  # Thai
+    Language.TR: "tur",  # Turkish
+    Language.UK: "ukr",  # Ukrainian
+    Language.UMB: "umb",  # Umbundu
+    Language.UR: "urd",  # Urdu
+    Language.UZ: "uzb",  # Uzbek
+    Language.VI: "vie",  # Vietnamese
+    Language.CY: "cym",  # Welsh
+    Language.WO: "wol",  # Wolof
+    Language.XH: "xho",  # Xhosa
+    Language.ZU: "zul",  # Zulu
+}
+
+# ElevenLabs reports detected languages as ISO 639-3 codes (e.g. "por"), while
+# other STT services and the Language enum use ISO 639-1 (e.g. "pt").
+_ELEVENLABS_CODE_TO_LANGUAGE: dict[str, Language] = {
+    code: language for language, code in _ELEVENLABS_LANGUAGE_MAP.items()
+}
+
 
 def language_to_elevenlabs_language(language: Language) -> str:
     """Convert a Language enum to ElevenLabs language code.
@@ -58,109 +166,34 @@ def language_to_elevenlabs_language(language: Language) -> str:
         becomes ``eng``) and logs a warning (via
         ``resolve_language(..., use_base_code=True)``).
     """
-    LANGUAGE_MAP = {
-        Language.AF: "afr",  # Afrikaans
-        Language.AM: "amh",  # Amharic
-        Language.AR: "ara",  # Arabic
-        Language.HY: "hye",  # Armenian
-        Language.AS: "asm",  # Assamese
-        Language.AST: "ast",  # Asturian
-        Language.AZ: "aze",  # Azerbaijani
-        Language.BE: "bel",  # Belarusian
-        Language.BN: "ben",  # Bengali
-        Language.BS: "bos",  # Bosnian
-        Language.BG: "bul",  # Bulgarian
-        Language.MY: "mya",  # Burmese
-        Language.YUE: "yue",  # Cantonese
-        Language.CA: "cat",  # Catalan
-        Language.CEB: "ceb",  # Cebuano
-        Language.NY: "nya",  # Chichewa
-        Language.HR: "hrv",  # Croatian
-        Language.CS: "ces",  # Czech
-        Language.DA: "dan",  # Danish
-        Language.NL: "nld",  # Dutch
-        Language.EN: "eng",  # English
-        Language.ET: "est",  # Estonian
-        Language.FIL: "fil",  # Filipino
-        Language.FI: "fin",  # Finnish
-        Language.FR: "fra",  # French
-        Language.FF: "ful",  # Fulah
-        Language.GL: "glg",  # Galician
-        Language.LG: "lug",  # Ganda
-        Language.KA: "kat",  # Georgian
-        Language.DE: "deu",  # German
-        Language.EL: "ell",  # Greek
-        Language.GU: "guj",  # Gujarati
-        Language.HA: "hau",  # Hausa
-        Language.HE: "heb",  # Hebrew
-        Language.HI: "hin",  # Hindi
-        Language.HU: "hun",  # Hungarian
-        Language.IS: "isl",  # Icelandic
-        Language.IG: "ibo",  # Igbo
-        Language.ID: "ind",  # Indonesian
-        Language.GA: "gle",  # Irish
-        Language.IT: "ita",  # Italian
-        Language.JA: "jpn",  # Japanese
-        Language.JV: "jav",  # Javanese
-        Language.KEA: "kea",  # Kabuverdianu
-        Language.KN: "kan",  # Kannada
-        Language.KK: "kaz",  # Kazakh
-        Language.KM: "khm",  # Khmer
-        Language.KO: "kor",  # Korean
-        Language.KU: "kur",  # Kurdish
-        Language.KY: "kir",  # Kyrgyz
-        Language.LO: "lao",  # Lao
-        Language.LV: "lav",  # Latvian
-        Language.LN: "lin",  # Lingala
-        Language.LT: "lit",  # Lithuanian
-        Language.LUO: "luo",  # Luo
-        Language.LB: "ltz",  # Luxembourgish
-        Language.MK: "mkd",  # Macedonian
-        Language.MS: "msa",  # Malay
-        Language.ML: "mal",  # Malayalam
-        Language.MT: "mlt",  # Maltese
-        Language.ZH: "zho",  # Mandarin Chinese
-        Language.MI: "mri",  # Māori
-        Language.MR: "mar",  # Marathi
-        Language.MN: "mon",  # Mongolian
-        Language.NE: "nep",  # Nepali
-        Language.NSO: "nso",  # Northern Sotho
-        Language.NO: "nor",  # Norwegian
-        Language.OC: "oci",  # Occitan
-        Language.OR: "ori",  # Odia
-        Language.PS: "pus",  # Pashto
-        Language.FA: "fas",  # Persian
-        Language.PL: "pol",  # Polish
-        Language.PT: "por",  # Portuguese
-        Language.PA: "pan",  # Punjabi
-        Language.RO: "ron",  # Romanian
-        Language.RU: "rus",  # Russian
-        Language.SR: "srp",  # Serbian
-        Language.SN: "sna",  # Shona
-        Language.SD: "snd",  # Sindhi
-        Language.SK: "slk",  # Slovak
-        Language.SL: "slv",  # Slovenian
-        Language.SO: "som",  # Somali
-        Language.ES: "spa",  # Spanish
-        Language.SW: "swa",  # Swahili
-        Language.SV: "swe",  # Swedish
-        Language.TA: "tam",  # Tamil
-        Language.TG: "tgk",  # Tajik
-        Language.TE: "tel",  # Telugu
-        Language.TH: "tha",  # Thai
-        Language.TR: "tur",  # Turkish
-        Language.UK: "ukr",  # Ukrainian
-        Language.UMB: "umb",  # Umbundu
-        Language.UR: "urd",  # Urdu
-        Language.UZ: "uzb",  # Uzbek
-        Language.VI: "vie",  # Vietnamese
-        Language.CY: "cym",  # Welsh
-        Language.WO: "wol",  # Wolof
-        Language.XH: "xho",  # Xhosa
-        Language.ZU: "zul",  # Zulu
-    }
+    return resolve_language(language, _ELEVENLABS_LANGUAGE_MAP, use_base_code=True)
 
-    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+def elevenlabs_language_to_language(language_code: str | None) -> Language | str | None:
+    """Convert a language code returned by ElevenLabs to a Language enum.
+
+    ElevenLabs returns ISO 639-3 codes (``"por"``, ``"eng"``), so they are mapped
+    to the ISO 639-1 based Language enum (``Language.PT``, ``Language.EN``) that
+    other STT services emit. Codes that are already valid Language values (such
+    as ``"en"``) are returned as Language members.
+
+    Args:
+        language_code: The ``language_code`` value from an ElevenLabs response.
+
+    Returns:
+        The matching Language, the original code if it has no mapping, or None
+        if no code was provided.
+    """
+    if not language_code:
+        return None
+    code = language_code.strip()
+    language = _ELEVENLABS_CODE_TO_LANGUAGE.get(code.lower())
+    if language is not None:
+        return language
+    try:
+        return Language(code)
+    except ValueError:
+        return language_code
 
 
 class CommitStrategy(StrEnum):
@@ -414,7 +447,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
             text = result.get("text", "").strip()
             if text:
                 # Use the language_code returned by the API
-                detected_language = result.get("language_code", "eng")
+                detected_language = elevenlabs_language_to_language(
+                    result.get("language_code", "eng")
+                )
 
                 await self._handle_transcription(text, True, detected_language)
                 logger.debug(f"Transcription: [{text}]")
@@ -916,7 +951,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             return
 
         # Get language if provided
-        language = data.get("language_code")
+        language = elevenlabs_language_to_language(data.get("language_code"))
 
         logger.trace(f"Partial transcript: [{text}]")
 
@@ -954,7 +989,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             return
 
         # Get language if provided
-        language = data.get("language_code")
+        language = elevenlabs_language_to_language(data.get("language_code"))
 
         logger.debug(f"Committed transcript: [{text}]")
 
@@ -1001,7 +1036,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             return
 
         # Get language if provided
-        language = data.get("language_code")
+        language = elevenlabs_language_to_language(data.get("language_code"))
 
         logger.debug(f"Committed transcript with timestamps: [{text}]")
 

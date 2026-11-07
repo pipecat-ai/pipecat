@@ -16,6 +16,7 @@ from pipecat.services.elevenlabs.stt import (
     ElevenLabsRealtimeSTTService,
     ElevenLabsSTTService,
     audio_format_from_sample_rate,
+    elevenlabs_language_to_language,
     language_to_elevenlabs_language,
 )
 from pipecat.transcriptions.language import Language
@@ -283,3 +284,77 @@ async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
     assert len(captured) == 1
     assert captured[0].text == COMMITTED_TEXT
     assert captured[0].language is None
+
+
+@pytest.mark.parametrize(
+    "language_code, expected",
+    [
+        ("por", Language.PT),
+        ("eng", Language.EN),
+        ("fas", Language.FA),
+        ("ENG", Language.EN),
+        ("en", Language.EN),
+        ("pt-BR", Language.PT_BR),
+        ("yue", Language.YUE),
+    ],
+)
+def test_elevenlabs_language_to_language_maps_to_enum(language_code, expected):
+    assert elevenlabs_language_to_language(language_code) == expected
+
+
+def test_elevenlabs_language_to_language_keeps_unmapped_code():
+    assert elevenlabs_language_to_language("xyz") == "xyz"
+
+
+@pytest.mark.parametrize("language_code", [None, ""])
+def test_elevenlabs_language_to_language_handles_missing_code(language_code):
+    assert elevenlabs_language_to_language(language_code) is None
+
+
+def test_elevenlabs_language_map_round_trips():
+    """Every code we send to ElevenLabs maps back to the same Language."""
+    for language in [Language.EN, Language.PT, Language.ES, Language.FA, Language.ZH]:
+        code = language_to_elevenlabs_language(language)
+        assert elevenlabs_language_to_language(code) == language
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_stt_transcription_frame_uses_iso_639_1(aiohttp_client):
+    async def handler(request):
+        reader = await request.multipart()
+        async for part in reader:
+            await part.read()
+        return web.json_response({"text": "olá", "language_code": "por", "words": []})
+
+    app = web.Application()
+    app.router.add_post("/v1/speech-to-text", handler)
+    client = await aiohttp_client(app)
+    base_url = str(client.make_url("/")).rstrip("/")
+
+    async with aiohttp.ClientSession() as session:
+        service = ElevenLabsSTTService(
+            api_key="test-key",
+            aiohttp_session=session,
+            base_url=base_url,
+        )
+        frames = [frame async for frame in service.run_stt(b"RIFF")]
+
+    transcriptions = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert len(transcriptions) == 1
+    assert transcriptions[0].language == Language.PT
+    assert transcriptions[0].language == "pt"
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_realtime_transcription_frame_uses_iso_639_1():
+    service = ElevenLabsRealtimeSTTService(
+        api_key="test-key",
+        sample_rate=16000,
+        include_language_detection=True,
+    )
+    captured = _capture_transcriptions(service)
+
+    await service._process_response({**TIMESTAMPED_COMMITTED_MESSAGE, "language_code": "por"})
+
+    assert len(captured) == 1
+    assert captured[0].language == Language.PT
