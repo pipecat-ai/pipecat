@@ -64,7 +64,7 @@ class EvalConversationObserver(BaseObserver):
 
         @observer.event_handler("on_conversation_ended")
         async def on_conversation_ended(observer, message: EvalConversationEndedMessage):
-            Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2))
+            Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2), encoding="utf-8")
 
         worker = PipelineWorker(pipeline, observers=[observer])
     """

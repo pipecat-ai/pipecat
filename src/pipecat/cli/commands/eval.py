@@ -323,11 +323,13 @@ async def _execute_scenario(
         Path(logs_dir).mkdir(parents=True, exist_ok=True)
         if run.result.debug_log:
             (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
-                "\n".join(run.result.debug_log) + "\n"
+                "\n".join(run.result.debug_log) + "\n",
+                encoding="utf-8",
             )
         if isinstance(run.result, EvalSimulationResult):
             (Path(logs_dir) / f"{run.stem}.conversation.json").write_text(
-                json.dumps(run.result.conversation, indent=2) + "\n"
+                json.dumps(run.result.conversation, indent=2) + "\n",
+                encoding="utf-8",
             )
     except Exception as e:  # noqa: BLE001
         # Errors raised inside the session's run() are caught there and returned
@@ -337,7 +339,9 @@ async def _execute_scenario(
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(traceback.format_exc())
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
     finally:
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
@@ -551,7 +555,7 @@ async def _judge_conversation(
     A file that can't be read or judged is the result's error.
     """
     try:
-        messages = json.loads(path.read_text())
+        messages = json.loads(path.read_text(encoding="utf-8"))
         judgement = await EvalSimulationJudge(simulation, explain_below=math.inf).judge(messages)
     except Exception as e:  # noqa: BLE001
         return EvalSimulationResult(

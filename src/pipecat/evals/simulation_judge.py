@@ -45,7 +45,7 @@ class EvalSimulationJudge:
     Example::
 
         scenario = EvalScenarioFile.load("book_table.yaml")["book_table/available"]
-        messages = json.loads(Path("run.conversation.json").read_text())
+        messages = json.loads(Path("run.conversation.json").read_text(encoding="utf-8"))
         judgement = await EvalSimulationJudge(scenario).judge(messages)
     """
 
