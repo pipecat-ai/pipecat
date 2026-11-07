@@ -710,10 +710,16 @@ class BaseOutputTransport(FrameProcessor):
             so it plays before the stop frame is handled, instead of being
             discarded when the buffer is cleared in `_bot_stopped_speaking`.
 
+            A speech stream (`SpeechOutputAudioRawFrame`) stays buffered: it
+            carries on through a `TTSStoppedFrame` (e.g. `OpenAILiveLLMService`
+            ends a transcript turn with one), so a flush would put silence in
+            the middle of the speech.
+
             Args:
                 frame: The TTS stopped frame to queue.
             """
-            await self._enqueue_flushed_audio_buffer()
+            if not issubclass(self._audio_buffer_cls, SpeechOutputAudioRawFrame):
+                await self._enqueue_flushed_audio_buffer()
             await self._audio_queue.put(frame)
 
         async def handle_mixer_control_frame(self, frame: MixerControlFrame):

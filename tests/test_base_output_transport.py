@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
@@ -485,6 +486,37 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_tts_stopped_frame_mid_speech_stream_adds_no_silence(self):
+        """A speech stream carries on through a TTSStoppedFrame.
+
+        `OpenAILiveLLMService` ends a transcript turn with one while its audio
+        continues, so the leftover stays buffered for the audio that follows.
+        """
+        transport = await _make_transport(mixer=None)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+            piece = chunk_size * 3 // 4
+
+            # Every sample is nonzero, so inserted silence can't hide.
+            stream = np.arange(1, 3 * piece + 1, dtype=np.int16).tobytes()
+            for offset in range(0, len(stream), piece):
+                if offset == 3 * piece:
+                    await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+                audio = stream[offset : offset + piece]
+                await transport.process_frame(
+                    SpeechOutputAudioRawFrame(audio, sender.sample_rate, 1),
+                    FrameDirection.DOWNSTREAM,
+                )
+            await asyncio.sleep(0.1)
+
+            written = b"".join(
+                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            )
+            self.assertEqual(written, stream[: len(stream) - len(stream) % chunk_size])
+        finally:
+            await transport.cancel(CancelFrame())
+
 
 async def _make_wedging_transport(
     write_audio_frame: AsyncMock, *, timeout: float
@@ -687,6 +719,31 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
             self.assertLessEqual(int(samples.max()), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_tts_stopped_frame_mid_speech_stream_keeps_resampling(self):
+        """Resampled, the stream isn't flushed or padded at a TTSStoppedFrame either."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            level = 8000
+            frame_samples = self.TTS_RATE // 50
+            audio = int(level).to_bytes(2, "little", signed=True) * frame_samples
+            for index in range(25):
+                # 13 frames leave half an output chunk buffered.
+                if index == 13:
+                    await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+                await transport.process_frame(
+                    SpeechOutputAudioRawFrame(audio, self.TTS_RATE, 1),
+                    FrameDirection.DOWNSTREAM,
+                )
+            await asyncio.sleep(0.1)
+
+            # Past the resampler's start-up, a constant input stays constant.
+            samples = np.frombuffer(self._written(transport), dtype=np.int16)
+            steady = samples[self.OUT_RATE // 50 :]
+            self.assertGreater(len(steady), self.OUT_RATE // 4)
+            self.assertGreater(int(steady.min()), level // 2)
         finally:
             await transport.cancel(CancelFrame())
 
