@@ -166,11 +166,14 @@ class FastAPIWebsocketClient:
         """
         return _WebSocketMessageIterator(self._websocket)
 
-    async def send(self, data: str | bytes):
+    async def send(self, data: str | bytes) -> bool:
         """Send data through the WebSocket connection.
 
         Args:
             data: The data to send (string or bytes).
+
+        Returns:
+            Whether the data was sent.
         """
         try:
             if self._can_send():
@@ -178,10 +181,12 @@ class FastAPIWebsocketClient:
                     await self._websocket.send_bytes(data)
                 else:
                     await self._websocket.send_text(data)
+                return True
         except Exception as e:
             logger.warning(
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
+        return False
 
     async def disconnect(self):
         """Disconnect the WebSocket client.
@@ -585,10 +590,11 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                     while len(self._audio_send_buffer) >= packet_bytes:
                         chunk = bytes(self._audio_send_buffer[:packet_bytes])
                         del self._audio_send_buffer[:packet_bytes]
-                        await self._client.send(chunk)
+                        if not await self._client.send(chunk):
+                            return False
                     return True
 
-                await self._client.send(payload)
+                success = await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
             success = False
