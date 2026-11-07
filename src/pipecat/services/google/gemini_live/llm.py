@@ -1061,7 +1061,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if run_llm is None:
             run_llm = frame.run_llm if frame.run_llm is not None else True
         tool_name = self._tool_call_id_to_name.get(frame.tool_call_id, "tool_call_result")
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         await self._tool_result(
             frame.tool_call_id,
             tool_name,

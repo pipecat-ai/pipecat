@@ -1689,6 +1689,56 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_function_call_falsy_result_runs_llm(self):
+        """A falsy final result is a real result: it runs the LLM and is kept as is."""
+        for result in [{}, [], 0, False, ""]:
+            with self.subTest(result=result):
+                context = LLMContext()
+                aggregator = LLMAssistantAggregator(context)
+                frames_to_send = [
+                    FunctionCallInProgressFrame(
+                        function_name="lookup",
+                        tool_call_id="1",
+                        arguments={},
+                        cancel_on_interruption=True,
+                    ),
+                    SleepFrame(),
+                    FunctionCallResultFrame(
+                        function_name="lookup", tool_call_id="1", arguments={}, result=result
+                    ),
+                ]
+                await run_test(
+                    aggregator,
+                    frames_to_send=frames_to_send,
+                    expected_down_frames=[],
+                    expected_up_frames=[LLMContextFrame],
+                )
+                self.assertEqual(json.loads(context.messages[-1]["content"]), result)
+
+    async def test_function_call_none_result_completes_without_llm(self):
+        """A None result completes the call without running the LLM."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result=None
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[],
+        )
+        self.assertEqual(context.messages[-1]["content"], "COMPLETED")
+
     async def test_function_call_cancel(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
