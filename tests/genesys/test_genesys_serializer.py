@@ -39,7 +39,7 @@ class TestGenesysAudioHookSerializer:
         """Test creating serializer with custom parameters."""
         params = GenesysAudioHookSerializer.InputParams(
             channel=AudioHookChannel.BOTH,
-            sample_rate=16000,
+            audio_in_sample_rate=16000,
             supported_languages=["es-ES", "en-US"],
             selected_language="es-ES",
             start_paused=True,

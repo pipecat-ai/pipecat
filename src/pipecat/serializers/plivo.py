@@ -6,14 +6,15 @@
 
 """Plivo WebSocket frame serializer for audio streaming."""
 
+import audioop
 import base64
 import json
-from typing import cast
+from typing import Any, cast
 
 from loguru import logger
+from pydantic import model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -25,8 +26,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class PlivoFrameSerializer(FrameSerializer):
@@ -45,15 +46,52 @@ class PlivoFrameSerializer(FrameSerializer):
         """Configuration parameters for PlivoFrameSerializer.
 
         Parameters:
-            plivo_sample_rate: Sample rate used by Plivo, defaults to 8000 Hz.
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Plivo sends, defaults to 8000 Hz.
+            audio_out_sample_rate: Sample rate of the audio sent to Plivo, defaults to 8000 Hz.
+            plivo_sample_rate: Sample rate used by Plivo.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             auto_hang_up: Whether to automatically terminate call on EndFrame.
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
-        plivo_sample_rate: int = 8000
+        audio_in_sample_rate: int = 8000
+        audio_out_sample_rate: int = 8000
+        plivo_sample_rate: int | None = None
         sample_rate: int | None = None
         auto_hang_up: bool = True
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("plivo_sample_rate") is not None:
+                warn_deprecated(
+                    "`PlivoFrameSerializer.InputParams.plivo_sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["plivo_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["plivo_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`PlivoFrameSerializer.InputParams.sample_rate` is deprecated since 1.16.0 "
+                    "and will be removed in 2.0.0. Use `PipelineParams.audio_in_sample_rate` "
+                    "instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(
         self,
@@ -96,24 +134,7 @@ class PlivoFrameSerializer(FrameSerializer):
         self._auth_id = auth_id
         self._auth_token = auth_token
 
-        self._plivo_sample_rate = self._params.plivo_sample_rate
-        self._sample_rate = 0  # Pipeline input rate
-
-        self._input_resampler = create_stream_resampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
-        self._output_resampler = create_stream_resampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
         self._hangup_attempted = False
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Plivo WebSocket format.
@@ -136,25 +157,20 @@ class PlivoFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             answer = {"event": "clearAudio", "streamId": self._stream_id}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
-            data = frame.audio
-
-            # Output: Convert PCM at frame's rate to 8kHz μ-law for Plivo
-            serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._plivo_sample_rate, self._output_resampler
-            )
-            if serialized_data is None or len(serialized_data) == 0:
-                # Ignoring in case we don't have audio
+            data = await self._resample_audio_out(frame)
+            if not data:
                 return None
 
-            payload = base64.b64encode(serialized_data).decode("utf-8")
+            payload = base64.b64encode(audioop.lin2ulaw(data, 2)).decode("utf-8")
             answer = {
                 "event": "playAudio",
                 "media": {
                     "contentType": "audio/x-mulaw",
-                    "sampleRate": self._plivo_sample_rate,
+                    "sampleRate": self._params.audio_out_sample_rate,
                     "payload": payload,
                 },
                 "streamId": self._stream_id,
@@ -230,18 +246,11 @@ class PlivoFrameSerializer(FrameSerializer):
 
             payload = base64.b64decode(payload_base64)
 
-            # Input: Convert Plivo's 8kHz μ-law to PCM at pipeline input rate
-            deserialized_data = await ulaw_to_pcm(
-                payload, self._plivo_sample_rate, self._sample_rate, self._input_resampler
-            )
-            if deserialized_data is None or len(deserialized_data) == 0:
-                # Ignoring in case we don't have audio
+            audio = await self._resample_audio_in(audioop.ulaw2lin(payload, 2))
+            if not audio:
                 return None
 
-            audio_frame = InputAudioRawFrame(
-                audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
-            )
-            return audio_frame
+            return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
         elif message.get("event") == "dtmf":
             dtmf_data = message.get("dtmf", {})
             digit = dtmf_data.get("digit")

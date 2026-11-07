@@ -20,6 +20,7 @@ Audio Format:
 - Mono (external channel) or Stereo (external on left, internal on right)
 """
 
+import audioop
 import json
 import uuid
 from datetime import timedelta
@@ -27,10 +28,9 @@ from enum import StrEnum
 from typing import Any
 
 from loguru import logger
+from pydantic import model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
-from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -42,7 +42,6 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 
@@ -169,8 +168,22 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """Configuration parameters for GenesysAudioHookSerializer.
 
         Parameters:
-            genesys_sample_rate: Sample rate used by Genesys (default: 8000 Hz).
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Genesys sends, and the rate
+                the session is opened with (default: 8000 Hz).
+            audio_out_sample_rate: Sample rate of the audio sent to Genesys (default:
+                8000 Hz).
+            genesys_sample_rate: Sample rate used by Genesys.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             channel: Which audio channels to process (external, internal, both).
             media_format: Audio format (PCMU or L16).
             process_external: Whether to process external (customer) audio.
@@ -182,7 +195,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
-        genesys_sample_rate: int = 8000
+        audio_in_sample_rate: int = 8000
+        audio_out_sample_rate: int = 8000
+        genesys_sample_rate: int | None = None
         sample_rate: int | None = None
         channel: AudioHookChannel = AudioHookChannel.EXTERNAL
         media_format: AudioHookMediaFormat = AudioHookMediaFormat.PCMU
@@ -191,6 +206,29 @@ class GenesysAudioHookSerializer(FrameSerializer):
         supported_languages: list[str] | None = None
         selected_language: str | None = None
         start_paused: bool = False
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("genesys_sample_rate") is not None:
+                warn_deprecated(
+                    "`GenesysAudioHookSerializer.InputParams.genesys_sample_rate` is deprecated "
+                    "since 1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["genesys_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["genesys_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`GenesysAudioHookSerializer.InputParams.sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use "
+                    "`PipelineParams.audio_in_sample_rate` instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(
         self,
@@ -207,16 +245,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         super().__init__(params, **kwargs)
         self._params: GenesysAudioHookSerializer.InputParams = params
 
-        self._genesys_sample_rate = self._params.genesys_sample_rate
-        self._sample_rate = 0  # Pipeline input rate, set in setup()
         self._session_id = str(uuid.uuid4())
-
-        self._input_resampler = SOXRStreamAudioResampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
-        self._output_resampler = SOXRStreamAudioResampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
 
         # Protocol state
         self._client_seq = 0
@@ -315,15 +344,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
-        logger.debug(f"GenesysAudioHookSerializer setup with sample_rate={self._sample_rate}")
 
     def _format_position(self, position: timedelta) -> str:
         """Format a timedelta as ISO 8601 duration string.
@@ -431,7 +451,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
                     "type": "audio",
                     "format": self._params.media_format.value,
                     "channels": channels,
-                    "rate": self._genesys_sample_rate,
+                    "rate": self._params.audio_in_sample_rate,
                 }
             ],
         }
@@ -634,7 +654,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """Serializes a Pipecat frame to Genesys AudioHook format.
 
         Handles conversion of various frame types to AudioHook messages:
-        - AudioRawFrame -> Binary PCMU audio data (resampled to 8kHz)
+        - AudioRawFrame -> Binary PCMU audio data
         - EndFrame/CancelFrame -> Disconnect message (JSON)
         - InterruptionFrame -> Barge-in event (JSON)
         - OutputTransportMessageFrame -> Pass-through JSON
@@ -657,27 +677,18 @@ class GenesysAudioHookSerializer(FrameSerializer):
             if not self._is_open or self._is_paused:
                 return None
 
-            data = frame.audio
-
-            # Convert PCM to μ-law at 8kHz for Genesys
-            if self._params.media_format == AudioHookMediaFormat.PCMU:
-                serialized_data = await pcm_to_ulaw(
-                    data,
-                    frame.sample_rate,
-                    self._genesys_sample_rate,
-                    self._output_resampler,
-                )
-            else:
-                # L16 format - just resample if needed
+            if self._params.media_format != AudioHookMediaFormat.PCMU:
                 logger.warning("L16 format not yet fully implemented")
                 return None
 
-            if serialized_data is None or len(serialized_data) == 0:
+            data = await self._resample_audio_out(frame)
+            if not data:
                 return None
 
-            return bytes(serialized_data)
+            return audioop.lin2ulaw(data, 2)
 
         elif isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             return json.dumps(self.create_barge_in_event())
 
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
@@ -738,7 +749,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             data: Raw audio bytes (PCMU or L16).
 
         Returns:
-            InputAudioRawFrame with PCM audio at pipeline sample rate.
+            InputAudioRawFrame with PCM audio at the pipeline's input rate.
         """
         if not self._is_open or self._is_paused:
             return None
@@ -752,32 +763,19 @@ class GenesysAudioHookSerializer(FrameSerializer):
             # Extract only bytes at even positions (left channel = external)
             audio_data = bytes(data[i] for i in range(0, len(data), 2))
 
-        if self._params.media_format == AudioHookMediaFormat.PCMU:
-            # Convert μ-law at 8kHz to PCM at pipeline rate
-            deserialized_data = await ulaw_to_pcm(
-                audio_data,
-                self._genesys_sample_rate,
-                self._sample_rate,
-                self._input_resampler,
-            )
-        else:
-            # L16 format
+        if self._params.media_format != AudioHookMediaFormat.PCMU:
             logger.warning("L16 format not yet fully implemented")
             return None
 
-        if deserialized_data is None or len(deserialized_data) == 0:
+        if not audio_data:
+            return None
+
+        audio = await self._resample_audio_in(audioop.ulaw2lin(audio_data, 2))
+        if not audio:
             return None
 
         # Always use mono for STT - ElevenLabs expects single channel
-        num_channels = 1
-
-        audio_frame = InputAudioRawFrame(
-            audio=deserialized_data,
-            num_channels=num_channels,
-            sample_rate=self._sample_rate,
-        )
-
-        return audio_frame
+        return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
 
     async def _handle_control_message(self, message: dict[str, Any]) -> Frame | None:
         """Handle a JSON control message from Genesys.

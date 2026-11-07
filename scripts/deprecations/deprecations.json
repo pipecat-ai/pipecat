@@ -1708,6 +1708,61 @@
       "location": "pipecat/runner/utils.py"
     },
     {
+      "subject": "FrameSerializer.InputParams.resampler_clear_after_secs",
+      "module": "pipecat.serializers.base_serializer",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/base_serializer.py"
+    },
+    {
+      "subject": "ExotelFrameSerializer.InputParams.exotel_sample_rate",
+      "module": "pipecat.serializers.exotel",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/exotel.py"
+    },
+    {
+      "subject": "ExotelFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.exotel",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/exotel.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.InputParams.genesys_sample_rate",
+      "module": "pipecat.serializers.genesys",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.genesys",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
       "subject": "GenesysAudioHookSerializer.create_resumed_response",
       "module": "pipecat.serializers.genesys",
       "kind": "method",
@@ -1728,6 +1783,94 @@
       "replacement": "on_paused",
       "message": "Use ``on_paused`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "PlivoFrameSerializer.InputParams.plivo_sample_rate",
+      "module": "pipecat.serializers.plivo",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/plivo.py"
+    },
+    {
+      "subject": "PlivoFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.plivo",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/plivo.py"
+    },
+    {
+      "subject": "TelnyxFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.telnyx",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/telnyx.py"
+    },
+    {
+      "subject": "TelnyxFrameSerializer.InputParams.telnyx_sample_rate",
+      "module": "pipecat.serializers.telnyx",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/telnyx.py"
+    },
+    {
+      "subject": "TwilioFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.twilio",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/twilio.py"
+    },
+    {
+      "subject": "TwilioFrameSerializer.InputParams.twilio_sample_rate",
+      "module": "pipecat.serializers.twilio",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/twilio.py"
+    },
+    {
+      "subject": "VonageFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.vonage",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/vonage.py"
+    },
+    {
+      "subject": "VonageFrameSerializer.InputParams.vonage_sample_rate",
+      "module": "pipecat.serializers.vonage",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/vonage.py"
     },
     {
       "subject": "AnthropicLLMService.InputParams",
