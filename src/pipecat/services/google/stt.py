@@ -707,7 +707,7 @@ class GoogleSTTService(STTService):
             self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_info(json_account_info)
         elif credentials_path:
-            with open(credentials_path) as f:
+            with open(credentials_path, encoding="utf-8") as f:
                 json_account_info = json.load(f)
                 self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_file(credentials_path)
