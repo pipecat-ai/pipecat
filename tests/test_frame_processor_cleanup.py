@@ -402,13 +402,14 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
         async def replacement_ready():
             replacement_started.set()
 
-        await processor.pause_processing_all_frames_until(ready)
-        await asyncio.wait_for(entered.wait(), timeout=1)
-        replacing = asyncio.create_task(
-            processor.pause_processing_all_frames_until(replacement_ready)
-        )
-        self.operations.append(replacing)
+        replacing = None
         try:
+            await processor.pause_processing_all_frames_until(ready)
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            replacing = asyncio.create_task(
+                processor.pause_processing_all_frames_until(replacement_ready)
+            )
+            self.operations.append(replacing)
             await asyncio.wait_for(cancellation.wait(), timeout=1)
             await processor.cleanup()
             self.assertFalse(replacement_started.is_set())
@@ -419,7 +420,8 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             release.set()
-            await asyncio.wait({replacing}, timeout=1)
+            if replacing is not None:
+                await asyncio.wait({replacing}, timeout=1)
         await replacing
         await asyncio.sleep(0)
         self.assertFalse(replacement_started.is_set())

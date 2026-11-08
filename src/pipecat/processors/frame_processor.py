@@ -263,6 +263,10 @@ class FrameProcessor(BaseObject):
         self.__cleanup_started = False
         self.__cleanup_observed_tasks: set[asyncio.Task] = set()
         self.__cleanup_consumed_tasks: WeakSet[asyncio.Task] = WeakSet()
+        self.__active_cleanup_calls = 0
+        self.__cleanup_complete = False
+        self.__setup_prepared = False
+        self.__setup_rejection: str | None = None
 
         # Metrics
         self._metrics = metrics or FrameProcessorMetrics()
@@ -666,6 +670,14 @@ class FrameProcessor(BaseObject):
         Args:
             setup: Configuration object containing setup parameters.
         """
+        if not self.__setup_prepared:
+            self.__prepare_setup()
+        rejection = self.__setup_rejection
+        self.__setup_prepared = False
+        self.__setup_rejection = None
+        if rejection is not None:
+            raise RuntimeError(f"{self}: {rejection}")
+
         await super().setup(setup.task_manager)
         self._setup = setup
 
@@ -678,6 +690,56 @@ class FrameProcessor(BaseObject):
         Called by the pipeline before setting this processor up.
         """
         self.__setup_done.clear()
+        self.__prepare_setup()
+
+    def __prepare_setup(self) -> None:
+        """Prepare one setup attempt, keeping unsafe reuse closed."""
+        self.__setup_prepared = True
+        self.__setup_rejection = None
+        if self.__active_cleanup_calls:
+            self.__setup_rejection = "previous cleanup is still running"
+            return
+        if not self.__cleanup_started:
+            return
+        if not self.__cleanup_complete:
+            self.__setup_rejection = "previous cleanup did not finish successfully"
+            return
+
+        owned = set(self.__pause_watcher_tasks) | self.__cleanup_observed_tasks
+        owned.update(
+            task
+            for task in (
+                self.__input_frame_task,
+                self.__process_frame_task,
+                self.__pause_watcher_task,
+            )
+            if task is not None
+        )
+        if any(not task.done() for task in owned):
+            self.__setup_rejection = "previous processor tasks have not finished"
+            return
+        if any(not task.done() for _, task in self._event_tasks):
+            self.__setup_rejection = "previous event handlers have not finished"
+            return
+
+        # A done task can still have a queued completion callback. Consume it
+        # with the old handler before replacing its manager or private handles.
+        for task in owned:
+            if task not in self.__cleanup_consumed_tasks:
+                self.__cleanup_observed_tasks.add(task)
+                self.__cleanup_task_done(task)
+            self.__release_cleanup_task(task)
+        self.__pause_watcher_tasks.clear()
+        self.__input_queue = FrameProcessorQueue()
+        self.__process_queue = FrameQueue(frame_getter=lambda item: item[0])
+        self.__input_event = None
+        self.__process_event = None
+        self.__should_block_system_frames = False
+        self.__should_block_frames = False
+        self.__process_current_frame = None
+        self.__start_received = False
+        self.__cleanup_started = False
+        self.__cleanup_complete = False
 
     def _setup_finished(self):
         """Let this processor start, once its own setup() has returned."""
@@ -697,7 +759,12 @@ class FrameProcessor(BaseObject):
         cancellation remain owned by the task manager until they finish, while
         this processor stops admitting frames and forwarding their output.
         """
+        self.__active_cleanup_calls += 1
+        self.__cleanup_complete = False
+        if self.__setup_prepared:
+            self.__setup_rejection = "setup was abandoned by cleanup"
         self.__cleanup_started = True
+        completed = False
         watchers = set(self.__pause_watcher_tasks)
         if self.__pause_watcher_task is not None:
             watchers.add(self.__pause_watcher_task)
@@ -720,11 +787,16 @@ class FrameProcessor(BaseObject):
             )
             if self._metrics is not None:
                 await self._metrics.cleanup()
+            completed = True
         finally:
             # An interrupted phase must not hide tasks whose phase was never
             # reached, including the owned task calling its own cleanup.
-            for task in remaining:
-                self.__observe_cleanup_task(task)
+            try:
+                for task in remaining:
+                    self.__observe_cleanup_task(task)
+            finally:
+                self.__active_cleanup_calls -= 1
+                self.__cleanup_complete = completed
 
     async def __cancel_cleanup_tasks(
         self,
