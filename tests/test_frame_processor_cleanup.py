@@ -7,6 +7,7 @@
 """Final processor teardown retains cancellation-resistant task ownership."""
 
 import asyncio
+import inspect
 import io
 import unittest
 
@@ -60,11 +61,12 @@ class _ResistantProcessor(FrameProcessor):
 class _RawTaskManager(TaskManager):
     """A supported custom manager without the default exception-swallowing wrapper."""
 
-    def __init__(self, completion_error=None):
+    def __init__(self, completion_error=None, completion_task="__process_frame_task_handler"):
         super().__init__()
         self.live = set()
         self.created = []
         self.completion_error = completion_error
+        self.completion_task = completion_task
 
     def create_task(self, coroutine, name, context=None):
         coroutine_name = coroutine.cr_code.co_name
@@ -72,13 +74,16 @@ class _RawTaskManager(TaskManager):
 
         async def run():
             await coroutine
-            if (
-                self.completion_error is not None
-                and coroutine_name == "__process_frame_task_handler"
-            ):
+            if self.completion_error is not None and coroutine_name == self.completion_task:
                 raise self.completion_error
 
         task = self.get_event_loop().create_task(run(), name=name, context=context)
+
+        def close_unstarted(task):
+            if inspect.getcoroutinestate(coroutine) == inspect.CORO_CREATED:
+                coroutine.close()
+
+        task.add_done_callback(close_unstarted)
         self.live.add(task)
         task.add_done_callback(self.live.discard)
         return task
@@ -243,7 +248,7 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                 after_events = []
 
                 class CleaningProcessor(FrameProcessor):
-                    async def process_frame(self, frame, direction):
+                    async def process_frame(self, frame, direction, stage=stage, body=body):
                         body.append(frame)
                         if stage == "body":
                             await self.cleanup()
@@ -251,15 +256,15 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                 processor = await self._setup(CleaningProcessor(enable_direct_mode=True))
 
                 @processor.event_handler("on_before_process_frame")
-                async def before(processor, frame):
+                async def before(processor, frame, stage=stage):
                     if stage == "before":
                         await processor.cleanup()
 
                 @processor.event_handler("on_after_process_frame")
-                async def after(processor, frame):
+                async def after(processor, frame, after_events=after_events):
                     after_events.append(frame)
 
-                async def callback(processor, frame, direction):
+                async def callback(processor, frame, direction, stage=stage, callbacks=callbacks):
                     callbacks.append(frame)
                     if stage == "callback":
                         await processor.cleanup()
@@ -314,9 +319,7 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(cleanup, timeout=1)
                 await asyncio.sleep(0)
                 self.assertEqual(self.manager.current_tasks(), [])
-                self.assertEqual(
-                    self.manager.created.count("__process_frame_task_handler"), 1
-                )
+                self.assertEqual(self.manager.created.count("__process_frame_task_handler"), 1)
 
     async def test_cleanup_in_before_push_hook_prevents_delivery_and_after_hook(self):
         processor = await self._setup(FrameProcessor(enable_direct_mode=True))
@@ -431,7 +434,9 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                 loop = asyncio.get_running_loop()
                 previous_handler = loop.get_exception_handler()
                 contexts = []
-                loop.set_exception_handler(lambda loop, context: contexts.append(context))
+                loop.set_exception_handler(
+                    lambda loop, context, contexts=contexts: contexts.append(context)
+                )
                 log = io.StringIO()
                 handler_id = logger.add(log, level="ERROR")
                 try:
@@ -485,6 +490,89 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
             logger.remove(handler_id)
         self.assertEqual(self.manager.current_tasks(), [])
         self.processors.remove(processor)
+
+    async def test_raw_result_is_observed_after_cleanup_caller_cancellation(self):
+        class FatalCleanup(BaseException):
+            pass
+
+        for error in (RuntimeError("caller ordinary result"), FatalCleanup("caller fatal result")):
+            with self.subTest(error=type(error).__name__):
+                self.manager = _RawTaskManager(completion_error=error)
+                processor = await self._start_resistant()
+                loop = asyncio.get_running_loop()
+                previous_handler = loop.get_exception_handler()
+                contexts = []
+                loop.set_exception_handler(
+                    lambda loop, context, contexts=contexts: contexts.append(context)
+                )
+                log = io.StringIO()
+                handler_id = logger.add(log, level="ERROR")
+                try:
+                    cleanup = asyncio.create_task(processor.cleanup())
+                    self.operations.append(cleanup)
+                    await asyncio.wait_for(processor.cancelled.wait(), timeout=1)
+                    cleanup.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await cleanup
+                    owned = self.manager.current_tasks()
+                    self.assertEqual(len(owned), 1)
+                    processor.release.set()
+                    await asyncio.wait(owned, timeout=1)
+                    await asyncio.sleep(0)
+                    self.assertEqual(self.manager.current_tasks(), [])
+                    self.assertEqual(log.getvalue().count(str(error)), 1)
+                    self.assertEqual(len(contexts), 0 if isinstance(error, Exception) else 1)
+                    await processor.cleanup()
+                    self.assertEqual(log.getvalue().count(str(error)), 1)
+                finally:
+                    logger.remove(handler_id)
+                    loop.set_exception_handler(previous_handler)
+
+    async def test_raw_input_and_process_results_are_observed_after_self_cleanup(self):
+        class FatalCleanup(BaseException):
+            pass
+
+        for frame_type, name in (
+            (TextFrame, "__process_frame_task_handler"),
+            (SystemFrame, "__input_frame_task_handler"),
+        ):
+            for error in (RuntimeError("self ordinary result"), FatalCleanup("self fatal result")):
+                with self.subTest(task=name, error=type(error).__name__):
+                    self.manager = _RawTaskManager(completion_error=error, completion_task=name)
+                    finished = asyncio.Event()
+
+                    class SelfCleaningProcessor(FrameProcessor):
+                        async def process_frame(
+                            self, frame, direction, frame_type=frame_type, finished=finished
+                        ):
+                            await super().process_frame(frame, direction)
+                            if type(frame) is frame_type:
+                                await self.cleanup()
+                                finished.set()
+
+                    processor = await self._setup(SelfCleaningProcessor())
+                    loop = asyncio.get_running_loop()
+                    previous_handler = loop.get_exception_handler()
+                    contexts = []
+                    loop.set_exception_handler(
+                        lambda loop, context, contexts=contexts: contexts.append(context)
+                    )
+                    log = io.StringIO()
+                    handler_id = logger.add(log, level="ERROR")
+                    try:
+                        await processor.queue_frame(StartFrame())
+                        frame = TextFrame("close") if frame_type is TextFrame else SystemFrame()
+                        await processor.queue_frame(frame)
+                        await asyncio.wait_for(finished.wait(), timeout=1)
+                        await asyncio.sleep(0)
+                        self.assertEqual(self.manager.current_tasks(), [])
+                        self.assertEqual(log.getvalue().count(str(error)), 1)
+                        self.assertEqual(len(contexts), 0 if isinstance(error, Exception) else 1)
+                        await processor.cleanup()
+                        self.assertEqual(log.getvalue().count(str(error)), 1)
+                    finally:
+                        logger.remove(handler_id)
+                        loop.set_exception_handler(previous_handler)
 
 
 if __name__ == "__main__":

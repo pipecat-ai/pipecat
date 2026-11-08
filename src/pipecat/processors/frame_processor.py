@@ -260,7 +260,7 @@ class FrameProcessor(BaseObject):
         # else to be pushed.
         self._cancelling = False
         self.__cleanup_started = False
-        self.__pending_cleanup_tasks: set[asyncio.Task] = set()
+        self.__cleanup_observed_tasks: set[asyncio.Task] = set()
 
         # Metrics
         self._metrics = metrics or FrameProcessorMetrics()
@@ -710,20 +710,26 @@ class FrameProcessor(BaseObject):
     ) -> None:
         """Bound final teardown while retaining tasks that refuse cancellation."""
         current = asyncio.current_task()
-        owned = {task for task in tasks if task is not None and task is not current}
+        owned = {task for task in tasks if task is not None}
+        if current is not None and current in owned:
+            self.__observe_cleanup_task(current)
+            owned.remove(current)
         if not owned:
             return
         for task in owned:
             task.cancel()
-        done, pending = await asyncio.wait(owned, timeout=timeout)
+        try:
+            done, pending = await asyncio.wait(owned, timeout=timeout)
+        except asyncio.CancelledError:
+            for task in owned:
+                self.__observe_cleanup_task(task)
+            raise
         for task in done:
             self.__release_cleanup_task(task)
             # Preserve TaskManager's result handling without another pending wait.
             await self.cancel_task(task, timeout=None)
         for task in pending:
-            if task not in self.__pending_cleanup_tasks:
-                self.__pending_cleanup_tasks.add(task)
-                task.add_done_callback(self.__pending_cleanup_task_done)
+            self.__observe_cleanup_task(task)
             task.cancel()
             logger.warning(f"{task.get_name()}: timed out waiting for task to cancel")
         # Pending tasks keep their handles and TaskManager registration. The
@@ -731,7 +737,7 @@ class FrameProcessor(BaseObject):
 
     def __release_cleanup_task(self, task: asyncio.Task) -> None:
         """Release only the completed task's own private handles."""
-        self.__pending_cleanup_tasks.discard(task)
+        self.__cleanup_observed_tasks.discard(task)
         if self.__input_frame_task is task:
             self.__input_frame_task = None
         if self.__process_frame_task is task:
@@ -739,21 +745,27 @@ class FrameProcessor(BaseObject):
         if self.__pause_watcher_task is task:
             self.__pause_watcher_task = None
 
-    def __pending_cleanup_task_done(self, task: asyncio.Task) -> None:
-        """Observe a task that finished after its final cancellation deadline."""
-        if task not in self.__pending_cleanup_tasks:
+    def __observe_cleanup_task(self, task: asyncio.Task) -> None:
+        """Keep one completion observer when cleanup cannot await this task."""
+        if task not in self.__cleanup_observed_tasks:
+            self.__cleanup_observed_tasks.add(task)
+            task.add_done_callback(self.__cleanup_task_done)
+
+    def __cleanup_task_done(self, task: asyncio.Task) -> None:
+        """Observe a task that outlived the attempt to clean up its processor."""
+        if task not in self.__cleanup_observed_tasks:
             return
         try:
             task.result()
         except asyncio.CancelledError:
             pass
         except Exception as error:
-            logger.error(f"{task.get_name()}: unexpected exception after cleanup timeout: {error}")
+            logger.error(f"{task.get_name()}: unexpected exception after final cleanup: {error}")
         except BaseException as error:
-            logger.critical(f"{task.get_name()}: fatal base exception after cleanup timeout: {error}")
+            logger.critical(f"{task.get_name()}: fatal base exception after final cleanup: {error}")
             task.get_loop().call_exception_handler(
                 {
-                    "message": "Processor task failed after its final cleanup timeout",
+                    "message": "Processor task failed after final cleanup",
                     "exception": error,
                     "task": task,
                 }
