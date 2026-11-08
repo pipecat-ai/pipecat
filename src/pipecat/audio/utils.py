@@ -19,8 +19,8 @@ import loudness
 import numpy as np
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.resamplers.sinc_resampler import SincAudioResampler
 from pipecat.audio.resamplers.sinc_stream_resampler import SincStreamAudioResampler
-from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
 
 # Normal speech usually results in many samples between ±500 to ±5000, depending on loudness and mic gain.
 # So we are using a threshold that is well below what real speech produces.
@@ -30,13 +30,15 @@ SPEAKING_THRESHOLD = 20
 def create_file_resampler(**kwargs) -> BaseAudioResampler:
     """Create an audio resampler instance for batch processing of complete audio files.
 
+    Each call resamples a whole clip, and the output lines up with the input.
+
     Args:
         **kwargs: Additional keyword arguments passed to the resampler constructor.
 
     Returns:
-        A configured SOXRAudioResampler instance.
+        A configured SincAudioResampler instance.
     """
-    return SOXRAudioResampler(**kwargs)
+    return SincAudioResampler(**kwargs)
 
 
 def create_stream_resampler(**kwargs) -> BaseAudioResampler:

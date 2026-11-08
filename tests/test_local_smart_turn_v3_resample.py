@@ -4,16 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests that Smart Turn v3 still resamples correctly after dropping the soxr
-quality preset from ``VHQ`` to ``HQ``.
+"""Tests that Smart Turn v3 resamples its input to 16 kHz correctly.
 
-Smart Turn v3 is a binary classifier on Whisper log-mel features at 16 kHz.
-``VHQ`` (~26-tap polyphase) vs ``HQ`` (~16-tap) is well below the noise floor
-of the mel feature representation, so model predictions should be unchanged
-on representative inputs and the resampled waveforms should be close in L2.
+Smart Turn v3 is a binary classifier on Whisper log-mel features at 16 kHz. The
+analyzer's resampled waveform should stay close in L2 to soxr's very high
+quality one, so model predictions on representative inputs are unchanged.
 
-These tests exist to catch regressions if anyone later changes the resampler
-or its quality preset.
+These tests exist to catch regressions if anyone later changes the resampler.
 """
 
 import numpy as np
@@ -40,34 +37,33 @@ def _synthesize_48k_speechlike(duration_secs: float = 3.0) -> np.ndarray:
     sample_rate = 48_000
     n = int(duration_secs * sample_rate)
     t = np.linspace(0, duration_secs, n, endpoint=False, dtype=np.float64)
-    chirp = 0.4 * np.sin(2 * np.pi * (200.0 + (4000.0 - 200.0) * t / duration_secs) * t)
+    chirp = 0.4 * np.sin(2 * np.pi * (200.0 * t + (4000.0 - 200.0) * t**2 / (2 * duration_secs)))
     tone = 0.2 * np.sin(2 * np.pi * 1000.0 * t)
     noise = 0.02 * rng.standard_normal(n)
     return (chirp + tone + noise).astype(np.float32)
 
 
 def test_resample_48k_to_16k_close_to_vhq():
-    """Dropping to HQ should produce a near-identical 16 kHz waveform to VHQ.
+    """The analyzer's 16 kHz waveform should be near-identical to soxr VHQ's.
 
-    The two presets differ in filter length, not in cutoff or interpolation
-    semantics, so the output difference is dominated by the slightly different
-    stop-band attenuation of HQ. On a band-limited speech-like signal that
-    difference is small.
+    Both line the output up with the input and keep the speech band flat, so the
+    difference comes from the top of the band, where the filters roll off
+    differently, and from 16-bit rounding. On a band-limited speech-like signal
+    that difference is small.
     """
     audio = _synthesize_48k_speechlike()
+    analyzer = LocalSmartTurnAnalyzerV3()
+    analyzer.set_sample_rate(48_000)
+    resampled = analyzer._resample_to_model_rate(audio)
     vhq = soxr.resample(audio, 48_000, _MODEL_SAMPLE_RATE, quality="VHQ")
-    hq = soxr.resample(audio, 48_000, _MODEL_SAMPLE_RATE, quality="HQ")
 
-    assert vhq.shape == hq.shape
-    diff = vhq - hq
+    assert resampled.shape == vhq.shape
+    diff = resampled - vhq
     rms = float(np.sqrt(np.mean(diff**2)))
     peak = float(np.max(np.abs(diff)))
 
-    # Empirically the RMS error between HQ and VHQ on a speech-band signal sits
-    # around 1e-4; the peak sits around 1e-3. The bounds below are generous
-    # enough to absorb soxr version-to-version drift without becoming a flake.
-    assert rms < 5e-3, f"resampled HQ vs VHQ RMS error too large: {rms}"
-    assert peak < 5e-2, f"resampled HQ vs VHQ peak error too large: {peak}"
+    assert rms < 5e-3, f"resampled vs VHQ RMS error too large: {rms}"
+    assert peak < 5e-2, f"resampled vs VHQ peak error too large: {peak}"
 
 
 def test_resample_16k_fast_path_unchanged():
@@ -81,14 +77,15 @@ def test_resample_16k_fast_path_unchanged():
 
 
 def test_predict_endpoint_on_48k_input_runs():
-    """End-to-end smoke: 48 kHz input -> resample (HQ) -> features -> ONNX.
+    """End-to-end smoke: 48 kHz input -> resample -> features -> ONNX.
 
     We don't assert a specific prediction value (the model can move; the test
     would become noise). We only assert the pipeline returns a well-shaped
-    result, which proves the HQ resampler still produces a 16 kHz waveform
-    that the Whisper feature extractor accepts.
+    result, which proves the resampler produces a 16 kHz waveform that the
+    Whisper feature extractor accepts.
     """
-    analyzer = LocalSmartTurnAnalyzerV3(sample_rate=48_000)
+    analyzer = LocalSmartTurnAnalyzerV3()
+    analyzer.set_sample_rate(48_000)
     audio = _synthesize_48k_speechlike()
     result = analyzer._predict_endpoint(audio)
 

@@ -9,16 +9,33 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 # We don't need to mock sys.modules here if we use patch on the imported module member
 # But we need to ensure RNNoiseFilter is imported so we can patch its member
 try:
     from pipecat.audio.filters.rnnoise_filter import RNNoiseFilter
+    from pipecat.audio.resamplers.sinc_stream_resampler import SincStreamAudioResampler
     from pipecat.frames.frames import FilterEnableFrame
 except ImportError as e:
     # If dependencies are missing (like numpy?), we can't test
     print(f"Failed to import RNNoiseFilter: {e}")
     sys.exit(1)
+
+
+@pytest.mark.asyncio
+async def test_rnnoise_resamples_with_the_stream_resampler(monkeypatch):
+    monkeypatch.setattr("pipecat.audio.filters.rnnoise_filter.RNNoise", MagicMock())
+    rnnoise_filter = RNNoiseFilter()
+    await rnnoise_filter.start(16000)
+
+    assert isinstance(rnnoise_filter._resampler_in, SincStreamAudioResampler)
+    assert isinstance(rnnoise_filter._resampler_out, SincStreamAudioResampler)
+
+
+def test_rnnoise_resampler_quality_is_deprecated():
+    with pytest.warns(DeprecationWarning, match=r"`RNNoiseFilter\(resampler_quality=...\)`"):
+        RNNoiseFilter(resampler_quality="QQ")
 
 
 class TestRNNoiseResampling(unittest.IsolatedAsyncioTestCase):

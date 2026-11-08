@@ -14,7 +14,7 @@ already been paced, such as the chunks an output transport sends.
 
 import time
 
-from pipecat_resampler import Resampler
+from pipecat_resampler import StreamResampler
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 
@@ -48,7 +48,7 @@ class SincStreamAudioResampler(BaseAudioResampler):
             **kwargs: Reserved for forward compatibility; currently ignored.
         """
         self._clear_after_secs = clear_after_secs
-        self._resampler: Resampler | None = None
+        self._resampler: StreamResampler | None = None
         self._last_resample_time = 0.0
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
@@ -87,10 +87,10 @@ class SincStreamAudioResampler(BaseAudioResampler):
         if self._resampler:
             self._resampler.reset()
 
-    def _use_rates(self, in_rate: int, out_rate: int) -> Resampler:
+    def _use_rates(self, in_rate: int, out_rate: int) -> StreamResampler:
         """Create the resampler on first use, and refuse another pair of rates after."""
         if not self._resampler:
-            self._resampler = Resampler(in_rate, out_rate)
+            self._resampler = StreamResampler(in_rate, out_rate)
         elif (in_rate, out_rate) != (self._resampler.in_rate, self._resampler.out_rate):
             raise ValueError(
                 f"SincStreamAudioResampler cannot be reused with different sample rates: "
@@ -99,7 +99,7 @@ class SincStreamAudioResampler(BaseAudioResampler):
             )
         return self._resampler
 
-    def _maybe_clear(self, resampler: Resampler):
+    def _maybe_clear(self, resampler: StreamResampler):
         """Discard the held audio after more than `clear_after_secs` of inactivity."""
         now = time.time()
         if (

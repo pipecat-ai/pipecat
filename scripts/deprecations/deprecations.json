@@ -223,15 +223,48 @@
       "location": "pipecat/adapters/services/perplexity_adapter.py"
     },
     {
+      "subject": "RNNoiseFilter.resampler_quality",
+      "module": "pipecat.audio.filters.rnnoise_filter",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/filters/rnnoise_filter.py"
+    },
+    {
       "subject": "ResampyResampler",
       "module": "pipecat.audio.resamplers.resampy_resampler",
       "kind": "class",
       "deprecated_in": "1.2.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "SOXRAudioResampler",
-      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
+      "replacement": "SincAudioResampler",
+      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SincAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
       "location": "pipecat/audio/resamplers/resampy_resampler.py"
+    },
+    {
+      "subject": "SOXRAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincAudioResampler",
+      "message": "`SOXRAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_resampler.py"
+    },
+    {
+      "subject": "SOXRStreamAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_stream_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincStreamAudioResampler",
+      "message": "`SOXRStreamAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincStreamAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_stream_resampler.py"
     },
     {
       "subject": "LocalCoreMLSmartTurnAnalyzer",
