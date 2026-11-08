@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -259,6 +259,8 @@ class FrameProcessor(BaseObject):
         # (e.g. EndFrame). So, when we are cancelling we don't want anything
         # else to be pushed.
         self._cancelling = False
+        self.__cleanup_started = False
+        self.__pending_cleanup_tasks: set[asyncio.Task] = set()
 
         # Metrics
         self._metrics = metrics or FrameProcessorMetrics()
@@ -282,6 +284,8 @@ class FrameProcessor(BaseObject):
         # Watches the readiness condition passed to
         # pause_processing_all_frames_until() and lifts the pause it took.
         self.__pause_watcher_task: asyncio.Task | None = None
+        # Retain watchers while a replacement waits for cancellation as well.
+        self.__pause_watcher_tasks: set[asyncio.Task] = set()
         # Clear while a pipeline is setting this processor up. The StartFrame
         # is held until it is set, so a processor never starts before its own
         # setup is done, while the ones ahead of it in the pipeline can.
@@ -686,13 +690,76 @@ class FrameProcessor(BaseObject):
         by an override. Like :meth:`setup`, this runs concurrently with every
         other processor's, so a resource shared with another processor is
         released with :func:`~pipecat.utils.shared.releases`.
+
+        Internal task cancellation has a finite wait. Tasks that suppress
+        cancellation remain owned by the task manager until they finish, while
+        this processor stops admitting frames and forwarding their output.
         """
+        self.__cleanup_started = True
         await super().cleanup()
-        await self.__cancel_pause_watcher()
-        await self.__cancel_input_task()
-        await self.__cancel_process_task()
+        await self.__cancel_cleanup_tasks(self.__pause_watcher_tasks, timeout=1.0)
+        await self.__cancel_cleanup_tasks(
+            (self.__input_frame_task,), timeout=INPUT_TASK_CANCEL_TIMEOUT_SECS
+        )
+        await self.__cancel_cleanup_tasks((self.__process_frame_task,), timeout=1.0)
         if self._metrics is not None:
             await self._metrics.cleanup()
+
+    async def __cancel_cleanup_tasks(
+        self, tasks: Iterable[asyncio.Task | None], *, timeout: float
+    ) -> None:
+        """Bound final teardown while retaining tasks that refuse cancellation."""
+        current = asyncio.current_task()
+        owned = {task for task in tasks if task is not None and task is not current}
+        if not owned:
+            return
+        for task in owned:
+            task.cancel()
+        done, pending = await asyncio.wait(owned, timeout=timeout)
+        for task in done:
+            self.__release_cleanup_task(task)
+            # Preserve TaskManager's result handling without another pending wait.
+            await self.cancel_task(task, timeout=None)
+        for task in pending:
+            if task not in self.__pending_cleanup_tasks:
+                self.__pending_cleanup_tasks.add(task)
+                task.add_done_callback(self.__pending_cleanup_task_done)
+            task.cancel()
+            logger.warning(f"{task.get_name()}: timed out waiting for task to cancel")
+        # Pending tasks keep their handles and TaskManager registration. The
+        # terminal processor cannot create a successor or forward their output.
+
+    def __release_cleanup_task(self, task: asyncio.Task) -> None:
+        """Release only the completed task's own private handles."""
+        self.__pending_cleanup_tasks.discard(task)
+        if self.__input_frame_task is task:
+            self.__input_frame_task = None
+        if self.__process_frame_task is task:
+            self.__process_frame_task = None
+        if self.__pause_watcher_task is task:
+            self.__pause_watcher_task = None
+
+    def __pending_cleanup_task_done(self, task: asyncio.Task) -> None:
+        """Observe a task that finished after its final cancellation deadline."""
+        if task not in self.__pending_cleanup_tasks:
+            return
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            logger.error(f"{task.get_name()}: unexpected exception after cleanup timeout: {error}")
+        except BaseException as error:
+            logger.critical(f"{task.get_name()}: fatal base exception after cleanup timeout: {error}")
+            task.get_loop().call_exception_handler(
+                {
+                    "message": "Processor task failed after its final cleanup timeout",
+                    "exception": error,
+                    "task": task,
+                }
+            )
+        finally:
+            self.__release_cleanup_task(task)
 
     def link(self, processor: FrameProcessor):
         """Link this processor to the next processor in the pipeline.
@@ -737,12 +804,14 @@ class FrameProcessor(BaseObject):
             callback: Optional callback to call after processing.
         """
         # If we are cancelling we don't want to process any other frame.
-        if self._cancelling:
+        if self._cancelling or self.__cleanup_started:
             return
 
         if self._enable_direct_mode:
             if isinstance(frame, StartFrame):
                 await self.__setup_done.wait()
+            if self.__cleanup_started:
+                return
             await self.__process_frame(frame, direction, callback)
             return
 
@@ -810,16 +879,26 @@ class FrameProcessor(BaseObject):
                 ``some_event.wait``.
             timeout: Seconds to hold frames before giving up and resuming.
         """
+        if self.__cleanup_started:
+            return
         if self._enable_direct_mode:
             logger.warning(f"{self}: cannot hold frames, this processor runs in direct mode")
             return
 
         await self.__cancel_pause_watcher()
+        if self.__cleanup_started:
+            return
         await self.pause_processing_system_frames()
+        if self.__cleanup_started:
+            return
         await self.pause_processing_frames()
+        if self.__cleanup_started:
+            return
         self.__pause_watcher_task = self.create_task(
             self.__pause_watcher_handler(ready, timeout), name=f"{self}::pause_watcher"
         )
+        self.__pause_watcher_tasks.add(self.__pause_watcher_task)
+        self.__pause_watcher_task.add_done_callback(self.__pause_watcher_tasks.discard)
 
     async def __pause_watcher_handler(self, ready: Callable[[], Awaitable[Any]], timeout: float):
         """Lift the pause taken by pause_processing_all_frames_until()."""
@@ -1039,9 +1118,15 @@ class FrameProcessor(BaseObject):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
+        if self.__cleanup_started:
+            return
         await self._call_event_handler("on_before_push_frame", frame)
+        if self.__cleanup_started:
+            return
 
         await self.__internal_push_frame(frame, direction)
+        if self.__cleanup_started:
+            return
 
         await self._call_event_handler("on_after_push_frame", frame)
 
@@ -1206,6 +1291,8 @@ class FrameProcessor(BaseObject):
         if self.__process_current_frame is not frame or not self.__process_frame_task:
             return False
         await self.__cancel_process_task()
+        if self.__cleanup_started:
+            return False
         self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
         return True
 
@@ -1231,6 +1318,8 @@ class FrameProcessor(BaseObject):
                         timestamp=timestamp,
                     )
                     await observer.on_push_frame(data)
+                if self.__cleanup_started:
+                    return
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
@@ -1243,6 +1332,8 @@ class FrameProcessor(BaseObject):
                         timestamp=timestamp,
                     )
                     await observer.on_push_frame(data)
+                if self.__cleanup_started:
+                    return
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             # Observers and the downstream processor run inside this
@@ -1269,25 +1360,16 @@ class FrameProcessor(BaseObject):
 
     def __create_input_task(self):
         """Create the frame input processing task."""
-        if self._enable_direct_mode:
+        if self._enable_direct_mode or self.__cleanup_started:
             return
 
         if not self.__input_frame_task:
             self.__input_event = asyncio.Event()
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
-    async def __cancel_input_task(self):
-        """Cancel the frame input processing task."""
-        if self.__input_frame_task:
-            # Apply a timeout as a safeguard: if a library swallows asyncio.CancelledError,
-            # the task would otherwise never be cancelled. With a timeout, we can detect this
-            # situation and surface it in the logs instead of hanging indefinitely.
-            await self.cancel_task(self.__input_frame_task, INPUT_TASK_CANCEL_TIMEOUT_SECS)
-            self.__input_frame_task = None
-
     def __create_process_task(self):
         """Create the non-system frame processing task."""
-        if self._enable_direct_mode:
+        if self._enable_direct_mode or self.__cleanup_started:
             return
 
         if not self.__process_frame_task:
@@ -1331,13 +1413,21 @@ class FrameProcessor(BaseObject):
         self, frame: Frame, direction: FrameDirection, callback: FrameCallback | None
     ):
         try:
+            if self.__cleanup_started:
+                return
             await self._call_event_handler("on_before_process_frame", frame)
+            if self.__cleanup_started:
+                return
 
             # Process the frame.
             await self.process_frame(frame, direction)
+            if self.__cleanup_started:
+                return
             # If this frame has an associated callback, call it now.
             if callback:
                 await callback(self, frame, direction)
+            if self.__cleanup_started:
+                return
 
             await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
@@ -1356,8 +1446,11 @@ class FrameProcessor(BaseObject):
         to execute.
 
         """
-        while True:
+        while not self.__cleanup_started:
             (frame, direction, callback) = await self.__input_queue.get()
+            if self.__cleanup_started:
+                self.__input_queue.task_done()
+                return
 
             if self.__should_block_system_frames and self.__input_event:
                 logger.trace(f"{self}: system frame processing paused")
@@ -1366,6 +1459,9 @@ class FrameProcessor(BaseObject):
                 self.__should_block_system_frames = False
                 logger.trace(f"{self}: system frame processing resumed")
 
+            if self.__cleanup_started:
+                self.__input_queue.task_done()
+                return
             if isinstance(frame, SystemFrame):
                 await self.__process_frame(frame, direction, callback)
             elif self.__process_queue:
@@ -1379,10 +1475,13 @@ class FrameProcessor(BaseObject):
 
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
-        while True:
+        while not self.__cleanup_started:
             self.__process_current_frame = None
 
             (frame, direction, callback) = await self.__process_queue.get()
+            if self.__cleanup_started:
+                self.__process_queue.task_done()
+                return
 
             self.__process_current_frame = frame
 
@@ -1393,6 +1492,9 @@ class FrameProcessor(BaseObject):
                 self.__should_block_frames = False
                 logger.trace(f"{self}: frame processing resumed")
 
+            if self.__cleanup_started:
+                self.__process_queue.task_done()
+                return
             await self.__process_frame(frame, direction, callback)
 
             self.__process_queue.task_done()
