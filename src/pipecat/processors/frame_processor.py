@@ -698,7 +698,10 @@ class FrameProcessor(BaseObject):
         this processor stops admitting frames and forwarding their output.
         """
         self.__cleanup_started = True
-        remaining = set(self.__pause_watcher_tasks)
+        watchers = set(self.__pause_watcher_tasks)
+        if self.__pause_watcher_task is not None:
+            watchers.add(self.__pause_watcher_task)
+        remaining = set(watchers)
         remaining.update(
             task
             for task in (self.__input_frame_task, self.__process_frame_task)
@@ -706,9 +709,7 @@ class FrameProcessor(BaseObject):
         )
         try:
             await super().cleanup()
-            await self.__cancel_cleanup_tasks(
-                self.__pause_watcher_tasks, timeout=1.0, remaining=remaining
-            )
+            await self.__cancel_cleanup_tasks(watchers, timeout=1.0, remaining=remaining)
             await self.__cancel_cleanup_tasks(
                 (self.__input_frame_task,),
                 timeout=INPUT_TASK_CANCEL_TIMEOUT_SECS,

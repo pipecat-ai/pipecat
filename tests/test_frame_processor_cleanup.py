@@ -728,6 +728,45 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
             event_release.set()
             logger.remove(handler_id)
 
+    async def test_cleanup_consumes_an_already_completed_active_watcher(self):
+        class FatalReadiness(BaseException):
+            pass
+
+        for error in (
+            RuntimeError("completed ordinary readiness"),
+            FatalReadiness("completed fatal"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                self.manager = _RawTaskManager()
+                processor = await self._setup(FrameProcessor())
+
+                async def ready(error=error):
+                    raise error
+
+                await processor.pause_processing_all_frames_until(ready)
+                watcher = processor._FrameProcessor__pause_watcher_task
+                await asyncio.wait({watcher}, timeout=1)
+                await asyncio.sleep(0)
+                self.assertTrue(watcher.done())
+                self.assertNotIn(watcher, processor._FrameProcessor__pause_watcher_tasks)
+                self.assertEqual(self.manager.current_tasks(), [])
+                log = io.StringIO()
+                handler_id = logger.add(log, level="ERROR")
+                try:
+                    if isinstance(error, Exception):
+                        await processor.cleanup()
+                    else:
+                        with self.assertRaises(FatalReadiness):
+                            await processor.cleanup()
+                    self.assertEqual(log.getvalue().count(str(error)), 1)
+                    self.assertIsNone(processor._FrameProcessor__pause_watcher_task)
+                finally:
+                    try:
+                        watcher.result()
+                    except BaseException:
+                        pass
+                    logger.remove(handler_id)
+
 
 if __name__ == "__main__":
     unittest.main()
