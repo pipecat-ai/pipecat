@@ -527,6 +527,28 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_scaled_amount_drops_trailing_zeros(self):
+        # "$2.50 million" is two and a half million, so the zero is not read out.
+        self.assertEqual(
+            await expand_currency("We raised $2.50 million", "*"),
+            "We raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("$1.50 billion", "*"), "one point five billion dollars"
+        )
+        self.assertEqual(await expand_currency("$1.0 million", "*"), "one million dollars")
+        # A zero inside the fraction is content and stays read.
+        self.assertEqual(
+            await expand_currency("$2.05 million", "*"), "two point zero five million dollars"
+        )
+
+    async def test_currency_code_stays_apart_from_the_amount(self):
+        # "US$5" used to expand to "USfive dollars".
+        self.assertEqual(await expand_currency("US$5", "*"), "US five dollars")
+        self.assertEqual(await expand_currency("CAD$10", "*"), "CAD ten dollars")
+        # A symbol with no code before it is unchanged.
+        self.assertEqual(await expand_currency(" pay $5", "*"), " pay five dollars")
+
     async def test_scale_word_after_amount(self):
         # "$2.5 billion" is two and a half billion dollars, not two dollars and
         # fifty cents followed by a stray "billion".
