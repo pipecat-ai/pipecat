@@ -280,10 +280,9 @@ class BaseObject(ABC):
             **kwargs: Keyword arguments to pass to handlers.
         """
         try:
-            if inspect.iscoroutinefunction(handler):
-                await handler(self, *args, **kwargs)
-            else:
-                handler(self, *args, **kwargs)
+            result = handler(self, *args, **kwargs)
+            if inspect.isawaitable(result):
+                await result
         except Exception as e:
             tb = traceback.extract_tb(e.__traceback__)
             last = tb[-1]
