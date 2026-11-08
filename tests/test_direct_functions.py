@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import functools
 import unittest
 from typing import Any, TypedDict
 
@@ -221,6 +222,15 @@ class TestDirectFunction(unittest.TestCase):
 
         with self.assertRaisesRegex(Exception, "first parameter must be named"):
             DirectFunctionWrapper(my_function_misplaced_params)
+
+    def test_function_name_of_a_partial_is_the_function_it_wraps(self):
+        async def my_function(params: FunctionCallParams, name: str):
+            return {"status": "success"}, None
+
+        self.assertEqual(DirectFunctionWrapper.function_name(my_function), "my_function")
+        self.assertEqual(
+            DirectFunctionWrapper.function_name(functools.partial(my_function)), "my_function"
+        )
 
     def test_invalid_function_without_a_name_is_reported_by_its_type(self):
         class Callable:
