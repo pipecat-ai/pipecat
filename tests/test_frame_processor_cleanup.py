@@ -102,6 +102,9 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
         for processor in self.processors:
             if isinstance(processor, _ResistantProcessor):
                 processor.release.set()
+                input_release = getattr(processor, "input_release", None)
+                if input_release is not None:
+                    input_release.set()
         await asyncio.sleep(0)
         for operation in self.operations:
             if not operation.done():
@@ -441,7 +444,7 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                 handler_id = logger.add(log, level="ERROR")
                 try:
                     await processor.cleanup()
-                    await processor.cleanup()
+                    await asyncio.gather(processor.cleanup(), processor.cleanup())
                     owned = self.manager.current_tasks()
                     self.assertEqual(len(owned), 1)
                     processor.release.set()
@@ -573,6 +576,157 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
                     finally:
                         logger.remove(handler_id)
                         loop.set_exception_handler(previous_handler)
+
+    async def test_interrupted_input_phase_keeps_the_unvisited_process_result_owned(self):
+        class FatalCleanup(BaseException):
+            pass
+
+        class DualProcessor(_ResistantProcessor):
+            def __init__(self):
+                super().__init__()
+                self.input_entered = asyncio.Event()
+                self.input_cancelled = asyncio.Event()
+                self.input_release = asyncio.Event()
+
+            async def process_frame(self, frame, direction):
+                if type(frame) is not SystemFrame:
+                    await super().process_frame(frame, direction)
+                    return
+                self.input_entered.set()
+                while not self.input_release.is_set():
+                    try:
+                        await self.input_release.wait()
+                    except asyncio.CancelledError:
+                        self.input_cancelled.set()
+
+        for error in (RuntimeError("unvisited ordinary result"), FatalCleanup("unvisited fatal")):
+            with self.subTest(error=type(error).__name__):
+                self.manager = _RawTaskManager(completion_error=error)
+                processor = await self._setup(DualProcessor())
+                await processor.queue_frame(StartFrame())
+                await processor.queue_frame(TextFrame("held"))
+                await asyncio.wait_for(processor.entered.wait(), timeout=1)
+                await processor.queue_frame(SystemFrame())
+                await asyncio.wait_for(processor.input_entered.wait(), timeout=1)
+                contexts = []
+                loop = asyncio.get_running_loop()
+                previous_handler = loop.get_exception_handler()
+                loop.set_exception_handler(
+                    lambda loop, context, contexts=contexts: contexts.append(context)
+                )
+                log = io.StringIO()
+                handler_id = logger.add(log, level="ERROR")
+                try:
+                    cleanup = asyncio.create_task(processor.cleanup())
+                    self.operations.append(cleanup)
+                    await asyncio.wait_for(processor.input_cancelled.wait(), timeout=1)
+                    cleanup.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await cleanup
+                    self.assertEqual(processor.requests, 0)
+                    owned = self.manager.current_tasks()
+                    self.assertEqual(len(owned), 2)
+                    processor.input_release.set()
+                    processor.release.set()
+                    await asyncio.wait(owned, timeout=1)
+                    await asyncio.sleep(0)
+                    self.assertEqual(self.manager.current_tasks(), [])
+                    self.assertEqual(log.getvalue().count(str(error)), 1)
+                    self.assertEqual(len(contexts), 0 if isinstance(error, Exception) else 1)
+                    await processor.cleanup()
+                    self.assertEqual(log.getvalue().count(str(error)), 1)
+                finally:
+                    processor.input_release.set()
+                    processor.release.set()
+                    logger.remove(handler_id)
+                    loop.set_exception_handler(previous_handler)
+
+    async def test_fatal_done_watcher_keeps_its_pending_sibling_observed(self):
+        class FatalCleanup(BaseException):
+            pass
+
+        self.manager = _RawTaskManager()
+        processor = await self._setup(FrameProcessor())
+        entered = [asyncio.Event(), asyncio.Event()]
+        release = asyncio.Event()
+
+        async def fatal():
+            entered[0].set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                raise FatalCleanup("immediate group failure")
+
+        async def pending():
+            entered[1].set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    pass
+            raise RuntimeError("remaining sibling result")
+
+        tasks = [processor.create_task(fatal()), processor.create_task(pending())]
+        # This is a focused group-exit control. Public lifecycle and concurrent
+        # pause replacement tests separately exercise admission and ownership.
+        watchers = processor._FrameProcessor__pause_watcher_tasks
+        watchers.update(tasks)
+        for task in tasks:
+            task.add_done_callback(watchers.discard)
+        await asyncio.gather(*(event.wait() for event in entered))
+        log = io.StringIO()
+        handler_id = logger.add(log, level="ERROR")
+        try:
+            with self.assertRaises(FatalCleanup):
+                await processor.cleanup()
+            self.assertFalse(tasks[1].done())
+            self.assertIn(tasks[1], self.manager.current_tasks())
+            release.set()
+            await asyncio.wait(tasks, timeout=1)
+            await asyncio.sleep(0)
+            self.assertEqual(log.getvalue().count("remaining sibling result"), 1)
+            self.assertEqual(self.manager.current_tasks(), [])
+        finally:
+            release.set()
+            logger.remove(handler_id)
+
+    async def test_completed_result_is_not_observed_again_by_a_waiting_retry(self):
+        error = RuntimeError("once across a waiting retry")
+        self.manager = _RawTaskManager(completion_error=error)
+        processor = await self._start_resistant()
+        event_entered = asyncio.Event()
+        event_release = asyncio.Event()
+
+        @processor.event_handler("on_usable_changed")
+        async def event_handler(processor, usable):
+            event_entered.set()
+            await event_release.wait()
+
+        log = io.StringIO()
+        handler_id = logger.add(log, level="ERROR")
+        try:
+            await processor.cleanup()
+            owned = self.manager.current_tasks()
+            self.assertEqual(len(owned), 1)
+            await processor.set_usable(False)
+            await asyncio.wait_for(event_entered.wait(), timeout=1)
+            retry = asyncio.create_task(processor.cleanup())
+            self.operations.append(retry)
+            await asyncio.sleep(0)
+            self.assertFalse(retry.done())
+            processor.release.set()
+            await asyncio.wait(owned, timeout=1)
+            await asyncio.sleep(0)
+            self.assertEqual(log.getvalue().count(str(error)), 1)
+            retry.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await retry
+            await asyncio.sleep(0)
+            self.assertEqual(log.getvalue().count(str(error)), 1)
+            self.assertEqual(self.manager.current_tasks(), [])
+        finally:
+            event_release.set()
+            logger.remove(handler_id)
 
 
 if __name__ == "__main__":

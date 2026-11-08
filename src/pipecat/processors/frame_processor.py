@@ -23,6 +23,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
 )
+from weakref import WeakSet
 
 from loguru import logger
 
@@ -261,6 +262,7 @@ class FrameProcessor(BaseObject):
         self._cancelling = False
         self.__cleanup_started = False
         self.__cleanup_observed_tasks: set[asyncio.Task] = set()
+        self.__cleanup_consumed_tasks: WeakSet[asyncio.Task] = WeakSet()
 
         # Metrics
         self._metrics = metrics or FrameProcessorMetrics()
@@ -696,40 +698,59 @@ class FrameProcessor(BaseObject):
         this processor stops admitting frames and forwarding their output.
         """
         self.__cleanup_started = True
-        await super().cleanup()
-        await self.__cancel_cleanup_tasks(self.__pause_watcher_tasks, timeout=1.0)
-        await self.__cancel_cleanup_tasks(
-            (self.__input_frame_task,), timeout=INPUT_TASK_CANCEL_TIMEOUT_SECS
+        remaining = set(self.__pause_watcher_tasks)
+        remaining.update(
+            task
+            for task in (self.__input_frame_task, self.__process_frame_task)
+            if task is not None
         )
-        await self.__cancel_cleanup_tasks((self.__process_frame_task,), timeout=1.0)
-        if self._metrics is not None:
-            await self._metrics.cleanup()
+        try:
+            await super().cleanup()
+            await self.__cancel_cleanup_tasks(
+                self.__pause_watcher_tasks, timeout=1.0, remaining=remaining
+            )
+            await self.__cancel_cleanup_tasks(
+                (self.__input_frame_task,),
+                timeout=INPUT_TASK_CANCEL_TIMEOUT_SECS,
+                remaining=remaining,
+            )
+            await self.__cancel_cleanup_tasks(
+                (self.__process_frame_task,), timeout=1.0, remaining=remaining
+            )
+            if self._metrics is not None:
+                await self._metrics.cleanup()
+        finally:
+            # An interrupted phase must not hide tasks whose phase was never
+            # reached, including the owned task calling its own cleanup.
+            for task in remaining:
+                self.__observe_cleanup_task(task)
 
     async def __cancel_cleanup_tasks(
-        self, tasks: Iterable[asyncio.Task | None], *, timeout: float
+        self,
+        tasks: Iterable[asyncio.Task | None],
+        *,
+        timeout: float,
+        remaining: set[asyncio.Task],
     ) -> None:
         """Bound final teardown while retaining tasks that refuse cancellation."""
         current = asyncio.current_task()
-        owned = {task for task in tasks if task is not None}
-        if current is not None and current in owned:
-            self.__observe_cleanup_task(current)
-            owned.remove(current)
+        owned = {task for task in tasks if task is not None and task is not current}
         if not owned:
             return
         for task in owned:
             task.cancel()
-        try:
-            done, pending = await asyncio.wait(owned, timeout=timeout)
-        except asyncio.CancelledError:
-            for task in owned:
-                self.__observe_cleanup_task(task)
-            raise
+        done, pending = await asyncio.wait(owned, timeout=timeout)
         for task in done:
+            remaining.discard(task)
+            if task in self.__cleanup_consumed_tasks:
+                continue
+            self.__cleanup_consumed_tasks.add(task)
             self.__release_cleanup_task(task)
             # Preserve TaskManager's result handling without another pending wait.
             await self.cancel_task(task, timeout=None)
         for task in pending:
             self.__observe_cleanup_task(task)
+            remaining.discard(task)
             task.cancel()
             logger.warning(f"{task.get_name()}: timed out waiting for task to cancel")
         # Pending tasks keep their handles and TaskManager registration. The
@@ -747,7 +768,7 @@ class FrameProcessor(BaseObject):
 
     def __observe_cleanup_task(self, task: asyncio.Task) -> None:
         """Keep one completion observer when cleanup cannot await this task."""
-        if task not in self.__cleanup_observed_tasks:
+        if task not in self.__cleanup_observed_tasks and task not in self.__cleanup_consumed_tasks:
             self.__cleanup_observed_tasks.add(task)
             task.add_done_callback(self.__cleanup_task_done)
 
@@ -755,6 +776,10 @@ class FrameProcessor(BaseObject):
         """Observe a task that outlived the attempt to clean up its processor."""
         if task not in self.__cleanup_observed_tasks:
             return
+        if task in self.__cleanup_consumed_tasks:
+            self.__cleanup_observed_tasks.discard(task)
+            return
+        self.__cleanup_consumed_tasks.add(task)
         try:
             task.result()
         except asyncio.CancelledError:
