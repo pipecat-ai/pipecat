@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Vartalaap text-to-speech service implementations.
+"""Vartaloop text-to-speech service implementations.
 
-Vartalaap (https://vartalaap.si) is a Hinglish and Indian-language TTS API. This module
+Vartaloop (https://vartaloop.ai) is a Hinglish and Indian-language TTS API. This module
 provides a WebSocket service for conversational use and an HTTP service for simpler
 pipelines. Both deliver 16-bit PCM, 24 kHz, mono, streamed from the first decoded frame.
 """
@@ -36,17 +36,18 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
-VARTALAAP_API_KEY_ENV = "VARTALAAP_API_KEY"
-VARTALAAP_BASE_URL = "https://api.vartaloop.ai"
-VARTALAAP_WS_URL = "wss://api.vartaloop.ai/v1/tts/stream"
-VARTALAAP_SAMPLE_RATE = 24000
-VARTALAAP_DEFAULT_MODEL = "narad"
-VARTALAAP_DEFAULT_VOICE = "saanvi"
+VARTALOOP_API_KEY_ENV = "VARTALOOP_API_KEY"
+_LEGACY_API_KEY_ENV = "VARTALAAP_API_KEY"  # the product's earlier name, still honoured
+VARTALOOP_BASE_URL = "https://api.vartaloop.ai"
+VARTALOOP_WS_URL = "wss://api.vartaloop.ai/v1/tts/stream"
+VARTALOOP_SAMPLE_RATE = 24000
+VARTALOOP_DEFAULT_MODEL = "narad"
+VARTALOOP_DEFAULT_VOICE = "saanvi"
 
 
 @dataclass
-class VartalaapTTSSettings(TTSSettings):
-    """Settings for VartalaapTTSService and VartalaapHttpTTSService.
+class VartaloopTTSSettings(TTSSettings):
+    """Settings for VartaloopTTSService and VartaloopHttpTTSService.
 
     Every field travels in the body of each utterance, so a runtime update applies
     from the next sentence on without reconnecting.
@@ -87,10 +88,10 @@ class VartalaapTTSSettings(TTSSettings):
     }
 
 
-def _default_settings() -> VartalaapTTSSettings:
-    return VartalaapTTSSettings(
-        model=VARTALAAP_DEFAULT_MODEL,
-        voice=VARTALAAP_DEFAULT_VOICE,
+def _default_settings() -> VartaloopTTSSettings:
+    return VartaloopTTSSettings(
+        model=VARTALOOP_DEFAULT_MODEL,
+        voice=VARTALOOP_DEFAULT_VOICE,
         language=None,
         expression="neutral",
         digits="auto",
@@ -104,16 +105,16 @@ def _default_settings() -> VartalaapTTSSettings:
 
 
 def _resolve_api_key(api_key: str | None) -> str:
-    key = api_key or os.environ.get(VARTALAAP_API_KEY_ENV)
+    key = api_key or os.environ.get(VARTALOOP_API_KEY_ENV) or os.environ.get(_LEGACY_API_KEY_ENV)
     if not key:
         raise ValueError(
-            f"Vartalaap API key is required: pass api_key= or set {VARTALAAP_API_KEY_ENV}"
+            f"Vartaloop API key is required: pass api_key= or set {VARTALOOP_API_KEY_ENV}"
         )
     return key
 
 
 def _utterance_body(
-    settings: VartalaapTTSSettings, *, text: str, request_id: str
+    settings: VartaloopTTSSettings, *, text: str, request_id: str
 ) -> dict[str, Any]:
     """The JSON of one utterance, shared by the WebSocket and the HTTP service.
 
@@ -145,8 +146,8 @@ def _utterance_body(
     return body
 
 
-class VartalaapTTSService(WebsocketTTSService):
-    """Text-to-speech over Vartalaap's WebSocket API (``WS /v1/tts/stream``).
+class VartaloopTTSService(WebsocketTTSService):
+    """Text-to-speech over Vartaloop's WebSocket API (``WS /v1/tts/stream``).
 
     One connection per session. Every sentence of a turn is sent as its own utterance
     message with a ``request_id``; the server serves them in order on the connection and
@@ -159,22 +160,22 @@ class VartalaapTTSService(WebsocketTTSService):
     with utterances still in flight reopens the connection.
     """
 
-    Settings = VartalaapTTSSettings
+    Settings = VartaloopTTSSettings
     _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str | None = None,
-        url: str = VARTALAAP_WS_URL,
+        url: str = VARTALOOP_WS_URL,
         sample_rate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
-        """Initialize the Vartalaap TTS service.
+        """Initialize the Vartaloop TTS service.
 
         Args:
-            api_key: Vartalaap API key (``vt_live_…``). Read from ``VARTALAAP_API_KEY``
+            api_key: Vartaloop API key (``vt_live_…``). Read from ``VARTALOOP_API_KEY``
                 when not given.
             url: The WebSocket endpoint.
             sample_rate: Output sample rate. The API produces 24 kHz; audio is resampled
@@ -252,12 +253,12 @@ class VartalaapTTSService(WebsocketTTSService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Connect to the Vartalaap websocket with the key on the handshake."""
+        """Connect to the Vartaloop websocket with the key on the handshake."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Vartalaap")
+            logger.debug("Connecting to Vartaloop")
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await self._websocket_connect(self._url, additional_headers=headers)
             # a new connection carries none of the old one's utterances
@@ -274,7 +275,7 @@ class VartalaapTTSService(WebsocketTTSService):
         try:
             await self.stop_all_metrics()
             if self._websocket:
-                logger.debug("Disconnecting from Vartalaap")
+                logger.debug("Disconnecting from Vartaloop")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
@@ -346,9 +347,9 @@ class VartalaapTTSService(WebsocketTTSService):
                 if not self.audio_context_available(context_id):
                     continue
                 audio = message
-                if self.sample_rate != VARTALAAP_SAMPLE_RATE:
+                if self.sample_rate != VARTALOOP_SAMPLE_RATE:
                     audio = await self._resampler.resample(
-                        audio, VARTALAAP_SAMPLE_RATE, self.sample_rate
+                        audio, VARTALOOP_SAMPLE_RATE, self.sample_rate
                     )
                 frame = TTSAudioRawFrame(
                     audio=audio,
@@ -376,11 +377,11 @@ class VartalaapTTSService(WebsocketTTSService):
                     if self._current and self._current[0] == request_id:
                         self._current = None
                     await self.stop_all_metrics()
-                    await self.push_error(error_msg=f"Vartalaap error ({status}): {error}")
+                    await self.push_error(error_msg=f"Vartaloop error ({status}): {error}")
                     await self._maybe_close_context(context_id)
                 elif request_id is None:
                     # untagged: the server could not read our message at all
-                    await self.push_error(error_msg=f"Vartalaap error ({status}): {error}")
+                    await self.push_error(error_msg=f"Vartaloop error ({status}): {error}")
                 else:
                     # a late error of an utterance that is not ours (before a reconnect)
                     logger.debug(
@@ -438,15 +439,15 @@ class VartalaapTTSService(WebsocketTTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
-class VartalaapHttpTTSService(TTSService):
-    """Text-to-speech over Vartalaap's HTTP API (``POST /v1/tts``).
+class VartaloopHttpTTSService(TTSService):
+    """Text-to-speech over Vartaloop's HTTP API (``POST /v1/tts``).
 
     One request per sentence, the chunked PCM body forwarded as it arrives. Simpler than
     the WebSocket service and fine for pipelines without interruptions; a conversational
-    agent should prefer :class:`VartalaapTTSService`.
+    agent should prefer :class:`VartaloopTTSService`.
     """
 
-    Settings = VartalaapTTSSettings
+    Settings = VartaloopTTSSettings
     _settings: Settings
 
     def __init__(
@@ -454,15 +455,15 @@ class VartalaapHttpTTSService(TTSService):
         *,
         api_key: str | None = None,
         aiohttp_session: aiohttp.ClientSession | None = None,
-        base_url: str = VARTALAAP_BASE_URL,
+        base_url: str = VARTALOOP_BASE_URL,
         sample_rate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
-        """Initialize the Vartalaap HTTP TTS service.
+        """Initialize the Vartaloop HTTP TTS service.
 
         Args:
-            api_key: Vartalaap API key (``vt_live_…``). Read from ``VARTALAAP_API_KEY``
+            api_key: Vartaloop API key (``vt_live_…``). Read from ``VARTALOOP_API_KEY``
                 when not given.
             aiohttp_session: Shared aiohttp session for HTTP requests. One is created
                 when not given.
@@ -547,20 +548,20 @@ class VartalaapHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"{self} error {response.status}: {error_text}")
-                    yield ErrorFrame(error=f"Vartalaap error ({response.status}): {error_text}")
+                    yield ErrorFrame(error=f"Vartaloop error ({response.status}): {error_text}")
                     return
 
                 await self.start_tts_usage_metrics(text)
 
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_any(),
-                    in_sample_rate=VARTALAAP_SAMPLE_RATE,
+                    in_sample_rate=VARTALOOP_SAMPLE_RATE,
                     context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"Vartalaap error: {e}")
+            yield ErrorFrame(error=f"Vartaloop error: {e}")
         finally:
             await self.stop_all_metrics()

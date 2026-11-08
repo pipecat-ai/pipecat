@@ -23,7 +23,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.vartalaap.tts import VartalaapTTSService
+from pipecat.services.vartaloop.tts import VartaloopHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -68,9 +68,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Hinglish voice. The voice decides the language and the text normaliser; `digits`
     # picks how numbers, OTPs and amounts are read; `expression` is the delivery.
-    tts = VartalaapTTSService(
-        api_key=os.environ["VARTALAAP_API_KEY"],
-        settings=VartalaapTTSService.Settings(
+    tts = VartaloopHttpTTSService(
+        api_key=os.environ["VARTALOOP_API_KEY"],
+        settings=VartaloopHttpTTSService.Settings(
             voice="saanvi",
             expression="neutral",
             digits="auto",

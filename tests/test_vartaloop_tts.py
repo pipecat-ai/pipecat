@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for VartalaapTTSService and VartalaapHttpTTSService against a fake Vartalaap server.
+"""Tests for VartaloopTTSService and VartaloopHttpTTSService against a fake Vartaloop server.
 
 The fake speaks the real wire protocol: one JSON message per utterance in, then ``start``,
 binary PCM frames, ``first_audio_ms`` and ``end`` events out, all tagged with the utterance's
@@ -31,10 +31,10 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
 )
-from pipecat.services.vartalaap.tts import (
-    VARTALAAP_SAMPLE_RATE,
-    VartalaapHttpTTSService,
-    VartalaapTTSService,
+from pipecat.services.vartaloop.tts import (
+    VARTALOOP_SAMPLE_RATE,
+    VartaloopHttpTTSService,
+    VartaloopTTSService,
     _utterance_body,
 )
 from pipecat.tests.utils import SleepFrame, run_test
@@ -43,8 +43,8 @@ FRAME = b"\x01\x00" * 1920  # one 80 ms pcm16 frame at 24 kHz
 
 
 @dataclass
-class _FakeVartalaap:
-    """A Vartalaap WebSocket server: utterances are served in order, each as start/audio/end."""
+class _FakeVartaloop:
+    """A Vartaloop WebSocket server: utterances are served in order, each as start/audio/end."""
 
     frames_per_utterance: int = 2
     # request_ids to answer with this error event instead of audio (by arrival index)
@@ -99,21 +99,21 @@ class _FakeVartalaap:
             pass
 
 
-async def _serve(fake: _FakeVartalaap):
+async def _serve(fake: _FakeVartaloop):
     server = await serve(fake.handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     return server, f"ws://127.0.0.1:{port}/v1/tts/stream"
 
 
-def _ws_service(url: str, **settings) -> VartalaapTTSService:
-    return VartalaapTTSService(
-        api_key="vt_live_test", url=url, settings=VartalaapTTSService.Settings(**settings)
+def _ws_service(url: str, **settings) -> VartaloopTTSService:
+    return VartaloopTTSService(
+        api_key="vt_live_test", url=url, settings=VartaloopTTSService.Settings(**settings)
     )
 
 
 @pytest.mark.asyncio
 async def test_turn_is_started_spoken_and_stopped_in_order():
-    fake = _FakeVartalaap()
+    fake = _FakeVartaloop()
     server, url = await _serve(fake)
     try:
         tts = _ws_service(url, voice="sahil", digits="hi")
@@ -129,7 +129,7 @@ async def test_turn_is_started_spoken_and_stopped_in_order():
     assert TTSStartedFrame in types and TTSStoppedFrame in types and TTSTextFrame in types
     audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
     assert len(audio) == 2
-    assert all(f.sample_rate == VARTALAAP_SAMPLE_RATE and f.audio == FRAME for f in audio)
+    assert all(f.sample_rate == VARTALOOP_SAMPLE_RATE and f.audio == FRAME for f in audio)
     started = types.index(TTSStartedFrame)
     stopped = types.index(TTSStoppedFrame)
     assert started < types.index(TTSAudioRawFrame) < stopped
@@ -144,7 +144,7 @@ async def test_turn_is_started_spoken_and_stopped_in_order():
 
 @pytest.mark.asyncio
 async def test_each_sentence_is_its_own_utterance_and_the_turn_closes_after_the_last():
-    fake = _FakeVartalaap()
+    fake = _FakeVartaloop()
     server, url = await _serve(fake)
     try:
         tts = _ws_service(url)
@@ -178,7 +178,7 @@ async def test_each_sentence_is_its_own_utterance_and_the_turn_closes_after_the_
 
 @pytest.mark.asyncio
 async def test_settings_update_applies_to_the_next_utterance_without_reconnecting():
-    fake = _FakeVartalaap()
+    fake = _FakeVartaloop()
     server, url = await _serve(fake)
     try:
         tts = _ws_service(url)
@@ -188,7 +188,7 @@ async def test_settings_update_applies_to_the_next_utterance_without_reconnectin
                 TTSSpeakFrame("Hello there."),
                 SleepFrame(0.2),
                 TTSUpdateSettingsFrame(
-                    delta=VartalaapTTSService.Settings(
+                    delta=VartaloopTTSService.Settings(
                         voice="sahil", expression="excited", speed=1.2, profile="telephony"
                     )
                 ),
@@ -211,7 +211,7 @@ async def test_settings_update_applies_to_the_next_utterance_without_reconnectin
 
 @pytest.mark.asyncio
 async def test_a_server_error_is_reported_and_the_turn_still_closes():
-    fake = _FakeVartalaap(error_at={0: {"status": 503, "retry_after": 1, "error": "busy"}})
+    fake = _FakeVartaloop(error_at={0: {"status": 503, "retry_after": 1, "error": "busy"}})
     server, url = await _serve(fake)
     try:
         tts = _ws_service(url)
@@ -230,7 +230,7 @@ async def test_a_server_error_is_reported_and_the_turn_still_closes():
 
 @pytest.mark.asyncio
 async def test_a_stale_error_of_another_utterance_is_ignored():
-    fake = _FakeVartalaap(stale_error=True)
+    fake = _FakeVartaloop(stale_error=True)
     server, url = await _serve(fake)
     try:
         tts = _ws_service(url)
@@ -246,7 +246,7 @@ async def test_a_stale_error_of_another_utterance_is_ignored():
 
 
 def test_utterance_body_sends_only_what_differs_from_the_server_defaults():
-    settings = VartalaapTTSService(api_key="k")._settings
+    settings = VartaloopTTSService(api_key="k")._settings
     assert _utterance_body(settings, text="hi", request_id="r") == {
         "text": "hi",
         "voice": "saanvi",
@@ -254,9 +254,9 @@ def test_utterance_body_sends_only_what_differs_from_the_server_defaults():
         "request_id": "r",
         "digits": "auto",
     }
-    settings = VartalaapTTSService(
+    settings = VartaloopTTSService(
         api_key="k",
-        settings=VartalaapTTSService.Settings(
+        settings=VartaloopTTSService.Settings(
             voice="meera",
             expression="whisper",
             digits="en",
@@ -282,7 +282,7 @@ def test_utterance_body_sends_only_what_differs_from_the_server_defaults():
 
 
 def test_settings_aliases_map_the_api_names():
-    delta = VartalaapTTSService.Settings.from_mapping({"style": "sad", "pace": 1.3})
+    delta = VartaloopTTSService.Settings.from_mapping({"style": "sad", "pace": 1.3})
     assert delta.expression == "sad"
     assert delta.speed == 1.3
 
@@ -326,11 +326,11 @@ class _Session:
 @pytest.mark.asyncio
 async def test_http_service_streams_the_chunked_body_as_it_arrives():
     session = _Session(_Response(200, chunks=[FRAME[:100], FRAME[100:], FRAME]))
-    tts = VartalaapHttpTTSService(
+    tts = VartaloopHttpTTSService(
         api_key="vt_live_test",
         aiohttp_session=session,
-        sample_rate=VARTALAAP_SAMPLE_RATE,
-        settings=VartalaapHttpTTSService.Settings(voice="sahil", expression="excited"),
+        sample_rate=VARTALOOP_SAMPLE_RATE,
+        settings=VartaloopHttpTTSService.Settings(voice="sahil", expression="excited"),
     )
     down, _ = await run_test(tts, frames_to_send=[TTSSpeakFrame("Hello there."), SleepFrame(0.2)])
 
@@ -352,7 +352,7 @@ async def test_http_service_streams_the_chunked_body_as_it_arrives():
 @pytest.mark.asyncio
 async def test_http_service_reports_a_non_200():
     session = _Session(_Response(401, text='{"error":"invalid api key"}'))
-    tts = VartalaapHttpTTSService(api_key="bad", aiohttp_session=session)
+    tts = VartaloopHttpTTSService(api_key="bad", aiohttp_session=session)
     down, up = await run_test(tts, frames_to_send=[TTSSpeakFrame("Hello there."), SleepFrame(0.2)])
     errors = [f for f in up if isinstance(f, ErrorFrame)]
     assert errors and "401" in errors[0].error
