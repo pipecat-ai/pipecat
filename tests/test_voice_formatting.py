@@ -278,6 +278,16 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         result = await expand_percentages(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
 
+    async def test_thousands_separator(self):
+        # The separator is part of the number, not a prefix left in front of it.
+        self.assertEqual(
+            await expand_percentages("1,500%", "*"), "one thousand, five hundred percent"
+        )
+        self.assertEqual(
+            await expand_percentages("12,500%", "*"), "twelve thousand, five hundred percent"
+        )
+        self.assertEqual(await expand_percentages("1,000,000%", "*"), "one million percent")
+
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
     async def test_km(self):
