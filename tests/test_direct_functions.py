@@ -222,6 +222,14 @@ class TestDirectFunction(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "first parameter must be named"):
             DirectFunctionWrapper(my_function_misplaced_params)
 
+    def test_invalid_function_without_a_name_is_reported_by_its_type(self):
+        class Callable:
+            def __call__(self, params: FunctionCallParams):
+                return {"status": "success"}, None
+
+        with self.assertRaisesRegex(Exception, "Direct function Callable must be async"):
+            DirectFunctionWrapper(function=Callable())
+
     def test_invoke_calls_function_with_args_and_params_object(self):
         called = {}
 

@@ -93,7 +93,10 @@ class BaseDirectFunctionWrapper:
                 parameters, incorrect first parameter name).
         """
         if not inspect.iscoroutinefunction(function):
-            raise Exception(f"Direct function {function.__name__} must be async")
+            # A callable object has no __name__, so name it by its type rather than
+            # letting the message itself raise AttributeError.
+            name = getattr(function, "__name__", None) or type(function).__name__
+            raise Exception(f"Direct function {name} must be async")
         params = list(inspect.signature(function).parameters.items())
         special_first_param_name = cls.special_first_param_name()
         if len(params) == 0:
