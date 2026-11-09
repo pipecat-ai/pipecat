@@ -105,6 +105,10 @@ class MiniMaxTTSSettings(TTSSettings):
             "disgusted", "surprised", "calm", "fluent", "whisper"). "fluent" and
             "whisper" need a speech-2.6 model.
         text_normalization: Enable text normalization (Chinese/English).
+        text_normalization_mode: Normalization mode, "basic" (rule-based) or "quality".
+            Takes precedence over ``text_normalization``. "quality" applies to
+            non-streaming requests on the speech-2.6 and speech-2.8 models, and is
+            treated as "basic" elsewhere.
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
     """
@@ -114,6 +118,7 @@ class MiniMaxTTSSettings(TTSSettings):
     pitch: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emotion: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization_mode: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latex_read: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
@@ -246,6 +251,7 @@ class MiniMaxHttpTTSService(TTSService):
             language_boost=None,
             emotion=None,
             text_normalization=None,
+            text_normalization_mode=None,
             latex_read=None,
         )
 
@@ -415,6 +421,8 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.language_boost is not None:
             payload["language_boost"] = self._settings.language_boost
+        if self._settings.text_normalization_mode is not None:
+            payload["text_normalization_mode"] = self._settings.text_normalization_mode
 
         try:
             async with self._session.post(
