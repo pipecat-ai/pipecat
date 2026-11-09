@@ -1,0 +1,1 @@
+- Added a `redact_usage` setting to the Deepgram Flux STT services, which stores keyterms as `[REDACTED]` in Deepgram's usage records.
