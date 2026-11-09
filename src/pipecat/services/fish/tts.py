@@ -105,7 +105,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     audio generation with interruption handling.
 
     Uses the ``s2.1-pro`` model by default. Set ``Settings(model=...)`` to use
-    another Fish Audio model, such as ``s1``, ``s2-pro``, or ``drama-3``.
+    another Fish Audio model, such as ``s2-pro`` or ``drama-3``.
     """
 
     Settings = FishAudioTTSSettings
