@@ -2,9 +2,18 @@ import importlib
 import sys
 import types
 
+import numpy as np
 import pytest
 
-from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    InputAudioRawFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
 
@@ -126,6 +135,26 @@ async def test_run_stt_uses_settings_for_generation(funasr_module):
     generate_call = fake_auto_model.instances[-1].generate_calls[-1]
     assert generate_call["language"] == "zh"
     assert generate_call["use_itn"] is False
+
+
+@pytest.mark.asyncio
+async def test_segment_reaches_the_model_as_raw_pcm(funasr_module):
+    stt, fake_auto_model = funasr_module
+    service = stt.FunASRSTTService(trailing_silence_secs=0)
+    samples = np.arange(1, 161, dtype=np.int16)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=samples.tobytes(), sample_rate=16000, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(audio_in_sample_rate=16000),
+    )
+
+    received = fake_auto_model.instances[-1].generate_calls[-1]["input"]
+    assert (received * 32768.0).astype(np.int16).tolist() == samples.tolist()
 
 
 @pytest.mark.asyncio

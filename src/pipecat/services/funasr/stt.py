@@ -97,6 +97,11 @@ class FunASRSTTService(SegmentedSTTService):
     Settings = FunASRSTTSettings
     _settings: Settings
 
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Receive segments as raw 16-bit PCM, which the model reads directly."""
+        return False
+
     def __init__(
         self,
         *,
