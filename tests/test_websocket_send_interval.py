@@ -28,12 +28,6 @@ _SAMPLE_RATE = 16000
 _CHUNKS = 4
 
 
-def _expected_interval(sample_rate: int, channels: int, chunks: int = _CHUNKS) -> float:
-    """Seconds of 16-bit audio in one output chunk."""
-    audio_bytes_10ms = int(sample_rate / 100) * channels * 2
-    return (audio_bytes_10ms * chunks) / (sample_rate * channels * 2)
-
-
 class TestWebsocketSendInterval(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._task_manager = TaskManager()
@@ -53,7 +47,7 @@ class TestWebsocketSendInterval(unittest.IsolatedAsyncioTestCase):
         await output.setup(self._setup(_SAMPLE_RATE))
 
         self.assertEqual(output.audio_chunk_size, 1280)
-        self.assertAlmostEqual(output._send_interval, _expected_interval(_SAMPLE_RATE, 1))
+        self.assertAlmostEqual(output._send_interval, 0.04)
 
     async def test_server_stereo_interval_is_not_doubled(self):
         output = SingleClientWebsocketServerTransport(
@@ -69,7 +63,6 @@ class TestWebsocketSendInterval(unittest.IsolatedAsyncioTestCase):
         # 40ms of stereo is twice the bytes of mono, and the same amount of time.
         self.assertEqual(output.audio_chunk_size, 2560)
         self.assertAlmostEqual(output._send_interval, 0.04)
-        self.assertAlmostEqual(output._send_interval, _expected_interval(_SAMPLE_RATE, 2))
 
     async def test_fastapi_and_client_use_the_same_interval(self):
         for output_cls, params_cls in (
@@ -84,6 +77,4 @@ class TestWebsocketSendInterval(unittest.IsolatedAsyncioTestCase):
             )
             output = output_cls(AsyncMock(), AsyncMock(), params)
             await output.setup(self._setup(48000))
-            self.assertAlmostEqual(
-                output._send_interval, _expected_interval(48000, 2), msg=output_cls.__name__
-            )
+            self.assertAlmostEqual(output._send_interval, 0.04, msg=output_cls.__name__)
