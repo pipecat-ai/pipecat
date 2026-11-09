@@ -2303,11 +2303,11 @@ class MOQTransport(BaseTransport):
 
     async def _on_client_connected(self):
         """Handle the peer's broadcast being announced."""
-        await self._call_event_handler("on_client_connected")
+        await self._call_event_handler("on_client_connected", {"id": self._params.peer_id})
 
     async def _on_client_disconnected(self):
         """Handle the peer's broadcast going away."""
-        await self._call_event_handler("on_client_disconnected")
+        await self._call_event_handler("on_client_disconnected", {"id": self._params.peer_id})
 
     async def _on_track_subscribed(self, track: MOQTrack):
         """Handle a remote track subscription succeeding.
