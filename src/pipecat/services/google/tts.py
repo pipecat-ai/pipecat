@@ -1379,7 +1379,8 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._api_key = (api_key or os.environ.get("GOOGLE_API_KEY")) if self._use_genai else None
         self._http_options = http_options
 
-        if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
+        # The Gemini API backend resamples its 24 kHz stream to any rate.
+        if not self._use_genai and sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
@@ -1556,7 +1557,8 @@ class GeminiTTSService(GoogleBaseTTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        if self.sample_rate != self.GOOGLE_SAMPLE_RATE:
+        # The Gemini API backend resamples its 24 kHz stream to any rate.
+        if not self._use_genai and self.sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS requires {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {self.sample_rate}Hz may cause issues."
