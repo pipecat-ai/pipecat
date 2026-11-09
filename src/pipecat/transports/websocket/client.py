@@ -359,7 +359,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        bytes_per_second = self.sample_rate * self._params.audio_out_channels * 2
+        self._send_interval = self.audio_chunk_size / bytes_per_second
 
         await self._session.setup(setup.task_manager)
 

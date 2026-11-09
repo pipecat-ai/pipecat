@@ -24,6 +24,7 @@ from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
+    StartFrame,
     TextType,
     TTSTextFrame,
 )
@@ -77,6 +78,28 @@ async def test_opting_out_paces_audio_to_playback_time():
 
     client.send_realtime_audio_frame.assert_awaited_once_with(frame)
     client.queue_tts_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_opt_out_pacing_counts_every_output_channel():
+    """The realtime pacing interval is the duration of a multichannel chunk."""
+    transport, client = _make_output_transport(
+        audio_out_faster_than_realtime=False,
+        audio_out_sample_rate=24000,
+        audio_out_channels=2,
+        audio_out_10ms_chunks=4,
+    )
+    client.setup = AsyncMock()
+    client.join = AsyncMock()
+    transport.set_transport_ready = AsyncMock()
+
+    await transport.setup(
+        frame_processor_setup(TaskManager(), audio_out_sample_rate=client.out_sample_rate)
+    )
+    await transport.start(StartFrame())
+
+    assert transport.audio_chunk_size == 3840
+    assert transport._send_interval == pytest.approx(0.04)
 
 
 @pytest.mark.asyncio
