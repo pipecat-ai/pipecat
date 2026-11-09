@@ -297,6 +297,7 @@ suite:
     scenarios:
       - scripted/weather_function_call
       - scripted/async_tool
+      - scripted/async_tool_wait_reassurance
       - scripted/function_call_timeout
       # gpt-4.1 answers that it is working on the report without calling
       # write_report, so neither cancellation scenario reaches what it tests.

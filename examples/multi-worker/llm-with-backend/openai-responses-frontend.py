@@ -42,7 +42,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
-from pipecat.pipeline.llm_with_backend import LLMWithBackend
+from pipecat.pipeline.llm_with_backend import BackendConnector, LLMWithBackend
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -63,6 +63,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.wait_reassurance.llm_extension import WaitReassuranceLLMExtension
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -106,14 +107,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         frontend=OpenAIResponsesLLMService(
             api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAIResponsesLLMService.Settings(system_instruction=FRONTEND_INSTRUCTIONS),
+            # A brief word from the LLM while the backend works.
+            extensions=[WaitReassuranceLLMExtension()],
         ),
         backend=build_backend(),
-        # To watch every exchange with the backend in a client's event log,
-        # such as the prebuilt UI's Events panel, pass a connector with
-        # client tracing on: each request, output, tool-call phase and
-        # cancellation is then sent to the client as an RTVI server message.
-        # from pipecat.pipeline.llm_with_backend import BackendConnector
-        # connector=BackendConnector(client_trace=True),
+        # Every exchange with the backend (each request, output, tool-call
+        # phase, error and idle) is sent to the client as an RTVI
+        # "server-message" whose data has "type": "llm-with-backend", so the
+        # prebuilt UI's Events panel shows the backend at work. Tracing is off
+        # by default; comment out the connector to leave it off.
+        connector=BackendConnector(client_trace=True),
     )
 
     # The frontend's tools are installed by the service; the real tools live
