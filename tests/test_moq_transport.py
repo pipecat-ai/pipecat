@@ -1489,11 +1489,15 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.script[:] = [first] + [_FakeSession(closed=True) for _ in range(1000)]
         client = self._make_client(connection_timeout=0.05)
         self._peer_never_returns(client)
+        # The window runs on a clock that moves 10 ms a dial, so it closes
+        # after a fixed number of dials however slowly the test runs.
+        clock = SimpleNamespace(monotonic=lambda: len(self.dials) * 0.01)
 
-        run = asyncio.create_task(client._run())
-        await self._wait_for_dials(1)
-        first.drop()
-        await asyncio.wait_for(run, timeout=2)
+        with patch.object(moq_transport, "time", clock):
+            run = asyncio.create_task(client._run())
+            await self._wait_for_dials(1)
+            first.drop()
+            await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
         self.assertGreater(len(self.dials), 2)
