@@ -139,6 +139,8 @@ uv add "pipecat-ai[option,...]"
 
 > **Using pip?** `pip install pipecat-ai` and `pip install "pipecat-ai[option,...]"` work too.
 
+Pipecat runs on Python 3.11 through 3.14. Python 3.15 is not supported yet, because `onnxruntime` publishes no wheels for it. Pin your project to a supported version, for example with `uv python pin 3.14`.
+
 From here, the code examples below are the best way to learn — agents you can run, read, and adapt.
 
 ## 🧪 Code examples
