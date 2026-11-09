@@ -6,9 +6,6 @@
 
 """Receive Daily SIP-trunk notifications and start a voice agent per call.
 
-Setup — dependencies, API keys, a softphone, and a tiered path from unit
-tests to a real phone call — is in ``examples/sip/README.md``.
-
 A ``sip_client`` SIP trunk on Daily provisions a SIP account for each inbound
 call and POSTs a signed ``sip_trunk.incoming`` notification to the trunk's
 ``notification.webhook_url``; the caller hears ringback until that endpoint

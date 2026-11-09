@@ -6,9 +6,6 @@
 
 """Voice agent that places a SIP dial-out call.
 
-Setup — dependencies, API keys, a softphone, and a tiered path from unit
-tests to a real phone call — is in ``examples/sip/README.md``.
-
 The bot connects to the SIP server, dials a destination, and starts the
 conversation when the callee answers. Give it a destination with an
 environment variable::

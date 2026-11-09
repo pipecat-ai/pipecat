@@ -6,9 +6,6 @@
 
 """Voice agent on the SIP transport.
 
-Setup — dependencies, API keys, a softphone, and a tiered path from unit
-tests to a real phone call — is in ``examples/sip/README.md``.
-
 The bot registers with a SIP server and answers incoming calls. Run it with
 an account on any SIP server::
 

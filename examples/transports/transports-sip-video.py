@@ -6,9 +6,6 @@
 
 """Audio and video mirror on the SIP transport.
 
-Setup — dependencies, a softphone, and a tiered path from unit tests to a
-real phone call — is in ``examples/sip/README.md``.
-
 The bot answers incoming calls with video and echoes the caller's audio and
 video back — call it from a video-capable SIP client (e.g. Linphone) to see
 and hear yourself. Requires the video extra (``pipecat-ai[sip-video]``)::
