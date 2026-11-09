@@ -220,7 +220,7 @@ jobs:
             Before finishing — including when something stops you early —
             write your Step 6 summary (or whatever explanation you have) to
             `$GITHUB_WORKSPACE/.pw-scratch/summary.md`: the workflow uploads
-            it, and it is the only record of your reasoning that survives the
+            it, and it is the only record of the run that survives the
             runner.
           claude_args: |
             --model claude-opus-5
