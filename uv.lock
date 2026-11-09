@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -6442,7 +6442,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["typesafe"], marker = "extra == 'jev'" },
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
     { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.9.0,<1" },
-    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.3.0" },
+    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.4.0" },
     { name = "pipecat-resampler", specifier = ">=0.2.0,<1" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
@@ -6545,14 +6545,14 @@ wheels = [
 
 [[package]]
 name = "pipecat-ai-prebuilt"
-version = "1.3.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/50/7ad21080c8c8d6210b08c6f2b72f9939da71caa2f8c3f16ac4afd9af25e8/pipecat_ai_prebuilt-1.3.0.tar.gz", hash = "sha256:b7ee2244e6885f2866272d4f4c5053980b1a1fcfc8c8976b6a21e6558676b061", size = 825709, upload-time = "2026-10-02T13:06:10.876Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/07/dc6ed6fb233411c912be32f8abb24336d6a455aa8fbbc5ff96e1ff86db4d/pipecat_ai_prebuilt-1.4.0.tar.gz", hash = "sha256:c1535e7585efda245b53573d0e13fdd16c47828ae991927d924cf08651c79397", size = 997636, upload-time = "2026-11-09T19:43:08.039Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/6a/df44efb2952089e59a7a2e1798156666257429613d6feac6f1ebb364f420/pipecat_ai_prebuilt-1.3.0-py3-none-any.whl", hash = "sha256:fe06408efea390d0cfe4257b4bf86aff19b44189cdbb504954dd9329513dbf7f", size = 828361, upload-time = "2026-10-02T13:06:09.099Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/02/108601f64733024bb9f97c36e5958169170dd60f84291a28b53184acda08/pipecat_ai_prebuilt-1.4.0-py3-none-any.whl", hash = "sha256:8826315c6ec70cb355c24421faf9bc7de9843c2891174e3e949aa1aa59275bce", size = 1002763, upload-time = "2026-11-09T19:43:06.467Z" },
 ]
 
 [[package]]
