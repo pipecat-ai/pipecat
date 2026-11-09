@@ -1,0 +1,2 @@
+- `GrokLLMService.Settings` now takes `guidelines`, xAI's per-category content
+  guidelines (`nsfw`, `violence`, `profanity`).
