@@ -43,7 +43,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
         llm = create_llm("anthropic")
 
         # Use specific provider and model
-        llm = create_llm("openai", "gpt-4o-mini")
+        llm = create_llm("openai", "gpt-6-luna")
 
         # Use AWS Bedrock (requires AWS credentials via SSO, env vars, or IAM)
         llm = create_llm("aws")
