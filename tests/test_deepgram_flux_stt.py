@@ -274,6 +274,29 @@ async def test_update_settings_configures_numerals():
 
 
 @pytest.mark.asyncio
+async def test_update_settings_configures_redact_usage_on():
+    """Turning redact_usage on goes over the live connection."""
+    service = _make_fake_flux_service()
+
+    await service._update_settings(DeepgramFluxSTTSettings(redact_usage=True))
+
+    assert service.sent_messages == [{"type": "Configure", "redact_usage": True}]
+    assert service.reconnect_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_update_settings_reconnects_to_turn_redact_usage_off():
+    """Flux keeps redact_usage on for the connection, so turning it off reconnects."""
+    service = _make_fake_flux_service()
+    service._settings.redact_usage = True
+
+    await service._update_settings(DeepgramFluxSTTSettings(redact_usage=False))
+
+    assert service.reconnect_requests == 1
+    assert service.sent_messages == []
+
+
+@pytest.mark.asyncio
 async def test_fatal_error_reports_code_and_description():
     """A FatalError raises with the code and description Flux sends."""
     service = _make_fake_flux_service()

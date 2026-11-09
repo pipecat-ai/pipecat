@@ -156,9 +156,9 @@ class DeepgramFluxSTTSettings(STTSettings):
             ``"aggressive_numbers"``. Read only from the connection URL, so an
             update is applied by reconnecting.
         redact_usage: Store keyterms as ``[REDACTED]`` in Deepgram's usage
-            records. Can be updated mid-stream via ``STTUpdateSettingsFrame``,
-            but Flux keeps it on for the rest of the connection once enabled,
-            so turning it back off takes a reconnect.
+            records. Turning it on via ``STTUpdateSettingsFrame`` applies to the
+            live connection. Flux keeps it on for the rest of a connection once
+            enabled, so turning it off is applied by reconnecting.
         language_hints: Languages to bias transcription toward. Only honored by the
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
@@ -667,8 +667,9 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         """Apply a settings delta.
 
         Fields in ``_CONFIGURE_FIELDS`` are sent to Deepgram via a Configure
-        message. Fields Flux only reads from the connection URL trigger a
-        reconnect, which waits until the user stops speaking.
+        message. Fields Flux only reads from the connection URL, and turning
+        ``redact_usage`` off, trigger a reconnect, which waits until the user
+        stops speaking.
         """
         changed = await super()._update_settings(delta)
 
@@ -676,10 +677,18 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             return changed
 
         configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        reconnect = bool(changed.keys() & self._CONNECTION_FIELDS)
+
+        # Flux keeps redact_usage on for the rest of a connection once it is
+        # enabled, so only a new connection can turn it off.
+        if changed.get("redact_usage") and not self._settings.redact_usage:
+            configure_fields.discard("redact_usage")
+            reconnect = True
+
         if configure_fields and self._transport_is_active():
             await self._send_configure(configure_fields)
 
-        if changed.keys() & self._CONNECTION_FIELDS:
+        if reconnect:
             await self._request_reconnect()
 
         self._warn_unhandled_updated_settings(
