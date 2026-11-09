@@ -1,0 +1,2 @@
+- Added `prompt_cache_key` to `SmallestLLMService.Settings`, Electron's key for
+  grouping one conversation's requests so each turn reuses the prefix cache.
