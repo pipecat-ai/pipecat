@@ -214,9 +214,9 @@ suite:
       data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: google/gemma-3-27b-it, service: pipecat.services.nebius.llm.NebiusLLMService}
     scenarios: *all
   - bot: bot.py
-    name: nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+    name: nebius/nvidia/Nemotron-3_5-Lightning
     runner_body:
-      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B, service: pipecat.services.nebius.llm.NebiusLLMService, system_suffix: /no_think}
+      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: nvidia/Nemotron-3_5-Lightning, service: pipecat.services.nebius.llm.NebiusLLMService, system_suffix: /no_think}
     scenarios: *all
   - bot: bot.py
     name: novita/moonshotai/kimi-k2.5
