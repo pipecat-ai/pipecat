@@ -16,7 +16,7 @@ Usage::
     TYPESAFE_API_KEY=... python features-classifiers.py
     CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers.py --clef
     OPENAI_API_KEY=... python features-classifiers.py --openai
-    OPENAI_API_KEY=... python features-classifiers.py --llm gpt-4o-mini
+    OPENAI_API_KEY=... python features-classifiers.py --llm gpt-6-luna
 """
 
 import argparse
