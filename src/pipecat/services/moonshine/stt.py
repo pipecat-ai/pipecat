@@ -46,6 +46,13 @@ except ModuleNotFoundError as e:
 # Moonshine expects 16 kHz mono PCM audio.
 MOONSHINE_SAMPLE_RATE = 16000
 
+# Moonshine truncates a decode whose token rate exceeds `max_tokens_per_second`.
+# Its default of 6.5 is tuned for Latin scripts; the languages below pack more
+# tokens into the same speech and need the higher cap Moonshine documents for
+# them, or valid output is cut off.
+NON_LATIN_MAX_TOKENS_PER_SECOND = 13.0
+NON_LATIN_LANGUAGES = frozenset({"ar", "ja", "ko", "uk", "zh"})
+
 
 def language_to_moonshine_language(language: Language) -> str:
     """Convert a pipecat Language to a Moonshine language code.
@@ -139,7 +146,9 @@ class MoonshineSTTService(SegmentedSTTService):
     model works, including the streaming-capable ones. Audio is expected as 16-bit
     mono PCM at 16 kHz.
 
-    Models are language-specific, so a language change reloads the model. They are
+    Models are language-specific, so a language change reloads the model. Arabic,
+    Chinese, Japanese, Korean and Ukrainian decode at the raised token rate
+    Moonshine documents for them, so long utterances are not truncated. They are
     MIT-licensed in every language and size, except the legacy non-streaming models
     for languages other than English (``TINY`` and ``BASE``), which are under the
     non-commercial Moonshine Community License (https://www.moonshine.ai/license);
@@ -239,7 +248,11 @@ class MoonshineSTTService(SegmentedSTTService):
             )
             self._settings.model = arch_str
 
-        transcriber = Transcriber(model_path, model_arch)
+        options = {}
+        if lang_code in NON_LATIN_LANGUAGES:
+            options["max_tokens_per_second"] = str(NON_LATIN_MAX_TOKENS_PER_SECOND)
+
+        transcriber = Transcriber(model_path, model_arch, options=options)
         logger.debug("Loaded Moonshine model")
         return transcriber
 
