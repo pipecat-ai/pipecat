@@ -9,7 +9,7 @@
 import copy
 from dataclasses import dataclass
 
-from pipecat.frames.frames import Frame, LLMContextFrame, LLMRunFrame
+from pipecat.frames.frames import Frame, InputTextRawFrame, LLMContextFrame, LLMRunFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregator,
@@ -38,21 +38,34 @@ class _RimeContextFrame(LLMContextFrame):
     history_update: _HistoryUpdate | None = None
     instruction: str | None = None
     response_metadata: dict[str, str] | None = None
+    text: str | None = None
 
 
 @dataclass
 class RimeReplyFrame(LLMRunFrame):
-    """Request one Prism reply with optional instruction and labels.
+    """Request a Prism reply or an ordered native typed turn.
 
     Session labels still apply. These labels replace matching session labels
     for this reply only. Prism starts speech replies without this frame.
+
+    Use ``text`` for native input that must follow queued history or settings
+    frames. Raw :class:`~pipecat.frames.frames.InputTextRawFrame` input has
+    system priority and can pass those frames before they are processed.
+
+    Parameters:
+        instruction: Instruction for a proactive reply, without a user turn.
+        response_metadata: Labels for this reply.
+        text: Fresh user text. Cannot be combined with ``instruction``.
     """
 
     instruction: str | None = None
     response_metadata: dict[str, str] | None = None
+    text: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.text is not None and self.instruction is not None:
+            raise ValueError("Prism typed input and reply instructions are separate operations")
         if self.response_metadata is not None:
             self.response_metadata = dict(self.response_metadata)
 
@@ -98,6 +111,15 @@ class _ApplicationHistory(LLMContextAggregator):
 
 
 class _RimeUserAggregator(_ApplicationHistory, LLMUserAggregator):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Carry fresh typed input with the shared conversation context."""
+        if isinstance(frame, InputTextRawFrame):
+            await self.push_frame(
+                _RimeContextFrame(context=self.context, text=frame.text), direction
+            )
+        else:
+            await super().process_frame(frame, direction)
+
     async def _handle_llm_run(self, frame: LLMRunFrame) -> None:
         if isinstance(frame, RimeReplyFrame):
             await self.push_frame(
@@ -105,6 +127,7 @@ class _RimeUserAggregator(_ApplicationHistory, LLMUserAggregator):
                     context=self.context,
                     instruction=frame.instruction,
                     response_metadata=frame.response_metadata,
+                    text=frame.text,
                 )
             )
         else:

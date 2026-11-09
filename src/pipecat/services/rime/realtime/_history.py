@@ -6,12 +6,14 @@
 
 """Prism history identities and acknowledged edit planning."""
 
+import asyncio
 import copy
 import json
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
+from rimelabs_sdk import RimeInputError
 from rimelabs_sdk import realtime as r
 
 from pipecat.processors.aggregators.async_tool_messages import parse_message
@@ -20,8 +22,21 @@ from pipecat.services.rime.realtime._adapter import history_items
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
-class PartialHistoryError(RuntimeError):
-    """Some history mutations committed before an edit failed."""
+class PrismHistoryUpdateError(RuntimeError):
+    """A rejected, partial, or uncertain provider history edit.
+
+    Attributes:
+        status: Whether the edit was rejected, partially applied, or uncertain.
+        recoverable: Whether independent operations can continue.
+        confirmed_context: Detached provider projection, or None when unknown.
+    """
+
+    def __init__(self, status: str, confirmed_context: list | None):
+        """Describe an edit without exposing conversation text in its message."""
+        super().__init__(f"Prism history update {status}")
+        self.status = status
+        self.recoverable = status != "uncertain"
+        self.confirmed_context = copy.deepcopy(confirmed_context)
 
 
 @dataclass
@@ -33,9 +48,14 @@ class Record:
     bound: bool = True
     identity: str = field(default_factory=lambda: uuid4().hex)
     accepted: dict = field(init=False)
+    variants: list[dict] = field(default_factory=list)
+    texts: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         self.accepted = copy.deepcopy(self.message)
+        if len(self.server_ids) == 1 and self.message.get("role") == "assistant":
+            if isinstance(self.message.get("content"), str):
+                self.texts[self.server_ids[0]] = self.message["content"]
 
 
 class History:
@@ -54,6 +74,8 @@ class History:
         self.pending_calls: set[str] = set()
         self.response_epoch = 0
         self._inputs: dict[str, Record] = {}
+        self.lock = asyncio.Lock()
+        self._writes = 0
 
     def reserve_input(self, item_id: str) -> Record:
         """Reserve provider speech order before its transcript arrives."""
@@ -75,7 +97,7 @@ class History:
         """Track provider items until normal aggregation records them locally."""
         self.records.append(Record(message, server_ids, bound=False))
 
-    async def sync(self, messages: list) -> None:
+    async def sync(self, messages: list, *, shared: bool = False) -> None:
         """Apply an explicit context snapshot while retaining matching provider items.
 
         Identical replacements cannot be distinguished from retained messages.
@@ -116,7 +138,10 @@ class History:
                 (
                     record
                     for record in self.records
-                    if record.identity not in used and _equivalent(record.accepted, message)
+                    if record.identity not in used
+                    and any(
+                        _equivalent(value, message) for value in [record.accepted, *record.variants]
+                    )
                 ),
                 None,
             )
@@ -125,6 +150,16 @@ class History:
                 used.add(match.identity)
                 match.message = message
                 match.bound = True
+        if shared:
+            # An ordinary context is a view. Only an append may introduce new items.
+            first_new = next(
+                (i for i, record in enumerate(matches) if record is None), len(matches)
+            )
+            if any(record is not None for record in matches[first_new:]):
+                raise PrismHistoryUpdateError("rejected", self.projection())
+            if first_new < len(matches):
+                await self.edit(filtered[first_new:], append=True)
+            return
         bound = list(self.records)
         retained = [record for record in matches if record is not None]
         if len(retained) == len(filtered) and bound == retained:
@@ -154,7 +189,7 @@ class History:
             if (
                 record.bound
                 or record.accepted.get("role") != role
-                or not record.accepted.get("content")
+                or not record.message.get("content")
                 or record.accepted.get("tool_calls")
             ):
                 group = []
@@ -168,18 +203,111 @@ class History:
                     for part in group
                 ]
             )
-            if len(group) > 1 and text == message["content"]:
+            generated = concatenate_aggregated_text(
+                [
+                    TextPartForConcatenation(
+                        part.message["content"], includes_inter_part_spaces=False
+                    )
+                    for part in group
+                ]
+            )
+            if len(group) > 1 and message["content"] in (text, generated):
                 first = group[0]
+                first.texts = {key: value for part in group for key, value in part.texts.items()}
                 first.message = copy.deepcopy(message)
-                first.accepted = copy.deepcopy(message)
+                first.accepted = {**copy.deepcopy(message), "content": text}
+                if generated != text:
+                    first.variants.append({**copy.deepcopy(message), "content": generated})
                 first.server_ids = [item_id for part in group for item_id in part.server_ids]
                 removed = {part.identity for part in group[1:]}
                 self.records[:] = [part for part in self.records if part.identity not in removed]
                 return
-            if not message["content"].startswith(text):
+            if not any(message["content"].startswith(value) for value in (text, generated)):
                 group = [record]
 
+    def projection(self) -> list:
+        """Return a detached projection of confirmed provider records."""
+        return copy.deepcopy([record.accepted for record in self.records])
+
+    def tool_variant(self, call_id: str, output: str) -> None:
+        """Match the application's latest result to an already recorded progress pair."""
+        for record in self.records:
+            if record.accepted.get("tool_call_id") == call_id:
+                record.variants.append({**record.accepted, "content": output})
+                record.variants = record.variants[-8:]
+                return
+
+    def truncate(self, event: r.ItemTruncated) -> None:
+        """Update confirmed retained text without replacing application context."""
+        if event.kept_text is None or event.content_index != 0:
+            return
+        for record in self.records:
+            if event.item_id in record.server_ids and record.accepted.get("role") == "assistant":
+                record.variants.append(copy.deepcopy(record.accepted))
+                record.variants = record.variants[-8:]
+                record.texts[event.item_id] = event.kept_text
+                retained = concatenate_aggregated_text(
+                    [
+                        TextPartForConcatenation(
+                            record.texts[item_id], includes_inter_part_spaces=False
+                        )
+                        for item_id in record.server_ids
+                        if item_id in record.texts
+                    ]
+                )
+                record.accepted = {**record.accepted, "content": retained}
+                return
+
     async def edit(
+        self, messages: list, *, append: bool, base: tuple | None = None, retained: tuple = ()
+    ) -> None:
+        """Apply edits and report confirmed state after a recoverable refusal."""
+        async with self.lock:
+            self._writes = 0
+            try:
+                await self._edit(messages, append=append, base=base, retained=retained)
+            except Exception as error:
+                known = isinstance(error, (ValueError, TypeError, RimeInputError)) or (
+                    isinstance(error, r.RimeRealtimeError) and error.fault.scope == "event"
+                )
+                if known and self._writes:
+                    try:
+                        await self._repair()
+                    except Exception:
+                        known = False
+                status = ("partial" if self._writes else "rejected") if known else "uncertain"
+                raise PrismHistoryUpdateError(
+                    status, self.projection() if known else None
+                ) from error
+
+    async def _repair(self) -> None:
+        """Read confirmed order once; active omissions cannot establish a replacement."""
+        epoch = self.response_epoch
+        snapshot = await self.session.get_history()
+        if self.active_responses or self.pending_calls or epoch != self.response_epoch:
+            raise RuntimeError("Cannot establish completed history order during active work")
+        records = []
+        for item in snapshot:
+            if isinstance(item, r.HistoryMessage):
+                message = {"role": item.role, "content": item.text}
+            elif isinstance(item, r.HistoryFunctionCall):
+                message = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": item.call_id,
+                            "type": "function",
+                            "function": {"name": item.name, "arguments": item.arguments},
+                        }
+                    ],
+                }
+            else:
+                message = {"role": "tool", "tool_call_id": item.call_id, "content": item.output}
+            records.append(Record(message, [item.id] if item.id else []))
+        self.records = records
+        self._inputs.clear()
+
+    async def _edit(
         self, messages: list, *, append: bool, base: tuple | None = None, retained: tuple = ()
     ) -> None:
         """Validate every item before applying append, retained-ID delete, or rebuild.
@@ -199,7 +327,10 @@ class History:
             else [None] * len(messages)
         )
         retained_records = [
-            record if record and record.accepted == message else None
+            record
+            if record
+            and any(_equivalent(value, message) for value in [record.accepted, *record.variants])
+            else None
             for record, message in zip(retained_records, messages)
         ]
         retained_ids = [record.identity for record in retained_records if record is not None]
@@ -226,7 +357,6 @@ class History:
             and record.message.get("role") == "tool"
             and record.message.get("tool_call_id") in deleted_calls
         )
-        removed_records = {record.identity for record in remove}
         removed_ids = {item_id for record in remove for item_id in record.server_ids}
         if removed_ids & self.active_inputs or any(
             call.get("id") in self.pending_calls
@@ -235,61 +365,57 @@ class History:
         ):
             raise ValueError("Cannot remove active inputs or pending calls")
         epoch = self.response_epoch
-        changed = 0
-        try:
-            deleted_calls = {
-                call["id"] for record in remove for call in record.message.get("tool_calls", [])
-            }
-            for record in remove:
-                if (
-                    record.message.get("role") == "tool"
-                    and record.message.get("tool_call_id") in deleted_calls
-                ):
-                    continue
-                for item_id in record.server_ids:
-                    self._check_epoch(epoch, rebuild)
-                    await self.session.delete_item(item_id)
-                    changed += 1
-            new_records = []
-            if not can_delete:
-                preserved = [
-                    record for record in self.records if record.identity not in removed_records
+        deleted_calls = {
+            call["id"] for record in remove for call in record.message.get("tool_calls", [])
+        }
+        for record in remove:
+            if (
+                record.message.get("role") == "tool"
+                and record.message.get("tool_call_id") in deleted_calls
+            ):
+                continue
+            for item_id in tuple(record.server_ids):
+                self._check_epoch(epoch, rebuild)
+                await self.session.delete_item(item_id)
+                self._writes += 1
+                record.server_ids.remove(item_id)
+                if not record.server_ids:
+                    self.records[:] = [value for value in self.records if value is not record]
+                self._inputs.pop(item_id, None)
+            for call in record.accepted.get("tool_calls", []):
+                self.records[:] = [
+                    value
+                    for value in self.records
+                    if value.accepted.get("tool_call_id") != call["id"]
                 ]
-                anchor = "root" if rebuild and preserved else None
-                offset = 0
-                for message in messages:
-                    converted = history_items_for_record(message, items, offset)
-                    offset += len(converted)
-                    record = Record(message)
-                    for item in converted:
-                        self._check_epoch(epoch, rebuild)
-                        ref = await self.session.create_item(
-                            item,
-                            previous_item_id=anchor
-                            if not isinstance(item, r.HistoryFunctionResult)
-                            else None,
-                        )
-                        if anchor is not None:
-                            anchor = ref.item_id
-                        changed += 1
-                        record.server_ids.append(ref.item_id)
-                    new_records.append(record)
-            self._check_epoch(epoch, rebuild)
-        except Exception as error:
-            if changed:
-                raise PartialHistoryError("Prism history edit partially applied") from error
-            raise
-        self.records[:] = [
-            record for record in self.records if record.identity not in removed_records
-        ]
-        if append:
-            self.records.extend(new_records)
-        elif can_delete:
+        if can_delete:
             for record, message in zip(retained_records, messages):
                 assert record is not None
                 record.message = message
         else:
-            self.records[:] = [*new_records, *self.records]
+            anchor = "root" if rebuild and self.records else None
+            offset = 0
+            insertion = 0 if rebuild else len(self.records)
+            for message in messages:
+                converted = history_items_for_record(message, items, offset)
+                offset += len(converted)
+                record = Record(message)
+                for item in converted:
+                    self._check_epoch(epoch, rebuild)
+                    ref = await self.session.create_item(
+                        item,
+                        previous_item_id=anchor
+                        if not isinstance(item, r.HistoryFunctionResult)
+                        else None,
+                    )
+                    self._writes += 1
+                    if anchor is not None:
+                        anchor = ref.item_id
+                    record.server_ids.append(ref.item_id)
+                    if len(record.server_ids) == 1:
+                        self.records.insert(insertion, record)
+                        insertion += 1
+        self._check_epoch(epoch, rebuild)
 
     def _check_epoch(self, epoch: int, rebuild: bool) -> None:
         if rebuild and self.response_epoch != epoch:

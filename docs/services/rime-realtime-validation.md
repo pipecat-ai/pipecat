@@ -1,14 +1,14 @@
 # Rime Prism validation
 
-The local protocol tests use the published `rimelabs-sdk` with a WebSocket peer and a `PipelineWorker`. They exercise the Rime context aggregator pair and standard output transport. Shared runtime modules match this branch's `main`. On October 27, 2026, with SDK `0.1.0a24`, all 55 Rime protocol tests passed within a set of 290 protocol and related regression tests. The 36 deprecation checks, Ruff, Pyright, lock consistency, registry checks, and changelog draft also passed.
+The protocol tests use the published `rimelabs-sdk` with a controlled WebSocket peer and a real `PipelineWorker`. They exercise the Rime context aggregator pair, frame ordering, standard tool execution, and output transport.
 
 ```sh
-uv run --extra rime-realtime pytest -n 0 tests/test_rime_realtime_service.py
+uv run --extra rime-realtime pytest -n 0 tests/test_rime_realtime*.py
 ```
 
-The tests cover typed history input, speech transcripts, successive turns, tool continuation, settings and filler updates, history edits, interruption, audio conversion, and cleanup. They check that speech aggregation requests no duplicate reply, partial local text does not replace provider history, and deferred application edits work through either aggregator. They also check SDK retained-text events and prompt-exclusion summaries without local context replacement or history deletion. The peer controls provider acknowledgments, rejection, and readiness events. These tests establish frame and protocol behavior, not public endpoint behavior or physical playback.
+Coverage includes ordered native text and raw text, input identities, history edits and partial recovery, retained text, concurrent turns, tool progress and cancellation, tool suppression, discard receipts, microphone clearing, usage metrics, startup retries, and shutdown. A pending tool is also exercised across more than 128 completed responses. The peer supplies acknowledgments, readiness, refusals, and timeouts. These checks establish frame and protocol behavior, not deployment behavior or model quality.
 
-The saved scenarios cover typed tools and handoff, voice memory, interruption followed by another turn, and voice tools and handoff:
+The saved behavioral scenarios cover typed tools and handoff, voice memory, interruption followed by another turn, and voice tools:
 
 ```sh
 uv run --extra rime-realtime --extra runner \
@@ -20,8 +20,8 @@ uv run pipecat eval run evals/release/scenarios/scripted/rime_prism.yaml \
 
 Audio scenarios are in `evals/release/scenarios/scripted/rime_prism_audio.yaml`. See the [release eval guide](../../evals/release/README.md) for caller speech, transcription, and judge setup.
 
-Public endpoint checks on October 27, 2026 used SDK `0.1.0a24` and the Rime aggregator pair with direct output and a LiveKit room. Both runs passed spoken turns without extra proactive replies, typed recall, three caller interruptions followed by spoken turns, application interruption, and explicit history replacement. All eight playback-truncation acknowledgments reached `on_rime_event` with `kept_text` available. Populated prompt-exclusion summaries were tested with the local peer. All owned clients closed, and the test room was absent after cleanup.
+Live validation must check tool invocation counts and arguments, received audio, and cleanup. Provider text alone does not prove what reached the caller. Use an independent transcriber on recorded output after closing the call, so local inference does not delay realtime processing. For room tests, use the standard Pipecat LiveKit transport and a separate RTC caller. Encoded silence can decode to small nonzero samples; check that discard mode emits no TTS audio frames and inspect the received signal level.
 
-The caller used synthetic speech. Checks compared provider text with expected content and verified nonzero output audio. They did not independently transcribe the generated audio. These checks do not establish reliable use of tools replaced during a session; that provider behavior remains unresolved.
+The public deployment can accept a runtime tool update but answer without invoking the new tool. A direct SDK control can distinguish that model behavior from a Pipecat integration failure. An accepted settings update alone does not establish a successful business handoff.
 
-Playback positions are estimates. Device timing, physical audibility, and remote listener timing are not measured by this implementation.
+Playback positions are estimates. Device timing and physical audibility are not measured by this implementation. Live tests must retain failed attempts and report deployment or transcription failures separately from local protocol results.

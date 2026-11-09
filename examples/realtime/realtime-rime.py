@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from rimelabs_sdk.realtime import PrismFiller
 
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
+from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -40,6 +40,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         Args:
             invoice_id: Invoice identifier.
         """
+        await params.result_callback(
+            {"status": "checking"},
+            properties=FunctionCallResultProperties(is_final=False, run_llm=False),
+        )
         await asyncio.sleep(0.25)
         await params.result_callback({"invoice_id": invoice_id, "status": "paid", "total": 42})
 
@@ -68,12 +72,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         ),
     )
+    llm.register_direct_function(lookup_invoice, cancel_on_interruption=False)
     context = LLMContext([{"role": "system", "content": "Greet the caller and offer help."}])
     user, assistant = llm.create_context_aggregator(context)
     pipeline = Pipeline([transport.input(), user, llm, transport.output(), assistant])
     worker = PipelineWorker(
         pipeline,
-        params=PipelineParams(enable_metrics=True),
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[TranscriptionLogObserver()],
     )

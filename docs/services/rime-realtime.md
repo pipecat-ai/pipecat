@@ -6,7 +6,7 @@
 uv pip install 'pipecat-ai[rime-realtime]'
 ```
 
-The extra requires `rimelabs-sdk>=0.1.0a25,<0.2`.
+The extra requires `rimelabs-sdk>=0.1.0a29,<0.2`.
 
 Set `RIME_API_KEY`. The default endpoint is `wss://prism.api.rime.ai/v1/realtime`. Use `endpoint=` for a custom deployment. An injected `client=Rime(...)` remains caller-owned. Use one service instance per conversation.
 
@@ -44,17 +44,27 @@ to request one reply with an optional instruction and labels. Import it from
 labels for this reply only. Prism starts replies to caller speech without this
 frame, so those replies use session labels.
 
-Typed input uses the existing `LLMMessagesAppendFrame(messages=[...], run_llm=True)` path, including RTVI text input. Rime imports the new history before requesting a reply. This does not use Prism's dedicated typed-turn operation, so the response does not identify that text as its current input item.
+Queue `RimeReplyFrame(text="Remember invoice 314")` through the Rime user aggregator for a native Prism typed turn that follows earlier history and settings frames. `text` cannot be combined with `instruction`. The user message enters local and provider history once. Its response carries the provider input ID in `LLMFullResponseStartFrame.metadata["rime"]["input_item_ids"]`. Empty input and input over 4000 characters are rejected. A refused turn does not enter local history or create an extra reply.
+
+`InputTextRawFrame(text="...")` also starts a native turn, with system-frame priority. It can overtake queued history and settings frames. Use `RimeReplyFrame(text=...)` when that order matters.
+
+The existing `LLMMessagesAppendFrame(messages=[...], run_llm=True)` path, including RTVI text input, imports history before requesting a reply. It remains suitable for explicit history edits. Imported history is not treated as fresh typed input.
 
 ## Settings, tools, and fillers
 
-Use `LLMUpdateSettingsFrame(delta=RimeRealtimeLLMService.Settings(...))` for instructions, tools, voice, server interruption, fillers, truncation, or response labels. Omitted settings retain their values. `LLMSetToolsFrame` also updates the provider's tools.
+Use `LLMUpdateSettingsFrame(delta=RimeRealtimeLLMService.Settings(...))` for instructions, tools, voice, server interruption, fillers, truncation, or response labels. Omitted settings retain their values. An empty `system_instruction=""` clears the instruction. `LLMSetToolsFrame` also updates the provider's tools.
 
 Instructions, tools, and fillers can share one settings delta. This supports a settings-only handoff in the same conversation. History changes are separate operations, so a handoff that also edits history is not atomic. Response labels use a separate SDK operation; their failure does not undo an accepted settings update.
 
-Tool fillers use SDK `PrismFiller` values with `type="none"`, `"text"`, or `"auto"`. Keys must name advertised tools. Removing a tool also removes its filler unless the delta explicitly supplies a replacement filler map.
+Tool fillers use SDK `PrismFiller` values with `type="none"`, `"text"`, or `"auto"`. Only fillers for currently advertised tools are sent. The configured map survives tool removal and restoration. Supply `tool_fillers={}` to clear it.
 
-Tools execute through Pipecat. Each final result is submitted once before requesting continuation. A queued call uses Pipecat's current registered handler; the service does not pin handlers to a response's settings revision. Intermediate tool results and forced or disabled tool selection are unsupported.
+Tools execute through Pipecat. Register a tool with `cancel_on_interruption=False` to send intermediate results using `FunctionCallResultProperties(is_final=False)`. The first result settles the provider call. Later progress and final results enter provider history as completed call/result pairs and never execute the tool again. The application tool remains active until its final result, cancellation, or deadline. Response references remain available while this work is pending.
+
+`run_llm=False` records a result silently. False-like results such as `0`, `False`, `{}`, and `""` are preserved. `None` completes a call without a reply by default. The service owns continuation requests so the aggregator does not request a duplicate reply. If the original tool round has been superseded, a requested reply uses the completed result in the current conversation.
+
+A queued call uses Pipecat's current registered handler. The service does not pin handlers to a response's settings revision.
+
+`LLMSetToolChoiceFrame(tool_choice="none")` disables tools for subsequent requested replies; `"auto"` restores automatic selection. The service removes tools, waits for acknowledgment, creates the reply, then restores the configured tools. This operation is not atomic: an automatic speech reply can start while tools are removed. A tool call from a suppressed response is rejected before execution. Restoration failure ends the conversation. Required and named tool choices are unsupported.
 
 The SDK acknowledgment controls accepted provider settings. Normal Pipecat aggregators can change local context or tools before provider acceptance. Rejected changes do not roll those local changes back.
 
@@ -62,13 +72,15 @@ The SDK acknowledgment controls accepted provider settings. Normal Pipecat aggre
 
 Append, update, and transform message frames change local context through the Rime pair. Appends import only the supplied messages. Updates and transforms replace supported provider history. An edit with `run_llm=False` remains local until another operation requests inference through either aggregator.
 
-Ordinary transcript and assistant aggregation never replace provider history. A later `LLMRunFrame` applies pending application edits and requests a reply. Direct `LLMContextFrame` input is an explicit history snapshot. Change messages through these frames; changes made directly to an already-bound context are not synchronized by `LLMRunFrame`.
+Ordinary transcript and assistant aggregation never replace provider history. A later `LLMRunFrame` applies pending application edits and requests a reply. After the initial import, direct `LLMContextFrame` input is a shared view: omitted provider records remain, and new trailing messages are appended. Use update or transform frames for explicit replacement. Change messages through these frames; changes made directly to an already-bound context are not synchronized by `LLMRunFrame`.
 
 The private history ledger matches explicit replacement messages to provider records by content and order. Identical messages can retain their server identities.
 
 History imports support user, assistant, and system text plus completed tool calls and results. Imported text messages have a 4000-character limit. Images, video, pending tool-call imports, and arbitrary developer messages are unsupported. Loading completed calls never executes them.
 
-Replacing or reordering history can require multiple provider requests. A rebuild requires no active reply or pending tool call. Rejected edits can leave local and provider history different. Partial application or an unknown request outcome makes the service unusable. There is no automatic reconnect or replay. Start a new instance with known valid, completed history for recovery.
+Replacing or reordering history can require multiple provider requests. A rebuild requires no active reply or pending tool call. Rejected edits can leave local and provider history different. Known rejection or partial application raises `PrismHistoryUpdateError` through an `ErrorFrame`. Its `status` is `"rejected"`, `"partial"`, or `"uncertain"`; `recoverable` says whether independent work can continue, and `confirmed_context` contains a detached provider projection when known. Import the exception from `pipecat.services.rime.realtime.llm`.
+
+Each accepted write is recorded before the next write. A partial refusal can require one bounded history read to establish completed order. The dependent reply stops, and accepted writes are not replayed. Local application context is not rolled back. If the outcome or order cannot be established, the service becomes unusable. There is no automatic reconnect or replay. Start a new instance with known valid, completed history for recovery.
 
 `await llm.get_history()` reads completed server history. Active items can be absent from that snapshot.
 For a `RimeReplyFrame` with an instruction, the `LLMFullResponseStartFrame` has
@@ -82,7 +94,9 @@ Set `truncation="auto"`, `"disabled"`, or SDK `RetentionRatio(...)` at construct
 
 ## Playback and interruption limits
 
-The service sends no playback completion receipts. Prism uses its playback estimate to admit later requests. Muted, disabled, or skipped output can delay the next request until that estimate expires.
+The default `playback="estimated"` sends no playback completion receipts. Prism uses its playback estimate to admit later requests. Muted, disabled, or skipped output can delay the next request until that estimate expires.
+
+Use `playback="discard"` at construction for a conversation that must produce no output audio. It preserves text and tools, drops audio from explicit and speech-triggered replies, and reports zero played after each response ends. Receipts follow response creation order and complete before dependent reply admission. This mode is fixed for the conversation. A muted downstream transport does not imply discard mode.
 
 On interruption, the service cancels active generation and can send an estimated position for the latest audio output. The position uses elapsed time capped by emitted audio duration. It does not measure device playback, network buffering, or physical audibility. Application stops use the same path as user interruptions.
 
@@ -92,14 +106,17 @@ Early speech hints remain available through `on_rime_event` but do not change ou
 
 `on_session_updated` supplies acknowledged SDK session information. `on_rime_event` supplies SDK events with provider request IDs, response metadata, and diagnostics. Failures use normal Pipecat error frames.
 
-SDK `ItemTruncated` events report the item ID, audio position, and retained server text when available. `kept_text=None` means unavailable; an empty string means no words remain. Retained text can differ from audible words. The event does not change Pipecat's local context.
+SDK `ItemTruncated` events report the item ID, audio position, and retained server text when available. `kept_text=None` means unavailable; an empty string means no words remain. Retained text can differ from audible words. The private history ledger records retained text while keeping the generated variant for matching. The event does not change Pipecat's local context.
 
 `ResponseEnded.truncation` reports conversation items excluded from that reply's prompt, with an optional first retained item ID. Those items remain in provider history. The summary is `None` when no exclusions are reported or the information is unavailable.
-`ResponseEnded.usage` reports token counts when Prism provides them. Read it in
-`on_rime_event`. An idle close raises SDK `RealtimeIdleTimeout`; Pipecat puts
+`ResponseEnded.usage` reports token counts when Prism provides them. The service emits one standard LLM usage metric per terminal response, including cancellation, when usage metrics are enabled. Missing usage is not reported as zero. Read raw diagnostics in `on_rime_event`. TTFB measures the first text delta, not device audio playback. An idle close raises SDK `RealtimeIdleTimeout`; Pipecat puts
 that exception in its normal error frame.
 
-Microphone input accepts PCM16 at 8–192 kHz with 1–32 channels. Unsupported SDK formats are converted before submission. Queue and input-byte limits bound pending work. Shutdown has a configurable deadline and does not wait for playback receipts.
+Microphone input accepts PCM16 at 8–192 kHz with 1–32 channels. Unsupported SDK formats are converted before submission. Queue and input-byte limits bound pending work. Queue `RimeInputAudioClearFrame()` to discard queued microphone audio and converter tails, clear SDK input after any in-flight send, then accept new audio. Import it from `pipecat.services.rime.realtime.llm`.
+
+Shutdown drains pending operations within a configurable deadline, then releases response holds and closes the connection. Injected clients remain caller-owned.
+
+Opening a conversation uses `RimeStartupParams`, imported from the same module. Defaults allow three retries, a two-second minimum delay, a 30-second attempt limit, and a 60-second total limit. Only HTTP 408, 429, 500, 502, 503, and 504 refusals are retried. Valid `Retry-After` values can extend the delay within the total limit. Authentication failures and established-session disconnects are not retried.
 
 ## Example and validation
 
