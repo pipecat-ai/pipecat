@@ -646,7 +646,7 @@ async def _judge_all(
     """Judge every conversation, ``concurrency`` at a time, writing each line as it is judged."""
     semaphore = asyncio.Semaphore(concurrency)
     results: list[EvalSimulationResult] = []
-    with output.open("w") as f:
+    with output.open("w", encoding="utf-8") as f:
 
         async def judge_one(path: Path) -> None:
             async with semaphore:

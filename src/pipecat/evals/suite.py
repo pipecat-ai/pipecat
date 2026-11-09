@@ -233,7 +233,7 @@ def _append_result(
         record = _scenario_record(run, artifacts)
 
     with contextlib.suppress(OSError):
-        with results_path.open("a") as f:
+        with results_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
 
 
