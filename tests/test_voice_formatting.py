@@ -287,6 +287,12 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
             await expand_percentages("12,500%", "*"), "twelve thousand, five hundred percent"
         )
         self.assertEqual(await expand_percentages("1,000,000%", "*"), "one million percent")
+        self.assertEqual(
+            await expand_percentages("1,234.5%", "*"),
+            "one thousand, two hundred and thirty-four point five percent",
+        )
+        # A long number without a separator is still read whole.
+        self.assertEqual(await expand_percentages("1000%", "*"), "one thousand percent")
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
