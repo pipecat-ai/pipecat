@@ -30,9 +30,9 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 def language_to_minimax_language(language: Language) -> str:
@@ -105,6 +105,11 @@ class MiniMaxTTSSettings(TTSSettings):
             "disgusted", "surprised", "calm", "fluent", "whisper"). "fluent" and
             "whisper" need a speech-2.6 model.
         text_normalization: Enable text normalization (Chinese/English).
+
+            .. deprecated:: 1.16.0
+                Use ``text_normalization_mode="basic"`` instead. Will be removed
+                in 2.0.0.
+
         text_normalization_mode: Normalization mode, "basic" (rule-based) or "quality".
             Takes precedence over ``text_normalization``. "quality" applies to
             non-streaming requests on the speech-2.6 and speech-2.8 models, and is
@@ -305,6 +310,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            self._warn_if_text_normalization(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -509,6 +515,31 @@ class MiniMaxHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
+
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta, warning if it sets ``text_normalization``.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        self._warn_if_text_normalization(delta)
+        return await super()._update_settings(delta)
+
+    def _warn_if_text_normalization(self, settings: TTSSettings):
+        """Warn if ``settings`` sets the deprecated ``text_normalization``."""
+        if (
+            isinstance(settings, self.Settings)
+            and is_given(settings.text_normalization)
+            and settings.text_normalization is not None
+        ):
+            warn_deprecated(
+                "`MiniMaxHttpTTSService.Settings.text_normalization` is deprecated since 1.16.0 "
+                'and will be removed in 2.0.0. Use `text_normalization_mode="basic"` instead.',
+                stacklevel=3,
+            )
 
     def _text_normalization_mode(self) -> str | None:
         """Return the mode to request, with ``text_normalization`` read as "basic"."""

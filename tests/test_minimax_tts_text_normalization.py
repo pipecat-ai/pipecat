@@ -8,7 +8,7 @@
 
 import pytest
 
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import TTSSpeakFrame, TTSUpdateSettingsFrame
 from pipecat.services.minimax.tts import MiniMaxHttpTTSService
 from pipecat.tests.utils import run_test
 
@@ -34,15 +34,18 @@ class _RecordingSession:
         return _RejectingResponse()
 
 
-async def _request(**settings) -> dict:
-    session = _RecordingSession()
-    service = MiniMaxHttpTTSService(
+def _service(session, **settings) -> MiniMaxHttpTTSService:
+    return MiniMaxHttpTTSService(
         api_key="key",
         group_id="group",
         aiohttp_session=session,
         settings=MiniMaxHttpTTSService.Settings(**settings),
     )
-    await run_test(service, frames_to_send=[TTSSpeakFrame("Hello.")])
+
+
+async def _request(**settings) -> dict:
+    session = _RecordingSession()
+    await run_test(_service(session, **settings), frames_to_send=[TTSSpeakFrame("Hello.")])
     return session.payloads[0]
 
 
@@ -61,3 +64,24 @@ async def test_request_sends_the_text_normalization_mode(settings, mode):
     request = await _request(**settings)
     assert request.get("text_normalization_mode") == mode
     assert "text_normalization" not in request["voice_setting"]
+
+
+def test_text_normalization_setting_is_deprecated():
+    with pytest.warns(DeprecationWarning, match="Settings.text_normalization"):
+        _service(_RecordingSession(), text_normalization=True)
+
+
+@pytest.mark.asyncio
+async def test_text_normalization_update_is_deprecated():
+    session = _RecordingSession()
+    with pytest.warns(DeprecationWarning, match="Settings.text_normalization"):
+        await run_test(
+            _service(session),
+            frames_to_send=[
+                TTSUpdateSettingsFrame(
+                    delta=MiniMaxHttpTTSService.Settings(text_normalization=True)
+                ),
+                TTSSpeakFrame("Hello."),
+            ],
+        )
+    assert session.payloads[0]["text_normalization_mode"] == "basic"
