@@ -67,7 +67,12 @@ class Peer:
             await self.gates[kind].wait()
         if kind in ("conversation.item.create", "conversation.item.delete"):
             self.history_mutations += 1
-        refusal = self.refuse.pop(kind, None)
+        refusal_key = (
+            "session.labels"
+            if kind == "session.update" and "prism_response_metadata" in event["session"]
+            else kind
+        )
+        refusal = self.refuse.pop(refusal_key, None)
         if refusal or self.history_failure_at == self.history_mutations:
             self.history_failure_at = None
             await self.emit(
@@ -79,6 +84,8 @@ class Peer:
                     "owner": {"kind": "event", "event_id": event["event_id"]},
                 },
             )
+            if kind == "response.create":
+                await self.emit("prism.typed_input.ready")
             return
         if kind == "session.update":
             self.settings.update(event["session"])
@@ -182,6 +189,14 @@ class Peer:
             response["prism_input_item_ids"] = input_ids
         if request and "prism_input_text" in request["response"]:
             response["prism_input_item_ids"] = [f"typed-{self.serial}"]
+            self.history.append(
+                {
+                    "id": f"typed-{self.serial}",
+                    "type": "message",
+                    "role": "user",
+                    "text": request["response"]["prism_input_text"],
+                }
+            )
         await self.emit(
             "response.created",
             response=response,
@@ -210,13 +225,14 @@ class Peer:
             await self.emit("response.audio.done", **common)
         return common
 
-    async def end(self, ref, status="completed", *, ready=True):
+    async def end(self, ref, status="completed", *, ready=True, usage=None):
         await self.emit(
             "response.done",
             response={
                 "id": ref,
                 "status": status,
                 "metadata": {"prism_drain_token": f"drain-{ref}"},
+                **({"usage": usage} if usage is not None else {}),
             },
         )
         # The server admits another turn after its playback estimate expires.
@@ -263,7 +279,9 @@ async def until(predicate, timeout=3):
 
 
 @asynccontextmanager
-async def conversation(*, context=None, enabled=True, unversioned=False, **options):
+async def conversation(
+    *, context=None, enabled=True, unversioned=False, worker_params=None, **options
+):
     peer = Peer(unversioned=unversioned)
     context = context or LLMContext()
     upstream, downstream = [], []
@@ -286,7 +304,9 @@ async def conversation(*, context=None, enabled=True, unversioned=False, **optio
                     pair.assistant(),
                 ]
             )
-            worker = PipelineWorker(pipeline, enable_rtvi=False, cancel_on_idle_timeout=False)
+            worker = PipelineWorker(
+                pipeline, params=worker_params, enable_rtvi=False, cancel_on_idle_timeout=False
+            )
             runner = WorkerRunner(handle_sigint=False)
             started = asyncio.Event()
 

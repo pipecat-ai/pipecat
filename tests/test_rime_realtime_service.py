@@ -284,7 +284,7 @@ async def test_reply_start_during_explicit_rebuild_keeps_partial_failure_guard()
         await until(lambda: response in service._ledger.active_responses)
         gate.set()
         await until(lambda: not service.is_usable)
-        assert str(service._failure) == "Prism history edit partially applied"
+        assert str(service._failure) == "Prism history update uncertain"
         assert len(sent(peer, "conversation.item.create")) == 1
 
 
@@ -305,7 +305,7 @@ async def test_rejected_history_edit_leaves_local_context_changed():
 
 
 @pytest.mark.asyncio
-async def test_history_replacement_and_partial_failure_require_recovery():
+async def test_history_replacement_partial_failure_allows_independent_reply():
     context = LLMContext([{"role": "user", "content": "Original"}])
     async with conversation(context=context) as (peer, service, worker, context, _, upstream, __):
         peer.history_failure_at = peer.history_mutations + 2
@@ -314,10 +314,19 @@ async def test_history_replacement_and_partial_failure_require_recovery():
                 messages=[{"role": "user", "content": "Replacement"}], run_llm=True
             )
         )
-        await until(lambda: not service.is_usable)
+        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
+        error = next(f for f in upstream if isinstance(f, ErrorFrame)).exception
+        assert error.status == "partial"
+        assert error.recoverable
+        assert error.confirmed_context == []
+        assert service.is_usable
         assert context.get_messages() == [{"role": "user", "content": "Replacement"}]
         assert len(sent(peer, "conversation.item.delete")) == 1
         assert len(sent(peer, "response.create")) == 1
+        await worker.queue_frame(LLMRunFrame())
+        await answer(peer)
+        assert len(sent(peer, "conversation.item.delete")) == 1
+        assert len(sent(peer, "conversation.item.create")) == 2
 
 
 @pytest.mark.asyncio
@@ -728,7 +737,7 @@ async def test_removed_tool_uses_standard_missing_handler():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("result", ["done", None, False, 0, {"status": "paid"}])
+@pytest.mark.parametrize("result", ["done", "", None, False, 0, {}, {"status": "paid"}])
 async def test_tool_result_encoding_matches_normal_context_aggregation(result):
     async def lookup(params):
         await params.result_callback(result)
@@ -751,10 +760,14 @@ async def test_tool_result_encoding_matches_normal_context_aggregation(result):
             arguments="{}",
         )
         await peer.end(response)
-        await answer(peer, await peer.next(), text="Tool answer")
-        await until(
-            lambda: {"role": "assistant", "content": "Tool answer"} in context.get_messages()
-        )
+        if result is not None:
+            await answer(peer, await peer.next(), text="Tool answer")
+            await until(
+                lambda: {"role": "assistant", "content": "Tool answer"} in context.get_messages()
+            )
+        else:
+            await until(lambda: len(sent(peer, "conversation.item.create")) == 1)
+            assert len(sent(peer, "response.create")) == 1
         await worker.queue_frame(LLMRunFrame())
         await answer(peer, text="Next answer")
         assert len(sent(peer, "conversation.item.create")) == 1
@@ -840,12 +853,12 @@ async def test_late_transcript_is_flushed_before_the_assistant_record():
 
 
 @pytest.mark.asyncio
-async def test_intermediate_result_is_rejected_but_final_result_continues():
+async def test_silent_progress_then_final_result_continues():
     from pipecat.frames.frames import FunctionCallResultProperties
 
     async def lookup(params):
         await params.result_callback(
-            "Working", properties=FunctionCallResultProperties(is_final=False)
+            "Working", properties=FunctionCallResultProperties(is_final=False, run_llm=False)
         )
         await params.result_callback("Done")
 
@@ -871,10 +884,12 @@ async def test_intermediate_result_is_rejected_but_final_result_continues():
         )
         await peer.end(response)
         await answer(peer, await peer.next())
-        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
+        await until(lambda: len(sent(peer, "conversation.item.create")) == 3)
+        assert not any(isinstance(f, ErrorFrame) for f in upstream)
         creates = sent(peer, "conversation.item.create")
-        assert len(creates) == 1
-        assert creates[0]["item"]["output"] == '"Done"'
+        assert creates[0]["item"]["output"] == '"Working"'
+        assert creates[1]["item"]["type"] == "function_call"
+        assert creates[2]["item"]["output"] == '"Done"'
         assert service.is_usable
 
 

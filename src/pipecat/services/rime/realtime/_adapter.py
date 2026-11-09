@@ -94,8 +94,8 @@ class RimeRealtimeLLMAdapter(BaseLLMAdapter):
 
     async def get_llm_invocation_params(self, context: LLMContext, **kwargs) -> dict:
         """Return validated history and the advertised tools."""
-        if is_given(context.tool_choice) and context.tool_choice != "auto":
-            raise ValueError("Prism only supports automatic tool selection")
+        if is_given(context.tool_choice) and context.tool_choice not in ("auto", "none", None):
+            raise ValueError("Prism supports automatic or disabled tool selection")
         return {
             "messages": history_items(context.get_messages()),
             "tools": self.tools(context.tools),
