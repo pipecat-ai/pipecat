@@ -158,6 +158,25 @@ async def test_segment_reaches_the_model_as_raw_pcm(funasr_module):
 
 
 @pytest.mark.asyncio
+async def test_8khz_input_reaches_the_model_at_16khz(funasr_module):
+    stt, fake_auto_model = funasr_module
+    service = stt.FunASRSTTService(trailing_silence_secs=0)
+    one_second = b"\x00\x00" * 8000
+
+    await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=one_second, sample_rate=8000, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(audio_in_sample_rate=8000),
+    )
+
+    assert len(fake_auto_model.instances[-1].generate_calls[-1]["input"]) == 16000
+
+
+@pytest.mark.asyncio
 async def test_run_stt_returns_error_frame_when_model_is_missing(funasr_module):
     stt, _ = funasr_module
     service = stt.FunASRSTTService()
