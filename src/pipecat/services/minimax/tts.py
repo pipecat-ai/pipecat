@@ -32,7 +32,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
 def language_to_minimax_language(language: Language) -> str:
@@ -398,8 +398,6 @@ class MiniMaxHttpTTSService(TTSService):
         # In expressive conversation, the request's delivery chooses its emotion and
         # its speed.
         voice_setting.update(self.expression_settings)
-        if self._settings.text_normalization is not None:
-            voice_setting["text_normalization"] = self._settings.text_normalization
         if self._settings.latex_read is not None:
             voice_setting["latex_read"] = self._settings.latex_read
 
@@ -421,8 +419,9 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.language_boost is not None:
             payload["language_boost"] = self._settings.language_boost
-        if self._settings.text_normalization_mode is not None:
-            payload["text_normalization_mode"] = self._settings.text_normalization_mode
+        text_normalization_mode = self._text_normalization_mode()
+        if text_normalization_mode is not None:
+            payload["text_normalization_mode"] = text_normalization_mode
 
         try:
             async with self._session.post(
@@ -510,3 +509,10 @@ class MiniMaxHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
+
+    def _text_normalization_mode(self) -> str | None:
+        """Return the mode to request, with ``text_normalization`` read as "basic"."""
+        mode = assert_given(self._settings.text_normalization_mode)
+        if mode is None and self._settings.text_normalization:
+            mode = "basic"
+        return mode
