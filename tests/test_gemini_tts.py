@@ -188,7 +188,9 @@ def test_warns_for_unsupported_genai_settings_at_init(mock_logger, mock_genai_cl
 
     GeminiTTSService(
         api_key="test-api-key",
-        settings=GeminiTTSService.Settings(prompt="Speak clearly", multi_speaker=True),
+        settings=GeminiTTSService.Settings(
+            model="gemini-3.1-flash-tts-preview", prompt="Speak clearly", multi_speaker=True
+        ),
     )
 
     warnings = " ".join(str(call.args[0]) for call in mock_logger.warning.call_args_list)
@@ -238,7 +240,10 @@ async def test_update_settings_warns_for_unsupported_genai_prompt(
     """A runtime settings change to an unsupported field warns on the GenAI backend."""
     mock_genai_client_class.return_value = MagicMock()
 
-    tts = GeminiTTSService(api_key="test-api-key")
+    tts = GeminiTTSService(
+        api_key="test-api-key",
+        settings=GeminiTTSService.Settings(model="gemini-3.1-flash-tts-preview"),
+    )
     mock_logger.reset_mock()
 
     await tts._update_settings(GeminiTTSService.Settings(prompt="Now use a style"))
@@ -264,6 +269,27 @@ async def test_update_settings_no_prompt_warning_on_genai_38(mock_logger, mock_g
 
     warnings = " ".join(str(call.args[0]) for call in mock_logger.warning.call_args_list)
     assert "Prompt" not in warnings
+
+
+@patch("google.genai.Client")
+def test_default_model_on_genai_backend(mock_genai_client_class):
+    """The Gemini API default is the 3.8 model that replaces the retiring preview one."""
+    mock_genai_client_class.return_value = MagicMock()
+
+    tts = GeminiTTSService(api_key="test-api-key")
+
+    assert tts._settings.model == "gemini-3.8-flash-lite-tts"
+
+
+@patch("google.oauth2.service_account.Credentials.from_service_account_info")
+@patch("google.cloud.texttospeech_v1.TextToSpeechAsyncClient")
+def test_default_model_on_gcp_backend(mock_gcp_client_class, mock_from_info):
+    """Cloud Text-to-Speech serves no 3.8 model, so it keeps the preview default."""
+    mock_from_info.return_value = MagicMock()
+
+    tts = GeminiTTSService(credentials='{"type": "service_account"}')
+
+    assert tts._settings.model == "gemini-3.1-flash-tts-preview"
 
 
 @patch("google.oauth2.service_account.Credentials.from_service_account_info")

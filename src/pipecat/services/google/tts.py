@@ -1218,13 +1218,14 @@ class GeminiTTSService(GoogleBaseTTSService):
     with support for natural voice control, prompts for style instructions,
     expressive markup tags, and multi-speaker conversations.
 
-    Model names differ by backend. Cloud Text-to-Speech takes
-    ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
-    ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``; the Gemini API
-    takes ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
-    ``gemini-3.1-flash-tts-preview``. Defaults to ``gemini-3.1-flash-tts-preview``,
-    which both backends accept; the Gemini API shuts that preview model down on
-    November 17, 2026 and names ``gemini-3.8-flash-lite-tts`` as its replacement.
+    Model names differ by backend, and so does the default. Cloud Text-to-Speech
+    takes ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
+    ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``, and defaults
+    to ``gemini-3.1-flash-tts-preview``; the Gemini API takes
+    ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
+    ``gemini-3.1-flash-tts-preview``, and defaults to
+    ``gemini-3.8-flash-lite-tts``, the replacement Google names for the preview
+    model it shuts down there on November 17, 2026.
 
     Gemini 3.8 TTS models (Gemini API backend, google-genai >= 2.25.0) treat the
     input text strictly as a verbatim transcript: the ``prompt`` setting is sent
@@ -1384,9 +1385,15 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
 
-        # 1. Initialize default_settings with hardcoded defaults
+        # 1. Initialize default_settings with hardcoded defaults. The backends'
+        # TTS catalogues are disjoint at the top: Cloud Text-to-Speech serves no
+        # Gemini 3.8 model, and the Gemini API retires
+        # gemini-3.1-flash-tts-preview on November 17, 2026 in favour of
+        # gemini-3.8-flash-lite-tts.
         default_settings = self.Settings(
-            model="gemini-3.1-flash-tts-preview",
+            model=(
+                "gemini-3.8-flash-lite-tts" if self._use_genai else "gemini-3.1-flash-tts-preview"
+            ),
             voice="Kore",
             language="en-US",
             prompt=None,
