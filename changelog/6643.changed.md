@@ -1,0 +1,1 @@
+- `GeminiTTSService` now picks its default model per backend: `gemini-3.8-flash-lite-tts` on the Gemini API, which retires `gemini-3.1-flash-tts-preview` on November 17, 2026, and `gemini-3.1-flash-tts-preview` on Cloud Text-to-Speech, which serves no Gemini 3.8 model.
