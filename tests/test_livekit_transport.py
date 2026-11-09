@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 
+from pipecat.audio.utils import create_stream_resampler
+
 try:
     from livekit import rtc
 
@@ -1649,6 +1651,9 @@ class TestLiveKitAudioInUserTracks(unittest.IsolatedAsyncioTestCase):
         )
         input_transport = transport.input()
         input_transport._sample_rate = 16000
+        # A pause in the test run, such as a garbage collection, must not clear
+        # the resampler in the middle of the stream.
+        input_transport._mixed_resampler = create_stream_resampler(clear_after_secs=None)
         input_transport.push_audio_frame = AsyncMock()
 
         async def frames():
