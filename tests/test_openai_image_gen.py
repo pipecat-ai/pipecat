@@ -132,3 +132,26 @@ async def test_moderation_setting_is_forwarded():
     await _frames(service)
 
     assert service._client.images.generate.call_args.kwargs["moderation"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_complexity_setting_is_forwarded():
+    """A configured complexity level reaches the Images API."""
+    b64 = base64.b64encode(_png_bytes("RGB")).decode()
+    service = _service([{"b64_json": b64}], complexity="low")
+
+    await _frames(service)
+
+    kwargs = service._client.images.generate.call_args.kwargs
+    assert kwargs["extra_body"] == {"complexity": "low"}
+
+
+@pytest.mark.asyncio
+async def test_complexity_is_omitted_when_unset():
+    """An unset complexity leaves the request body untouched."""
+    b64 = base64.b64encode(_png_bytes("RGB")).decode()
+    service = _service([{"b64_json": b64}])
+
+    await _frames(service)
+
+    assert service._client.images.generate.call_args.kwargs["extra_body"] is None
