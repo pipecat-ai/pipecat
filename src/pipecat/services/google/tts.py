@@ -1774,13 +1774,8 @@ class GeminiTTSService(GoogleBaseTTSService):
                 if buffer:
                     yield bytes(buffer)
 
-            # Streaming responses are headerless 24 kHz audio/l16, so the source
-            # rate is passed explicitly rather than read from a WAV header.
-            # Without it, audio is never resampled to self.sample_rate and plays
-            # at the wrong speed when the pipeline runs at another rate (e.g.
-            # 8 kHz telephony). A RIFF header, should one ever arrive, is still
-            # stripped rather than played as audio.
-            # https://ai.google.dev/gemini-api/docs/generate-content/speech-generation
+            # Streamed audio is headerless 24 kHz L16 (WAV is only the unary
+            # default), so the source rate is given rather than read from a header.
             async for frame in self._stream_audio_frames_from_iterator(
                 audio_chunks(),
                 strip_wav_header=is_gemini_38,
