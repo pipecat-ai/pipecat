@@ -291,7 +291,7 @@ class TavusTransportClient:
         self._callbacks = callbacks
         self._params = params
         self._task_manager: BaseTaskManager | None = None
-        self._resampler = create_stream_resampler()
+        self._resampler = create_stream_resampler(clear_after_secs=None)
         self._audio_queue: asyncio.Queue | None = None
         self._send_task = None
         # Utterance tracking for the realtime-paced send path (see
@@ -616,6 +616,7 @@ class TavusTransportClient:
             await self._task_manager.cancel_task(self._send_task)
             self._send_task = None
             self._audio_queue = None
+        await self._resampler.reset()
 
     async def queue_tts_frame(self, frame: OutputAudioRawFrame | TTSStoppedFrame) -> bool:
         """Add an audio frame or end-of-utterance signal to the send queue.
@@ -665,7 +666,8 @@ class TavusTransportClient:
         await self.encode_audio_and_send(done_silence, True, inference_id)
 
     async def _flush_and_end_utterance(self, audio_buffer: bytearray, inference_id: str) -> None:
-        """Flush remaining buffered audio then send the done marker."""
+        """Flush remaining buffered and resampled audio then send the done marker."""
+        audio_buffer.extend(await self._resampler.flush())
         if audio_buffer:
             await self.encode_audio_and_send(bytes(audio_buffer), False, inference_id)
             audio_buffer.clear()

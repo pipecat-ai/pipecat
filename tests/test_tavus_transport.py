@@ -10,9 +10,11 @@ import asyncio
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.expression import (
     CORE_DELIVERY,
     EMPHASIS_DELIVERY,
@@ -25,6 +27,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     TextType,
+    TTSStoppedFrame,
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -377,3 +380,59 @@ async def test_a_tts_text_frame_sets_the_emotion_when_the_clock_releases_it(monk
     )
 
     client.update_emotion.assert_awaited_once_with([ExpressionDelivery.EXCITED])
+
+
+#
+# Audio sent to the replica
+#
+
+
+def _make_audio_client() -> tuple[TavusTransportClient, list[bytes], asyncio.Event]:
+    client = _make_emotion_client()
+    client._client.out_sample_rate = 24000
+    client._audio_queue = asyncio.Queue()
+    sent: list[bytes] = []
+    done = asyncio.Event()
+
+    async def record(audio: bytes, is_done: bool, inference_id: str | None):
+        if is_done:
+            done.set()
+        else:
+            sent.append(audio)
+
+    client.encode_audio_and_send = record
+    return client, sent, done
+
+
+def _tone(rate: int, samples: int) -> bytes:
+    t = np.arange(samples) / rate
+    return (np.sin(2 * np.pi * 220 * t) * 8000).astype(np.int16).tobytes()
+
+
+@pytest.mark.asyncio
+async def test_an_utterance_reaches_the_replica_without_gaps():
+    client, sent, done = _make_audio_client()
+    clip = _tone(16000, 3200)
+    half = len(clip) // 2
+    task = asyncio.create_task(client._send_task_handler())
+
+    await client.queue_tts_frame(OutputAudioRawFrame(clip[:half], 16000, 1))
+    await asyncio.sleep(0.3)
+    await client.queue_tts_frame(OutputAudioRawFrame(clip[half:], 16000, 1))
+    await client.queue_tts_frame(TTSStoppedFrame())
+    await asyncio.wait_for(done.wait(), timeout=2)
+    task.cancel()
+
+    resampler = create_stream_resampler(clear_after_secs=None)
+    expected = await resampler.resample(clip, 16000, 24000) + await resampler.flush()
+    assert b"".join(sent) == expected
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_send_task_drops_the_audio_the_resampler_holds():
+    client, _, _ = _make_audio_client()
+    await client._resampler.resample(_tone(16000, 1600), 16000, 24000)
+
+    await client.cancel_send_task()
+
+    assert await client._resampler.flush() == b""

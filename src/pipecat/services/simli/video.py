@@ -416,6 +416,8 @@ class SimliVideoService(AIService):
             return
         elif isinstance(frame, InterruptionFrame):
             await self._simli_client.clearBuffer()
+            # A new resampler, so the next reply doesn't start with the end of this one.
+            self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
         await self.push_frame(frame, direction)
 
