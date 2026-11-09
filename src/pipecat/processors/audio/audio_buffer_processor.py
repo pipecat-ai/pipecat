@@ -14,6 +14,7 @@ configurations and event-driven processing.
 import time
 from dataclasses import dataclass
 
+import numpy as np
 from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
@@ -591,9 +592,12 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
         """Resample audio frame to the target sample rate."""
-        return await self._input_resampler.resample(
-            frame.audio, frame.sample_rate, self._sample_rate
-        )
+        audio = frame.audio
+        if frame.num_channels == 2:
+            # Recording tracks are mono: average each interleaved stereo frame.
+            samples = np.frombuffer(audio, dtype=np.int16).reshape(-1, 2)
+            audio = samples.mean(axis=1).astype(np.int16).tobytes()
+        return await self._input_resampler.resample(audio, frame.sample_rate, self._sample_rate)
 
     async def _resample_output_audio(self, frame: OutputAudioRawFrame) -> bytes:
         """Resample audio frame to the target sample rate."""
