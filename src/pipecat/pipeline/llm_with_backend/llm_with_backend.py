@@ -13,6 +13,7 @@ from loguru import logger
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.pipeline.llm_with_backend.connector import BackendConnector, ConnectorContext
+from pipecat.pipeline.llm_with_backend.llm_extension import BackendPairingLLMExtension
 from pipecat.pipeline.llm_with_backend.predictive_delegation import PredictiveDelegation
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -115,11 +116,11 @@ class LLMWithBackend(Pipeline):
                     "from. Use a strategy that needs none, such as "
                     "TranscriptBackendRequestStrategy."
                 )
-        if instruction := self._connector.frontend_instruction:
-            frontend.append_system_instruction(instruction)
-        for tool in self._connector.tools:
-            frontend.register_function(tool.name, tool.handler, cancel_on_interruption=False)
-            frontend.get_llm_adapter().builtin_tools[tool.name] = tool
+        frontend.add_extension(
+            BackendPairingLLMExtension(
+                instruction=self._connector.frontend_instruction, tools=self._connector.tools
+            )
+        )
         self._predictive_delegation = predictive_delegation
         self._session_task: asyncio.Task | None = None
         if predictive_delegation is not None:
