@@ -141,9 +141,10 @@ Prefer to wire things up yourself?
 
 2. Set up your environment
 
-   ```bash
-   cp env.example .env
-   ```
+   Create a `.env` file in your app directory and add the credentials for the
+   services your bot uses. See the repository's
+   [env.example](https://github.com/pipecat-ai/pipecat/blob/main/env.example)
+   for the variable names.
 
 3. To keep things lightweight, only the core framework is included by default. If you need support for third-party AI services, you can add the necessary dependencies with:
 
@@ -181,7 +182,7 @@ From here, the code examples below are the best way to learn — agents you can 
    ```bash
    uv sync --group dev --all-extras \
      --no-extra gstreamer \
-     --no-extra local \
+     --no-extra local
    ```
 
 3. Install the git pre-commit hooks:
