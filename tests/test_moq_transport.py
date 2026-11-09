@@ -1090,6 +1090,40 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         duration_s = 480 / (client._audio_out_sample_rate * 2)
         self.assertEqual(client._publish_audio_clock, clock + duration_s)
 
+    async def test_the_pts_timeline_tracks_wall_clock_across_a_gap(self):
+        """Silence between turns is real delay the player schedules
+        against. A presentation timeline that advances only by audio
+        duration is shorter than wall clock by the whole of it, so every
+        turn after the first plays late by the silence before it."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            first = client._audio_out.write.call_args[0][0].timestamp_us
+            # Turn boundary: interruption re-anchors the pacing clock, then
+            # the user talks and the LLM thinks for 5s.
+            client.reset_audio_pacing()
+            clock.t += 5.0
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(first, 0)
+        self.assertAlmostEqual(second, 5_000_000, delta=20_000)
+
+    async def test_a_continuous_run_of_writes_stays_future_dated(self):
+        """Within one utterance the bot writes faster than real time and
+        the timeline advances by audio duration, so the player buffers the
+        lookahead instead of re-anchoring per frame."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        duration_us = int(480 / (24000 * 2) * 1_000_000)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(second, duration_us)
+
     async def test_a_teardown_mid_sleep_drops_the_write(self):
         """``_run``'s finally clears ``_audio_out`` while a paced write
         sleeps (peer left with a full buffer). The write must return

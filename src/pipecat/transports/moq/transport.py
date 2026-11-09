@@ -665,6 +665,8 @@ class MOQTransportClient:
         # playback. Not reset on interruption — the player re-anchors on
         # its own (reset() on user-started-speaking).
         self._publish_pts_us: int = 0
+        # Wall clock at pts 0, for re-anchoring the timeline across idle gaps.
+        self._publish_pts_epoch: float | None = None
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -905,9 +907,25 @@ class MOQTransportClient:
             gap = None if self._publish_audio_clock is None else now - self._publish_audio_clock
             if gap is None or gap > _EPOCH_REANCHOR_MIN_GAP_S:
                 self._audio_out.reset_epoch()
+                # Carry the idle gap into the presentation timeline. The
+                # player anchors pts to wall clock on the first frame and
+                # holds that anchor while it buffers, so a timeline that
+                # advances only by audio duration is short by every silence
+                # between turns: each utterance plays late by the sum of the
+                # gaps before it, and once the backlog passes the player's
+                # `maxAge` the oldest groups are dropped. Never moves back,
+                # so an interruption's cancelled lookahead keeps its place.
+                if self._publish_pts_epoch is None:
+                    self._publish_pts_epoch = now
+                else:
+                    self._publish_pts_us = max(
+                        self._publish_pts_us,
+                        int((now - self._publish_pts_epoch) * 1_000_000),
+                    )
                 logger.debug(
                     f"MOQ: audio epoch re-anchored after "
-                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'}"
+                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'} "
+                    f"(pts={self._publish_pts_us / 1e6:.3f}s)"
                 )
             self._publish_audio_clock = now
 
