@@ -1506,6 +1506,13 @@ async def cmd_call_dialout(args: argparse.Namespace) -> int:
     print()
     print("Start the bot with it — it dials as soon as it is ready:")
     print(f"  {command}")
+    if args.to == "softphone":
+        print()
+        print(
+            "The softphone answers only while registered — keep\n"
+            "  uv run python examples/sip/util/provision.py softphone\n"
+            "running in another terminal, or the call fails with 404 Not Found."
+        )
     return 0
 
 

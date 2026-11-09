@@ -39,6 +39,12 @@ _ERROR_HINTS = (
         "(and SIP_AUTH_USER when the auth user differs from the AOR)",
     ),
     (
+        ("404", "not found", "480", "temporarily unavailable"),
+        "likely cause: dial-out target offline — a softphone target answers only "
+        "while registered; keep `provision.py softphone` running (registration "
+        "lapses minutes after it exits)",
+    ),
+    (
         ("408", "timeout", "timed out", "no route", "unreachable", "connection refused", "dns"),
         "likely cause: registrar unreachable — check SIP_DOMAIN, SIP_TRANSPORT, "
         "and that outbound SIP is not firewalled",
@@ -116,7 +122,13 @@ def attach_milestones(transport, *, direction: str) -> None:
 
     async def _on_ended(transport, *args):
         if once("ended"):
-            logger.info("[5/6] call ended")
+            # Stop payloads carry the stack's close reason, e.g. "404 Not Found".
+            reason = args[0].get("reason", "") if args and isinstance(args[0], dict) else ""
+            hint = _error_hint(reason)
+            logger.info(
+                f"[5/6] call ended{f' ({reason})' if reason else ''}"
+                f"{f' — {hint}' if hint else ''}"
+            )
 
     for event in ("on_dialin_stopped", "on_dialout_stopped", "on_client_disconnected"):
         transport.add_event_handler(event, _on_ended)
@@ -183,7 +195,7 @@ async def _smoke():
             "on_dialin_warning", {"sessionId": "s1", "errorMsg": "rtp stream stalled"}
         )
         await transport.fire("on_call_state_updated", "closed")
-        await transport.fire("on_dialin_stopped", {"sessionId": "s1"})
+        await transport.fire("on_dialin_stopped", {"sessionId": "s1", "reason": "hangup"})
         await transport.fire("on_client_disconnected", {"id": "s1"})
         await transport.fire("on_call_quality_stats", "duration=12s loss=0.0% jitter=3ms rtt=41ms")
         for error in (

@@ -24,31 +24,6 @@ Tiers 3 and 4 are optional. Tier 3 costs money and needs a Twilio account;
 tier 4 needs a publicly reachable URL. Neither is needed to exercise the
 transport.
 
-## Setup
-
-From the repo root:
-
-```bash
-uv sync --all-extras
-```
-
-That installs the transport's SIP stack. The `baresip-python` wheel bundles the
-native stack, so no system `baresip` is needed to **run a bot** — only to use
-baresip as the far-end softphone ([tier 1](#softphone-choice)).
-
-Copy the env template and fill in your API keys:
-
-```bash
-cp examples/sip/env.example examples/sip/.env
-```
-
-| Variable | Required by |
-|---|---|
-| `DAILY_API_KEY` | all tiers: SIP-client CRUD, and the runner's temporary client when no account is set |
-| `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY` | the bots' STT → LLM → TTS cascade |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | tier 3 only: Twilio REST basic auth |
-| `TWILIO_CALLER_ID` | tier 3 only, and only when no number is attached to the trunk |
-
 ## Tier 0 — no credentials, no calls (1 minute)
 
 The unit tests and the log vocabulary, with no account anywhere.
@@ -76,6 +51,31 @@ uv run python examples/sip/util/milestones.py
 What each line means is tabulated under [Call milestones](#call-milestones).
 
 ## Tier 1 — your first call (5 minutes)
+
+### Setup
+
+From the repo root:
+
+```bash
+uv sync --group dev --extra sip --extra sip-video --extra daily --extra deepgram --extra cartesia --extra openai --extra silero --extra runner
+```
+
+That installs the transport's SIP stack. The `baresip-python` wheel bundles the
+native stack, so no system `baresip` is needed to **run a bot** — only to use
+baresip as the far-end softphone ([tier 1](#softphone-choice)).
+
+Copy the env template and fill in your API keys:
+
+```bash
+cp examples/sip/env.example examples/sip/.env
+```
+
+| Variable | Required by |
+|---|---|
+| `DAILY_API_KEY` | all tiers: SIP-client CRUD, and the runner's temporary client when no account is set |
+| `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY` | the bots' STT → LLM → TTS cascade |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | tier 3 only: Twilio REST basic auth |
+| `TWILIO_CALLER_ID` | tier 3 only, and only when no number is attached to the trunk |
 
 A softphone dials the bot; the bot answers and holds a conversation.
 
