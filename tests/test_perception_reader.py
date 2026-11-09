@@ -24,7 +24,11 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.expressive.processors import perception_reader as reader_module
-from pipecat.expressive.processors.perception_reader import PerceptionQuestion, PerceptionReader
+from pipecat.expressive.processors.perception_reader import (
+    PerceptionQuestion,
+    PerceptionReader,
+    PerceptionSource,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     InputAudioRawFrame,
@@ -285,6 +289,7 @@ class FakeAudioClassifier(BaseClassifier):
         self,
         *,
         min_secs: float = 1.0,
+        max_secs: float | None = None,
         delays: list[float] | None = None,
         probabilities: list[float] | None = None,
         setup_error: Exception | None = None,
@@ -293,6 +298,7 @@ class FakeAudioClassifier(BaseClassifier):
         self.clips: list[ClassifierAudio] = []
         self.states: list = []
         self._min_secs = min_secs
+        self._max_secs = max_secs
         self._delays = delays or []
         self._probabilities = probabilities
         self._setup_error = setup_error
@@ -309,6 +315,10 @@ class FakeAudioClassifier(BaseClassifier):
     @property
     def min_audio_secs(self) -> float:
         return self._min_secs
+
+    @property
+    def max_audio_secs(self) -> float | None:
+        return self._max_secs
 
     async def _ask(self, state, questions, inputs=()):
         call = len(self.clips)
@@ -930,3 +940,386 @@ async def test_an_unusable_audio_reader_passes_the_stt_latency_on_as_it_is():
     )
 
     assert _stt_latencies(down) == [pytest.approx(0.3)]
+
+
+TONE = PerceptionSignal("tone", labels=[("frustrated", 0.7), ("confused", 0.2)])
+HESITATION = PerceptionSignal("hesitation", value=0.64)
+ENERGY = PerceptionSignal("energy", value=0.68)
+
+
+def _source(
+    classifier: BaseClassifier, *names: str, timeout: float | None = None
+) -> PerceptionSource:
+    """A source that asks ``classifier`` the questions with these names."""
+    return PerceptionSource(
+        classifier=classifier, questions={name: QUESTIONS[name] for name in names}, timeout=timeout
+    )
+
+
+def _speech(text: str) -> list:
+    """Two seconds of the user's speech, then its transcription."""
+    return [
+        VADUserStartedSpeakingFrame(),
+        _audio(1, 2),
+        VADUserStoppedSpeakingFrame(),
+        _transcription(text),
+    ]
+
+
+class MeetingClassifier(FakeClassifier):
+    """Answers once another classifier has been asked too, so only when both are asked at once."""
+
+    def __init__(self):
+        super().__init__()
+        self.asked_now = asyncio.Event()
+        self.other: MeetingClassifier | None = None
+
+    async def _ask(self, state, questions, inputs=()):
+        self.asked_now.set()
+        assert self.other
+        await self.other.asked_now.wait()
+        return await super()._ask(state, questions, inputs)
+
+
+@pytest.mark.asyncio
+async def test_the_sources_signals_are_declared_together():
+    reader = PerceptionReader(
+        sources=[
+            _source(FakeClassifier(), "tone"),
+            _source(FakeAudioClassifier(), "hesitation", "energy"),
+        ]
+    )
+
+    down, _ = await run_test(reader, frames_to_send=[])
+
+    metadata = [f for f in down if isinstance(f, PerceptionMetadataFrame)]
+    assert [[t.name for t in f.perception.signals] for f in metadata] == [
+        ["tone", "hesitation", "energy"]
+    ]
+    assert list(reader.questions) == ["tone", "hesitation", "energy"]
+
+
+@pytest.mark.asyncio
+async def test_text_sources_write_one_reading_in_their_order():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(), "hesitation"),
+                _source(FakeClassifier(), "tone", "energy"),
+            ]
+        ),
+        frames_to_send=[_transcription("I already gave you my order number.")],
+    )
+
+    assert _perception(down) == [[HESITATION, TONE, ENERGY]]
+
+
+@pytest.mark.asyncio
+async def test_text_sources_are_asked_at_the_same_time():
+    first, second = MeetingClassifier(), MeetingClassifier()
+    first.other, second.other = second, first
+
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(first, "tone"), _source(second, "hesitation")]),
+        frames_to_send=[_transcription("Hello.")],
+    )
+
+    assert _perception(down) == [[TONE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_source_reads_the_words_while_another_hears_them():
+    words, voice = FakeClassifier(), FakeAudioClassifier()
+
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(words, "tone"), _source(voice, "hesitation")]),
+        frames_to_send=[
+            LLMContextAssistantTurnFrame(text="What's your order number?", timestamp="now"),
+            SleepFrame(sleep=0.05),
+            *_speech("I already gave it to you."),
+        ],
+    )
+
+    assert [state for state, _ in words.asked] == [
+        {"assistant": "What's your order number?", "user": "I already gave it to you."}
+    ]
+    assert voice.clips == [ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE)]
+    assert _perception(down) == [[TONE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_reading_follows_the_sources_order_not_the_order_they_read_in():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeAudioClassifier(delays=[0.2]), "hesitation"),
+                _source(FakeClassifier(), "tone"),
+            ]
+        ),
+        frames_to_send=_speech("I already told you."),
+    )
+
+    assert _perception(down) == [[HESITATION, TONE]]
+
+
+@pytest.mark.asyncio
+async def test_a_held_transcription_waits_for_its_words_to_be_read():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(delay=0.2), "tone"),
+                _source(FakeAudioClassifier(), "hesitation"),
+            ]
+        ),
+        frames_to_send=_speech("I already told you."),
+    )
+
+    assert _perception(down) == [[TONE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_each_transcription_of_a_speech_gets_its_own_words_reading_and_the_clips():
+    words = FakeClassifier()
+
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[_source(words, "tone"), _source(FakeAudioClassifier(), "hesitation")]
+        ),
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 2),
+            _transcription("I already told you."),
+            _transcription("Twice."),
+            VADUserStoppedSpeakingFrame(),
+        ],
+    )
+
+    assert [state for state, _ in words.asked] == [
+        {"user": "I already told you."},
+        {"user": "Twice."},
+    ]
+    assert _perception(down) == [[TONE, HESITATION], [TONE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_late_source_leaves_only_its_signals_out():
+    down, up = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(delay=1.0), "tone", timeout=0.05),
+                _source(FakeClassifier(), "hesitation"),
+            ]
+        ),
+        frames_to_send=[_transcription("Hello.")],
+    )
+
+    assert _perception(down) == [[HESITATION]]
+    assert not [f for f in up if isinstance(f, ErrorFrame)]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_source_is_reported_and_leaves_only_its_signals_out():
+    down, up = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(error=ClassifierError("down")), "tone"),
+                _source(FakeClassifier(), "hesitation"),
+            ]
+        ),
+        frames_to_send=[_transcription("Hello.")],
+    )
+
+    assert _perception(down) == [[HESITATION]]
+    assert [f for f in up if isinstance(f, ErrorFrame)]
+
+
+@pytest.mark.asyncio
+async def test_a_late_clip_reading_leaves_the_words_reading():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(), "tone"),
+                _source(FakeAudioClassifier(delays=[1.0]), "hesitation", timeout=0.05),
+            ]
+        ),
+        frames_to_send=_speech("Hello."),
+    )
+
+    assert _perception(down) == [[TONE]]
+
+
+@pytest.mark.asyncio
+async def test_a_late_words_reading_leaves_the_clips_reading():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(delay=1.0), "tone", timeout=0.05),
+                _source(FakeAudioClassifier(), "hesitation"),
+            ]
+        ),
+        frames_to_send=_speech("Hello."),
+    )
+
+    assert _perception(down) == [[HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_transcription_no_source_read_passes_unread():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(delay=1.0), "tone", timeout=0.05),
+                _source(FakeAudioClassifier(delays=[1.0]), "hesitation", timeout=0.05),
+            ]
+        ),
+        frames_to_send=_speech("Hello."),
+    )
+
+    assert _perception(down) == [None]
+
+
+@pytest.mark.asyncio
+async def test_each_audio_source_hears_a_clip_of_the_length_its_classifier_takes():
+    whole, short, long = (
+        FakeAudioClassifier(min_secs=0.5),
+        FakeAudioClassifier(min_secs=0.5, max_secs=1.0),
+        FakeAudioClassifier(min_secs=3.0),
+    )
+
+    await run_test(
+        PerceptionReader(
+            sources=[
+                _source(whole, "tone"),
+                _source(short, "hesitation"),
+                _source(long, "energy"),
+            ]
+        ),
+        frames_to_send=[
+            _audio(1, 2),
+            VADUserStartedSpeakingFrame(),
+            _audio(2, 1),
+            _audio(3, 1),
+            VADUserStoppedSpeakingFrame(),
+            _transcription("I already told you."),
+        ],
+    )
+
+    # The speech, its last second, and the speech with the second before it.
+    assert whole.clips == [ClassifierAudio(audio=_pcm(2, 1) + _pcm(3, 1), sample_rate=SAMPLE_RATE)]
+    assert short.clips == [ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE)]
+    assert long.clips == [
+        ClassifierAudio(audio=_pcm(1, 1) + _pcm(2, 1) + _pcm(3, 1), sample_rate=SAMPLE_RATE)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_each_sources_reading_is_broadcast_as_its_own():
+    down, up = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(), "tone"),
+                _source(FakeAudioClassifier(), "hesitation"),
+            ]
+        ),
+        frames_to_send=_speech("Hello."),
+    )
+
+    for readings in (_readings(down), _readings(up)):
+        assert sorted(readings, key=lambda reading: reading[0].name) == [[HESITATION], [TONE]]
+
+
+@pytest.mark.asyncio
+async def test_every_classifiers_metrics_are_pushed():
+    words, voice = FakeClassifier(), FakeAudioClassifier()
+
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(words, "tone"), _source(voice, "hesitation")]),
+        frames_to_send=[*_speech("Hello."), SleepFrame(sleep=0.2)],
+        pipeline_params=PipelineParams(enable_metrics=True),
+    )
+
+    measured = {d.processor for f in down if isinstance(f, MetricsFrame) for d in f.data}
+    assert {words.name, voice.name} <= measured
+
+
+@pytest.mark.parametrize("words_timeout, expected", [(0.1, 1.0), (0.9, 1.2)])
+@pytest.mark.asyncio
+async def test_a_reader_that_hears_adds_its_longest_wait_to_the_stt_latency(
+    words_timeout, expected
+):
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(), "tone", timeout=words_timeout),
+                _source(FakeAudioClassifier(), "hesitation", timeout=0.2),
+                _source(FakeAudioClassifier(), "energy", timeout=0.7),
+            ]
+        ),
+        frames_to_send=[STTMetadataFrame(service_name="stt", ttfs_p99_latency=0.3)],
+    )
+
+    assert _stt_latencies(down) == [pytest.approx(expected)]
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_cant_be_set_up_leaves_the_reader_unusable():
+    words = FakeClassifier()
+    reader = PerceptionReader(
+        sources=[
+            _source(words, "tone"),
+            _source(FakeAudioClassifier(setup_error=ClassifierError("no key")), "hesitation"),
+        ]
+    )
+
+    down, up = await run_test(reader, frames_to_send=_speech("Hello."))
+
+    assert not reader.is_usable
+    assert [f for f in up if isinstance(f, ErrorFrame)]
+    assert not [f for f in down if isinstance(f, PerceptionMetadataFrame)]
+    assert _perception(down) == [None]
+    assert words.asked == []
+
+
+def test_two_sources_cant_report_a_signal_of_the_same_name():
+    with pytest.raises(ValueError, match="hesitation"):
+        PerceptionReader(
+            sources=[
+                _source(FakeClassifier(), "tone", "hesitation"),
+                _source(FakeAudioClassifier(), "hesitation"),
+            ]
+        )
+
+
+def test_a_classifier_goes_in_one_source():
+    classifier = FakeClassifier()
+
+    with pytest.raises(ValueError):
+        PerceptionReader(sources=[_source(classifier, "tone"), _source(classifier, "energy")])
+
+
+def test_a_reader_takes_sources_or_a_classifier():
+    with pytest.raises(ValueError):
+        PerceptionReader(
+            classifier=FakeClassifier(),
+            questions=QUESTIONS,
+            sources=[_source(FakeAudioClassifier(), "hesitation")],
+        )
+    with pytest.raises(ValueError):
+        PerceptionReader(sources=[_source(FakeClassifier(), "tone")], timeout=1.0)
+    with pytest.raises(ValueError):
+        PerceptionReader(classifier=FakeClassifier())
+    with pytest.raises(ValueError):
+        PerceptionReader(sources=[])
+
+
+def test_a_source_takes_its_classifiers_default_timeout():
+    assert _source(FakeClassifier(), "tone").timeout == 0.5
+    assert _source(FakeAudioClassifier(), "tone").timeout == 2.0
+    assert _source(FakeAudioClassifier(), "tone", timeout=0.3).timeout == 0.3
+
+
+def test_a_sources_name_that_cant_be_written_in_a_reading_is_refused():
+    with pytest.raises(ValueError):
+        PerceptionSource(
+            classifier=FakeClassifier(), questions={"speech rate": QUESTIONS["energy"]}
+        )

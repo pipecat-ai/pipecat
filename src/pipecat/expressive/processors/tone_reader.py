@@ -4,14 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The processor that reads how each user turn was meant with Pipecat Tone."""
+"""The processor that reads how each user turn was meant with Pipecat Tone, and its source."""
 
 from pathlib import Path
 from typing import Literal
 
 from pipecat.classifiers.tone.classifier import PipecatToneClassifier
 from pipecat.classifiers.tone.model import TONE_REVISION
-from pipecat.expressive.processors.perception_reader import PerceptionQuestion, PerceptionReader
+from pipecat.expressive.processors.perception_reader import (
+    PerceptionQuestion,
+    PerceptionReader,
+    PerceptionSource,
+)
 
 _EMOTION = (
     "The feeling the words show. Read from the words alone, so neutral means they show no "
@@ -23,6 +27,60 @@ _SARCASM = (
 )
 
 
+class PipecatToneSource(PerceptionSource):
+    """Pipecat Tone as one of a :class:`PerceptionReader`'s sources.
+
+    Reads each final transcription, with the bot's reply before it, and
+    reports the turn's ``emotion``, its two likeliest labels with their
+    confidences, and its ``sarcasm``, the chance it's sarcastic. Give it to a
+    reader beside the sources of other classifiers, such as one that hears the
+    user's audio. Another source's signal needs a name other than these two.
+
+    Example::
+
+        reader = PerceptionReader(sources=[PipecatToneSource(), hume])
+    """
+
+    def __init__(
+        self,
+        *,
+        revision: str = TONE_REVISION,
+        model_dir: str | Path | None = None,
+        precision: Literal["fp16", "fp32"] = "fp16",
+        threads: int = 4,
+        timeout: float | None = None,
+    ):
+        """Initialize the source.
+
+        Args:
+            revision: The model's release on Hugging Face, such as ``"reader-rc2"``.
+            model_dir: A folder to load the model from instead of downloading one,
+                laid out as a release's ``reader``. ``revision`` is then unused.
+            precision: The weights to load: ``"fp16"`` or ``"fp32"``.
+            threads: The CPU threads for one read.
+            timeout: Seconds a transcription waits for its reading, 0.5 by default.
+        """
+        tone = PipecatToneClassifier(
+            revision=revision, model_dir=model_dir, precision=precision, threads=threads
+        )
+        # Tone's questions come from its model once it's loaded: see `questions`.
+        super().__init__(classifier=tone, questions={}, timeout=timeout)
+        self._tone = tone
+
+    @property
+    def questions(self) -> dict[str, PerceptionQuestion]:
+        """Tone's emotion and sarcasm questions, with the loaded model's options.
+
+        Raises:
+            ClassifierError: If the model isn't loaded yet.
+        """
+        tone = self._tone.questions
+        return {
+            "emotion": PerceptionQuestion(question=tone["emotion"], description=_EMOTION),
+            "sarcasm": PerceptionQuestion(question=tone["sarcasm"], description=_SARCASM),
+        }
+
+
 class PipecatToneReader(PerceptionReader):
     """Reads how each user turn was meant with Pipecat Tone.
 
@@ -31,8 +89,8 @@ class PipecatToneReader(PerceptionReader):
     set as its ``perception``: the turn's ``emotion``, its two likeliest labels
     with their confidences, and its ``sarcasm``, the chance it's sarcastic.
     The read runs off the event loop, and the transcription waits for it, a
-    few milliseconds. It's a :class:`PerceptionReader` that asks a
-    :class:`PipecatToneClassifier` its emotion and sarcasm questions.
+    few milliseconds. It's a :class:`PerceptionReader` whose one source is a
+    :class:`PipecatToneSource`.
 
     The model loads while the pipeline is set up, once a process, and every
     reader shares it. The first load downloads it from Hugging Face, which holds
@@ -56,6 +114,7 @@ class PipecatToneReader(PerceptionReader):
         model_dir: str | Path | None = None,
         precision: Literal["fp16", "fp32"] = "fp16",
         threads: int = 4,
+        timeout: float | None = None,
         **kwargs,
     ):
         """Initialize the processor.
@@ -66,24 +125,14 @@ class PipecatToneReader(PerceptionReader):
                 laid out as a release's ``reader``. ``revision`` is then unused.
             precision: The weights to load: ``"fp16"`` or ``"fp32"``.
             threads: The CPU threads for one read.
+            timeout: Seconds a transcription waits for its reading, 0.5 by default.
             **kwargs: Additional arguments passed to the parent.
         """
-        tone = PipecatToneClassifier(
-            revision=revision, model_dir=model_dir, precision=precision, threads=threads
+        tone = PipecatToneSource(
+            revision=revision,
+            model_dir=model_dir,
+            precision=precision,
+            threads=threads,
+            timeout=timeout,
         )
-        # Tone's questions come from its model once it's loaded: see `questions`.
-        super().__init__(classifier=tone, questions={}, **kwargs)
-        self._tone = tone
-
-    @property
-    def questions(self) -> dict[str, PerceptionQuestion]:
-        """Tone's emotion and sarcasm questions, with the loaded model's options.
-
-        Raises:
-            ClassifierError: If the model isn't loaded yet.
-        """
-        tone = self._tone.questions
-        return {
-            "emotion": PerceptionQuestion(question=tone["emotion"], description=_EMOTION),
-            "sarcasm": PerceptionQuestion(question=tone["sarcasm"], description=_SARCASM),
-        }
+        super().__init__(sources=[tone], **kwargs)
