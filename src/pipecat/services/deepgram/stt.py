@@ -191,6 +191,11 @@ class DeepgramSTTSettings(STTSettings):
         interim_results: Whether to emit interim transcriptions.
         keyterm: Keyterms to boost (str or list of str).
         keywords: Keywords to boost (str or list of str).
+        language_hint: BCP-47 language tag, or list of tags, biasing language
+            detection on Nova-3 multilingual. Deepgram ignores it unless the
+            request sets ``model="nova-3"`` and ``language="multi"``, and
+            rejects a tag the multilingual model does not cover. Requires
+            deepgram-sdk 7.15.0 or later.
         numerals: Convert spoken numbers to numerals.
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
@@ -211,6 +216,7 @@ class DeepgramSTTSettings(STTSettings):
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hint: str | list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -359,6 +365,7 @@ class DeepgramSTTService(STTService):
             interim_results=True,
             keyterm=None,
             keywords=None,
+            language_hint=None,
             numerals=False,
             profanity_filter=None,
             punctuate=True,
