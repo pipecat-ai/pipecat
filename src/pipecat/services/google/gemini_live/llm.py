@@ -349,17 +349,13 @@ class InputParams(BaseModel):
             set, the service applies the lowest level the model accepts.
         enable_affective_dialog: Enable affective dialog, which allows Gemini
             to adapt to expression and tone. Defaults to None.
-            Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-3.8-live".
-            Also note that this setting may require specifying an API version that
-            supports it, e.g. HttpOptions(api_version="v1alpha").
+            Only the 2.5 Flash Live models act on it; the 3.8 Live models
+            dropped the feature and ignore the field.
         proactivity: Proactivity settings, which allows Gemini to proactively
             decide how to behave, such as whether to avoid responding to
             content that is not relevant. Defaults to None.
-            Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-3.8-live".
-            Also note that this setting may require specifying an API version that
-            supports it, e.g. HttpOptions(api_version="v1alpha").
+            The 3.8 Live models have proactive audio on at all times and
+            reject a setup that sets ``proactive_audio`` to False.
         extra: Additional parameters. Defaults to empty dict.
     """
 
@@ -400,8 +396,12 @@ class GeminiLiveLLMSettings(LLMSettings):
         thinking: Thinking configuration. Live thinking models require a
             ``thinking_level``; when none is set, the service applies the
             lowest level the model accepts.
-        enable_affective_dialog: Whether to enable affective dialog.
-        proactivity: Proactivity configuration.
+        enable_affective_dialog: Whether to enable affective dialog. Only the
+            2.5 Flash Live models act on it; the 3.8 Live models dropped the
+            feature and ignore the field.
+        proactivity: Proactivity configuration. The 3.8 Live models have
+            proactive audio on at all times and reject a setup that sets
+            ``proactive_audio`` to False.
     """
 
     voice: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
