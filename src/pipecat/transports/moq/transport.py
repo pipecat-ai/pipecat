@@ -303,6 +303,10 @@ _PEER_DATA_GRACE_S = 5.0
 # and well below any real turn gap.
 _EPOCH_REANCHOR_MIN_GAP_S = 0.25
 
+# Silence published on interruption to carry the epoch discontinuity
+# to the player (see ``cut_audio``). One Opus frame's worth.
+_AUDIO_CUT_SILENCE_S = 0.02
+
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
 # always emits AudioData at 48kHz regardless of the
@@ -477,12 +481,12 @@ class MOQParams(TransportParams):
             real-time with future-dated timestamps so the browser player
             (``@moq/watch``) can buffer and play at the encoded pace; this
             paces ``publish_audio`` so the in-flight buffer never grows
-            past this many milliseconds. Keep it a little under the
-            player's buffer ceiling (``MoqTransportOptions.audioBufferMaxMs``,
-            30s) so the producer self-limits below the player's drop
-            ceiling and the player never has to drop. On interruption the
-            pacing clock is re-anchored (see :meth:`reset_audio_pacing`) so
-            the next utterance isn't delayed by the previous buffer.
+            past this many milliseconds. The player consumes whatever is
+            in flight at 1x, so this also bounds how long a cancelled
+            utterance keeps playing after an interruption (see
+            :meth:`cut_audio`); keep it small for barge-in, larger for
+            network-stall smoothing, and always under the player's drop
+            ceiling (``MoqTransportOptions.audioBufferMaxMs``, 30s).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -511,7 +515,7 @@ class MOQParams(TransportParams):
     audio_in_sample_rate: int = 16000
     audio_in_max_latency_ms: int = 500
     audio_out_frame_ms: int = 20
-    audio_out_max_buffer_ms: int = 25000
+    audio_out_max_buffer_ms: int = 2000
 
     @model_validator(mode="before")
     @classmethod
@@ -851,16 +855,33 @@ class MOQTransportClient:
     def reset_audio_pacing(self):
         """Re-anchor the publish_audio pacing clock to wall-clock now.
 
-        Called from :class:`MOQOutputTransport.process_frame` on
-        InterruptionFrame so the next utterance plays immediately
-        instead of waiting for the (now-cancelled) previous one to
-        finish in pacing time.
+        Called on InterruptionFrame (via :meth:`cut_audio`) so the next
+        utterance plays immediately instead of waiting for the
+        (now-cancelled) previous one to finish in pacing time.
 
         Part of the publish_audio pacing workaround; goes away once
         moq-rs exposes a flush primitive on ``AudioProducer``. See
         :meth:`publish_audio`.
         """
         self._publish_audio_clock = None
+
+    async def cut_audio(self):
+        """Stop the cancelled utterance on the player within a round trip.
+
+        Called from :class:`MOQOutputTransport.process_frame` on
+        InterruptionFrame. The browser flushes only its shallow playback
+        ring on interruption; the cancelled utterance's write-ahead sits
+        in its network buffer and keeps playing until an epoch
+        discontinuity truncates it. ``reset_epoch`` reaches the wire
+        with the next write, so after re-anchoring the pacing clock this
+        publishes a short silence to carry the discontinuity immediately.
+        """
+        had_audio = self._publish_audio_clock is not None
+        self.reset_audio_pacing()
+        if not had_audio or self._audio_out is None or not self._audio_out_sample_rate:
+            return
+        samples = int(self._audio_out_sample_rate * _AUDIO_CUT_SILENCE_S)
+        await self.publish_audio(b"\x00\x00" * samples)
 
     async def publish_audio(self, audio: bytes):
         """Push a PCM chunk to the bot's audio track with real PTS, paced to a cap.
@@ -874,13 +895,11 @@ class MOQTransportClient:
         is fire-and-forget, so to bound how far ahead the bot runs we pace
         the writes against a virtual clock: each call advances the clock by
         the chunk's audio duration, and we sleep until wall-clock is within
-        ``audio_out_max_buffer_ms`` (25s) of it. That keeps the in-flight
-        buffer a little under the player's drop ceiling
-        (``MoqTransportOptions.audioBufferMaxMs``, 30s), so the producer
-        self-limits below the consumer's cap. Interruptions are flushed on
-        the browser side (``reset()`` on ``user-started-speaking``); the
-        pacing clock is re-anchored here (see :meth:`reset_audio_pacing`)
-        so the next utterance isn't delayed by the previous buffer.
+        ``audio_out_max_buffer_ms`` of it. The in-flight buffer is what a
+        cancelled utterance keeps playing out of after an interruption
+        (see :meth:`cut_audio`), so the cap bounds barge-in overhang; it
+        must also stay under the player's drop ceiling
+        (``MoqTransportOptions.audioBufferMaxMs``, 30s).
         """
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
@@ -2017,7 +2036,7 @@ class MOQOutputTransport(BaseOutputTransport):
         this the bot's final TTS utterance gets clipped: base_output's
         stop() unblocks as soon as every audio frame has been *written*
         to moq's pacing queue, but moq buffers up to
-        ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
+        ``audio_out_max_buffer_ms`` of paced audio that still has
         to reach the browser and drain the client jitter buffer before
         it actually plays.
 
@@ -2046,19 +2065,19 @@ class MOQOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Reset the publish_audio pacing clock on interruption.
+        """Cut the cancelled utterance on interruption.
 
-        The pacing in ``write_audio_frame`` keeps moq's in-flight buffer
-        bounded so InterruptionFrame can actually stop playback in the
-        browser — but the pacing clock needs to be re-anchored to ``now``
-        so the next utterance plays immediately instead of catching up.
+        ``cut_audio`` re-anchors the publish_audio pacing clock so the
+        next utterance plays immediately, and publishes an epoch
+        discontinuity so the player drops the cancelled utterance's
+        buffered write-ahead instead of playing it out.
 
         Args:
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, InterruptionFrame):
-            self._client.reset_audio_pacing()
+            await self._client.cut_audio()
         await super().process_frame(frame, direction)
 
     async def send_message(

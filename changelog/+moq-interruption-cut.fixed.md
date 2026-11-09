@@ -1,0 +1,1 @@
+- Interrupting a MoQ bot now silences it within the write-ahead cap (2s by default) instead of the bot talking on until its next reply arrived. On interruption the transport publishes an epoch discontinuity, carried by a short silence frame, so the browser player drops the cancelled utterance's buffered audio.

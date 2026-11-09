@@ -1153,6 +1153,45 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         producer.reset_epoch.assert_not_called()
         producer.write.assert_not_called()
 
+    async def test_an_interruption_cut_publishes_a_discontinuity_and_silence(self):
+        """The browser flushes only its playback ring on interruption;
+        the cancelled write-ahead keeps playing until an epoch
+        discontinuity truncates it. The discontinuity reaches the wire
+        with the next write, so the cut carries it on a short silence."""
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.reset_mock()
+        client._audio_out.write.reset_mock()
+        await client.cut_audio()
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        silence = client._audio_out.write.call_args[0][0].data
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(len(silence), int(24000 * 0.02) * 2)
+
+    async def test_an_interruption_with_nothing_written_leaves_the_track_alone(self):
+        client = self._client_with_audio()
+        await client.cut_audio()
+        client._audio_out.reset_epoch.assert_not_called()
+        client._audio_out.write.assert_not_called()
+
+    async def test_the_cut_keeps_the_pts_timeline_monotonic(self):
+        """The cut's silence lands after the cancelled lookahead, so the
+        next utterance's re-anchor can't rewind past published frames."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            await client.cut_audio()
+            silence_pts = client._audio_out.write.call_args[0][0].timestamp_us
+            clock.t += 2.0
+            await client.publish_audio(chunk)
+            reply_pts = client._audio_out.write.call_args[0][0].timestamp_us
+        duration_us = int(480 / (24000 * 2) * 1_000_000)
+        self.assertEqual(silence_pts, duration_us)
+        self.assertGreater(reply_pts, silence_pts)
+
 
 # ----------------------------------------------------------------------
 # Runner arguments: relay_url
