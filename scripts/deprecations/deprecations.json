@@ -3853,6 +3853,17 @@
       "location": "pipecat/services/minimax/tts.py"
     },
     {
+      "subject": "MiniMaxTTSSettings.text_normalization",
+      "module": "pipecat.services.minimax.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_normalization_mode=\"basic\"",
+      "message": "Use ``text_normalization_mode=\"basic\"`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/minimax/tts.py"
+    },
+    {
       "subject": "MistralLLMService.model",
       "module": "pipecat.services.mistral.llm",
       "kind": "parameter",
