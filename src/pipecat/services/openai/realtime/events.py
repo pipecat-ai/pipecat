@@ -128,9 +128,13 @@ class InputAudioNoiseReduction(BaseModel):
 
     Parameters:
         type: Noise reduction type for different microphone scenarios.
+        strength: Suppression strength between 0.0 and 1.0; higher values suppress
+            more. Left unset, the server keeps the strength already in force, which
+            is 1.0 when noise reduction is first enabled.
     """
 
     type: Literal["near_field", "far_field"] | None
+    strength: float | None = None
 
 
 class AudioInput(BaseModel):

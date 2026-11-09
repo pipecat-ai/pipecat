@@ -1,0 +1,1 @@
+- Added `strength` to OpenAI Realtime's `InputAudioNoiseReduction`, so a session can set how much suppression the input noise filter applies.
