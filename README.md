@@ -123,36 +123,19 @@ pipecat init
 
 Follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart) to get your very first bot running, or dive a little deeper into [bootstrapping a project](https://docs.pipecat.ai/pipecat/get-started/build-your-next-bot).
 
-### Manual installation
+### Add to an existing project
 
-Prefer to wire things up yourself?
+```bash
+uv add pipecat-ai
+```
 
-1. Install the module
+To keep things lightweight, only the core framework is included by default. Add extras for the third-party AI services you use:
 
-   ```bash
-   # For new projects
-   uv init my-pipecat-app
-   cd my-pipecat-app
-   uv add pipecat-ai
+```bash
+uv add "pipecat-ai[option,...]"
+```
 
-   # Or for existing projects
-   uv add pipecat-ai
-   ```
-
-2. Set up your environment
-
-   Create a `.env` file in your app directory and add the credentials for the
-   services your bot uses. See the repository's
-   [env.example](https://github.com/pipecat-ai/pipecat/blob/main/env.example)
-   for the variable names.
-
-3. To keep things lightweight, only the core framework is included by default. If you need support for third-party AI services, you can add the necessary dependencies with:
-
-   ```bash
-   uv add "pipecat-ai[option,...]"
-   ```
-
-> **Using pip?** You can still use `pip install pipecat-ai` and `pip install "pipecat-ai[option,...]"` to get set up.
+> **Using pip?** `pip install pipecat-ai` and `pip install "pipecat-ai[option,...]"` work too.
 
 From here, the code examples below are the best way to learn — agents you can run, read, and adapt.
 
