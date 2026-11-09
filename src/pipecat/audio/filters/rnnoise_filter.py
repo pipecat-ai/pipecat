@@ -101,6 +101,8 @@ class RNNoiseFilter(BaseAudioFilter):
             frame: The control frame containing filter commands.
         """
         if isinstance(frame, FilterEnableFrame):
+            if frame.enable and not self._filtering:
+                await self._reset_resamplers()
             self._filtering = frame.enable
 
     async def filter(self, audio: bytes) -> bytes:
@@ -160,3 +162,9 @@ class RNNoiseFilter(BaseAudioFilter):
 
         # No frames processed yet (buffering)
         return b""
+
+    async def _reset_resamplers(self):
+        """Discard the audio the resamplers held when filtering was turned off."""
+        for resampler in (self._resampler_in, self._resampler_out):
+            if resampler:
+                await resampler.reset()

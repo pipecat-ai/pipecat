@@ -960,6 +960,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.info(f"AudioHook session paused: {self._session_id}")
 
         self._is_paused = True
+        # Audio is dropped while paused, so what the resampler holds never plays.
+        await self._reset_audio_out()
 
         await self._call_event_handler("on_paused", message)
         await self._call_event_handler("on_pause", message)

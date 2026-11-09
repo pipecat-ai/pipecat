@@ -241,6 +241,8 @@ class AudioBufferProcessor(FrameProcessor):
             return
         self._recording = True
         self._reset_recording()
+        await self._input_resampler.reset()
+        await self._output_resampler.reset()
         await self._call_event_handler("on_recording_started")
 
     async def stop_recording(self):
