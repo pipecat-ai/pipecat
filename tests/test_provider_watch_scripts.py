@@ -247,6 +247,46 @@ class TestDigest:
         )
         assert text.rstrip().endswith("#the-weekly-loop).")
 
+    def test_render_issue_lists_only_high_priority_titles(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        text = digest.render_issue(
+            reports,
+            date="2026-08-20",
+            highlights="- Big week for LLMs",
+            repo_url="https://x/y",
+            digest_url="https://x/y/blob/main/digests/2026-08-20.md",
+        )
+
+        assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
+        sections = [line for line in text.splitlines() if line.startswith("## ")]
+        assert sections == [
+            "## PRs to review",
+            "## Branches not opened as PRs (dry run)",
+            "## Changes to consider",
+            "## Did not complete",
+            "## Nothing new",
+        ]
+        consider = text.split("## Changes to consider")[1].split("## Did not complete")[0]
+        assert "emotion controls unreachable\n" in consider
+        assert "needs a call" not in consider
+        assert "sonic-4 preview" not in consider
+        assert (
+            "The [full digest](https://x/y/blob/main/digests/2026-08-20.md) lists every change "
+            "to consider with its notes, including 1 low." in consider
+        )
+        assert text.rstrip().endswith("#the-weekly-loop).")
+
+    def test_highlights_of_a_rendered_digest(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        highlights = "- Big week for LLMs\n- **Two** services broke"
+        rendered = digest.render(
+            reports, date="2026-08-20", highlights=highlights, repo_url="https://x/y"
+        )
+        plain = digest.render(reports, date="2026-08-20", highlights=None, repo_url="https://x/y")
+
+        assert digest.highlights_of(rendered) == highlights
+        assert digest.highlights_of(plain) is None
+
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
         subprocess.run(
@@ -677,6 +717,19 @@ class TestPublish:
         text = out.read_text(encoding="utf-8")
         assert out == tmp_path / "digests" / "2026-08-20.md"
         assert "3 units researched" in text and "fireworks/llm" in text
+
+    def test_issue_body_keeps_the_digest_highlights_and_links_it(self, reports_dir):
+        tmp_path, publish = reports_dir
+        digest_file = tmp_path / "digests" / "2026-08-20.md"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text(
+            "# Provider watch — 2026-08-20\n\n- authored highlight\n\n**3 units researched** — …\n",
+            encoding="utf-8",
+        )
+        body = publish.issue_body(tmp_path, "2026-08-20", "o/r", digest_file)
+
+        assert body.startswith("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        assert "3 units researched" in body and "fireworks/llm" in body
 
     def test_worth_an_issue(self, reports_dir, tmp_path):
         _, publish = reports_dir
