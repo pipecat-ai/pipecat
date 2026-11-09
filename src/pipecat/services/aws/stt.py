@@ -21,6 +21,7 @@ from loguru import logger
 from websockets import Subprotocol
 from websockets.protocol import State
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -163,6 +164,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             region=region,
         )
         self._aws_session = None
+        self._resampler = create_stream_resampler()
 
         self._receive_task = None
 
@@ -173,6 +175,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             True, as AWS Transcribe STT supports metrics generation.
         """
         return True
+
+    @property
+    def _send_sample_rate(self) -> int:
+        """The rate audio is sent at, 16000 Hz unless the input is at 8000 or 16000 Hz."""
+        return self.sample_rate if self.sample_rate in (8000, 16000) else 16000
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -236,6 +243,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         """
         if self._websocket and self._websocket.state is State.OPEN:
             try:
+                audio = await self._resampler.resample(
+                    audio, self.sample_rate, self._send_sample_rate
+                )
                 # Format the audio data according to AWS event stream format
                 event_message = build_event_message(audio)
 
@@ -333,14 +343,12 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             if not language_code:
                 raise ValueError(f"Unsupported language: {language_code}")
 
-            # Validate sample rate — AWS Transcribe only supports 8000 or 16000 Hz
-            connect_sample_rate = self.sample_rate
-            if connect_sample_rate not in (8000, 16000):
-                logger.warning(
-                    f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. "
-                    f"Converting from {connect_sample_rate} Hz to 16000 Hz."
+            connect_sample_rate = self._send_sample_rate
+            if connect_sample_rate != self.sample_rate:
+                logger.debug(
+                    f"{self} resampling audio from {self.sample_rate} Hz to "
+                    f"{connect_sample_rate} Hz for AWS Transcribe"
                 )
-                connect_sample_rate = 16000
 
             # Generate random websocket key
             websocket_key = "".join(
