@@ -44,6 +44,7 @@ class EvalConversation:
         """Initialize an empty conversation."""
         self._messages: list[dict] = []
         self._bot_said: list[str] = []
+        self._tool_calls_by_id: dict[str, dict] = {}
 
     @property
     def messages(self) -> list[dict]:
@@ -67,14 +68,25 @@ class EvalConversation:
         if text.strip():
             self._bot_said.append(text.strip())
 
-    def add_tool_call(self, name: str, arguments: dict) -> None:
-        """Add a function the bot called."""
-        self._messages.append(
-            {"role": "tool_call", "name": name, "arguments": dict(arguments), "cancelled": False}
-        )
+    def add_tool_call(self, name: str, arguments: dict, *, tool_call_id: str | None = None) -> None:
+        """Add a function the bot called, retaining its ID for cancellation when provided."""
+        message = {
+            "role": "tool_call",
+            "name": name,
+            "arguments": dict(arguments),
+            "cancelled": False,
+        }
+        self._messages.append(message)
+        if tool_call_id is not None:
+            self._tool_calls_by_id[tool_call_id] = message
 
-    def cancel_tool_call(self, name: str) -> None:
-        """Mark the bot's latest call to ``name`` that is not cancelled yet as cancelled."""
+    def cancel_tool_call(self, name: str, *, tool_call_id: str | None = None) -> None:
+        """Cancel the identified call, or the latest uncancelled call to ``name`` without an ID."""
+        if tool_call_id is not None:
+            message = self._tool_calls_by_id.get(tool_call_id)
+            if message is not None and message["name"] == name:
+                message["cancelled"] = True
+            return
         for message in reversed(self._messages):
             if (
                 message["role"] == "tool_call"

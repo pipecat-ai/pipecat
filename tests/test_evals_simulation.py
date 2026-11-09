@@ -295,6 +295,10 @@ from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
 from pipecat.frames.frames import (  # noqa: E402
+    ExternalFunctionCallCancelFrame,
+    ExternalFunctionCallInProgressFrame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -642,7 +646,14 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"type": "function_call", "name": "check_availability", "args": {"time": "6"}}
             )
             # A cancelled call did not happen.
-            await stream.append({"type": "function_call", "name": "send_confirmation", "args": {}})
+            await stream.append(
+                {
+                    "type": "function_call",
+                    "name": "send_confirmation",
+                    "tool_call_id": "1",
+                    "args": {},
+                }
+            )
             await stream.append(
                 {
                     "type": "function_call_stopped",
@@ -817,6 +828,47 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(client.hung_up)
+
+    async def test_parallel_call_cancellation_reaches_the_judge_by_identity(self):
+        for started, cancelled in (
+            (FunctionCallInProgressFrame, FunctionCallCancelFrame),
+            (ExternalFunctionCallInProgressFrame, ExternalFunctionCallCancelFrame),
+        ):
+            with self.subTest(frame=started.__name__):
+                judge = _FakeConversationJudge(["yes"])
+                metric = EvalSimulationMetric(
+                    "booking",
+                    measure="function_calls",
+                    calls=[EvalFunctionCall(name="book", args={"time": "7"})],
+                )
+                driver, stream, llm, _ = _driver(_simulation(metrics=[metric]), judge)
+
+                async def conversation(
+                    started=started, cancelled=cancelled, stream=stream, llm=llm
+                ):
+                    for frame in (
+                        started("book", "first", arguments={"time": "6"}),
+                        started("book", "second", arguments={"time": "7"}),
+                        cancelled("book", "first"),
+                        cancelled("book", "first"),
+                        cancelled("book", "unknown"),
+                    ):
+                        await stream.append(stream.frame_to_event(frame))
+                    await _end_call(llm, success=True, reason="booked")
+
+                task = asyncio.create_task(conversation())
+                await driver.run()
+                await task
+                result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+                self.assertEqual((result.metrics[0].value, result.metrics[0].passed), (1.0, True))
+                self.assertEqual(
+                    [(m["arguments"], m["cancelled"]) for m in result.conversation],
+                    [({"time": "6"}, True), ({"time": "7"}, False)],
+                )
+                self.assertEqual(
+                    [e["content"] for e in judge.transcript if e["role"] == "tool"],
+                    ['book({"time": "6"})', "book was cancelled", 'book({"time": "7"})'],
+                )
 
     async def test_the_bots_tool_calls_are_the_judges_evidence(self):
         judge = _FakeConversationJudge(["yes"])
