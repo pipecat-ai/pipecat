@@ -185,6 +185,7 @@ async def test_flux_sagemaker_tts_protocol_roundtrip(fake_client):
     assert query["sample_rate"] == ["24000"]
     assert "speed" not in query
     assert "expressivity" not in query
+    assert "normalize_volume" not in query
 
     types_sent = [m.get("type") for m in client.messages]
     assert "Flush" in types_sent
