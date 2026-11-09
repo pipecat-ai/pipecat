@@ -77,13 +77,14 @@ Catch new features, interviews, and how-tos on our [Pipecat TV](https://www.yout
 
 ## 🎬 See it in action
 
-<p float="left">
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/simple-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/simple-chatbot/image.png" width="400" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/storytelling-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/storytelling-chatbot/image.png" width="400" /></a>
-    <br/>
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/daily-multi-translation"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/daily-multi-translation/image.png" width="400" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat/blob/main/examples/vision/vision-moondream.py"><img src="https://github.com/pipecat-ai/pipecat/blob/main/examples/assets/moondream.png" width="400" /></a>
-</p>
+| Example | What it shows |
+| ------- | ------------- |
+| 📞 [**Phone agent**](https://github.com/pipecat-ai/pipecat-examples#telephony--voice-calls) | Answers incoming calls and places outbound calls. Examples for [Twilio](https://github.com/pipecat-ai/pipecat-examples/tree/main/twilio-chatbot), [Telnyx](https://github.com/pipecat-ai/pipecat-examples/tree/main/telnyx-chatbot), [Plivo](https://github.com/pipecat-ai/pipecat-examples/tree/main/plivo-chatbot), [Exotel](https://github.com/pipecat-ai/pipecat-examples/tree/main/exotel-chatbot), [Vonage](https://github.com/pipecat-ai/pipecat-examples/tree/main/vonage-audio-bot), [Genesys](https://github.com/pipecat-ai/pipecat-examples/tree/main/genesys-chatbot) and [Daily PSTN and SIP](https://github.com/pipecat-ai/pipecat-examples/tree/main/phone-chatbot). |
+| 🧠 [**Voice LLM with a tool-calling backend**](https://github.com/pipecat-ai/pipecat/tree/main/examples/multi-worker/llm-with-backend) | `LLMWithBackend` pairs a fast voice model with a slower backend model that runs the tools, and the voice keeps talking while the backend works. |
+| 🎭 [**Expressive conversation**](https://github.com/pipecat-ai/pipecat/tree/main/examples/expressive-conversation) | The LLM writes emotion and sound tags such as laughter into its replies, and the TTS performs them. The tags follow the [Real-time Context Standard](https://docs.pipecat.ai/api-reference/standards/real-time-context-standard), with examples for ten TTS providers. |
+| 🔢 [**IVR navigation**](https://github.com/pipecat-ai/pipecat-examples/tree/main/ivr-navigation) | `IVRNavigator` dials out and works through a phone menu with DTMF keypad tones and speech until it reaches a person. |
+| 🍽️ [**Pipecat Flows: restaurant reservation**](https://github.com/pipecat-ai/pipecat/tree/main/examples/flows/yaml/restaurant_reservation) | A booking conversation defined in YAML, where `FlowManager` moves through each step and branches on table availability. |
+| 📝 [**Multi-agent UI control**](https://github.com/pipecat-ai/pipecat/tree/main/examples/multi-worker/ui-worker/document-review) | A `UIWorker` lets voice commands read and act on a web page, and runs two reviewer agents in parallel as a job group. |
 
 ## 🧩 Available services
 
