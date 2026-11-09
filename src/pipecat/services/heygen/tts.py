@@ -149,7 +149,7 @@ def _error_detail(body: str | bytes) -> str:
 
 
 @dataclass
-class HeyGenTTSSettings(TTSSettings):
+class HeyGenHttpTTSSettings(TTSSettings):
     """Settings for HeyGenHttpTTSService.
 
     Parameters:
@@ -173,7 +173,7 @@ class HeyGenHttpTTSService(TTSService):
     public voice Nadine.
     """
 
-    Settings = HeyGenTTSSettings
+    Settings = HeyGenHttpTTSSettings
     _settings: Settings
 
     def __init__(
@@ -287,7 +287,7 @@ class HeyGenHttpTTSService(TTSService):
 
 
 @dataclass
-class HeyGenWebsocketTTSSettings(TTSSettings):
+class HeyGenTTSSettings(TTSSettings):
     """Settings for HeyGenTTSService.
 
     Parameters:
@@ -358,7 +358,7 @@ class HeyGenTTSService(WebsocketTTSService):
     Professional voice clones are served only by :class:`HeyGenHttpTTSService`.
     """
 
-    Settings = HeyGenWebsocketTTSSettings
+    Settings = HeyGenTTSSettings
     _settings: Settings
 
     def __init__(
