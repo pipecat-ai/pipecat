@@ -63,12 +63,25 @@ pytest.importorskip("moq")
 import moq  # noqa: E402
 
 import pipecat.transports.moq.transport as moq_transport  # noqa: E402
+from pipecat.clocks.system_clock import SystemClock  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    CancelFrame,
+    InterruptionFrame,
+    StartFrame,
+    TTSAudioRawFrame,
+)
+from pipecat.processors.frame_processor import (  # noqa: E402
+    FrameDirection,
+    FrameProcessorSetup,
+)
 from pipecat.runner.types import MOQRunnerArguments  # noqa: E402
 from pipecat.runner.utils import create_transport  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
+    _AUDIO_CUT_SILENCE_S,
     TRANSCRIPT_EPOCH_FIELD,
     TRANSCRIPT_SEQ_FIELD,
     MOQCallbacks,
+    MOQOutputTransport,
     MOQParams,
     MOQTransport,
     MOQTransportClient,
@@ -1090,6 +1103,21 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         duration_s = 480 / (client._audio_out_sample_rate * 2)
         self.assertEqual(client._publish_audio_clock, clock + duration_s)
 
+    async def test_the_pts_timeline_tracks_wall_clock_across_an_automatic_idle_gap(self):
+        """A turn gap with no interruption (the LLM just took a while)
+        re-anchors on the next write by itself — no ``reset_audio_pacing``
+        call — and the pts carries the gap."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            clock.t += 5.0
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(client._audio_out.reset_epoch.call_count, 2)
+        self.assertAlmostEqual(second, 5_000_000, delta=20_000)
+
     async def test_the_pts_timeline_tracks_wall_clock_across_a_gap(self):
         """Silence between turns is real delay the player schedules
         against. A presentation timeline that advances only by audio
@@ -1191,6 +1219,292 @@ class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
         duration_us = int(480 / (24000 * 2) * 1_000_000)
         self.assertEqual(silence_pts, duration_us)
         self.assertGreater(reply_pts, silence_pts)
+
+
+# ----------------------------------------------------------------------
+# Interruption cut: uninterruptible audio already handed to moq
+# ----------------------------------------------------------------------
+
+
+class TestInterruptionCutProtection(unittest.IsolatedAsyncioTestCase):
+    """The cut's discontinuity drops everything the player has buffered,
+    so uninterruptible audio already handed to moq must be re-published
+    after it — base_output preserves its queued uninterruptible frames,
+    and the published lookahead deserves the same protection."""
+
+    RATE = 24000
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = self.RATE
+        return client
+
+    def _pcm(self, seconds: float, pattern: bytes = b"\x01\x02") -> bytes:
+        return pattern * int(self.RATE * seconds)
+
+    def _written(self, client) -> list[bytes]:
+        return [call.args[0].data for call in client._audio_out.write.call_args_list]
+
+    async def test_the_cut_republishes_the_unplayed_protected_remainder(self):
+        """An uninterruptible announcement interrupted 25ms in keeps its
+        remaining 75ms: the cut publishes the discontinuity silence, then
+        the unplayed remainder in the new epoch."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            client._audio_out.reset_epoch.reset_mock()
+            await client.cut_audio()
+        client._audio_out.reset_epoch.assert_called_once()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(remainder, announcement, played_s=0.025)
+
+    def _assert_remainder(self, remainder: bytes, source: bytes, *, played_s: float):
+        """The remainder is the source's tail, trimmed by the played
+        duration to within a sample (the trim truncates float seconds)."""
+        self.assertTrue(source.endswith(remainder))
+        expected = len(source) - int(played_s * self.RATE) * 2
+        # Each trim truncates float seconds to samples; a repeated cut
+        # trims twice, so allow a couple of samples.
+        self.assertAlmostEqual(len(remainder), expected, delta=4)
+
+    async def test_the_cut_drops_an_interruptible_lookahead_entirely(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1))
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        (silence,) = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+
+    async def test_protected_audio_already_played_is_not_republished(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1), interruptible=False)
+            clock.t += 1.0
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        (silence,) = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+
+    async def test_the_interruptible_tail_behind_the_announcement_is_still_cut(self):
+        """Announcement then ordinary speech, interrupted mid-announcement:
+        only the announcement's remainder comes back."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        speech = self._pcm(0.1, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            await client.publish_audio(speech)
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(remainder, announcement, played_s=0.025)
+
+    async def test_a_second_cut_still_protects_the_remainder(self):
+        """The re-published remainder is protected again, so a second
+        interruption during the announcement preserves what's left."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            clock.t += 0.025
+            await client.cut_audio()
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        # First cut at 25ms kept 75ms, re-anchored behind 20ms of
+        # silence; the second cut 25ms later has played that silence
+        # plus 5ms of the remainder.
+        total_played = 0.025 + (0.025 - _AUDIO_CUT_SILENCE_S)
+        self._assert_remainder(remainder, announcement, played_s=total_played)
+
+    async def test_played_out_protected_entries_are_pruned_on_write(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1), interruptible=False)
+            clock.t += 1.0
+            await client.publish_audio(self._pcm(0.1))
+        self.assertEqual(len(client._publish_protected), 0)
+
+
+# ----------------------------------------------------------------------
+# Write-ahead cap: default and pacing bound
+# ----------------------------------------------------------------------
+
+
+class TestAudioWriteAheadCap(unittest.IsolatedAsyncioTestCase):
+    """``audio_out_max_buffer_ms`` bounds the published lookahead — the
+    audio a cancelled utterance keeps playing after an interruption."""
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = 24000
+        return client
+
+    def test_the_default_cap_is_2s(self):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        self.assertEqual(params.audio_out_max_buffer_ms, 2000)
+
+    async def test_pacing_holds_the_lookahead_to_the_cap(self):
+        """Writing 200ms of audio against a 50ms cap sleeps for the
+        difference and never runs more than cap + one chunk ahead."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=50)
+        )
+        chunk = b"\x00" * 960  # 20ms at 24kHz S16 mono
+        start = time.monotonic()
+        for _ in range(10):
+            await client.publish_audio(chunk)
+            self.assertLessEqual(client._publish_audio_clock - time.monotonic(), 0.05 + 0.021)
+        self.assertGreaterEqual(time.monotonic() - start, 0.2 - 0.05 - 0.03)
+
+    async def test_an_explicit_cap_raises_the_lookahead(self):
+        """The same 200ms under a 1s cap is all lookahead: no pacing
+        sleep, the clock runs the full 200ms ahead."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=1000)
+        )
+        chunk = b"\x00" * 960
+        start = time.monotonic()
+        for _ in range(10):
+            await client.publish_audio(chunk)
+        self.assertLess(time.monotonic() - start, 0.1)
+        self.assertAlmostEqual(client._publish_audio_clock - time.monotonic(), 0.2, delta=0.05)
+
+
+# ----------------------------------------------------------------------
+# MOQOutputTransport: interruption through process_frame
+# ----------------------------------------------------------------------
+
+
+class TestOutputTransportInterruption(unittest.IsolatedAsyncioTestCase):
+    """InterruptionFrame through ``MOQOutputTransport.process_frame`` —
+    the pipeline-level path that fires ``cut_audio`` — with base_output's
+    chunking and audio task in the loop."""
+
+    RATE = 24000
+
+    async def _make_transport(self, **params_kwargs):
+        params_kwargs.setdefault("audio_in_enabled", True)
+        params_kwargs.setdefault("audio_out_enabled", True)
+        params_kwargs.setdefault("audio_out_sample_rate", self.RATE)
+        params = MOQParams(**params_kwargs)
+        client, _stream = _client_with_fake_moq(params)
+        client.connect = MagicMock()
+        client.cancel = AsyncMock()
+        transport = MOQOutputTransport(client, params)
+        transport.push_frame = AsyncMock()
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=TaskManager(),
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start = StartFrame(audio_out_sample_rate=self.RATE)
+        await transport.process_frame(start, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start)
+        return transport, client
+
+    async def _wait_for_writes(self, producer, count: int):
+        for _ in range(200):
+            if producer.write.call_count >= count:
+                return
+            await asyncio.sleep(0.01)
+        self.fail(f"expected {count} writes, got {producer.write.call_count}")
+
+    def _written(self, client) -> list[bytes]:
+        return [call.args[0].data for call in client._audio_out.write.call_args_list]
+
+    def _audio_frame(self, transport, pattern: bytes, *, interruptible: bool):
+        sender = transport._media_senders[None]
+        frame = TTSAudioRawFrame(
+            pattern * (sender.audio_chunk_size // len(pattern)), sender.sample_rate, 1
+        )
+        frame.interruptible = interruptible
+        return frame
+
+    async def test_an_uninterruptible_announcement_survives_the_interruption(self):
+        """The announcement's unplayed remainder is re-published after the
+        cut's discontinuity, so the player keeps playing it."""
+        transport, client = await self._make_transport()
+        try:
+            producer = client._audio_out
+            announcement = self._audio_frame(transport, b"\x01\x02", interruptible=False)
+            await transport.process_frame(announcement, FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 3)
+            first, silence, republished = self._written(client)
+            self.assertEqual(first, announcement.audio)
+            self.assertEqual(silence, b"\x00" * len(silence))
+            self.assertGreater(len(republished), 0)
+            self.assertTrue(announcement.audio.endswith(republished))
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_ordinary_speech_is_cut_with_nothing_republished(self):
+        transport, client = await self._make_transport()
+        try:
+            producer = client._audio_out
+            speech = self._audio_frame(transport, b"\x03\x04", interruptible=True)
+            await transport.process_frame(speech, FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 2)
+            await asyncio.sleep(0.05)
+            first, silence = self._written(client)
+            self.assertEqual(first, speech.audio)
+            self.assertEqual(silence, b"\x00" * len(silence))
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_an_interruption_lands_while_a_pacing_write_sleeps(self):
+        """The cut's discontinuity goes out at once while the paced write
+        sleeps; the in-flight chunk is still delivered after it (matching
+        base_output, which delivers the frame being written) and the
+        pacing clock lands on the silence plus the chunk."""
+        transport, client = await self._make_transport(audio_out_max_buffer_ms=50)
+        try:
+            producer = client._audio_out
+            budget = 0.05
+            client._publish_audio_clock = time.monotonic() + budget + 0.3
+            speech = self._audio_frame(transport, b"\x05\x06", interruptible=True)
+            await transport.process_frame(speech, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+            self.assertEqual(producer.write.call_count, 0)
+            cut_time = time.monotonic()
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            self.assertEqual(self._written(client)[0], b"\x00" * int(self.RATE * 0.02) * 2)
+            producer.reset_epoch.assert_called_once()
+            await self._wait_for_writes(producer, 2)
+            self.assertEqual(self._written(client)[1], speech.audio)
+            chunk_s = len(speech.audio) / (self.RATE * 2)
+            self.assertAlmostEqual(
+                client._publish_audio_clock,
+                cut_time + _AUDIO_CUT_SILENCE_S + chunk_s,
+                delta=0.1,
+            )
+        finally:
+            await transport.cancel(CancelFrame())
 
 
 # ----------------------------------------------------------------------

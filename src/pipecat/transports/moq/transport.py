@@ -19,6 +19,7 @@ import asyncio
 import re
 import secrets
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
@@ -671,6 +672,12 @@ class MOQTransportClient:
         self._publish_pts_us: int = 0
         # Wall clock at pts 0, for re-anchoring the timeline across idle gaps.
         self._publish_pts_epoch: float | None = None
+        # Uninterruptible audio already handed to moq, as (pacing-clock end,
+        # PCM) per chunk. An interruption cut re-publishes the unplayed
+        # remainder so protected audio survives the discontinuity (see
+        # :meth:`cut_audio`). Entries whose end has passed are pruned on
+        # each write.
+        self._publish_protected: deque[tuple[float, bytes]] = deque()
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -875,15 +882,49 @@ class MOQTransportClient:
         discontinuity truncates it. ``reset_epoch`` reaches the wire
         with the next write, so after re-anchoring the pacing clock this
         publishes a short silence to carry the discontinuity immediately.
+
+        The discontinuity drops *everything* the player has buffered, so
+        the unplayed remainder of any uninterruptible audio already
+        handed to moq is re-published right after the silence; the
+        protected audio keeps playing while cancelled speech is cut
+        (matching base_output, which preserves uninterruptible frames
+        still in its queue).
         """
         had_audio = self._publish_audio_clock is not None
+        protected = self._take_protected_remainder()
         self.reset_audio_pacing()
         if not had_audio or self._audio_out is None or not self._audio_out_sample_rate:
             return
         samples = int(self._audio_out_sample_rate * _AUDIO_CUT_SILENCE_S)
         await self.publish_audio(b"\x00\x00" * samples)
+        for chunk in protected:
+            await self.publish_audio(chunk, interruptible=False)
 
-    async def publish_audio(self, audio: bytes):
+    def _take_protected_remainder(self) -> list[bytes]:
+        """Drain the protected ledger, returning the unplayed audio.
+
+        A chunk's entry carries the pacing-clock time its playback ends;
+        the part of it past ``now`` hasn't played yet. The first live
+        chunk may be mid-playback, so it is trimmed to its unplayed tail.
+        """
+        rate = self._audio_out_sample_rate
+        entries = self._publish_protected
+        self._publish_protected = deque()
+        if not rate:
+            return []
+        now = time.monotonic()
+        remainder = []
+        for end, audio in entries:
+            if end <= now:
+                continue
+            start = end - len(audio) / (rate * 2)
+            if start < now:
+                audio = audio[int((now - start) * rate) * 2 :]
+            if audio:
+                remainder.append(audio)
+        return remainder
+
+    async def publish_audio(self, audio: bytes, interruptible: bool = True):
         """Push a PCM chunk to the bot's audio track with real PTS, paced to a cap.
 
         The library does the Opus encode + resample inside the FFI, so we
@@ -900,6 +941,12 @@ class MOQTransportClient:
         (see :meth:`cut_audio`), so the cap bounds barge-in overhang; it
         must also stay under the player's drop ceiling
         (``MoqTransportOptions.audioBufferMaxMs``, 30s).
+
+        Args:
+            audio: S16 mono PCM at the track's sample rate.
+            interruptible: Whether an interruption may cut this chunk.
+                ``False`` records it in the protected ledger so
+                :meth:`cut_audio` re-publishes its unplayed remainder.
         """
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
@@ -955,6 +1002,14 @@ class MOQTransportClient:
 
         self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
+
+        # Keep the protected ledger current: drop chunks that have played
+        # out, record this one if a cut must preserve it.
+        played_out = time.monotonic()
+        while self._publish_protected and self._publish_protected[0][0] <= played_out:
+            self._publish_protected.popleft()
+        if not interruptible:
+            self._publish_protected.append((self._publish_audio_clock, audio))
 
     async def wait_for_audio_drain(self, jitter_buffer_margin_s: float = 0.3) -> None:
         """Block until the pacing clock catches up to wall-clock, then a bit more.
@@ -2070,7 +2125,9 @@ class MOQOutputTransport(BaseOutputTransport):
         ``cut_audio`` re-anchors the publish_audio pacing clock so the
         next utterance plays immediately, and publishes an epoch
         discontinuity so the player drops the cancelled utterance's
-        buffered write-ahead instead of playing it out.
+        buffered write-ahead instead of playing it out. Uninterruptible
+        audio already handed to moq is re-published after the cut, so a
+        protected announcement keeps playing through the interruption.
 
         Args:
             frame: The frame to process.
@@ -2103,7 +2160,7 @@ class MOQOutputTransport(BaseOutputTransport):
             True if the audio frame was written successfully, False otherwise.
         """
         try:
-            await self._client.publish_audio(frame.audio)
+            await self._client.publish_audio(frame.audio, interruptible=frame.interruptible)
             return True
         except Exception as e:
             logger.error(f"Error writing audio frame: {e}")
