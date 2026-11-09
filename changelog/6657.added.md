@@ -1,0 +1,1 @@
+- Added `complexity` to `OpenAIImageGenService.Settings`, OpenAI's control over how much a GPT Image model plans before rendering (`low`, `medium`, `high`).
