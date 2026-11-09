@@ -6,7 +6,7 @@
 
 """Async Twilio REST client covering what the SIP examples provision.
 
-Thin wrapper over ``httpx`` — no Twilio SDK. Two API hosts are involved:
+Thin wrapper over ``aiohttp`` — no Twilio SDK. Two API hosts are involved:
 ``trunking.twilio.com/v1`` owns Elastic SIP trunks, their origination URLs,
 and the phone numbers routed to them; ``api.twilio.com/2010-04-01`` owns the
 account-level SIP IP access control lists and credential lists a trunk points
@@ -19,10 +19,11 @@ non-2xx, with the response body in the message::
         trunks = await api.list_trunks()
 """
 
+import json
 import os
 from typing import Any
 
-import httpx
+import aiohttp
 
 API_BASE = "https://api.twilio.com/2010-04-01"
 TRUNKING_BASE = "https://trunking.twilio.com/v1"
@@ -53,28 +54,29 @@ def _form(fields: dict[str, Any]) -> dict[str, str]:
     return body
 
 
-async def get_public_ip(client: httpx.AsyncClient | None = None) -> str:
+async def get_public_ip(client: "aiohttp.ClientSession | None" = None) -> str:
     """Look up this machine's public IP.
 
     Twilio's IP ACL authorizes the address Twilio sees traffic arrive from, so
     provision.py refreshes the entry with this value on every provision.
 
     Args:
-        client: Client to issue the request on; one is created when omitted.
+        client: Session to issue the request on; one is created when omitted.
 
     Returns:
         Dotted-quad public address.
     """
     own = client is None
-    client = client or httpx.AsyncClient(timeout=10)
+    client = client or aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
     try:
-        response = await client.get("https://api.ipify.org")
-        if response.status_code >= 300:
-            raise TwilioError(f"public IP lookup failed: {response.status_code} {response.text}")
-        return response.text.strip()
+        async with client.get("https://api.ipify.org") as response:
+            body = await response.text()
+            if response.status >= 300:
+                raise TwilioError(f"public IP lookup failed: {response.status} {body}")
+            return body.strip()
     finally:
         if own:
-            await client.aclose()
+            await client.close()
 
 
 class TwilioAPI:
@@ -89,7 +91,10 @@ class TwilioAPI:
             timeout: Per-request timeout in seconds.
         """
         self.account_sid = account_sid
-        self._client = httpx.AsyncClient(auth=(account_sid, auth_token), timeout=timeout)
+        self._client = aiohttp.ClientSession(
+            auth=aiohttp.BasicAuth(account_sid, auth_token),
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        )
 
     @classmethod
     def from_env(cls, **kwargs) -> "TwilioAPI":
@@ -111,8 +116,8 @@ class TwilioAPI:
         return cls(sid, token, **kwargs)
 
     async def aclose(self) -> None:
-        """Close the underlying HTTP client."""
-        await self._client.aclose()
+        """Close the underlying HTTP session."""
+        await self._client.close()
 
     async def __aenter__(self) -> "TwilioAPI":
         """Enter the context manager.
@@ -160,19 +165,20 @@ class TwilioAPI:
         Returns:
             Parsed JSON body, or an empty dict for a 204 or a tolerated 404.
         """
-        response = await self._client.request(
+        async with self._client.request(
             method,
             url,
             data=_form(data) if data else None,
             params=_form(params) if params else None,
-        )
-        if ok_404 and response.status_code == 404:
-            return {}
-        if response.status_code >= 300:
-            raise TwilioError(f"{method} {url} -> {response.status_code} {response.text}")
-        if response.status_code == 204 or not response.content:
-            return {}
-        return response.json()
+        ) as response:
+            body = await response.text()
+            if ok_404 and response.status == 404:
+                return {}
+            if response.status >= 300:
+                raise TwilioError(f"{method} {url} -> {response.status} {body}")
+            if response.status == 204 or not body:
+                return {}
+            return json.loads(body)
 
     async def _list_all(
         self, url: str, key: str, params: dict[str, Any] | None = None
