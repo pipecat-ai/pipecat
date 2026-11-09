@@ -12,7 +12,14 @@ import types
 
 import pytest
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
 # Architectures published per language, best first. English has the widest range;
@@ -203,6 +210,25 @@ async def test_run_stt_yields_a_transcription_frame(moonshine_module):
     assert frames[0].text == "hello there"
     assert frames[0].language == Language.ES
     assert fake_transcriber.instances[-1].sample_rate == stt.MOONSHINE_SAMPLE_RATE
+
+
+@pytest.mark.asyncio
+async def test_8khz_input_reaches_the_model_at_16khz(moonshine_module):
+    stt, fake_transcriber = moonshine_module
+    service = stt.MoonshineSTTService(trailing_silence_secs=0)
+    one_second = b"\x00\x00" * 8000
+
+    await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=one_second, sample_rate=8000, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(audio_in_sample_rate=8000),
+    )
+
+    assert len(fake_transcriber.instances[-1].audio) == stt.MOONSHINE_SAMPLE_RATE
 
 
 @pytest.mark.asyncio
