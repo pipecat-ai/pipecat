@@ -149,6 +149,9 @@ class InworldTTSSettings(TTSSettings):
             :class:`InworldHttpTTSService` with ``inworld-tts-2``; the
             WebSocket API takes steering as inline ``[tags]`` in the text
             instead, so :class:`InworldTTSService` ignores this field.
+        enhance_generation: Whether to denoise the synthesized audio. Honored by
+            :class:`InworldHttpTTSService`; the WebSocket API has no equivalent,
+            so :class:`InworldTTSService` ignores this field.
     """
 
     speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -157,6 +160,7 @@ class InworldTTSSettings(TTSSettings):
         default_factory=lambda: NOT_GIVEN
     )
     instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enhance_generation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {
         "voiceId": "voice",
@@ -260,6 +264,7 @@ class InworldHttpTTSService(TTSService):
             temperature=None,
             delivery_mode=None,
             instruction=None,
+            enhance_generation=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -450,6 +455,8 @@ class InworldHttpTTSService(TTSService):
             payload["deliveryMode"] = self._settings.delivery_mode
         if self._settings.instruction is not None:
             payload["instruction"] = self._settings.instruction
+        if self._settings.enhance_generation is not None:
+            payload["enhanceGeneration"] = self._settings.enhance_generation
         if self._settings.language is not None:
             payload["language"] = self._settings.language
 
@@ -771,6 +778,7 @@ class InworldTTSService(WebsocketTTSService):
             temperature=None,
             delivery_mode=None,
             instruction=None,
+            enhance_generation=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
