@@ -1,0 +1,1 @@
+- Added an `enhance_generation` field to `InworldHttpTTSService.Settings`, which asks Inworld to denoise the synthesized audio. The WebSocket API has no equivalent, so `InworldTTSService` ignores the field.
