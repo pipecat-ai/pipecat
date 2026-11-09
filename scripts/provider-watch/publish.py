@@ -31,6 +31,8 @@ Then commit and push ``_reports``. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
 or a highlights-less render made here when none exists — and opens (or
 updates) the digest issue on the reports repo when there is anything to show.
+The issue carries the digest with only its high-priority changes to consider
+listed and links the full digest for the rest (see ``digest.render_issue``).
 Run::
 
     uv run python scripts/provider-watch/publish.py --date 2026-08-20
@@ -390,8 +392,22 @@ def worth_an_issue(reports: list[Report]) -> bool:
     )
 
 
-def open_or_update_issue(sh: Shell, reports_repo: str, date: str, body_file: Path) -> str:
+def issue_body(reports_dir: Path, date: str, reports_repo: str, digest_file: Path) -> str:
+    """The digest issue's body: ``digest.render_issue`` with the published digest's highlights."""
+    repo_url = f"https://github.com/{reports_repo}"
+    return digest.render_issue(
+        digest.load_reports(reports_dir, date),
+        date=date,
+        highlights=digest.highlights_of(digest_file.read_text(encoding="utf-8")),
+        repo_url=repo_url,
+        digest_url=f"{repo_url}/blob/main/{digest_file.relative_to(reports_dir).as_posix()}",
+    )
+
+
+def open_or_update_issue(sh: Shell, reports_repo: str, date: str, body: str) -> str:
     title = f"Provider watch {date}"
+    body_file = Path(tempfile.mkdtemp(prefix="pw-issue-")) / "body.md"
+    body_file.write_text(body, encoding="utf-8")
     existing = json.loads(
         sh.run(
             "gh",
@@ -471,7 +487,12 @@ def main(argv: list[str] | None = None) -> int:
         digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
     if args.finalize and worth_an_issue(reports):
-        outcome.issue_url = open_or_update_issue(sh, args.reports_repo, args.date, digest_file)
+        outcome.issue_url = open_or_update_issue(
+            sh,
+            args.reports_repo,
+            args.date,
+            issue_body(args.reports, args.date, args.reports_repo, digest_file),
+        )
 
     print(json.dumps(outcome.__dict__, indent=2))
     return 0
