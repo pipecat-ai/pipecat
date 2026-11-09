@@ -45,6 +45,11 @@ jobs:
         id: ruff-check
         run: uv run ruff check
 
+      - name: Ruff linter (explicit text encoding)
+        id: ruff-encoding
+        # PLW1514 is in preview, so it runs on its own until stable; see .pre-commit-config.yaml.
+        run: uv run ruff check --preview --select PLW1514 src/pipecat
+
       - name: Type check (pyright)
         id: pyright
         run: uv run pyright
