@@ -159,6 +159,7 @@ class DeepgramSageMakerSTTService(STTService):
             interim_results=True,
             keyterm=None,
             keywords=None,
+            language_hint=None,
             numerals=False,
             profanity_filter=None,
             punctuate=True,
