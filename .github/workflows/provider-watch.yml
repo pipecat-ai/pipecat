@@ -189,6 +189,7 @@ jobs:
           done
 
       - name: Run provider research
+        id: research
         timeout-minutes: 55
         uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
         env:
@@ -226,6 +227,18 @@ jobs:
             --model claude-opus-5
             --max-turns 120
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
+
+      - name: Show why the research session stopped
+        # The action hides the session's output, since this repo's logs are
+        # public. The final result line says why a failed session ended (an
+        # API error, or the model's last words), so it alone is printed,
+        # capped at 500 characters.
+        if: failure() && steps.research.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.research.outputs.execution_file }}
+        run: |
+          jq -r 'last(.[] | select(.type == "result")) | .result // .subtype' "$EXECUTION_FILE" | head -c 500
+          echo
 
       - name: Verify the group was researched
         # A run that exits cleanly without doing the work should fail loudly,
@@ -270,6 +283,9 @@ jobs:
           name: provider-watch-${{ github.run_id }}-${{ matrix.group.name }}
           if-no-files-found: ignore
           retention-days: 14
+          # .pw-scratch is a hidden directory, which upload-artifact skips
+          # unless told otherwise.
+          include-hidden-files: true
           path: |
             _reports/reports
             _reports/digests
