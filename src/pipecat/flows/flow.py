@@ -214,7 +214,7 @@ class Flow:
             if handler is not None:
                 config["handler"] = handler
         for key, value in action.extras().items():
-            config[key] = value  # type: ignore[literal-required]
+            config[key] = value
         return config
 
     def _lookup(self, name: str, *, kind: str, where: str, node: str | None) -> Callable | None:

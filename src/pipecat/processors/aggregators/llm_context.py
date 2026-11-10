@@ -98,7 +98,7 @@ def standard_message_text(message: LLMContextMessage) -> str:
     """
     if isinstance(message, LLMSpecificMessage):
         return ""
-    content = message.get("content")  # type: ignore[attr-defined]
+    content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):

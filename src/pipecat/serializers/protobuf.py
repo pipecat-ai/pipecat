@@ -101,9 +101,9 @@ class ProtobufFrameSerializer(FrameSerializer):
             return None
 
         # ignoring linter errors; we check that type(frame) is in this dict above
-        proto_optional_name = self.SERIALIZABLE_TYPES[type(serializable)]  # type: ignore
+        proto_optional_name = self.SERIALIZABLE_TYPES[type(serializable)]
         proto_attr = getattr(proto_frame, proto_optional_name)
-        for field in dataclasses.fields(serializable):  # type: ignore
+        for field in dataclasses.fields(serializable):
             value = getattr(serializable, field.name)
             if value and hasattr(proto_attr, field.name):
                 setattr(proto_attr, field.name, value)

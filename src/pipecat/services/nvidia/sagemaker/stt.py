@@ -305,11 +305,11 @@ class NvidiaSageMakerSTTService(STTService):
                 result = await self._client.receive_response()
 
                 if result is None or not (
-                    hasattr(result, "value") and hasattr(result.value, "bytes_")  # type: ignore[union-attr]
+                    hasattr(result, "value") and hasattr(result.value, "bytes_")
                 ):
                     continue
 
-                payload = result.value.bytes_  # type: ignore[union-attr]
+                payload = result.value.bytes_
                 if not payload:
                     continue
 

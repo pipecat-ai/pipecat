@@ -542,7 +542,7 @@ def _get_bot_module():
 
     # Try to import 'bot' module from current directory
     try:
-        import bot  # type: ignore[import-untyped]
+        import bot
 
         return bot
     except ImportError:

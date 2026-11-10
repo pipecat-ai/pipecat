@@ -40,9 +40,9 @@ def job(*, name: str, sequential: bool = False):
     """
 
     def decorator(fn: Callable) -> Callable:
-        fn.is_job_handler = True  # type: ignore[attr-defined]
-        fn.job_name = name  # type: ignore[attr-defined]
-        fn.job_sequential = sequential  # type: ignore[attr-defined]
+        fn.is_job_handler = True
+        fn.job_name = name
+        fn.job_sequential = sequential
         return fn
 
     return decorator

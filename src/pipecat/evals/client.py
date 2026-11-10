@@ -185,7 +185,7 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
         finally:
             yield _BotSegmentTranscribedFrame()
 
-    stt.run_stt = tagged_run_stt  # type: ignore[method-assign]
+    stt.run_stt = tagged_run_stt
 
 
 class _BotSpeechGate(FrameProcessor):

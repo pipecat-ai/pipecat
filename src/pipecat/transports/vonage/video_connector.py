@@ -107,7 +107,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
 
     async def cleanup(self) -> None:
         """Cleanup input transport."""
-        await super().cleanup()  # type: ignore
+        await super().cleanup()
         await self._client.cleanup()
 
     async def start(self, frame: StartFrame) -> None:
@@ -241,7 +241,7 @@ class VonageVideoConnectorOutputTransport(BaseOutputTransport):
 
     async def cleanup(self) -> None:
         """Cleanup output transport."""
-        await super().cleanup()  # type: ignore
+        await super().cleanup()
         await self._client.cleanup()
 
     async def start(self, frame: StartFrame) -> None:

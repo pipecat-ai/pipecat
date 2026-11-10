@@ -75,7 +75,7 @@ def include_loader(
             data = yaml.load(f, include_loader(path.parent))
     """
 
-    class _IncludeLoader(base):  # type: ignore[valid-type,misc]
+    class _IncludeLoader(base):
         pass
 
     add_include_constructor(_IncludeLoader, base_dir)

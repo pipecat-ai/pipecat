@@ -24,7 +24,7 @@ from aic_sdk import (
     Vad,
     VadContext,
     # Exported at runtime but absent from aic-sdk's type stub.
-    set_sdk_id,  # type: ignore[attr-defined]
+    set_sdk_id,
 )
 from loguru import logger
 

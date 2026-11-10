@@ -301,7 +301,7 @@ class LLMAssistantAggregatorParams:
                 )
             else:
                 # Accept LLMAutoContextSummarizationConfig passed to the deprecated field
-                self.auto_context_summarization_config = self.context_summarization_config  # type: ignore[assignment]
+                self.auto_context_summarization_config = self.context_summarization_config
             self.context_summarization_config = None
 
 

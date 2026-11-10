@@ -124,7 +124,7 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
         """
         await super().setup(setup)
         session = aiobotocore.session.get_session()
-        self._client_ctx = session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+        self._client_ctx = session.create_client(
             "sagemaker-runtime",
             region_name=self._region,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
@@ -193,7 +193,7 @@ class NvidiaSageMakerHTTPTTSService(TTSService):
                 }
             )
 
-            response = await self._client.invoke_endpoint(  # pyright: ignore[reportGeneralTypeIssues]
+            response = await self._client.invoke_endpoint(
                 EndpointName=self._endpoint_name,
                 ContentType="application/json",
                 Accept="application/octet-stream",
@@ -429,10 +429,10 @@ class NvidiaSageMakerTTSService(InterruptibleTTSService):
             if result is None:
                 break
 
-            if not (hasattr(result, "value") and hasattr(result.value, "bytes_")):  # type: ignore[union-attr]
+            if not (hasattr(result, "value") and hasattr(result.value, "bytes_")):
                 continue
 
-            payload = result.value.bytes_  # type: ignore[union-attr]
+            payload = result.value.bytes_
             if not payload:
                 continue
 
