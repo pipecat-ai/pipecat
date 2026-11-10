@@ -25,6 +25,61 @@ This directory contains examples showing how to build voice and multimodal agent
 
 4. Open the web interface at http://localhost:7860/client/ and click "Connect"
 
+## Dynamo with incremental text prefill
+
+[`voice/voice-dynamo.py`](voice/voice-dynamo.py) connects Dynamo's realtime STT,
+text LLM, and streaming TTS endpoints. STT interim deltas are sent to the LLM
+while the user speaks. The final Pipecat context remains authoritative, including
+transcript corrections; response generation begins only when the user turn ends.
+
+Use Dynamo [**1.6.0**](https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.0)
+for both the frontend and vLLM runtime. This example requires its **experimental text-input
+Realtime API**, not just an OpenAI-compatible chat-completions endpoint. The LLM backend
+must support `input_text.append`, `input_text.clear`, and `input_text.commit`,
+alongside `conversation.item.create`, `response.create`, and streamed
+`response.output_text.delta` events. Engine-side incremental prefill must also be
+enabled for the latency optimization to take effect. Start the Dynamo vLLM
+worker with `--realtime --enable-prefix-caching`; an ordinary text-generation
+worker does not register this capability. These input events are Dynamo
+extensions, not part of the OpenAI standard, and remain experimental.
+
+The release images are `nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.6.0` and
+`nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.6.0`.
+Build the speech adapters from the
+[matching release's example](https://github.com/ai-dynamo/dynamo/tree/v1.6.0/examples/nemotron_speech_cascaded_pipeline)
+using the same frontend base image. ASR/TTS NIMs retain their own model-specific
+image versions and access requirements.
+
+The STT endpoint must support transcription sessions with 24 kHz PCM input,
+client-side audio-buffer commits, and append-only transcription deltas. The TTS
+endpoint must return mono 16-bit PCM at 24 kHz for `response_format="pcm"`.
+Pipecat talks only to these endpoints; no Riva client dependency is needed.
+
+From the repository root, configure the model and voice names registered by your
+Dynamo deployment:
+
+```bash
+uv sync --group dev --extra runner --extra websocket
+export DYNAMO_STT_MODEL="your-stt-model"
+export DYNAMO_LLM_MODEL="your-text-model"
+export DYNAMO_TTS_MODEL="your-tts-model"
+export DYNAMO_TTS_VOICE="your-voice"
+uv run python examples/voice/voice-dynamo.py -t websocket
+```
+
+Open `http://localhost:7860/client/`. By default, all services use the Dynamo
+frontend on `localhost:8000`. Override `DYNAMO_STT_BASE_URL` (default
+`ws://localhost:8000/v1/realtime`), `DYNAMO_LLM_BASE_URL`, and
+`DYNAMO_TTS_BASE_URL` (both default `http://localhost:8000/v1`) for another
+deployment. Set `DYNAMO_API_KEY` when the endpoints require authentication; use
+`wss://` and `https://` for remote authenticated endpoints.
+
+`DynamoStreamingPrefillProcessor` belongs between streaming STT and the user context
+aggregator. It expects **append-only deltas**, as emitted by
+`OpenAIRealtimeSTTService`, not cumulative interim hypotheses. The text LLM
+service supports plain-text conversation messages, not tools or multimodal
+input. Keep the same `LLMContext` in the prefill processor and aggregator pair.
+
 ## Running examples with other transports
 
 Most examples support running with other transports, like Twilio or Daily.

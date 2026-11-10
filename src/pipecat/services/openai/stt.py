@@ -799,6 +799,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                     self._user_id,
                     time_now_iso8601(),
                     result=evt,
+                    finalized=True,
                 )
             )
             await self._handle_transcription_trace(transcript, True)
