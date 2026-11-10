@@ -15,10 +15,13 @@ Environment:
 - ``DEEPGRAM_API_KEY`` (required): listen and speak.
 - ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL``: the ``open_ai`` think provider.
 - ``ANTHROPIC_API_KEY``: the ``anthropic`` think provider.
+- ``CARTESIA_API_KEY`` / ``ELEVENLABS_API_KEY``: those speak providers, when the
+  client's ``endpoint`` doesn't carry its own key.
+- ``GOOGLE_API_KEY``: the ``google`` think provider.
 
 Install and run::
 
-    pip install "pipecat-ai[deepgram,openai,anthropic,runner]"
+    pip install "pipecat-ai[deepgram,openai,anthropic,cartesia,elevenlabs,google,runner]"
     python examples/deepgram-voice-agent/server.py --port 8765
 """
 
@@ -40,11 +43,14 @@ server = DeepgramVoiceAgentServer(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_base_url=os.getenv("OPENAI_BASE_URL"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+        cartesia_api_key=os.getenv("CARTESIA_API_KEY"),
+        elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
+        google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
 )
 
 app = FastAPI()
-app.add_api_websocket_route("/v1/agent/converse", server.handle_websocket)
+server.add_routes(app)
 
 
 if __name__ == "__main__":

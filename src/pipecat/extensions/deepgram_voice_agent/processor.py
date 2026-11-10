@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from pipecat.extensions.deepgram_voice_agent.services import SettingsError, speak_settings
+from pipecat.extensions.deepgram_voice_agent.services import SettingsError, speak_update
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
@@ -77,6 +77,10 @@ PIPELINE_ERROR = "PIPELINE_ERROR"
 SPEAK_REQUEST_FAILED = "SPEAK_REQUEST_FAILED"
 FORCE_END_TURN_UNSUPPORTED = "FORCE_END_TURN_UNSUPPORTED"
 CLIENT_MESSAGE_TIMEOUT = "CLIENT_MESSAGE_TIMEOUT"
+SLOW_THINK_REQUEST = "SLOW_THINK_REQUEST"
+SLOW_SPEAK_REQUEST = "SLOW_SPEAK_REQUEST"
+# How often to warn while the LLM or TTS is slow to respond.
+SLOWNESS_WARNING_SECS = 5.0
 INJECT_AGENT_MESSAGE_DURING_USER_SPEECH = "INJECT_AGENT_MESSAGE_DURING_USER_SPEECH"
 INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH = "INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH"
 
@@ -160,6 +164,8 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
         self.tts: FrameProcessor | None = None
         # Checks an UpdateThink before it's applied, raising SettingsError.
         self.validate_think: Callable[[Mapping[str, Any]], Awaitable[None]] | None = None
+        # The session's speak provider type, which UpdateSpeak must keep.
+        self.speak_provider = "deepgram"
         # The end of the turn the client forced, for EndOfTurn's trigger.
         self.end_turn_forced = False
         # Agent messages waiting for the agent to finish what it is saying.
@@ -176,6 +182,8 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
         self.agent_busy: Callable[[], bool] = lambda: self._agent_speaking
         self._last_client_message = time.monotonic()
         self._client_timeout_task: asyncio.Task | None = None
+        # Seconds of audio received from the client, for the STT's latency.
+        self.audio_received_secs = 0.0
 
     async def send(self, message: dict[str, Any]):
         """Send a message to the client.
@@ -226,6 +234,9 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
             return
         if isinstance(frame, InputAudioRawFrame):
             self._last_client_message = time.monotonic()
+            self.audio_received_secs += len(frame.audio) / (
+                2 * frame.sample_rate * frame.num_channels
+            )
 
         await self.push_frame(frame, direction)
 
@@ -325,7 +336,7 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
 
     async def _update_speak(self, speak: Any):
         try:
-            delta = speak_settings(speak)
+            delta = speak_update(speak, current_type=self.speak_provider)
         except SettingsError as e:
             # Invalid speak settings end the session, as in the Voice Agent API.
             await self.close_with_error(e.code, e.description)
@@ -604,12 +615,72 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._response_in_progress = False
         # AgentAudioDone held back until the agent has nothing left to say.
         self._audio_done_pending = False
+        # Whether assistant text carries audio_timing (ElevenLabs' include_timing_data),
+        # and the segment being timed: its text, start, and words with their offsets.
+        self.include_timing_data = False
+        self._timed_segment: tuple[str, float, list[tuple[str, float]]] | None = None
+        # The turn's latency bookkeeping, search hits and STT cursor.
+        self._first_token_time: float | None = None
+        self._turn_latency_reported = False
+        self._turn_search: dict[str, dict[str, Any]] = {}
+        self._stt_cursor: float | None = None
+        self._slowness_task: asyncio.Task | None = None
+        # Called with each latency measured, for the server's metrics.
+        self.on_latency: Callable[[str, float], None] | None = None
         # Client function calls sent and not yet settled: tool call id to name.
         self._client_calls: dict[str, str] = {}
 
     def _mark_turn_end(self):
         self._turn_end_time = time.monotonic()
         self._first_text_time = None
+        self._first_token_time = None
+        self._turn_latency_reported = False
+
+    async def _report_latency(self, name: str, value: float):
+        """Send a ``LatencyReport`` and record it in the server's metrics."""
+        value = max(value, 0.001)
+        await self._processor.send({"type": "LatencyReport", name: value})
+        if self.on_latency:
+            self.on_latency(name, value)
+
+    async def _on_first_llm_output(self, *, text: bool):
+        """Report how long the LLM took to its first token, and first text token."""
+        if self._turn_end_time is None:
+            return
+        now = time.monotonic()
+        if self._first_token_time is None:
+            self._first_token_time = now
+            await self._stop_slowness_watch()
+            if text:
+                # The text is on its way to the TTS; warn if it's slow to speak.
+                await self._start_slowness_watch(SLOW_SPEAK_REQUEST, "speak")
+            await self._report_latency("ttt_token_latency", now - self._turn_end_time)
+        if text and self._first_text_time is None:
+            self._first_text_time = now
+            await self._report_latency("ttt_text_latency", now - self._turn_end_time)
+
+    async def _watch_slowness(self, code: str, stage: str):
+        """Warn the client while a provider is slow to respond, as the Voice Agent API does."""
+        waited = 0.0
+        while True:
+            await asyncio.sleep(SLOWNESS_WARNING_SECS)
+            waited += SLOWNESS_WARNING_SECS
+            await self._processor.send(
+                error_message(
+                    code,
+                    f"We have now waited {waited:.0f} seconds for a {stage} response.",
+                    warning=True,
+                )
+            )
+
+    async def _start_slowness_watch(self, code: str = SLOW_THINK_REQUEST, stage: str = "think"):
+        await self._stop_slowness_watch()
+        self._slowness_task = self._processor.create_task(self._watch_slowness(code, stage))
+
+    async def _stop_slowness_watch(self):
+        if self._slowness_task:
+            await self._processor.cancel_task(self._slowness_task)
+            self._slowness_task = None
 
     def agent_busy(self) -> bool:
         """Whether the agent is replying or speaking.
@@ -630,7 +701,18 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         if self._turn_languages is not None:
             fields["languages"] = self._turn_languages
             fields["languages_hinted"] = self.languages_hinted()
+        listen = self._processor.listen
+        if listen and listen.interim_utterances:
+            fields["is_final"] = True
+        if listen and listen.verbose and self._turn_search:
+            fields["search"] = list(self._turn_search.values())
+        self._turn_search = {}
         await self._processor.send_conversation_text("user", content, **fields)
+        if self._stt_cursor is not None:
+            lag = self._processor.audio_received_secs - self._stt_cursor
+            self._stt_cursor = None
+            if lag > 0:
+                await self._report_latency("stt_latency", lag)
         await self._processor.on_user_turn_reported()
 
     async def _on_output(self, frame: Frame):
@@ -643,14 +725,29 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         audio, as in the Voice Agent API.
         """
         if isinstance(frame, TTSTextFrame):
+            if self._timed_segment and frame.text.strip():
+                _, start, words = self._timed_segment
+                words.append((frame.text.strip(), time.monotonic() - start))
             self._open_segments = max(0, self._open_segments - 1)
             await self._maybe_send_audio_done()
         elif isinstance(frame, AggregatedTextFrame):
             if frame.will_be_spoken and frame.text.strip():
                 self._next_segment_text = frame.text.strip()
         elif isinstance(frame, OutputAudioRawFrame) and self._next_segment_text:
+            await self._stop_slowness_watch()
             text, self._next_segment_text = self._next_segment_text, None
-            await self._processor.send_conversation_text("assistant", text)
+            if self.include_timing_data:
+                # Sent when the segment ends, with when each character played.
+                await self._flush_timed_segment()
+                self._timed_segment = (text, time.monotonic(), [])
+            else:
+                await self._processor.send_conversation_text("assistant", text)
+            if not self._turn_latency_reported and self._turn_end_time is not None:
+                self._turn_latency_reported = True
+                now = time.monotonic()
+                first_text = self._first_text_time or now
+                await self._report_latency("tts_latency", now - first_text)
+                await self._report_latency("total_latency", now - self._turn_end_time)
             if not self._speaking_announced:
                 self._speaking_announced = True
                 if self._experimental:
@@ -658,6 +755,7 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                         {"type": "AgentStartedSpeaking", **self._latencies()}
                     )
         elif isinstance(frame, InterruptionFrame):
+            await self._flush_timed_segment()
             self._next_segment_text = None
             self._open_segments = 0
 
@@ -665,9 +763,21 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         """Collect the user turn's text; report the end of a Flux turn."""
         if isinstance(frame, InterimTranscriptionFrame):
             self._turn_interim = frame.text
+            listen = self._processor.listen
+            if listen and listen.interim_utterances and frame.text.strip():
+                await self._processor.send(
+                    {
+                        "type": "ConversationText",
+                        "role": "user",
+                        "content": " ".join([*self._turn_transcripts, frame.text]).strip(),
+                        "is_final": False,
+                    }
+                )
             return
         self._turn_transcripts.append(frame.text)
         self._turn_interim = ""
+        self._collect_search(frame.result)
+        self._note_stt_cursor(frame.result)
         result = frame.result if isinstance(frame.result, dict) else {}
         if getattr(frame.result, "from_finalize", False):
             # Every word heard before a v1 finalize is in.
@@ -679,6 +789,55 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             forced, self._processor.end_turn_forced = self._processor.end_turn_forced, False
             trigger = result.get("trigger") or ("manual" if forced else "model")
             await self._processor.send({"type": "EndOfTurn", "trigger": trigger})
+
+    def _collect_search(self, result: Any):
+        """Keep a v1 transcript's search hits, merged by query, for the turn."""
+        channel = getattr(result, "channel", None)
+        for search in _field(channel, "search") or []:
+            query = _field(search, "query")
+            if not query:
+                continue
+            entry = self._turn_search.setdefault(query, {"query": query, "hits": []})
+            for hit in _field(search, "hits") or []:
+                entry["hits"].append(
+                    {
+                        "confidence": _field(hit, "confidence", 0.0),
+                        "start": _field(hit, "start", 0.0),
+                        "end": _field(hit, "end", 0.0),
+                        "snippet": _field(hit, "snippet"),
+                    }
+                )
+
+    def _note_stt_cursor(self, result: Any):
+        """Note how far into the audio the STT has transcribed, for ``stt_latency``."""
+        if isinstance(result, dict):
+            cursor = result.get("audio_window_end")
+        else:
+            start, duration = getattr(result, "start", None), getattr(result, "duration", None)
+            cursor = start + duration if start is not None and duration is not None else None
+        if cursor is not None:
+            self._stt_cursor = float(cursor)
+
+    async def _flush_timed_segment(self):
+        """Send a timed segment's ``ConversationText``, with ``audio_timing``."""
+        if not self._timed_segment:
+            return
+        text, _, words = self._timed_segment
+        self._timed_segment = None
+        timing = []
+        for i, (word, start) in enumerate(words):
+            end = words[i + 1][1] if i + 1 < len(words) else start + 0.3
+            chars = word + (" " if i + 1 < len(words) else "")
+            step = (end - start) / len(chars)
+            for j, char in enumerate(chars):
+                timing.append(
+                    {
+                        "char": char,
+                        "start_time_ms": round((start + j * step) * 1000, 1),
+                        "duration_ms": round(step * 1000, 1),
+                    }
+                )
+        await self._processor.send_conversation_text("assistant", text, audio_timing=timing)
 
     async def _maybe_send_audio_done(self):
         """Send a held AgentAudioDone once the agent has nothing left to say."""
@@ -702,6 +861,13 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             return
         if isinstance(data.source, BaseOutputTransport):
             await self._on_output(data.frame)
+        if (
+            isinstance(data.frame, LLMContextFrame)
+            and data.source is self._processor.llm_input_gate
+        ):
+            # An inference starting (other context frames don't reach the LLM);
+            # warn if the LLM is slow to answer it.
+            await self._start_slowness_watch()
         frame = data.frame
         send = self._processor.send
         if not data.first_push:
@@ -726,6 +892,7 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                 # no AgentAudioDone of its own.
                 await send({"type": "AgentAudioDone"})
         elif isinstance(frame, InterruptionFrame):
+            await self._stop_slowness_watch()
             self._interrupted = True
             self._speaking_announced = False
             self._response_in_progress = False
@@ -738,15 +905,17 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             self._response_called_functions = False
             self._response_in_progress = True
         elif isinstance(frame, LLMTextFrame):
-            if self._first_text_time is None:
-                self._first_text_time = time.monotonic()
+            await self._on_first_llm_output(text=True)
             self._response_text += frame.text
         elif isinstance(frame, FunctionCallsStartedFrame):
             self._response_called_functions = True
+            await self._on_first_llm_output(text=False)
         elif isinstance(frame, LLMFullResponseEndFrame):
             text = self._response_text.strip()
             self._response_text = ""
             self._response_in_progress = False
+            if not text:
+                await self._stop_slowness_watch()
             if not text and not self._response_called_functions:
                 # Nothing will be spoken, so no audio will end.
                 await send({"type": "AgentAudioDone"})
@@ -783,6 +952,7 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             self._bot_speaking = True
             self._interrupted = False
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._flush_timed_segment()
             self._bot_speaking = False
             self._speaking_announced = False
             if not self._interrupted:
@@ -799,3 +969,10 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             "ttt_latency": max(0.0, first_text - turn_end),
             "tts_latency": max(0.0, now - first_text),
         }
+
+
+def _field(obj: Any, name: str, default: Any = None) -> Any:
+    """A field of an STT result part, which may be a model or a plain dict."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)

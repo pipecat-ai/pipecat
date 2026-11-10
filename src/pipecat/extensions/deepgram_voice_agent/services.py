@@ -76,12 +76,19 @@ class ProviderCredentials:
         openai_api_key: OpenAI API key, for ``think.provider.type == "open_ai"``.
         openai_base_url: OpenAI API base URL, e.g. for region-scoped keys.
         anthropic_api_key: Anthropic API key, for ``"anthropic"``.
+        cartesia_api_key: Cartesia API key, for a ``"cartesia"`` speak provider
+            whose endpoint carries none.
+        elevenlabs_api_key: ElevenLabs API key, likewise for ``"eleven_labs"``.
+        google_api_key: Google API key, for ``think.provider.type == "google"``.
     """
 
     deepgram_api_key: str
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     anthropic_api_key: str | None = None
+    cartesia_api_key: str | None = None
+    elevenlabs_api_key: str | None = None
+    google_api_key: str | None = None
 
 
 def _provider(stage: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -147,6 +154,20 @@ async def create_llm(
             ),
         )
 
+    if provider_type == "google":
+        if not credentials.google_api_key:
+            raise SettingsError("The google think provider is not configured on this server.")
+        from pipecat.services.google.llm import GoogleLLMService
+
+        return GoogleLLMService(
+            api_key=credentials.google_api_key,
+            settings=GoogleLLMService.Settings(
+                model=model,
+                system_instruction=system_instruction,
+                temperature=provider.get("temperature"),
+            ),
+        )
+
     raise SettingsError(f"Unsupported think provider: {provider_type}")
 
 
@@ -178,6 +199,9 @@ async def validate_think_update(
     elif provider_type == "anthropic":
         if not credentials.anthropic_api_key:
             raise SettingsError("The anthropic think provider is not configured on this server.")
+    elif provider_type == "google":
+        if not credentials.google_api_key:
+            raise SettingsError("The google think provider is not configured on this server.")
     else:
         raise SettingsError(f"Unsupported think provider: {provider_type}")
 
@@ -202,6 +226,36 @@ async def _check_openai_model(
         logger.warning(f"Could not check OpenAI model {model}: {e}")
 
 
+def _first_speak(speak: Any) -> Mapping[str, Any]:
+    if isinstance(speak, list):
+        speak = speak[0] if speak else None
+    return speak or {}
+
+
+def _endpoint(speak: Mapping[str, Any]) -> tuple[str | None, dict[str, str]]:
+    """The speak endpoint's URL and headers, checking the URL is one we can use."""
+    endpoint = speak.get("endpoint") or {}
+    url = endpoint.get("url")
+    headers = {str(k).lower(): str(v) for k, v in (endpoint.get("headers") or {}).items()}
+    if url is not None:
+        scheme = urlparse(url).scheme
+        if scheme not in ("https", "wss"):
+            raise SettingsError(f"Speak endpoints must use https or wss: {url}")
+    return url, headers
+
+
+def speak_provider_type(speak: Any) -> str:
+    """The provider type of ``agent.speak`` (or an ``UpdateSpeak``).
+
+    Args:
+        speak: The speak settings, an object or a list of them.
+
+    Returns:
+        The provider type, ``deepgram`` when none is given.
+    """
+    return _provider(_first_speak(speak)).get("type", "deepgram")
+
+
 def create_tts(
     speak: Any,
     *,
@@ -211,7 +265,10 @@ def create_tts(
 ) -> TTSService:
     """Create the TTS service for ``agent.speak``.
 
-    ``agent.speak`` may list fallback providers; the first is used.
+    ``agent.speak`` may list fallback providers; the first is used. Supported
+    providers are ``deepgram``, ``cartesia`` and ``eleven_labs``. A
+    third-party provider's API key comes from its ``endpoint`` headers, as in
+    the Voice Agent API, or else from the server's credentials.
 
     Args:
         speak: The ``agent.speak`` settings, an object or a list of them.
@@ -225,24 +282,172 @@ def create_tts(
     Raises:
         SettingsError: If the settings aren't supported.
     """
-    from pipecat.services.deepgram.tts import DeepgramHttpTTSService
+    speak = _first_speak(speak)
+    provider_type = speak_provider_type(speak)
+    filters: list[BaseTextFilter] = [StageDirectionFilter()]
+    if speak.get("additional_delay_ms_connect"):
+        filters.insert(0, ConnectDelayFilter(speak["additional_delay_ms_connect"] / 1000))
 
-    # One streamed HTTP request per utterance: Voice Agent sessions idle for long
-    # stretches, and an idle TTS WebSocket gets closed.
-    return DeepgramHttpTTSService(
-        api_key=credentials.deepgram_api_key,
+    if provider_type == "deepgram":
+        # Flux or Aura settings, by voice.
+        settings: Any = speak_settings(speak, default_voice=DEFAULT_SPEAK_MODEL)
+        if is_flux_voice(settings.voice):
+            from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
+
+            return DeepgramFluxTTSService(
+                api_key=credentials.deepgram_api_key,
+                sample_rate=sample_rate,
+                settings=settings,
+                text_filters=filters,
+            )
+
+        from pipecat.services.deepgram.tts import DeepgramHttpTTSService
+
+        # One streamed HTTP request per utterance: Voice Agent sessions idle for
+        # long stretches, and an idle TTS WebSocket gets closed.
+        return DeepgramHttpTTSService(
+            api_key=credentials.deepgram_api_key,
+            aiohttp_session=http_session,
+            sample_rate=sample_rate,
+            settings=settings,
+            text_filters=filters,
+        )
+
+    if provider_type == "cartesia":
+        return _create_cartesia_tts(speak, credentials, http_session, sample_rate, filters)
+
+    if provider_type == "eleven_labs":
+        return _create_eleven_labs_tts(speak, credentials, sample_rate, filters)
+
+    raise SettingsError(f"Unsupported speak provider: {provider_type}")
+
+
+def _cartesia_extra(provider: Mapping[str, Any]) -> dict[str, Any]:
+    """Cartesia request fields for ``speed`` and ``volume``.
+
+    sonic-3 and later take both in ``generation_config``, as a multiplier
+    (presets map onto it); older models take ``speed`` at the top level, as a
+    preset or -1 to 1.
+    """
+    model = provider.get("model_id") or provider.get("model") or ""
+    legacy = model.startswith(("sonic-2", "sonic-english", "sonic-multilingual", "sonic-turbo"))
+    extra: dict[str, Any] = {}
+    generation_config: dict[str, Any] = {}
+    speed = provider.get("speed")
+    if speed is not None:
+        if legacy and _valid_legacy_cartesia_speed(speed):
+            extra["speed"] = speed
+        else:
+            # generation_config takes a multiplier; presets map onto its range.
+            # Cartesia ignores an invalid top-level speed but rejects an invalid
+            # generation_config one, so an invalid value fails the request.
+            generation_config["speed"] = _CARTESIA_SPEED_PRESETS.get(speed, speed)
+    if provider.get("volume") is not None:
+        generation_config["volume"] = provider["volume"]
+    if generation_config:
+        extra["generation_config"] = generation_config
+    return extra
+
+
+_CARTESIA_SPEED_PRESETS = {"slowest": 0.6, "slow": 0.8, "normal": 1.0, "fast": 1.2, "fastest": 1.5}
+
+
+def _valid_legacy_cartesia_speed(speed: Any) -> bool:
+    """Whether a speed is valid on the legacy scale: a preset, or -1 to 1."""
+    if isinstance(speed, str) and speed in _CARTESIA_SPEED_PRESETS:
+        return True
+    try:
+        return -1.0 <= float(speed) <= 1.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _create_cartesia_tts(speak, credentials, http_session, sample_rate, filters) -> TTSService:
+    from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSService
+
+    provider = _provider(speak)
+    url, headers = _endpoint(speak)
+    api_key = headers.get("x-api-key") or credentials.cartesia_api_key
+    if not api_key:
+        raise SettingsError("The cartesia speak provider needs an X-API-Key endpoint header.")
+    voice = (provider.get("voice") or {}).get("id")
+    model = provider.get("model_id") or provider.get("model")
+    language = provider.get("language")
+    if url and urlparse(url).scheme == "wss":
+        if provider.get("speed") is not None:
+            raise SettingsError("Cartesia speed is only supported on its batch (https) endpoint.")
+        return CartesiaTTSService(
+            api_key=api_key,
+            url=url,
+            sample_rate=sample_rate,
+            settings=CartesiaTTSService.Settings(model=model, voice=voice, language=language),
+            text_filters=filters,
+        )
+    base_url = "https://api.cartesia.ai"
+    if url:
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+    return CartesiaHttpTTSService(
+        api_key=api_key,
+        base_url=base_url,
         aiohttp_session=http_session,
         sample_rate=sample_rate,
-        settings=speak_settings(speak, default_voice=DEFAULT_SPEAK_MODEL),
-        text_filters=[StageDirectionFilter()],
+        settings=CartesiaHttpTTSService.Settings(
+            model=model, voice=voice, language=language, extra=_cartesia_extra(provider)
+        ),
+        text_filters=filters,
+    )
+
+
+def eleven_labs_voice(url: str | None) -> str:
+    """The voice in an ElevenLabs ``multi-stream-input`` endpoint URL.
+
+    Args:
+        url: The endpoint URL.
+
+    Returns:
+        The voice ID.
+
+    Raises:
+        SettingsError: If the URL isn't a ``multi-stream-input`` endpoint.
+    """
+    path = [part for part in urlparse(url or "").path.split("/") if part]
+    if len(path) < 2 or path[-1] != "multi-stream-input":
+        raise SettingsError(
+            "ElevenLabs speak endpoints must end with /multi-stream-input, which supports barge-in."
+        )
+    return path[-2]
+
+
+def _create_eleven_labs_tts(speak, credentials, sample_rate, filters) -> TTSService:
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+    provider = _provider(speak)
+    url, headers = _endpoint(speak)
+    api_key = headers.get("xi-api-key") or credentials.elevenlabs_api_key
+    if not api_key:
+        raise SettingsError("The eleven_labs speak provider needs an xi-api-key endpoint header.")
+    voice = eleven_labs_voice(url)
+    parsed = urlparse(url or "")
+    fields: dict[str, Any] = {"model": provider.get("model_id"), "voice": voice}
+    if provider.get("language_code"):
+        fields["language"] = str(provider["language_code"]).split("-")[0]
+    if provider.get("speed") is not None:
+        fields["speed"] = float(provider["speed"])
+    return ElevenLabsTTSService(
+        api_key=api_key,
+        url=f"{parsed.scheme}://{parsed.netloc}",
+        sample_rate=sample_rate,
+        settings=ElevenLabsTTSService.Settings(**fields),
+        text_filters=filters,
     )
 
 
 def speak_settings(speak: Any, *, default_voice: str | None = None):
-    """Check ``agent.speak`` (or an ``UpdateSpeak``) and build the TTS settings for it.
+    """Check Deepgram speak settings and build the TTS settings for them.
 
-    ``speak`` may list fallback providers; the first is used. Only the
-    ``deepgram`` provider, without a custom ``endpoint``, is supported.
+    Used for ``agent.speak`` with the ``deepgram`` provider, and for an
+    ``UpdateSpeak`` to it. A custom Deepgram ``endpoint`` isn't supported.
 
     Args:
         speak: The speak settings, an object or a list of them.
@@ -256,22 +461,123 @@ def speak_settings(speak: Any, *, default_voice: str | None = None):
     """
     from pipecat.services.deepgram.tts import DeepgramHttpTTSService
 
-    if isinstance(speak, list):
-        speak = speak[0] if speak else None
-    speak = speak or {}
-    if speak.get("endpoint"):
-        raise SettingsError("Custom speak endpoints aren't supported.")
+    speak = _first_speak(speak)
+    url, _ = _endpoint(speak)
+    if url:
+        raise SettingsError("Custom Deepgram speak endpoints aren't supported.")
     provider = _provider(speak)
     provider_type = provider.get("type", "deepgram")
     if provider_type != "deepgram":
         raise SettingsError(f"Unsupported speak provider: {provider_type}")
     voice = provider.get("model") or default_voice
+    expressivity = provider.get("expressivity")
+    if expressivity is not None:
+        if not is_flux_voice(voice):
+            raise SettingsError(
+                f"`expressivity` is only supported on Deepgram Flux voices, not {voice}."
+            )
+        if not isinstance(expressivity, int) or not -2 <= expressivity <= 2:
+            raise SettingsError(f"`expressivity` must be an integer from -2 to 2: {expressivity}")
+    if is_flux_voice(voice):
+        from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
+
+        flux_fields: dict[str, Any] = {"voice": voice}
+        if expressivity is not None:
+            flux_fields["expressivity"] = expressivity
+        return DeepgramFluxTTSService.Settings(**flux_fields)
     fields: dict[str, Any] = {}
     if voice:
         fields["voice"] = voice
     if provider.get("speed") is not None:
         fields["speed"] = float(provider["speed"])
     return DeepgramHttpTTSService.Settings(**fields)
+
+
+def is_flux_voice(voice: str | None) -> bool:
+    """Whether a Deepgram speak voice is a Flux one (streamed over ``/v2/speak``).
+
+    Args:
+        voice: The voice (``agent.speak.provider.model``).
+
+    Returns:
+        Whether it is.
+    """
+    return bool(voice) and str(voice).startswith("flux-")
+
+
+def speak_update(speak: Any, *, current_type: str):
+    """Build the TTS settings delta for an ``UpdateSpeak``.
+
+    The update must keep the session's provider; it may change the voice or
+    model, and speed where the provider has it.
+
+    Args:
+        speak: The ``speak`` settings from the ``UpdateSpeak``.
+        current_type: The session's speak provider type.
+
+    Returns:
+        The TTS settings delta.
+
+    Raises:
+        SettingsError: If the update isn't supported.
+    """
+    speak = _first_speak(speak)
+    provider_type = speak_provider_type(speak)
+    if provider_type != current_type:
+        raise SettingsError(
+            f"UpdateSpeak can't change the speak provider from {current_type} to {provider_type}."
+        )
+    if provider_type == "deepgram":
+        return speak_settings(speak)
+    provider = _provider(speak)
+    url, _ = _endpoint(speak)
+    if provider_type == "cartesia":
+        from pipecat.services.cartesia.tts import CartesiaHttpTTSService
+
+        fields: dict[str, Any] = {}
+        if (provider.get("voice") or {}).get("id"):
+            fields["voice"] = provider["voice"]["id"]
+        if provider.get("model_id"):
+            fields["model"] = provider["model_id"]
+        if _cartesia_extra(provider):
+            fields["extra"] = _cartesia_extra(provider)
+        return CartesiaHttpTTSService.Settings(**fields)
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+    fields = {}
+    if url:
+        fields["voice"] = eleven_labs_voice(url)
+    if provider.get("model_id"):
+        fields["model"] = provider["model_id"]
+    return ElevenLabsTTSService.Settings(**fields)
+
+
+class ConnectDelayFilter(BaseTextFilter):
+    """Waits before each synthesis request, for ``additional_delay_ms_connect``.
+
+    The Voice Agent API lets a client add this delay to the speak connection,
+    to exercise its handling of a slow TTS provider.
+    """
+
+    def __init__(self, delay_secs: float):
+        """Initialize the filter.
+
+        Args:
+            delay_secs: How long to wait.
+        """
+        self._delay_secs = delay_secs
+
+    async def filter(self, text: str) -> str:
+        """Wait, then pass the text on unchanged.
+
+        Args:
+            text: The text to speak.
+
+        Returns:
+            The same text.
+        """
+        await asyncio.sleep(self._delay_secs)
+        return text
 
 
 class StageDirectionFilter(BaseTextFilter):
@@ -510,6 +816,9 @@ __all__ = [
     "create_tts",
     "endpoint_function_handler",
     "speak_settings",
+    "speak_update",
+    "speak_provider_type",
+    "eleven_labs_voice",
     "validate_think_update",
     "StageDirectionFilter",
     "function_schemas",

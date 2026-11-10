@@ -140,6 +140,8 @@ class DeepgramListen:
         switcher: The switcher holding both; it goes in the pipeline.
         active: The service currently listening.
         settings: Each service's current provider settings, by Voice Agent name.
+        interim_utterances: Whether to report the user's words as they come.
+        verbose: Whether to report word details, such as search hits.
     """
 
     v1: DeepgramV1STTService
@@ -147,6 +149,8 @@ class DeepgramListen:
     switcher: ServiceSwitcher
     active: STTService
     settings: dict[STTService, dict[str, Any]] = field(default_factory=dict)
+    interim_utterances: bool = False
+    verbose: bool = False
 
     def service_for(self, model: str) -> STTService:
         """The service that serves a model.
@@ -194,9 +198,11 @@ def create_listen(
         tag=tags,
         settings=DeepgramSTTService.Settings(
             model=v1_settings.get("model") or DEFAULT_V1_MODEL,
+            language=v1_settings.get("language") or None,
             smart_format=True,
             interim_results=True,
             keyterm=v1_settings.get("keyterms") or None,
+            search=v1_settings.get("search") or None,
         ),
     )
     v2 = DeepgramFluxSTTService(
@@ -221,6 +227,8 @@ def create_listen(
         v2=v2,
         switcher=switcher,
         active=active,
+        interim_utterances=bool(provider.get("interim_utterances")),
+        verbose=bool(provider.get("verbose")),
         settings={v1: _known(v1_settings, v1=True), v2: _known(v2_settings, v1=False)},
     )
 
