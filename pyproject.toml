@@ -28,7 +28,6 @@ classifiers = [
 dependencies = [
     "aiofiles>=24.1.0,<27",
     "aiohttp>=3.14.4,<4",
-    "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
     "loudness>=0.2.0,<1",
@@ -235,9 +234,6 @@ addopts = "--verbose -n auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
-filterwarnings = [
-    "ignore:'audioop' is deprecated:DeprecationWarning",
-]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
