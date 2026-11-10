@@ -211,7 +211,9 @@ class DeepgramVoiceAgentServer:
         processor = DeepgramVoiceAgentProcessor(
             system_instruction=prompt, greeting=agent.get("greeting")
         )
-        observer = DeepgramVoiceAgentObserver(processor)
+        observer = DeepgramVoiceAgentObserver(
+            processor, experimental=bool(settings.get("experimental"))
+        )
         processor.listen_updater = DeepgramListenUpdater(
             listen,
             send=processor.send,

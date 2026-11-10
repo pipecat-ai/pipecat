@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ClientFunctionCallRequestFrame,
@@ -36,11 +37,12 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
-    TTSStartedFrame,
+    TTSTextFrame,
     TTSUpdateSettingsFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -48,6 +50,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings, TTSSettings
+from pipecat.transports.base_output import BaseOutputTransport
 
 if TYPE_CHECKING:
     from pipecat.extensions.deepgram_voice_agent.listen import DeepgramListenUpdater
@@ -59,6 +62,8 @@ UNPARSABLE_CLIENT_MESSAGE = "UNPARSABLE_CLIENT_MESSAGE"
 INVALID_SETTINGS = "INVALID_SETTINGS"
 UNSUPPORTED_UPDATE = "UNSUPPORTED_UPDATE"
 PIPELINE_ERROR = "PIPELINE_ERROR"
+INJECT_AGENT_MESSAGE_DURING_USER_SPEECH = "INJECT_AGENT_MESSAGE_DURING_USER_SPEECH"
+INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH = "INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH"
 
 CLIENT_MESSAGE_TYPES = {
     "Settings",
@@ -137,6 +142,17 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
             message: The JSON-serializable message.
         """
         await self.push_frame(OutputTransportMessageUrgentFrame(message=message))
+
+    async def send_conversation_text(self, role: str, content: str, **fields: Any):
+        """Send a ``ConversationText`` and the ``History`` entry that goes with it.
+
+        Args:
+            role: ``user`` or ``assistant``.
+            content: The text.
+            **fields: Additional ``ConversationText`` fields.
+        """
+        await self.send({"type": "ConversationText", "role": role, "content": content, **fields})
+        await self.send({"type": "History", "role": role, "content": content})
 
     async def close_with_error(self, code: str, description: str):
         """Report a protocol error to the client and end the session.
@@ -219,7 +235,9 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
             case "InjectUserMessage":
                 await self._inject_user_message(message["content"])
             case "InjectAgentMessage":
-                await self._speak_as_agent(message.get("content", message.get("message", "")))
+                await self._inject_agent_message(
+                    message.get("content", message.get("message", "")), message.get("behavior")
+                )
             case "FunctionCallResponse":
                 await self.push_frame(
                     ClientFunctionCallResultFrame(
@@ -258,16 +276,48 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
         if self.on_turn_end:
             self.on_turn_end()
         # An injected message is a new user turn: it barges in on whatever the
-        # agent is saying or about to say.
+        # agent is saying or about to say, which ends the agent's turn.
+        was_speaking = self._agent_speaking
         await self.send({"type": "UserStartedSpeaking"})
         await self.broadcast_interruption()
-        await self.send({"type": "ConversationText", "role": "user", "content": content})
+        if was_speaking:
+            await self.send({"type": "AgentAudioDone"})
+        await self.send_conversation_text("user", content)
         await self.push_frame(
             LLMMessagesAppendFrame([{"role": "user", "content": content}], run_llm=True)
         )
 
+    async def _inject_agent_message(self, content: str, behavior: str | None):
+        """Speak a message as the agent, by the Voice Agent API's rules.
+
+        Without a ``behavior`` the message is refused while anyone is speaking.
+        ``queue`` waits for the agent's current speech (a barge-in drops it) and
+        is refused while the user speaks. ``interrupt`` cuts the agent off.
+        """
+        if self._user_speaking and behavior != "interrupt":
+            await self.send(
+                error_message(
+                    INJECT_AGENT_MESSAGE_DURING_USER_SPEECH,
+                    "The agent can't speak while the user is speaking.",
+                    warning=True,
+                )
+            )
+            return
+        if self._agent_speaking and behavior is None:
+            await self.send(
+                error_message(
+                    INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH,
+                    "The agent is already speaking.",
+                    warning=True,
+                )
+            )
+            return
+        if behavior == "interrupt":
+            await self.broadcast_interruption()
+        await self._speak_as_agent(content)
+
     async def _speak_as_agent(self, text: str):
-        await self.send({"type": "ConversationText", "role": "assistant", "content": text})
+        # The observer reports the text once its audio starts.
         await self.push_frame(TTSSpeakFrame(text))
 
 
@@ -279,27 +329,39 @@ class DeepgramVoiceAgentObserver(BaseObserver):
     - ``UserStartedSpeaking`` when a user turn starts.
     - ``ConversationText`` (``user``) when a user turn ends, with the turn's
       final transcripts and, from Flux, the detected ``languages``.
-    - ``ConversationText`` (``assistant``) with each LLM response's text.
+    - ``ConversationText`` (``assistant``) for each spoken segment, right after
+      its first audio reaches the client, as in the Voice Agent API. A segment ends where its ``TTSTextFrame`` follows its
+      audio out of the transport, so this needs a TTS service that reports text
+      per segment (one without word timestamps).
+    - A ``History`` entry after each ``ConversationText``.
     - ``FunctionCallRequest`` for each client function call.
-    - ``AgentStartedSpeaking`` with latencies, ahead of the audio, and
-      ``AgentAudioDone`` when the audio ends (not when an interruption cuts it).
+    - ``AgentStartedSpeaking`` with latencies, after a turn's first
+      ``ConversationText`` (only for an ``experimental`` session, as in the Voice
+      Agent API), and ``AgentAudioDone``
+      once the agent has nothing left to say, or right after
+      ``UserStartedSpeaking`` when the user barges in.
     """
 
-    def __init__(self, processor: DeepgramVoiceAgentProcessor, **kwargs):
+    def __init__(
+        self, processor: DeepgramVoiceAgentProcessor, *, experimental: bool = False, **kwargs
+    ):
         """Initialize the observer.
 
         Args:
             processor: The processor that sends messages to the client.
+            experimental: The ``Settings`` ``experimental`` flag. The Voice Agent
+                API sends ``AgentStartedSpeaking`` only when it is set.
             **kwargs: Additional arguments passed to :class:`BaseObserver`.
         """
         super().__init__(**kwargs)
         self._processor = processor
         self._processor.on_turn_end = self._mark_turn_end
+        self._experimental = experimental
         self._response_text = ""
         self._response_called_functions = False
         # Audio cut short by an interruption doesn't end with AgentAudioDone.
         self._interrupted = False
-        # AgentStartedSpeaking goes out once per agent turn, ahead of its audio.
+        # AgentStartedSpeaking goes out once per agent turn.
         self._speaking_announced = False
         self._turn_end_time: float | None = None
         self._first_text_time: float | None = None
@@ -308,6 +370,15 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._turn_languages: list[str] | None = None
         # Returns the listen language hints in effect, for ``languages_hinted``.
         self.languages_hinted: Callable[[], list[str] | None] = lambda: None
+        # The text of the segment whose audio the transport is about to send,
+        # announced with that audio's first chunk.
+        self._next_segment_text: str | None = None
+        # Segments the TTS has started that haven't finished reaching the client.
+        self._open_segments = 0
+        self._bot_speaking = False
+        self._response_in_progress = False
+        # AgentAudioDone held back until the agent has nothing left to say.
+        self._audio_done_pending = False
 
     def _mark_turn_end(self):
         self._turn_end_time = time.monotonic()
@@ -318,11 +389,48 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._turn_transcripts = []
         if not content:
             return
-        message: dict[str, Any] = {"type": "ConversationText", "role": "user", "content": content}
+        fields: dict[str, Any] = {}
         if self._turn_languages is not None:
-            message["languages"] = self._turn_languages
-            message["languages_hinted"] = self.languages_hinted()
-        await self._processor.send(message)
+            fields["languages"] = self._turn_languages
+            fields["languages_hinted"] = self.languages_hinted()
+        await self._processor.send_conversation_text("user", content, **fields)
+
+    async def _on_output(self, frame: Frame):
+        """Follow spoken segments as the output transport sends them on.
+
+        A TTS service pushes each segment's text (an ``AggregatedTextFrame``
+        that will be spoken) ahead of its audio, and a ``TTSTextFrame`` after
+        it; the transport sends them on in that order, and drops what an
+        interruption cuts. So the text is announced with the segment's first
+        audio, as in the Voice Agent API.
+        """
+        if isinstance(frame, TTSTextFrame):
+            self._open_segments = max(0, self._open_segments - 1)
+            await self._maybe_send_audio_done()
+        elif isinstance(frame, AggregatedTextFrame):
+            if frame.will_be_spoken and frame.text.strip():
+                self._next_segment_text = frame.text.strip()
+        elif isinstance(frame, OutputAudioRawFrame) and self._next_segment_text:
+            text, self._next_segment_text = self._next_segment_text, None
+            await self._processor.send_conversation_text("assistant", text)
+            if not self._speaking_announced:
+                self._speaking_announced = True
+                if self._experimental:
+                    await self._processor.send(
+                        {"type": "AgentStartedSpeaking", **self._latencies()}
+                    )
+        elif isinstance(frame, InterruptionFrame):
+            self._next_segment_text = None
+            self._open_segments = 0
+
+    async def _maybe_send_audio_done(self):
+        """Send a held AgentAudioDone once the agent has nothing left to say."""
+        if not self._audio_done_pending or self._bot_speaking:
+            return
+        if self._open_segments or self._response_in_progress:
+            return
+        self._audio_done_pending = False
+        await self._processor.send({"type": "AgentAudioDone"})
 
     async def on_push_frame(self, data: FramePushed):
         """Translate pipeline frames into Voice Agent events.
@@ -330,15 +438,30 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         Args:
             data: The frame push event.
         """
-        if data.direction != FrameDirection.DOWNSTREAM or not data.first_push:
+        if data.direction != FrameDirection.DOWNSTREAM:
+            return
+        if isinstance(data.source, BaseOutputTransport):
+            await self._on_output(data.frame)
+        if not data.first_push:
             return
         frame = data.frame
         send = self._processor.send
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if (
+            isinstance(frame, AggregatedTextFrame)
+            and not isinstance(frame, TTSTextFrame)
+            and frame.will_be_spoken
+        ):
+            # The TTS starting a segment.
+            self._open_segments += 1
+        elif isinstance(frame, UserStartedSpeakingFrame):
             self._turn_transcripts = []
             self._turn_languages = None
             await send({"type": "UserStartedSpeaking"})
+            if self._bot_speaking:
+                # Barging in ends the agent's turn; its cut-off audio sends
+                # no AgentAudioDone of its own.
+                await send({"type": "AgentAudioDone"})
         elif isinstance(frame, TranscriptionFrame):
             self._turn_transcripts.append(frame.text)
             result = frame.result if isinstance(frame.result, dict) else {}
@@ -347,12 +470,15 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         elif isinstance(frame, InterruptionFrame):
             self._interrupted = True
             self._speaking_announced = False
+            self._response_in_progress = False
+            self._audio_done_pending = False
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._mark_turn_end()
             await self._send_user_text()
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._response_text = ""
             self._response_called_functions = False
+            self._response_in_progress = True
         elif isinstance(frame, LLMTextFrame):
             if self._first_text_time is None:
                 self._first_text_time = time.monotonic()
@@ -362,11 +488,12 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         elif isinstance(frame, LLMFullResponseEndFrame):
             text = self._response_text.strip()
             self._response_text = ""
-            if text:
-                await send({"type": "ConversationText", "role": "assistant", "content": text})
-            elif not self._response_called_functions:
+            self._response_in_progress = False
+            if not text and not self._response_called_functions:
                 # Nothing will be spoken, so no audio will end.
                 await send({"type": "AgentAudioDone"})
+            else:
+                await self._maybe_send_audio_done()
         elif isinstance(frame, ClientFunctionCallRequestFrame):
             await send(
                 {
@@ -381,16 +508,16 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                     ],
                 }
             )
-        elif isinstance(frame, TTSStartedFrame) and not self._speaking_announced:
-            # Synthesis starting, not playback: the client hears about the turn
-            # before its first audio arrives.
-            self._speaking_announced = True
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
             self._interrupted = False
-            await send({"type": "AgentStartedSpeaking", **self._latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
             self._speaking_announced = False
             if not self._interrupted:
-                await send({"type": "AgentAudioDone"})
+                # Held until any segments still queued have been spoken too.
+                self._audio_done_pending = True
+                await self._maybe_send_audio_done()
 
     def _latencies(self) -> dict[str, float]:
         now = time.monotonic()
