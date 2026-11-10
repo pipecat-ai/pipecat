@@ -199,25 +199,35 @@ class TruncationTokenLimits(BaseModel):
     """Custom token limits for a retention-ratio truncation strategy.
 
     Parameters:
-        post_instructions: Maximum tokens allowed in the conversation after
-            instructions (which include tool definitions). Cannot exceed the
-            model's context window minus the maximum output tokens.
+        post_instructions: Maximum input tokens a response may use for the
+            conversation after the instructions (which include tool
+            definitions). Setting it below the model's own limit caps each
+            response's token usage, and so its cost, at the price of the model
+            seeing less of the conversation. Cannot exceed the model's context
+            window minus the maximum output tokens.
     """
 
     post_instructions: int | None = None
 
 
 class TruncationRetentionRatio(BaseModel):
-    """Retain a fraction of the conversation when it exceeds the input token limit.
+    """Truncation that drops more of the conversation than needed, to truncate less often.
 
-    Amortizing truncation across turns keeps more of the prompt cache intact
-    than dropping only as much as each turn requires.
+    Once the conversation outgrows the input token limit, the server drops the
+    oldest messages until ``retention_ratio`` of the limit is left, leaving
+    headroom before the next truncation. The ``"auto"`` strategy instead drops
+    only as many as each response needs, so a session past the limit truncates
+    on every turn. Every truncation changes the start of the conversation and
+    so invalidates the prompt cache; truncating less often keeps more input
+    cached, which OpenAI recommends for lowering the cost of long sessions.
+    The model sees less of the conversation after each truncation.
 
     Parameters:
         type: Truncation strategy, always "retention_ratio".
-        retention_ratio: Fraction of post-instruction conversation tokens to
-            retain (0.0-1.0). 0.8 drops messages until 80% of the maximum
-            allowed tokens are used.
+        retention_ratio: Fraction of the token limit to keep after truncating
+            (0.0-1.0). 0.8, the value OpenAI's guidance uses, drops messages
+            until 80% of the limit is used. 1.0 drops only what is necessary,
+            like ``"auto"``.
         token_limits: Custom token limits for this strategy. Defaults to the
             model's own limits.
     """
@@ -249,10 +259,15 @@ class SessionProperties(BaseModel):
         include: Additional fields to include in server outputs.
         reasoning: Reasoning configuration. Only supported by reasoning-capable
             Realtime models such as ``gpt-realtime-2``.
-        truncation: How the conversation is truncated once it exceeds the
-            model's input token limit: ``"auto"``, ``"disabled"`` (the server
-            errors instead of truncating), or a
-            :class:`TruncationRetentionRatio`.
+        truncation: What the server does once the conversation outgrows the
+            model's input token limit, which only long sessions reach.
+            ``"auto"`` (the server's default) drops the oldest messages, only
+            as many as each response needs. A
+            :class:`TruncationRetentionRatio` drops more at once so it
+            truncates less often, which keeps more input in the prompt cache
+            and lowers the cost of long sessions. ``"disabled"`` returns an
+            error instead, for applications that manage the conversation's
+            size themselves.
     """
 
     # Needed to support ToolSchema in tools field.

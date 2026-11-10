@@ -50,3 +50,20 @@ def test_parse_session_updated_with_unmodeled_transcription_fields():
     parsed = evt.session.audio.input.transcription
     assert parsed.model == "gpt-live-transcribe"
     assert parsed.languages == ["en", "es"]
+
+
+def test_session_update_serializes_retention_ratio_truncation():
+    session = events.SessionProperties(
+        truncation=events.TruncationRetentionRatio(
+            retention_ratio=0.8,
+            token_limits=events.TruncationTokenLimits(post_instructions=8000),
+        )
+    )
+
+    dump = events.SessionUpdateEvent(session=session).model_dump(exclude_none=True)
+
+    assert dump["session"]["truncation"] == {
+        "type": "retention_ratio",
+        "retention_ratio": 0.8,
+        "token_limits": {"post_instructions": 8000},
+    }
