@@ -43,6 +43,40 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_delimiter_lengths(self):
+        cases = {
+            "Use ``__init__`` here.": "Use __init__ here.",
+            "Use ``a ` b`` here.": "Use a ` b here.",
+            "Use `a `` b` here.": "Use a `` b here.",
+            "``one ` two`` and `three`": "one ` two and three",
+            "**bold ``a ` b``** end": "bold a ` b end",
+            "``first\nsecond``": "first\nsecond",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
+    async def test_double_backtick_code_keeps_link_markup(self):
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in (
+                ("``[label](url)``", "[label](url)"),
+                ("``![alt](image.png)``", "![alt](image.png)"),
+            ):
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_unmatched_code_delimiters(self):
+        for text in ("Use ``unclosed` here.", "Use `unclosed`` here.", "Use ``unclosed here."):
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), text)
+
+    async def test_fenced_code_with_backticks_removed(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                text = f"Before {fence}python\nvalue = `code`\n{fence} after ``shown``."
+                self.assertEqual(await strip_markdown(text, "*"), "Before  after shown.")
+
     async def test_inline_code_content_kept(self):
         cases = {
             "call `__init__` please": "call __init__ please",
