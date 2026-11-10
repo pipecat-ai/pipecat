@@ -9,7 +9,7 @@
 import asyncio
 import re
 import time
-from collections.abc import Coroutine, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
 
 from loguru import logger
@@ -232,18 +232,21 @@ class PerceptionReader(FrameProcessor):
             raise ValueError(f"{self} needs at least one source")
         if len({id(source.classifier) for source in sources}) < len(sources):
             raise ValueError(f"{self}: a classifier goes in one source, with all its questions")
+        names = [name for source in sources for name in source.names]
+        if clash := next((name for name in names if names.count(name) > 1), None):
+            raise ValueError(
+                f"{self}: two sources report {clash!r}, and a reading has one signal of a name"
+            )
         # Who to ask: the sources that read transcriptions, and the ones that hear.
         self._sources = list(sources)
         self._text_sources = [s for s in self._sources if not s.classifier.supports_audio]
         self._audio_sources = [s for s in self._sources if s.classifier.supports_audio]
-        if clash := self._name_clash():
-            raise ValueError(clash)
         # The bot's last reply, which the user's turn is read against.
         self._previous: str | None = None
         # For the sources that hear: the user's recent audio, and their reads
         # of the clips that end with the user's latest speech.
         self._audio = _RecentAudio([source.classifier for source in self._audio_sources])
-        self._clip_reads: _ClipReads | None = None
+        self._clip_reads: _Reads | None = None
         # Transcriptions held until their speech is read, and the task that
         # pushes them on once the STT's latency has passed.
         self._held: list[_HeldTranscription] = []
@@ -258,15 +261,6 @@ class PerceptionReader(FrameProcessor):
     def sources(self) -> list[PerceptionSource]:
         """The classifiers asked about each turn, each with its questions."""
         return list(self._sources)
-
-    @property
-    def questions(self) -> dict[str, PerceptionQuestion]:
-        """The questions asked about each turn, by the name of the signal each reports."""
-        return {
-            name: question
-            for source in self._sources
-            for name, question in source.questions.items()
-        }
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor and its classifiers.
@@ -349,20 +343,13 @@ class PerceptionReader(FrameProcessor):
 
     async def _hold_transcription(self, frame: TranscriptionFrame):
         # The text sources read it while it waits for its speech to be heard.
-        reads = {
-            source: self._start_read(self._read_text(source, frame.text))
-            for source in self._text_sources
-        }
-        self._held.append(_HeldTranscription(frame, reads))
+        self._held.append(_HeldTranscription(frame, self._read_text(frame.text)))
         if not self._release_task:
             self._release_task = self.create_task(self._release_transcriptions())
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         if frame.text.strip() and self.is_usable:
-            readings = await asyncio.gather(
-                *(self._read_text(source, frame.text) for source in self._text_sources)
-            )
-            frame.perception = self._reading(dict(zip(self._text_sources, readings)))
+            frame.perception = self._reading(await self._wait(self._read_text(frame.text)))
 
     async def _handle_stt_metadata(self, frame: STTMetadataFrame):
         self._stt_latency = frame.ttfs_p99_latency
@@ -397,11 +384,12 @@ class PerceptionReader(FrameProcessor):
             )
 
     def _capabilities(self) -> PerceptionCapabilities:
-        """The signals the reader reports, from its questions."""
+        """The signals the reader reports, from its sources' questions."""
         return PerceptionCapabilities(
             signals=[
                 PerceptionTerm(name, question.description, labels=self._labels(question.question))
-                for name, question in self.questions.items()
+                for source in self._sources
+                for name, question in source.questions.items()
             ]
         )
 
@@ -409,28 +397,11 @@ class PerceptionReader(FrameProcessor):
         """The labels a signal can report: a choice's options, or none."""
         return list(question.options) if isinstance(question, ChoiceQuestion) else []
 
-    async def _read_text(
-        self, source: PerceptionSource, text: str
-    ) -> list[PerceptionSignal] | None:
-        """A source's reading of a transcription, or None when it's late or its classifier fails."""
-        questions = source.questions
+    def _read_text(self, text: str) -> "_Reads":
+        """Start each text source's read of a transcription, with the bot's reply before it."""
         state = {"assistant": self._previous, "user": text} if self._previous else {"user": text}
-        signals = None
-        try:
-            results = await asyncio.wait_for(
-                source.classifier.ask(state, self._classifier_questions(questions)),
-                source.timeout,
-            )
-            signals = self._signals(results, questions)
-            await self.broadcast_frame(PerceptionFrame, perception=signals)
-        except TimeoutError:
-            logger.warning(
-                f"{self}: no reading from {source.classifier} after {source.timeout}s, "
-                "the turn goes on without it"
-            )
-        except ClassifierError as e:
-            await self.push_error(f"{self}: {e}", e)
-        return signals
+        reads = {source: self._start_read(source, state) for source in self._text_sources}
+        return _Reads(time.monotonic(), reads)
 
     def _read_speech(self):
         """Start each audio source's read of the clip that ends with the speech just finished."""
@@ -448,32 +419,37 @@ class PerceptionReader(FrameProcessor):
                     f"{self}: {source.classifier} is reading {clip.duration_secs:.1f}s "
                     "of the user's audio"
                 )
-                reads[source] = self._start_read(self._read_audio(source, state, clip))
+                reads[source] = self._start_read(source, state, [clip])
         if reads:
-            self._clip_reads = _ClipReads(ended_at, reads)
+            self._clip_reads = _Reads(ended_at, reads)
 
-    async def _read_audio(
-        self, source: PerceptionSource, state: dict[str, Any], clip: ClassifierAudio
+    def _start_read(
+        self,
+        source: PerceptionSource,
+        state: dict[str, Any],
+        inputs: Sequence[ClassifierAudio] = (),
+    ) -> asyncio.Task:
+        """Start a source's read in a task of its own, kept until it's done so cleanup can stop it."""
+        task = self.create_task(self._read(source, state, inputs))
+        self._reads.add(task)
+        task.add_done_callback(self._reads.discard)
+        return task
+
+    async def _read(
+        self, source: PerceptionSource, state: dict[str, Any], inputs: Sequence[ClassifierAudio]
     ) -> list[PerceptionSignal] | None:
-        """A source's reading of a clip, broadcast once made, or None when its classifier fails."""
+        """A source's reading, broadcast once made, late or not, or None when its classifier fails."""
         questions = source.questions
         signals = None
         try:
             results = await source.classifier.ask(
-                state, self._classifier_questions(questions), inputs=[clip]
+                state, self._classifier_questions(questions), inputs=inputs
             )
             signals = self._signals(results, questions)
             await self.broadcast_frame(PerceptionFrame, perception=signals)
         except ClassifierError as e:
             await self.push_error(f"{self}: {e}", e)
         return signals
-
-    def _start_read(self, read: Coroutine[Any, Any, list[PerceptionSignal] | None]) -> asyncio.Task:
-        """Run a read in a task of its own, kept until it's done so cleanup can stop it."""
-        task = self.create_task(read)
-        self._reads.add(task)
-        task.add_done_callback(self._reads.discard)
-        return task
 
     async def _release_transcriptions(self):
         """Push the held transcriptions on with the reading, in order."""
@@ -487,9 +463,9 @@ class PerceptionReader(FrameProcessor):
         """Push the transcriptions of the user's speech on together, once it's over and read."""
         speech_end = await self._wait_for_speech_end()
         held, self._held = self._held, []
-        heard = await self._clip_readings(speech_end)
+        heard = await self._wait(self._take_clip_reads(speech_end))
         readings = [
-            self._reading({**heard, **await self._text_readings(transcription)})
+            self._reading({**heard, **await self._wait(transcription.reads)})
             for transcription in held
         ]
         # The stop strategies end the turn at once on a finalized transcription,
@@ -511,35 +487,28 @@ class PerceptionReader(FrameProcessor):
             await asyncio.sleep(max(0.0, speech_end + self._stt_latency - time.monotonic()))
         return speech_end
 
-    async def _clip_readings(self, speech_end: float | None) -> "_Readings":
-        """What each audio source heard in the speech, waited for up to its timeout after it."""
+    def _take_clip_reads(self, speech_end: float | None) -> "_Reads | None":
+        """The reads of the clips that end with the speech, if any."""
         # Reads are used once, and only for the speech their clips end with, so
         # a transcription of no new speech gets no reading.
         clip_reads, self._clip_reads = self._clip_reads, None
-        if not clip_reads or clip_reads.ended_at != speech_end:
+        return clip_reads if clip_reads and clip_reads.started_at == speech_end else None
+
+    async def _wait(self, reads: "_Reads | None") -> "_Readings":
+        """What each source read, waited for up to its timeout from when the reads started."""
+        if reads is None:
             return {}
-        # The shortest timeout first, so the wait ends once every read is done
-        # or out of time.
-        for source, read in sorted(clip_reads.reads.items(), key=lambda item: item[0].timeout):
-            if read.done():
-                continue
-            logger.debug(f"{self}: transcriptions are waiting for {source.classifier}'s reading")
-            deadline = clip_reads.ended_at + source.timeout
-            # A wait that doesn't cancel the read when it's late, nor fails
-            # when a mute cancels it.
+        for source, read in reads.tasks.items():
+            deadline = reads.started_at + source.timeout
+            # A wait that doesn't cancel a late read, which still broadcasts its
+            # reading, nor fails when a mute cancels it.
             await asyncio.wait({read}, timeout=max(0.0, deadline - time.monotonic()))
             if not read.done():
                 logger.warning(
-                    f"{self}: {source.classifier} hadn't read the clip after "
-                    f"{source.timeout}s, the speech goes on without it"
+                    f"{self}: no reading from {source.classifier} after {source.timeout}s, "
+                    "the turn goes on without it"
                 )
-        return {source: self._found(read) for source, read in clip_reads.reads.items()}
-
-    async def _text_readings(self, transcription: "_HeldTranscription") -> "_Readings":
-        """What each text source read in a held transcription, each within its own timeout."""
-        if transcription.reads:
-            await asyncio.wait(transcription.reads.values())
-        return {source: self._found(read) for source, read in transcription.reads.items()}
+        return {source: self._found(read) for source, read in reads.tasks.items()}
 
     def _found(self, read: asyncio.Task) -> list[PerceptionSignal] | None:
         """What a read found, or None when it's late, was stopped or failed."""
@@ -557,21 +526,11 @@ class PerceptionReader(FrameProcessor):
     async def _cancel_clip_reads(self):
         """Stop the reads of the latest clips still running, if any."""
         if self._clip_reads:
-            for read in self._clip_reads.reads.values():
+            for read in self._clip_reads.tasks.values():
                 if not read.done():
                     logger.debug(f"{self}: dropping a clip still being read")
                     await self.cancel_task(read)
         self._clip_reads = None
-
-    def _name_clash(self) -> str | None:
-        """Why the sources can't share a reading, if two report a signal of the same name."""
-        seen: set[str] = set()
-        for source in self._sources:
-            for name in source.names:
-                if name in seen:
-                    return f"two sources report {name!r}, and a reading has one signal of a name"
-                seen.add(name)
-        return None
 
     def _classifier_questions(
         self, questions: Mapping[str, PerceptionQuestion]
@@ -608,18 +567,22 @@ class PerceptionReader(FrameProcessor):
 _Readings = dict[PerceptionSource, list[PerceptionSignal] | None]
 
 
+class _Reads(NamedTuple):
+    """The sources' reads of a turn, and when they started: each timeout counts from then.
+
+    A transcription's reads start when it arrives, and the reads of the clips
+    of the user's speech when the user stopped it.
+    """
+
+    started_at: float
+    tasks: dict[PerceptionSource, asyncio.Task]
+
+
 class _HeldTranscription(NamedTuple):
-    """A transcription held until its speech is read, and each text source's read of it."""
+    """A transcription held until its speech is read, and the text sources' reads of it."""
 
     frame: TranscriptionFrame
-    reads: dict[PerceptionSource, asyncio.Task]
-
-
-class _ClipReads(NamedTuple):
-    """Each audio source's read of its clip, and when the user stopped the speech they end with."""
-
-    ended_at: float
-    reads: dict[PerceptionSource, asyncio.Task]
+    reads: _Reads
 
 
 class _RecentAudio:

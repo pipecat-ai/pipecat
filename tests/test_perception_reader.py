@@ -204,6 +204,17 @@ async def test_a_late_reading_lets_the_transcription_pass_unread():
 
 
 @pytest.mark.asyncio
+async def test_a_late_reading_is_still_broadcast_once_made():
+    down, _ = await run_test(
+        _reader(classifier=FakeClassifier(delay=0.2), questions=QUESTIONS, timeout=0.05),
+        frames_to_send=[_transcription("Hello."), SleepFrame(sleep=0.3)],
+        expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame, PerceptionFrame],
+    )
+
+    assert down[1].perception is None
+
+
+@pytest.mark.asyncio
 async def test_a_failed_reading_is_reported_and_the_transcription_still_passes():
     down, up = await run_test(
         _reader(classifier=FakeClassifier(error=ClassifierError("down")), questions=QUESTIONS),
@@ -998,7 +1009,6 @@ async def test_the_sources_signals_are_declared_together():
     assert [[t.name for t in f.perception.signals] for f in metadata] == [
         ["tone", "hesitation", "energy"]
     ]
-    assert list(reader.questions) == ["tone", "hesitation", "energy"]
 
 
 @pytest.mark.asyncio
