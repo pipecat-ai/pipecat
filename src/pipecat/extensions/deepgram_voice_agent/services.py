@@ -8,8 +8,8 @@
 
 A Voice Agent client chooses its providers and models in ``Settings``
 (``agent.listen``, ``agent.think``, ``agent.speak``). The functions here build
-the matching Pipecat services, and the function handlers for server-side
-(``endpoint``) functions.
+the think and speak services, and the function handlers for server-side
+(``endpoint``) functions; :mod:`.listen` builds the listen services.
 """
 
 import asyncio
@@ -38,10 +38,8 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
-from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
 
-DEFAULT_LISTEN_MODEL = "nova-3"
 DEFAULT_SPEAK_MODEL = "aura-2-thalia-en"
 ENDPOINT_FUNCTION_TIMEOUT_SECS = 10.0
 
@@ -85,73 +83,6 @@ class ProviderCredentials:
 
 def _provider(stage: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return (stage or {}).get("provider") or {}
-
-
-def create_stt(
-    listen: Mapping[str, Any] | None, *, credentials: ProviderCredentials, tag: str | None = None
-) -> STTService:
-    """Create the STT service for ``agent.listen``.
-
-    Flux models (``flux-*``) get :class:`DeepgramFluxSTTService`, which does its
-    own turn detection; other Deepgram models get :class:`DeepgramSTTService`.
-
-    Args:
-        listen: The ``agent.listen`` settings.
-        credentials: Provider credentials.
-        tag: Usage tag for the Deepgram requests.
-
-    Returns:
-        The STT service.
-
-    Raises:
-        SettingsError: If the provider isn't supported.
-    """
-    provider = _provider(listen)
-    provider_type = provider.get("type", "deepgram")
-    if provider_type != "deepgram":
-        raise SettingsError(f"Unsupported listen provider: {provider_type}")
-    model = provider.get("model") or DEFAULT_LISTEN_MODEL
-    keyterms = provider.get("keyterms") or None
-    tags = [tag] if tag else None
-
-    if model.startswith("flux"):
-        from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
-
-        return DeepgramFluxSTTService(
-            api_key=credentials.deepgram_api_key,
-            tag=tags,
-            settings=DeepgramFluxSTTService.Settings(
-                model=model,
-                eot_threshold=provider.get("eot_threshold"),
-                eager_eot_threshold=provider.get("eager_eot_threshold"),
-                eot_timeout_ms=provider.get("eot_timeout_ms"),
-                keyterm=keyterms or [],
-            ),
-        )
-
-    from pipecat.services.deepgram.stt import DeepgramSTTService
-
-    return DeepgramSTTService(
-        api_key=credentials.deepgram_api_key,
-        tag=tags,
-        settings=DeepgramSTTService.Settings(
-            model=model, smart_format=True, interim_results=True, keyterm=keyterms
-        ),
-    )
-
-
-def uses_external_turn_detection(stt: STTService) -> bool:
-    """Whether the STT service detects turns itself (Flux does).
-
-    Args:
-        stt: The STT service.
-
-    Returns:
-        Whether it does.
-    """
-    from pipecat.services.deepgram.flux.stt_base import DeepgramFluxSTTBase
-
-    return isinstance(stt, DeepgramFluxSTTBase)
 
 
 async def create_llm(
@@ -494,9 +425,7 @@ __all__ = [
     "SettingsError",
     "check_endpoint_functions",
     "create_llm",
-    "create_stt",
     "create_tts",
     "endpoint_function_handler",
     "function_schemas",
-    "uses_external_turn_detection",
 ]

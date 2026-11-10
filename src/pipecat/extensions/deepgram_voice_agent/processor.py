@@ -16,11 +16,12 @@ they let a client written for the Voice Agent API talk to a Pipecat pipeline.
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ClientFunctionCallRequestFrame,
     ClientFunctionCallResultFrame,
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSUpdateSettingsFrame,
@@ -46,6 +48,9 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings, TTSSettings
+
+if TYPE_CHECKING:
+    from pipecat.extensions.deepgram_voice_agent.listen import DeepgramListenUpdater
 
 # Error codes the Voice Agent API reports.
 NON_SETTINGS_MESSAGE_BEFORE_SETTINGS = "NON_SETTINGS_MESSAGE_BEFORE_SETTINGS"
@@ -118,8 +123,12 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
         self._system_instruction = system_instruction
         self._greeting = greeting
         self._closing = False
+        self._user_speaking = False
+        self._agent_speaking = False
         # Set by an injected user message, so the observer can time the reply.
         self.on_turn_end: Callable[[], None] | None = None
+        # Handles UpdateListen; without one, UpdateListen is refused.
+        self.listen_updater: DeepgramListenUpdater | None = None
 
     async def send(self, message: dict[str, Any]):
         """Send a message to the client.
@@ -159,6 +168,16 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
+        if direction == FrameDirection.UPSTREAM:
+            # Turn and speaking frames are broadcast, so their upstream copies
+            # reach this processor at the head of the pipeline.
+            if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
+                self._user_speaking = isinstance(frame, UserStartedSpeakingFrame)
+                if self.listen_updater:
+                    await self.listen_updater.set_user_speaking(self._user_speaking)
+            elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+                self._agent_speaking = isinstance(frame, BotStartedSpeakingFrame)
+
         if isinstance(frame, StartFrame) and self._greeting:
             await self._speak_as_agent(self._greeting)
         elif isinstance(frame, ErrorFrame) and direction == FrameDirection.UPSTREAM:
@@ -189,11 +208,14 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
             case "UpdateThink":
                 await self._update_think(message.get("think"))
             case "UpdateListen":
-                await self.send(
-                    error_message(
-                        UNSUPPORTED_UPDATE, "UpdateListen is not supported.", warning=True
+                if self.listen_updater:
+                    await self.listen_updater.update(message.get("listen"))
+                else:
+                    await self.send(
+                        error_message(
+                            UNSUPPORTED_UPDATE, "UpdateListen is not supported.", warning=True
+                        )
                     )
-                )
             case "InjectUserMessage":
                 await self._inject_user_message(message["content"])
             case "InjectAgentMessage":
@@ -255,13 +277,12 @@ class DeepgramVoiceAgentObserver(BaseObserver):
     Sends, through a :class:`DeepgramVoiceAgentProcessor`:
 
     - ``UserStartedSpeaking`` when a user turn starts.
+    - ``ConversationText`` (``user``) when a user turn ends, with the turn's
+      final transcripts and, from Flux, the detected ``languages``.
     - ``ConversationText`` (``assistant``) with each LLM response's text.
     - ``FunctionCallRequest`` for each client function call.
     - ``AgentStartedSpeaking`` with latencies, ahead of the audio, and
       ``AgentAudioDone`` when the audio ends (not when an interruption cuts it).
-
-    The user's ``ConversationText`` comes from the user aggregator, which
-    knows the turn's final text; see :meth:`on_user_turn_stopped`.
     """
 
     def __init__(self, processor: DeepgramVoiceAgentProcessor, **kwargs):
@@ -282,26 +303,26 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._speaking_announced = False
         self._turn_end_time: float | None = None
         self._first_text_time: float | None = None
+        # The user turn in progress: its final transcripts and detected languages.
+        self._turn_transcripts: list[str] = []
+        self._turn_languages: list[str] | None = None
+        # Returns the listen language hints in effect, for ``languages_hinted``.
+        self.languages_hinted: Callable[[], list[str] | None] = lambda: None
 
     def _mark_turn_end(self):
         self._turn_end_time = time.monotonic()
         self._first_text_time = None
 
-    async def on_user_turn_stopped(self, aggregator, strategy, message):
-        """Send the user's ``ConversationText``.
-
-        Register this with the user aggregator's ``on_user_turn_stopped`` event.
-
-        Args:
-            aggregator: The user aggregator.
-            strategy: The strategy that ended the turn.
-            message: The turn's message, with the user's text in ``content``.
-        """
-        content = getattr(message, "content", None)
-        if content:
-            await self._processor.send(
-                {"type": "ConversationText", "role": "user", "content": content}
-            )
+    async def _send_user_text(self):
+        content = " ".join(self._turn_transcripts).strip()
+        self._turn_transcripts = []
+        if not content:
+            return
+        message: dict[str, Any] = {"type": "ConversationText", "role": "user", "content": content}
+        if self._turn_languages is not None:
+            message["languages"] = self._turn_languages
+            message["languages_hinted"] = self.languages_hinted()
+        await self._processor.send(message)
 
     async def on_push_frame(self, data: FramePushed):
         """Translate pipeline frames into Voice Agent events.
@@ -315,12 +336,20 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         send = self._processor.send
 
         if isinstance(frame, UserStartedSpeakingFrame):
+            self._turn_transcripts = []
+            self._turn_languages = None
             await send({"type": "UserStartedSpeaking"})
+        elif isinstance(frame, TranscriptionFrame):
+            self._turn_transcripts.append(frame.text)
+            result = frame.result if isinstance(frame.result, dict) else {}
+            if result.get("languages"):
+                self._turn_languages = list(result["languages"])
         elif isinstance(frame, InterruptionFrame):
             self._interrupted = True
             self._speaking_announced = False
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._mark_turn_end()
+            await self._send_user_text()
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._response_text = ""
             self._response_called_functions = False

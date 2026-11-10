@@ -30,6 +30,7 @@ import aiohttp
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from pipecat.extensions.deepgram_voice_agent.listen import DeepgramListenUpdater, create_listen
 from pipecat.extensions.deepgram_voice_agent.processor import (
     CLIENT_MESSAGE_TYPES,
     NON_SETTINGS_MESSAGE_BEFORE_SETTINGS,
@@ -44,23 +45,15 @@ from pipecat.extensions.deepgram_voice_agent.services import (
     SettingsError,
     check_endpoint_functions,
     create_llm,
-    create_stt,
     create_tts,
     endpoint_function_handler,
     function_schemas,
-    uses_external_turn_detection,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
-from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 PIPELINE_IN_SAMPLE_RATE = 16000
@@ -194,7 +187,14 @@ class DeepgramVoiceAgentServer:
         prompt = think.get("prompt") or ""
         await check_endpoint_functions(functions, allow_nonpublic=self._allow_nonpublic_endpoints)
 
-        stt = create_stt(agent.get("listen"), credentials=self._credentials, tag=tag)
+        try:
+            listen = create_listen(
+                agent.get("listen"),
+                deepgram_api_key=self._credentials.deepgram_api_key,
+                tag=tag,
+            )
+        except ValueError as e:
+            raise SettingsError(str(e))
         llm = await create_llm(
             think,
             credentials=self._credentials,
@@ -212,6 +212,13 @@ class DeepgramVoiceAgentServer:
             system_instruction=prompt, greeting=agent.get("greeting")
         )
         observer = DeepgramVoiceAgentObserver(processor)
+        processor.listen_updater = DeepgramListenUpdater(
+            listen,
+            send=processor.send,
+            push_frame=processor.push_frame,
+            deepgram_api_key=self._credentials.deepgram_api_key,
+            http_session=http_session,
+        )
 
         llm.register_client_function(None, timeout_secs=self._function_call_timeout_secs)
         for function in functions:
@@ -228,19 +235,10 @@ class DeepgramVoiceAgentServer:
                 )
 
         context = LLMContext(tools=function_schemas(functions)) if functions else LLMContext()
-        if uses_external_turn_detection(stt):
-            user_params = LLMUserAggregatorParams()
-        else:
-            # Without a turn-detecting STT, a transcript starts the turn and a
-            # pause after it ends the turn. No local VAD is needed.
-            user_params = LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    start=[TranscriptionUserTurnStartStrategy()],
-                    stop=[SpeechTimeoutUserTurnStopStrategy()],
-                )
-            )
-        aggregators = LLMContextAggregatorPair(context, user_params=user_params)
-        aggregators.user().add_event_handler("on_user_turn_stopped", observer.on_user_turn_stopped)
+        # The active listen service recommends the turn strategies: Flux detects
+        # turns itself, and the v1 service needs no VAD either.
+        aggregators = LLMContextAggregatorPair(context)
+        observer.languages_hinted = lambda: listen.settings[listen.active].get("language_hints")
 
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
@@ -262,7 +260,7 @@ class DeepgramVoiceAgentServer:
             [
                 transport.input(),
                 processor,
-                stt,
+                listen.switcher,
                 aggregators.user(),
                 llm,
                 tts,
