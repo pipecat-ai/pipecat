@@ -46,7 +46,10 @@ class PiperSynthesisSettings(TTSSettings):
     """Piper's per-request synthesis controls.
 
     Parameters:
-        speaker_id: Speaker index for multi-speaker voices.
+        speaker_id: Which speaker to use, for voices trained on several speakers (such as
+            ``en_US-libritts_r-medium``). It's an index from 0 to the voice's speaker count
+            minus one, listed in the voice's ``.onnx.json`` file. Voices with a single speaker
+            ignore it.
         length_scale: Phoneme length scale; below 1 is faster, above 1 is slower.
         noise_scale: Amount of generator noise, which varies the audio.
         noise_w_scale: Amount of phoneme width noise, which varies the speaking style.
