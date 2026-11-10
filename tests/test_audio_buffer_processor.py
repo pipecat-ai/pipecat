@@ -37,6 +37,9 @@ class _PassthroughResampler:
     ) -> bytes:  # pragma: no cover - trivial
         return audio
 
+    async def reset(self):  # pragma: no cover - trivial
+        pass
+
 
 async def _make_processor(
     *, buffer_size: int = 0, start: bool = True, auto_start: bool = False

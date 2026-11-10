@@ -177,7 +177,7 @@ class _ZoomAIRealtimeWebSocket:
         self.terminal_error: dict[str, Any] | None = None
         self._output_rate = _VOICE_AGENT_OUTPUT_RATE
         # One stream per reply: never cleared on a gap between deltas (see above).
-        self._resampler = create_stream_resampler(clear_after_secs=None)
+        self._resampler = create_stream_resampler()
         # A delta can end mid-sample (an odd number of PCM16 bytes): the odd byte is kept
         # for the next one.
         self._partial_sample = b""

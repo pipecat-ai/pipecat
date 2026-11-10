@@ -7,6 +7,8 @@
 """Rime STT segment streaming, ordering, errors and metrics against a fake SDK."""
 
 import asyncio
+import math
+import struct
 
 import pytest
 
@@ -270,6 +272,24 @@ async def test_unsupported_rate_is_resampled(client):
         await wait(stream.exhausted)
         assert stream.options["input_format"].sample_rate == 16000
         assert 0 < len(b"".join(stream.chunks)) <= 3 * 3200
+
+
+@pytest.mark.asyncio
+async def test_each_segment_is_resampled_as_a_new_stream(client):
+    service = RimeSTTService(api_key="test", sample_rate=44100)
+    tone = b"".join(
+        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * n / 44100))) for n in range(4410)
+    )
+    async with harness(service):
+        await speak(service, audio(tone, rate=44100))
+        await wait((await next_stream(client)).exhausted)
+        await speak(service, audio(bytes(8820), rate=44100))
+        stream = await next_stream(client)
+        await wait(stream.exhausted)
+
+    sent = b"".join(stream.chunks)
+    samples = struct.unpack(f"<{len(sent) // 2}h", sent)
+    assert samples and max(abs(sample) for sample in samples) < 100
 
 
 @pytest.mark.asyncio
