@@ -1067,6 +1067,9 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
+            # Request fields this service has no setting for, passed as given.
+            payload.update(self._settings.extra or {})
+
             headers = {
                 "Cartesia-Version": self._cartesia_version,
                 "X-API-Key": self._api_key,
