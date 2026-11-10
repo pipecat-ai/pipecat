@@ -302,7 +302,7 @@ class DailyRESTHelper:
         self,
         room_url: str,
         expiry_time: float = 60 * 60,
-        eject_at_token_exp: bool = False,
+        eject_at_token_exp: bool | None = None,
         owner: bool = True,
         params: DailyMeetingTokenParams | None = None,
     ) -> str:
@@ -311,7 +311,10 @@ class DailyRESTHelper:
         Args:
             room_url: Daily room URL.
             expiry_time: Token validity duration in seconds (default: 1 hour).
-            eject_at_token_exp: Whether to eject user when token expires.
+            eject_at_token_exp: Whether to eject the user when the token
+                expires. Leave it unset (None) to let the room's
+                `eject_at_room_exp` setting apply. Setting it to True or
+                False overrides the room's ejection settings for this token.
             owner: Whether token has owner privileges.
             params: Optional additional token properties. Note that room_name,
                 exp, and is_owner will be set based on the other function
@@ -346,7 +349,8 @@ class DailyRESTHelper:
         else:
             params.properties.room_name = room_name
             params.properties.exp = expiration
-            params.properties.eject_at_token_exp = eject_at_token_exp
+            if eject_at_token_exp is not None:
+                params.properties.eject_at_token_exp = eject_at_token_exp
             params.properties.is_owner = owner
 
         json = params.model_dump(exclude_none=True)
