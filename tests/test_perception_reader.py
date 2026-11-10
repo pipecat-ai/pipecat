@@ -303,6 +303,7 @@ class FakeAudioClassifier(BaseClassifier):
         *,
         min_secs: float = 1.0,
         max_secs: float | None = None,
+        preferred_secs: float | None = None,
         delays: list[float] | None = None,
         probabilities: list[float] | None = None,
         setup_error: Exception | None = None,
@@ -312,6 +313,7 @@ class FakeAudioClassifier(BaseClassifier):
         self.states: list = []
         self._min_secs = min_secs
         self._max_secs = max_secs
+        self._preferred_secs = min_secs if preferred_secs is None else preferred_secs
         self._delays = delays or []
         self._probabilities = probabilities
         self._setup_error = setup_error
@@ -332,6 +334,10 @@ class FakeAudioClassifier(BaseClassifier):
     @property
     def max_audio_secs(self) -> float | None:
         return self._max_secs
+
+    @property
+    def preferred_audio_secs(self) -> float:
+        return self._preferred_secs
 
     async def _ask(self, state, questions, inputs=()):
         call = len(self.clips)
@@ -379,14 +385,16 @@ async def test_an_audio_classifier_hears_the_users_speech():
         ],
     )
 
-    # Two seconds of speech is more than the classifier takes, so it's all.
-    assert classifier.clips == [ClassifierAudio(audio=_pcm(2, 2), sample_rate=SAMPLE_RATE)]
+    # The speech, with the second heard before the VAD reported it.
+    assert classifier.clips == [
+        ClassifierAudio(audio=_pcm(1, 1) + _pcm(2, 2), sample_rate=SAMPLE_RATE)
+    ]
     assert classifier.states == [{"assistant": "What's your order number?"}]
     assert _perception(down) == [[PerceptionSignal("hesitation", value=0.64)]]
 
 
 @pytest.mark.asyncio
-async def test_each_stop_is_heard_with_the_audio_just_before_it():
+async def test_a_short_stop_is_heard_with_the_users_speech_before_it():
     classifier = FakeAudioClassifier(min_secs=1.5)
 
     down, _ = await run_test(
@@ -402,16 +410,16 @@ async def test_each_stop_is_heard_with_the_audio_just_before_it():
         ],
     )
 
+    # The first stop's half second is shorter than the classifier takes.
     assert classifier.clips == [
-        ClassifierAudio(audio=_silence(1) + _pcm(1, 0.5), sample_rate=SAMPLE_RATE),
-        ClassifierAudio(audio=_pcm(1, 0.5) + _pcm(2, 1), sample_rate=SAMPLE_RATE),
+        ClassifierAudio(audio=_pcm(1, 0.5) + _pcm(2, 1), sample_rate=SAMPLE_RATE)
     ]
     assert _perception(down) == [[PerceptionSignal("hesitation", value=0.64)]]
 
 
 @pytest.mark.asyncio
-async def test_a_short_turn_at_the_start_of_a_call_is_heard_after_silence():
-    classifier = FakeAudioClassifier(min_secs=5.0)
+async def test_a_short_turn_at_the_start_of_a_call_is_heard_without_silence():
+    classifier = FakeAudioClassifier(min_secs=1.0, preferred_secs=5.0)
 
     down, _ = await run_test(
         _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
@@ -423,10 +431,26 @@ async def test_a_short_turn_at_the_start_of_a_call_is_heard_after_silence():
         ],
     )
 
-    assert classifier.clips == [
-        ClassifierAudio(audio=_silence(4) + _pcm(1, 1), sample_rate=SAMPLE_RATE)
-    ]
+    assert classifier.clips == [ClassifierAudio(audio=_pcm(1, 1), sample_rate=SAMPLE_RATE)]
     assert _perception(down) == [[PerceptionSignal("hesitation", value=0.64)]]
+
+
+@pytest.mark.asyncio
+async def test_speech_shorter_than_the_classifier_takes_isnt_read():
+    classifier = FakeAudioClassifier(min_secs=1.0)
+
+    down, _ = await run_test(
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 0.5),
+            VADUserStoppedSpeakingFrame(),
+            _transcription("No."),
+        ],
+    )
+
+    assert classifier.clips == []
+    assert _perception(down) == [None]
 
 
 def _two_turns(first: InputAudioRawFrame, second: InputAudioRawFrame) -> list:
@@ -454,7 +478,7 @@ async def test_a_short_turn_is_heard_with_the_users_speech_before_it():
     )
 
     assert classifier.clips[1] == ClassifierAudio(
-        audio=_pcm(1, 0.8) + _pcm(2, 0.2), sample_rate=SAMPLE_RATE
+        audio=_pcm(1, 2) + _pcm(2, 0.2), sample_rate=SAMPLE_RATE
     )
     assert _perception(down) == [[PerceptionSignal("hesitation", value=0.9)]]
 
@@ -474,7 +498,7 @@ async def test_a_new_turn_doesnt_get_the_last_turns_reading():
 
 
 @pytest.mark.asyncio
-async def test_the_audio_between_the_users_speech_is_kept():
+async def test_the_quiet_between_the_users_speech_is_shortened():
     classifier = FakeAudioClassifier(min_secs=2.5)
 
     await run_test(
@@ -491,32 +515,37 @@ async def test_the_audio_between_the_users_speech_is_kept():
         ],
     )
 
-    # The reply is heard after the quiet before it, as it was heard.
-    assert classifier.clips[1] == ClassifierAudio(
-        audio=_pcm(9, 1.5) + _pcm(2, 1), sample_rate=SAMPLE_RATE
-    )
+    # The reply keeps a second of the quiet before it, and the speech before that.
+    assert classifier.clips == [
+        ClassifierAudio(audio=_pcm(1, 1) + _pcm(9, 1) + _pcm(2, 1), sample_rate=SAMPLE_RATE)
+    ]
 
 
 @pytest.mark.asyncio
-async def test_audio_heard_while_the_user_is_muted_is_heard_as_silence():
-    classifier = FakeAudioClassifier(min_secs=2.0)
+async def test_speech_before_a_mute_isnt_joined_to_speech_after_it():
+    classifier = FakeAudioClassifier(min_secs=1.0, preferred_secs=5.0)
 
     await run_test(
         _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
-            _audio(1, 1),
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 2),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.1),
             UserMuteStartedFrame(),
             _audio(2, 0.5),
             UserMuteStoppedFrame(),
             VADUserStartedSpeakingFrame(),
-            _audio(3, 0.5),
+            _audio(3, 1),
             VADUserStoppedSpeakingFrame(),
             _transcription("Hello?"),
         ],
     )
 
+    # Nor is the audio heard while the user was muted.
     assert classifier.clips == [
-        ClassifierAudio(audio=_pcm(1, 1) + _silence(0.5) + _pcm(3, 0.5), sample_rate=SAMPLE_RATE)
+        ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE),
+        ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE),
     ]
 
 
@@ -596,7 +625,7 @@ async def test_a_short_last_stretch_reaches_back_into_the_turn():
     )
 
     assert classifier.clips[1] == ClassifierAudio(
-        audio=_pcm(1, 1.5) + _pcm(2, 0.5), sample_rate=SAMPLE_RATE
+        audio=_pcm(1, 3) + _pcm(2, 0.5), sample_rate=SAMPLE_RATE
     )
 
 
@@ -628,7 +657,7 @@ async def test_a_late_clip_leaves_its_speech_unread():
 
 
 @pytest.mark.asyncio
-async def test_each_stop_is_read_even_while_an_earlier_clip_is_being_read():
+async def test_a_stop_during_an_earlier_read_is_read_once_its_done():
     classifier = FakeAudioClassifier(delays=[0.3])
 
     await run_test(
@@ -648,6 +677,34 @@ async def test_each_stop_is_read_even_while_an_earlier_clip_is_being_read():
         ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE),
         ClassifierAudio(audio=_pcm(2, 2), sample_rate=SAMPLE_RATE),
     ]
+
+
+@pytest.mark.asyncio
+async def test_of_the_stops_during_an_earlier_read_only_the_newest_is_read():
+    classifier = FakeAudioClassifier(delays=[0.3], probabilities=[0.2, 0.9])
+
+    down, _ = await run_test(
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 1),
+            VADUserStoppedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            _audio(2, 1),
+            VADUserStoppedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            _audio(3, 1),
+            VADUserStoppedSpeakingFrame(),
+            _transcription("Hello?"),
+        ],
+    )
+
+    # The classifier hears one clip at a time, so the second stop's is dropped.
+    assert classifier.clips == [
+        ClassifierAudio(audio=_pcm(1, 1), sample_rate=SAMPLE_RATE),
+        ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE),
+    ]
+    assert _perception(down) == [[PerceptionSignal("hesitation", value=0.9)]]
 
 
 @pytest.mark.asyncio
@@ -1207,7 +1264,9 @@ async def test_each_audio_source_hears_a_clip_of_the_length_its_classifier_takes
             ]
         ),
         frames_to_send=[
-            _audio(1, 2),
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 1),
+            VADUserStoppedSpeakingFrame(),
             VADUserStartedSpeakingFrame(),
             _audio(2, 1),
             _audio(3, 1),
@@ -1216,9 +1275,11 @@ async def test_each_audio_source_hears_a_clip_of_the_length_its_classifier_takes
         ],
     )
 
-    # The speech, its last second, and the speech with the second before it.
-    assert whole.clips == [ClassifierAudio(audio=_pcm(2, 1) + _pcm(3, 1), sample_rate=SAMPLE_RATE)]
-    assert short.clips == [ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE)]
+    # The latest speech, its last second, and the latest with the speech before it.
+    assert whole.clips[-1] == ClassifierAudio(
+        audio=_pcm(2, 1) + _pcm(3, 1), sample_rate=SAMPLE_RATE
+    )
+    assert short.clips[-1] == ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE)
     assert long.clips == [
         ClassifierAudio(audio=_pcm(1, 1) + _pcm(2, 1) + _pcm(3, 1), sample_rate=SAMPLE_RATE)
     ]
