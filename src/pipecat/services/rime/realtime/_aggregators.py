@@ -154,6 +154,8 @@ class _RimeUserAggregator(_ApplicationHistory, LLMUserAggregator):
 
 
 class _RimeAssistantAggregator(_ApplicationHistory, LLMAssistantAggregator):
+    """Record assistant turns after the output transport and return output stop IDs."""
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Return output identities after their stop frames pass through the transport."""
         await super().process_frame(frame, direction)

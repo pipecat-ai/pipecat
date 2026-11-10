@@ -109,3 +109,41 @@ async def test_completed_output_is_not_truncated_by_a_later_interruption():
         assert not sent(peer, "conversation.item.truncate")
         assert not sent(peer, "response.cancel")
         assert not any(isinstance(frame, ErrorFrame) for frame in upstream)
+
+
+@pytest.mark.asyncio
+async def test_output_stop_waits_for_the_transport_write():
+    async with conversation() as (peer, service, _, __, output, ___, ____):
+        writing = asyncio.Event()
+        release_write = asyncio.Event()
+        acknowledged = asyncio.Event()
+        write_audio = output.write_audio_frame
+        process_frame = service.process_frame
+
+        async def gated_write(frame):
+            writing.set()
+            await release_write.wait()
+            return await write_audio(frame)
+
+        async def observe_acknowledgment(frame, direction):
+            await process_frame(frame, direction)
+            if isinstance(frame, _RimeOutputStoppedFrame):
+                acknowledged.set()
+
+        output.write_audio_frame = gated_write
+        service.process_frame = observe_acknowledgment
+        try:
+            response = await peer.start()
+            await peer.message(response)
+            await peer.end(response)
+            await asyncio.wait_for(writing.wait(), 3)
+            await until(lambda: service._responses[response].ended)
+            assert not acknowledged.is_set()
+            assert service._latest_audio_output is not None
+            assert service._latest_audio_output.ref.response.response_id == response
+
+            release_write.set()
+            await asyncio.wait_for(acknowledged.wait(), 3)
+            assert service._latest_audio_output is None
+        finally:
+            release_write.set()
