@@ -730,8 +730,8 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
-    async def test_resampling_is_logged_once_per_source_rate(self):
-        """The resample log line shows up once per source rate, never for a match."""
+    async def test_resampling_is_logged_once(self):
+        """The resample log line shows up once, never for a match."""
         sink = io.StringIO()
         handler_id = logger.add(sink, level="DEBUG", format="{message}")
         transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
