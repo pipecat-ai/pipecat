@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -2603,10 +2604,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
             stop_messages.append(message)
 
-        # Send text with a turn completion marker
+        # Send a turn completion marker as the mixin does, ahead of the reply
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            LLMTextFrame(f"{USER_TURN_COMPLETE_MARKER} Hello from Pipecat!"),
+            LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False),
+            LLMTextFrame("Hello from Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
@@ -2626,7 +2628,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            LLMTextFrame(USER_TURN_INCOMPLETE_SHORT_MARKER),
+            LLMMarkerFrame(USER_TURN_INCOMPLETE_SHORT_MARKER),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator2, frames_to_send=frames_to_send)
@@ -2634,6 +2636,28 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_marker_characters_kept_without_turn_completion(self):
+        """Without marker frames, marker characters are reply text and stay in the transcript."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("○ Option A ● Option B"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "○ Option A ● Option B")
+        self.assertEqual(context.messages[-1]["content"], stop_messages[0].content)
 
     async def test_llm_run(self):
         context = LLMContext()
