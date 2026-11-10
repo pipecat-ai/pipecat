@@ -2617,7 +2617,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
 
-        # Test incomplete markers are also stripped
+        # Test incomplete markers stay out of the transcript
         stop_messages.clear()
         context2 = LLMContext()
         aggregator2 = LLMAssistantAggregator(context2)
@@ -2628,14 +2628,15 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            LLMMarkerFrame(USER_TURN_INCOMPLETE_SHORT_MARKER, append_to_context_immediately=False),
+            LLMMarkerFrame(USER_TURN_INCOMPLETE_SHORT_MARKER, append_to_context_immediately=True),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator2, frames_to_send=frames_to_send)
 
-        # The incomplete marker should be stripped (resulting in empty content)
+        # The incomplete marker is its own context message, not part of the transcript
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+        self.assertEqual(context2.messages[-1]["content"], USER_TURN_INCOMPLETE_SHORT_MARKER)
 
     async def test_marker_characters_kept_without_marker_frames(self):
         """Marker characters in plain LLM text are content, not turn markers."""
