@@ -58,14 +58,17 @@ from pipecat.evals.scenario import (
 )
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
+from pipecat.evals.serializer import EvalClientSerializer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ExternalFunctionCallCancelFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
+    FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -85,6 +88,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi.observer import (
+    RTVIFunctionCallReportLevel,
+    RTVIObserver,
+    RTVIObserverParams,
+)
 from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -1636,6 +1644,95 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(nxt.frames), 1)
 
+    async def test_text_feed_waits_for_announced_call_before_in_progress(self):
+        for level in (RTVIFunctionCallReportLevel.NONE, RTVIFunctionCallReportLevel.ARGUMENTS):
+            with self.subTest(level=level):
+                persona = _persona()
+                sink, nxt = self._sink(persona=persona, persona_hears=True)
+                serializer = EvalClientSerializer()
+                observer = RTVIObserver(
+                    params=RTVIObserverParams(function_call_report_level={"*": level})
+                )
+
+                async def receive(message, serializer=serializer, sink=sink):
+                    frame = await serializer.deserialize(message.model_dump_json())
+                    if frame is not None:
+                        await self._push(sink, frame)
+
+                observer.send_rtvi_message = AsyncMock(side_effect=receive)
+                await self._push(sink, LLMFullResponseStartFrame(), LLMTextFrame("Let me check."))
+                await observer._report_function_call_frame(
+                    FunctionCallsStartedFrame([FunctionCallFromLLM("lookup", "call_1", {}, None)])
+                )
+                await self._push(sink, LLMFullResponseEndFrame())
+                self.assertEqual(persona.context.get_messages(), [])
+                self.assertEqual(nxt.frames, [])
+
+                await observer._report_function_call_frame(
+                    FunctionCallInProgressFrame("lookup", "call_1", {})
+                )
+                await observer._report_function_call_frame(
+                    FunctionCallResultFrame("lookup", "call_1", {}, "found")
+                )
+                await self._push(sink, *_bot_response("I found your registration. How can I help?"))
+                self.assertEqual(
+                    persona.context.get_messages(),
+                    [
+                        {
+                            "role": "user",
+                            "content": "Let me check. I found your registration. How can I help?",
+                        }
+                    ],
+                )
+                self.assertEqual(len(nxt.frames), 1)
+                self.assertEqual(self._events(sink).count("function_call"), 1)
+
+    async def test_announced_parallel_calls_wait_for_every_result(self):
+        persona = _persona()
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        serializer = EvalClientSerializer()
+
+        async def report(kind, **data):
+            frame = await serializer.deserialize(_rtvi(kind, data))
+            if frame is not None:
+                await self._push(sink, frame)
+
+        await report("llm-function-call-started", function_name="lookup")
+        await report("llm-function-call-started", function_name="lookup")
+        await self._push(sink, *_bot_response("Checking both."))
+        self.assertEqual(nxt.frames, [])
+        for call_id in ("a", "b"):
+            await report(
+                "llm-function-call-in-progress", function_name="lookup", tool_call_id=call_id
+            )
+        await report("llm-function-call-stopped", function_name="lookup", tool_call_id="b")
+        await self._push(sink, *_bot_response("One result."))
+        self.assertEqual(nxt.frames, [])
+        await report("llm-function-call-stopped", function_name="lookup", tool_call_id="a")
+        await self._push(sink, *_bot_response("Both done."))
+        self.assertEqual(len(nxt.frames), 1)
+        self.assertEqual(
+            persona.context.get_messages(),
+            [{"role": "user", "content": "Checking both. One result. Both done."}],
+        )
+
+    async def test_announced_call_cancelled_before_execution_releases_the_persona(self):
+        persona = _persona()
+        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        serializer = EvalClientSerializer()
+        for message in (
+            _rtvi("llm-function-call-started", {"function_name": "lookup"}),
+            _rtvi(
+                "llm-function-call-stopped",
+                {"function_name": "lookup", "tool_call_id": "a", "cancelled": True},
+            ),
+        ):
+            frame = await serializer.deserialize(message)
+            if frame is not None:
+                await self._push(sink, frame)
+        await self._push(sink, *_bot_response("Could you repeat the number?"))
+        self.assertEqual(len(nxt.frames), 1)
+
     async def test_upstream_frames_are_not_the_bots(self):
         # The persona's own function call travels upstream through the sink; it
         # is neither an event nor held back.
@@ -2893,7 +2990,6 @@ from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric, EvalSimulationScenario  # noqa: E402
 from pipecat.evals.session import EvalSession, EvalSessionParams  # noqa: E402
 from pipecat.evals.simulation_session import EvalSimulationSession  # noqa: E402
-from pipecat.frames.frames import FunctionCallFromLLM  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.settings import LLMSettings  # noqa: E402
 
