@@ -1838,8 +1838,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
-        # Markers seen on LLMMarkerFrames, so a service configured with markers
-        # other than the defaults still gets them stripped from transcripts.
+        # Markers seen on LLMMarkerFrames: the only text stripped from
+        # transcripts, whatever marker set the service is configured with.
         self._seen_turn_markers: set[str] = set()
         self._context_updated_tasks: set[asyncio.Task] = set()
 
@@ -2774,22 +2774,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Strip turn completion markers from assistant transcript.
 
         Turn completion markers are used internally for turn completion
-        detection and shouldn't appear in the final transcript. Both the
-        default markers and any seen on this turn's marker frames are removed,
-        so a custom marker set is stripped too.
+        detection and shouldn't appear in the final transcript. Only markers
+        seen on marker frames are removed, so a reply that merely contains a
+        marker character keeps it.
         """
-        from pipecat.turns.user_turn_completion_mixin import (
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-        )
-
         marker_found = False
-        for marker in {
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-        } | self._seen_turn_markers:
+        for marker in self._seen_turn_markers:
             if marker in text:
                 text = text.replace(marker, "")
                 marker_found = True
