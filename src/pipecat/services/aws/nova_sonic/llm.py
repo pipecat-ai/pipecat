@@ -795,6 +795,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             if message.get("role") == "tool" and message.get("content") not in [
                 "IN_PROGRESS",
                 "CANCELLED",
+                async_tool_messages.CANCELLED_CALL_RESULT,
             ]:
                 tool_call_id = message.get("tool_call_id")
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:

@@ -172,7 +172,17 @@ class OpenAIProtocolIntermediateResultsTests:
 
         (item,) = self._items()
         self.assertEqual(item.type, "function_call_output")
-        self.assertEqual(item.output, "CANCELLED")
+        self.assertEqual(item.output, async_tool_messages.CANCELLED_CALL_RESULT)
+
+    async def test_a_cancelled_call_is_settled_with_what_the_handler_reported(self):
+        await self.service.push_frame(
+            FunctionCallCancelFrame(
+                function_name="delegate", tool_call_id="call_1", result={"status": "submitted"}
+            )
+        )
+
+        (item,) = self._items()
+        self.assertEqual(json.loads(item.output), {"status": "submitted"})
 
     async def test_an_appended_message_goes_in_as_an_item_and_runs_when_the_aggregator_asks(self):
         await self.service._handle_messages_append(_append())
@@ -419,6 +429,21 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._texts(), [])
         self.service._send_tool_result.assert_awaited_once()
         self.assertIn("call_1", self.service._completed_tool_calls)
+
+    async def test_a_cancelled_call_in_the_context_is_not_sent_as_a_result(self):
+        self.service._context = LLMContext(
+            messages=[
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": async_tool_messages.CANCELLED_CALL_RESULT,
+                }
+            ]
+        )
+
+        await self.service._process_completed_function_calls(send_new_results=True)
+
+        self.service._send_tool_result.assert_not_awaited()
 
     async def test_an_appended_message_goes_in_as_text_interactive_as_asked(self):
         await self.service._handle_messages_append(_append())

@@ -674,44 +674,77 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
 
         await service._cancel_sequential_runner_task()
 
-    async def test_result_delivered_after_a_timeout_is_rejected(self):
-        """A handler that outlives its deadline can't settle the call late."""
-        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+    @staticmethod
+    def _reporting_handler(report: dict):
+        """A handler that, when cancelled, reports how far it got."""
 
-        async def stubborn(params: FunctionCallParams):
+        async def handler(params: FunctionCallParams):
             try:
-                await asyncio.sleep(self.HANDLER_DURATION)
+                await asyncio.sleep(TestFunctionCallTimeout.HANDLER_DURATION)
             except asyncio.CancelledError:
-                # The call is already settled, so this result must not reach
-                # the pipeline.
-                await params.result_callback({"too": "late"})
+                await params.result_callback(report)
                 raise
 
-        service.register_function("stubborn", stubborn)
-        await self._run_call(service, "stubborn")
+        return handler
+
+    def _assert_settled_by_cancellation_with(self, frames: list, report: dict | None):
+        # The report doesn't reopen the call as a result: it travels with the
+        # cancellation that settles it.
+        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
+        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+        self.assertEqual(frames[-1].result, report)
+
+    async def test_a_handler_cancelled_by_a_timeout_reports_how_far_it_got(self):
+        service, frames = self._service(function_call_timeout_secs=self.TIMEOUT)
+        service.register_function("refund", self._reporting_handler({"status": "submitted"}))
+
+        await self._run_call(service, "refund")
         await asyncio.sleep(self.SETTLE)
 
-        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
+        self._assert_settled_by_cancellation_with(frames, {"status": "submitted"})
 
-    async def test_result_delivered_after_an_interruption_is_rejected(self):
-        """Cancellation settles a call whatever triggered it, not just a timeout."""
+    async def test_a_handler_cancelled_by_an_interruption_reports_how_far_it_got(self):
         service, frames = self._service()
+        service.register_function("refund", self._reporting_handler({"status": "not_sent"}))
 
-        async def stubborn(params: FunctionCallParams):
-            try:
-                await asyncio.sleep(self.HANDLER_DURATION)
-            except asyncio.CancelledError:
-                await params.result_callback({"too": "late"})
-                raise
-
-        service.register_function("stubborn", stubborn)
-        await self._run_call(service, "stubborn")
+        await self._run_call(service, "refund")
         await asyncio.sleep(self.TIMEOUT)
         await service._handle_interruptions(InterruptionFrame())
         await asyncio.sleep(self.SETTLE)
 
-        self.assertFalse(any(isinstance(frame, FunctionCallResultFrame) for frame in frames))
-        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
+        self._assert_settled_by_cancellation_with(frames, {"status": "not_sent"})
+
+    async def test_a_cancelled_handler_that_reports_nothing_leaves_the_outcome_unknown(self):
+        service, frames = self._service()
+
+        async def silent(params: FunctionCallParams):
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("refund", silent)
+        await self._run_call(service, "refund")
+        await asyncio.sleep(self.TIMEOUT)
+        await service._handle_interruptions(InterruptionFrame())
+        await asyncio.sleep(self.SETTLE)
+
+        self._assert_settled_by_cancellation_with(frames, None)
+
+    async def test_a_report_after_the_cancellation_is_settled_is_rejected(self):
+        """A handler that outlives its call can't settle it again later."""
+        service, frames = self._service()
+        callbacks = []
+
+        async def leaky(params: FunctionCallParams):
+            callbacks.append(params.result_callback)
+            await asyncio.sleep(self.HANDLER_DURATION)
+
+        service.register_function("refund", leaky)
+        await self._run_call(service, "refund")
+        await asyncio.sleep(self.TIMEOUT)
+        await service._handle_interruptions(InterruptionFrame())
+        await asyncio.sleep(self.SETTLE)
+        await callbacks[0]({"too": "late"})
+
+        self._assert_settled_by_cancellation_with(frames, None)
 
     async def test_handler_finishing_within_the_deadline_is_untouched(self):
         service, frames = self._service(function_call_timeout_secs=self.HANDLER_DURATION)
