@@ -14,7 +14,7 @@ import pytest
 
 from pipecat.evals.client import BOT_ENDED_EVENT, HARNESS_ERROR_EVENT
 from pipecat.evals.events import EvalEventStream
-from pipecat.evals.results import EvalSimulationMetricScore, EvalTrace
+from pipecat.evals.results import EvalAssertionFailure, EvalSimulationMetricScore, EvalTrace
 from pipecat.evals.simulation import EvalSimulationScenario
 from pipecat.evals.simulation_driver import EvalSimulationDriver
 
@@ -211,3 +211,23 @@ async def test_simulation_does_not_begin_judging_after_error_in_ended_progress()
     failures = await driver.run()
     assert [f.kind for f in failures] == ["error"]
     driver._judge_conversation.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kind", ["error", "connect_failed", "closed_before_ready", "handshake_timeout"]
+)
+def test_simulation_retains_machine_readable_startup_failure_kind(kind):
+    driver, _stream, _client = _driver()
+    result = _result(
+        driver,
+        [EvalAssertionFailure(-1, -1, "<bot-ready>", "Safe startup reason", kind)],
+    )
+    assert result.failure_kind == kind
+    assert result.error == "Safe startup reason"
+    assert not result.passed
+
+
+def test_simulation_without_run_failure_keeps_failure_kind_optional():
+    driver, _stream, _client = _driver()
+    result = _result(driver, [])
+    assert result.failure_kind is None

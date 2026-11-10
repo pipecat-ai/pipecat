@@ -647,7 +647,10 @@ class EvalClient:
         async def _on_pipeline_error(_worker, frame):
             # The transport connects as it starts, so a refused connection (an
             # HTTP 403 for a spent token, nothing listening) surfaces here.
-            if isinstance(frame.exception, (InvalidHandshake, OSError)):
+            from_target = (
+                frame.processor is transport.input() or frame.processor is transport.output()
+            )
+            if from_target and isinstance(frame.exception, (InvalidHandshake, OSError)):
                 self._refuse("connect_failed", str(frame.exception))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
@@ -674,12 +677,21 @@ class EvalClient:
         # The transport sends client-ready on connect and fires on_bot_ready when
         # the bot answers; our handler sets _handshake_over.
         timeout_s = self._session_params.bot_ready_timeout_s
+        ready = asyncio.create_task(self._handshake_over.wait(), name="eval-bot-ready")
+        failed = asyncio.create_task(self._stream.wait_harness_error(), name="eval-handshake-error")
         try:
-            await asyncio.wait_for(self._handshake_over.wait(), timeout=timeout_s)
-        except TimeoutError:
-            raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
-        if self._refusal is not None:
-            raise self._refusal
+            done, _ = await asyncio.wait(
+                (ready, failed), timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED
+            )
+            if self._refusal is not None:
+                raise self._refusal
+            self._raise_harness_failure()
+            if ready not in done:
+                raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms")
+        finally:
+            ready.cancel()
+            failed.cancel()
+            await asyncio.gather(ready, failed, return_exceptions=True)
 
         if self._session_params.require_audio_support:
             capabilities = self._audio_capabilities
@@ -714,8 +726,14 @@ class EvalClient:
         # set it up.
         if self._params.context:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
+        self._raise_harness_failure()
         if self._sink is not None:
             await self._sink.allow_answers()
+
+    def _raise_harness_failure(self) -> None:
+        """Refuse startup when its speech pipeline failed, without blaming the target."""
+        if self._stream.harness_error is not None:
+            raise EvalBotUnavailableError("error", "the eval harness pipeline failed")
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -884,7 +902,7 @@ class EvalClient:
 
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
-        if not self._handshake_over.is_set():
+        if not self._handshake_over.is_set() and self._stream.harness_error is None:
             self._refusal = EvalBotUnavailableError(kind, reason)
             self._handshake_over.set()
 

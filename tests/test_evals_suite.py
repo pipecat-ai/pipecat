@@ -855,6 +855,40 @@ class TestScenarioRecords(unittest.TestCase):
 
 
 class TestSimulationRecords(unittest.TestCase):
+    def test_run_failure_kind_survives_worker_json_and_results_jsonl(self):
+        for kind in ("error", "connect_failed"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                result = EvalSimulationResult(
+                    simulation_name="startup",
+                    succeeded=False,
+                    error="Safe startup reason",
+                    failure_kind=kind,
+                )
+                rebuilt = _simulation_result_from_dict(
+                    json.loads(json.dumps(dataclasses.asdict(result)))
+                )
+                self.assertEqual(rebuilt.failure_kind, kind)
+                run = EvalRun(
+                    bot="fixture.py",
+                    scenario="startup",
+                    kind=EvalKind.SIMULATION,
+                    scenario_path=base / "scenario.yaml",
+                    status="done",
+                    result=rebuilt,
+                )
+                _append_result(base / "results.jsonl", run, "fixture", base, None)
+                record = json.loads((base / "results.jsonl").read_text())
+                self.assertEqual(record["failure_kind"], kind)
+                self.assertEqual(record["error"], "Safe startup reason")
+
+    def test_legacy_simulation_json_without_failure_kind_still_loads(self):
+        result = _simulation_result_from_dict(
+            {"simulation_name": "legacy", "succeeded": False, "error": "Legacy reason"}
+        )
+        self.assertIsNone(result.failure_kind)
+        self.assertEqual(result.error, "Legacy reason")
+
     def test_result_roundtrips_through_the_worker_json(self):
         result = EvalSimulationResult(
             simulation_name="book",
