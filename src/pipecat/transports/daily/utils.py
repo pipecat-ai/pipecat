@@ -301,30 +301,28 @@ class DailyRESTHelper:
     async def get_token(
         self,
         room_url: str,
-        expiry_time: float | None = None,
+        expiry_time: float = 60 * 60,
         eject_at_token_exp: bool | None = None,
-        owner: bool | None = None,
+        owner: bool = True,
         params: DailyMeetingTokenParams | None = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 
-        For `exp`, `is_owner` and `eject_at_token_exp`, an explicit argument
-        wins over the value in `params`, and the value in `params` wins over
-        the default. `room_name` is always taken from `room_url`.
+        `room_name` is always taken from `room_url`. For `exp` and
+        `is_owner`, a value set in `params` is kept; otherwise
+        `expiry_time` and `owner` are used.
 
         Args:
             room_url: Daily room URL.
-            expiry_time: Token validity duration in seconds. If unset, the
-                `exp` in `params` is kept; if that is unset too, the token
-                expires in 1 hour.
+            expiry_time: Token validity duration in seconds (default: 1 hour).
+                Ignored if `params` sets `exp`.
             eject_at_token_exp: Whether to eject the user when the token
                 expires. If unset, the value in `params` is kept; if that is
                 unset too, the field is left out so the room's
                 `eject_at_room_exp` setting applies. Setting it to True or
                 False overrides the room's ejection settings for this token.
-            owner: Whether token has owner privileges. If unset, the
-                `is_owner` in `params` is kept; if that is unset too, the
-                token is an owner token.
+            owner: Whether token has owner privileges (default: True).
+                Ignored if `params` sets `is_owner`.
             params: Optional additional token properties.
 
         Returns:
@@ -348,15 +346,11 @@ class DailyRESTHelper:
         properties = params.properties
         properties.room_name = room_name
 
-        if expiry_time is not None:
+        if properties.exp is None:
             properties.exp = int(time.time() + expiry_time)
-        elif properties.exp is None:
-            properties.exp = int(time.time() + 60 * 60)
 
-        if owner is not None:
+        if properties.is_owner is None:
             properties.is_owner = owner
-        elif properties.is_owner is None:
-            properties.is_owner = True
 
         if eject_at_token_exp is not None:
             properties.eject_at_token_exp = eject_at_token_exp

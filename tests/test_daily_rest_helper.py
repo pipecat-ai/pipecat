@@ -111,47 +111,45 @@ async def test_get_token_default_sends_owner_and_one_hour_exp():
 
 
 @pytest.mark.asyncio
-async def test_get_token_keeps_exp_from_params_when_expiry_time_unset():
+async def test_get_token_keeps_exp_from_params():
     session = _make_session()
     helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
     params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(exp=1234567890))
 
-    await helper.get_token(ROOM_URL, params=params)
+    await helper.get_token(ROOM_URL, expiry_time=60, params=params)
 
     assert _posted_properties(session)["exp"] == 1234567890
 
 
 @pytest.mark.asyncio
-async def test_get_token_expiry_time_arg_overrides_params_exp():
+async def test_get_token_uses_expiry_time_when_params_has_no_exp():
     session = _make_session()
     helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
-    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(exp=1234567890))
+    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(user_name="bot"))
 
     before = time.time()
     await helper.get_token(ROOM_URL, expiry_time=60, params=params)
     after = time.time()
 
-    exp = _posted_properties(session)["exp"]
-    assert exp != 1234567890
-    assert int(before + 60) <= exp <= int(after + 60)
+    assert int(before + 60) <= _posted_properties(session)["exp"] <= int(after + 60)
 
 
 @pytest.mark.asyncio
-async def test_get_token_keeps_is_owner_from_params_when_owner_unset():
+async def test_get_token_keeps_is_owner_from_params():
     session = _make_session()
     helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
     params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(is_owner=False))
 
-    await helper.get_token(ROOM_URL, params=params)
+    await helper.get_token(ROOM_URL, owner=True, params=params)
 
     assert _posted_properties(session)["is_owner"] is False
 
 
 @pytest.mark.asyncio
-async def test_get_token_owner_arg_overrides_params_is_owner():
+async def test_get_token_uses_owner_when_params_has_no_is_owner():
     session = _make_session()
     helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
-    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(is_owner=True))
+    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(user_name="bot"))
 
     await helper.get_token(ROOM_URL, owner=False, params=params)
 
