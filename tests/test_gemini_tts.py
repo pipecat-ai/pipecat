@@ -479,9 +479,10 @@ async def test_genai_headerless_stream_resampled_to_pipeline_rate(mock_genai_cli
 
     assert audio_frames
     assert all(f.sample_rate == 8000 for f in audio_frames)
-    # Half a second at 8 kHz is 8000 bytes. Unresampled, all 24000 bytes would be
-    # stamped as 8 kHz.
-    assert sum(len(f.audio) for f in audio_frames) == len(source_audio) // 3
+    # Half a second at 8 kHz is 8000 bytes, plus the few milliseconds the resampler
+    # holds until the end. Unresampled, all 24000 bytes would be stamped as 8 kHz.
+    total = sum(len(f.audio) for f in audio_frames)
+    assert len(source_audio) // 3 <= total < len(source_audio) // 3 + 160
 
 
 @pytest.mark.asyncio
