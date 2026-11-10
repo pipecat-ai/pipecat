@@ -36,14 +36,14 @@ except ModuleNotFoundError as e:
 
 PIPER_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/piper"))
 
-# Synthesis controls Piper reads per request, so a runtime update of any of them
-# takes effect on the next utterance.
+# Settings Piper takes with each utterance it synthesizes, so a runtime update of any
+# of them applies to the next one.
 _SYNTHESIS_FIELDS = ("speaker_id", "length_scale", "noise_scale", "noise_w_scale")
 
 
 @dataclass
-class PiperSynthesisSettings(TTSSettings):
-    """Piper's per-request synthesis controls.
+class _PiperBaseTTSSettings(TTSSettings):
+    """Shared settings for Piper TTS services.
 
     Parameters:
         speaker_id: Which speaker to use, for voices trained on several speakers (such as
@@ -62,7 +62,7 @@ class PiperSynthesisSettings(TTSSettings):
 
 
 @dataclass
-class PiperTTSSettings(PiperSynthesisSettings):
+class PiperTTSSettings(_PiperBaseTTSSettings):
     """Settings for PiperTTSService."""
 
     pass
@@ -241,7 +241,7 @@ class PiperTTSService(TTSService):
 # `base_url` is "http://localhost:5000/synthesize".
 #
 @dataclass
-class PiperHttpTTSSettings(PiperSynthesisSettings):
+class PiperHttpTTSSettings(_PiperBaseTTSSettings):
     """Settings for PiperHttpTTSService."""
 
     pass
