@@ -1578,19 +1578,26 @@ class LLMUserAggregator(LLMContextAggregator):
         inference, it passes the LLM before the response is held, while the
         turn written once it ends waits for the inference to finish.
 
+        The speculated turn is whatever of the turn the context doesn't hold
+        yet: transcripts committed earlier in the turn but not written, then the
+        predicted text. Transcripts an earlier inference in the turn wrote are
+        already in the context.
+
         Args:
             speculation: The speculation to run, from the stop strategy that
                 started it.
         """
-        perception = speculation.perception if self._expressive else None
-        content = (
-            f"{format_perception(perception)} {speculation.text}"
-            if perception
-            else speculation.text
+        text = concatenate_aggregated_text(
+            [
+                *self._aggregation,
+                TextPartForConcatenation(speculation.text, includes_inter_part_spaces=False),
+            ]
         )
+        perception = speculation.perception if self._expressive else None
+        content = f"{format_perception(perception)} {text}" if perception else text
         await self.broadcast_frame(
             LLMContextUserTurnFrame,
-            text=speculation.text,
+            text=text,
             timestamp=self._user_turn_start_timestamp,
             perception=perception,
             speculation=True,
