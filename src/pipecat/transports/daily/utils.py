@@ -342,6 +342,11 @@ class DailyRESTHelper:
 
         if params is None:
             params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties())
+        else:
+            # Fill in a copy. Written onto the caller's object, the defaults
+            # below would look like the caller's own values on the next call
+            # with the same `params`, and win over that call's arguments.
+            params = params.model_copy(deep=True)
 
         properties = params.properties
         properties.room_name = room_name

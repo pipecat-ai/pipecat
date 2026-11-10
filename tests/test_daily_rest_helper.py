@@ -154,3 +154,31 @@ async def test_get_token_uses_owner_when_params_has_no_is_owner():
     await helper.get_token(ROOM_URL, owner=False, params=params)
 
     assert _posted_properties(session)["is_owner"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_token_does_not_change_the_params_it_is_given():
+    session = _make_session()
+    helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
+    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(user_name="bot"))
+
+    await helper.get_token(ROOM_URL, eject_at_token_exp=True, params=params)
+
+    assert params.properties.model_dump(exclude_none=True) == {"user_name": "bot"}
+
+
+@pytest.mark.asyncio
+async def test_get_token_reusing_params_takes_each_calls_arguments():
+    session = _make_session()
+    helper = DailyRESTHelper(daily_api_key="key", aiohttp_session=session)
+    params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties(user_name="bot"))
+
+    await helper.get_token(ROOM_URL, expiry_time=60, owner=True, params=params)
+    before = int(time.time())
+    await helper.get_token(ROOM_URL, expiry_time=7200, owner=False, params=params)
+
+    first, second = (call.kwargs["json"]["properties"] for call in session.post.call_args_list)
+    assert first["is_owner"] is True
+    assert second["is_owner"] is False
+    assert second["exp"] >= before + 7200
+    assert "eject_at_token_exp" not in second
