@@ -38,7 +38,7 @@ PIPER_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/piper"))
 
 # Synthesis controls Piper reads per request, so a runtime update of any of them
 # takes effect on the next utterance.
-SYNTHESIS_FIELDS = ("speaker_id", "length_scale", "noise_scale", "noise_w_scale")
+_SYNTHESIS_FIELDS = ("speaker_id", "length_scale", "noise_scale", "noise_w_scale")
 
 
 @dataclass
@@ -176,7 +176,7 @@ class PiperTTSService(TTSService):
         if not changed:
             return changed
         # TODO: voice changes would require re-downloading and loading the model.
-        self._warn_unhandled_updated_settings(set(changed) - set(SYNTHESIS_FIELDS))
+        self._warn_unhandled_updated_settings(changed.keys() - _SYNTHESIS_FIELDS)
         return changed
 
     @traced_tts
@@ -206,7 +206,7 @@ class PiperTTSService(TTSService):
 
         try:
             syn_config = SynthesisConfig(
-                **{name: assert_given(getattr(self._settings, name)) for name in SYNTHESIS_FIELDS}
+                **{name: assert_given(getattr(self._settings, name)) for name in _SYNTHESIS_FIELDS}
             )
 
             await self.start_tts_usage_metrics(text)
@@ -352,7 +352,7 @@ class PiperHttpTTSService(TTSService):
                 "text": text,
                 "voice": self._settings.voice,
             }
-            for name in SYNTHESIS_FIELDS:
+            for name in _SYNTHESIS_FIELDS:
                 value = assert_given(getattr(self._settings, name))
                 if value is not None:
                     data[name] = value
