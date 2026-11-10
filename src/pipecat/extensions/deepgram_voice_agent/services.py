@@ -263,9 +263,10 @@ def create_tts(
     http_session: aiohttp.ClientSession,
     sample_rate: int,
 ) -> TTSService:
-    """Create the TTS service for ``agent.speak``.
+    """Create the TTS service for an ``agent.speak`` entry.
 
-    ``agent.speak`` may list fallback providers; the first is used. Supported
+    ``agent.speak`` may list fallback providers; given the list, this creates
+    the first, and the server creates one per entry. Supported
     providers are ``deepgram``, ``cartesia`` and ``eleven_labs``. A
     third-party provider's API key comes from its ``endpoint`` headers, as in
     the Voice Agent API, or else from the server's credentials.

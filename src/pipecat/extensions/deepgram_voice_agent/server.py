@@ -59,12 +59,14 @@ from pipecat.extensions.deepgram_voice_agent.services import (
     validate_think_update,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 from pipecat.turns.user_turn_strategies import StrategyMode, UserTurnStrategiesParams
 from pipecat.workers.runner import WorkerRunner
@@ -354,12 +356,20 @@ class DeepgramVoiceAgentServer:
             http_session=http_session,
             system_instruction=prompt,
         )
-        tts = create_tts(
-            agent.get("speak"),
-            credentials=self._credentials,
-            http_session=http_session,
-            sample_rate=PIPELINE_OUT_SAMPLE_RATE,
-        )
+        # One TTS per speak entry: the first speaks, and each next one is the
+        # fallback should the one before it fail.
+        speak = agent.get("speak")
+        speak_entries = speak if isinstance(speak, list) and speak else [speak]
+        tts_services: list[FrameProcessor] = [
+            create_tts(
+                entry,
+                credentials=self._credentials,
+                http_session=http_session,
+                sample_rate=PIPELINE_OUT_SAMPLE_RATE,
+            )
+            for entry in speak_entries
+        ]
+        tts = tts_services[0] if len(tts_services) == 1 else ServiceSwitcher(tts_services)
 
         processor = DeepgramVoiceAgentProcessor(
             system_instruction=prompt, greeting=agent.get("greeting")
@@ -375,7 +385,7 @@ class DeepgramVoiceAgentServer:
             http_session=http_session,
         )
         processor.listen = listen
-        processor.tts = tts
+        processor.tts_services = list(tts_services)
         processor.speak_provider = speak_provider_type(agent.get("speak"))
         observer.include_timing_data = bool(
             processor.speak_provider == "eleven_labs"

@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMMessagesAppendFrame,
     LLMUpdateSettingsFrame,
+    ManuallySwitchServiceFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     TTSSpeakFrame,
@@ -395,3 +396,52 @@ class TestDeepgramVoiceAgentLLMInputGate(unittest.IsolatedAsyncioTestCase):
             gate, frames_to_send=[UserStartedSpeakingFrame(), LLMContextFrame(LLMContext())]
         )
         self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)
+
+
+class TestDeepgramVoiceAgentSpeakFallback(unittest.IsolatedAsyncioTestCase):
+    def _processor(self, services):
+        processor = DeepgramVoiceAgentProcessor()
+        processor.tts_services = services
+        self.sent: list[dict] = []
+        self.pushed: list = []
+        self.failed = 0
+
+        async def send(message):
+            self.sent.append(message)
+
+        async def push_frame(frame, direction=None):
+            self.pushed.append(frame)
+
+        async def on_speech_failed():
+            self.failed += 1
+
+        processor.send = send
+        processor.speech_injector.push_frame = push_frame
+        processor.on_speech_failed = on_speech_failed
+        return processor
+
+    async def test_failed_speech_is_retried_on_the_next_speak_entry(self):
+        aura, flux = DeepgramVoiceAgentLLMInputGate(), DeepgramVoiceAgentLLMInputGate()
+        processor = self._processor([aura, flux])
+        processor.last_speech_request = "Hello there."
+        await processor._on_speak_failure(aura, "HTTP 400")
+        # The same failure reported again is handled once.
+        await processor._on_speak_failure(aura, "completed with no audio")
+        self.assertEqual([m["code"] for m in self.sent], ["SPEAK_REQUEST_FAILED"])
+        self.assertEqual(self.failed, 1)
+        switch, speak = self.pushed
+        self.assertIsInstance(switch, ManuallySwitchServiceFrame)
+        self.assertIs(switch.service, flux)
+        self.assertEqual(speak.text, "Hello there.")
+
+    async def test_last_speak_entry_failing_fails_to_speak(self):
+        aura, flux = DeepgramVoiceAgentLLMInputGate(), DeepgramVoiceAgentLLMInputGate()
+        processor = self._processor([aura, flux])
+        processor.last_speech_request = "Hello there."
+        await processor._on_speak_failure(aura, "HTTP 400")
+        await processor._on_speak_failure(flux, "HTTP 503")
+        self.assertEqual(
+            [m["code"] for m in self.sent],
+            ["SPEAK_REQUEST_FAILED", "SPEAK_REQUEST_FAILED", "FAILED_TO_SPEAK"],
+        )
+        self.assertEqual(self.failed, 2)

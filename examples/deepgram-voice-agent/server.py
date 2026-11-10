@@ -58,4 +58,6 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Like the Voice Agent API, rely on the client's KeepAlive messages rather
+    # than pinging it: a client that isn't reading its socket can't answer.
+    uvicorn.run(app, host=args.host, port=args.port, ws_ping_interval=None)

@@ -48,6 +48,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    ManuallySwitchServiceFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     ProposedUserStoppedSpeakingFrame,
@@ -75,6 +76,7 @@ INVALID_SETTINGS = "INVALID_SETTINGS"
 UNSUPPORTED_UPDATE = "UNSUPPORTED_UPDATE"
 PIPELINE_ERROR = "PIPELINE_ERROR"
 SPEAK_REQUEST_FAILED = "SPEAK_REQUEST_FAILED"
+FAILED_TO_SPEAK = "FAILED_TO_SPEAK"
 FORCE_END_TURN_UNSUPPORTED = "FORCE_END_TURN_UNSUPPORTED"
 CLIENT_MESSAGE_TIMEOUT = "CLIENT_MESSAGE_TIMEOUT"
 SLOW_THINK_REQUEST = "SLOW_THINK_REQUEST"
@@ -159,9 +161,14 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
         self.on_turn_end: Callable[[], None] | None = None
         # Handles UpdateListen; without one, UpdateListen is refused.
         self.listen_updater: DeepgramListenUpdater | None = None
-        # The listen services, for ForceEndTurn; the TTS, to tell its errors apart.
+        # The listen services, for ForceEndTurn; the TTS services, one per speak
+        # entry (fallbacks after the first), behind a switcher when there are more.
         self.listen: DeepgramListen | None = None
-        self.tts: FrameProcessor | None = None
+        self.tts_services: list[FrameProcessor] = []
+        self.last_speech_request: str | None = None
+        self._failed_speech: tuple[FrameProcessor, str] | None = None
+        # Set by the observer: a segment the TTS started will never be spoken.
+        self.on_speech_failed: Callable[[], Awaitable[None]] | None = None
         # Checks an UpdateThink before it's applied, raising SettingsError.
         self.validate_think: Callable[[Mapping[str, Any]], Awaitable[None]] | None = None
         # The session's speak provider type, which UpdateSpeak must keep.
@@ -263,10 +270,34 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
             self._client_timeout_task = None
         elif isinstance(frame, ErrorFrame) and direction == FrameDirection.UPSTREAM:
             fatal = frame.fatal or (frame.processor is not None and not frame.processor.is_usable)
-            if self.tts is not None and frame.processor is self.tts:
-                await self.send(error_message(SPEAK_REQUEST_FAILED, str(frame.error), warning=True))
+            if frame.processor is not None and frame.processor in self.tts_services:
+                await self._on_speak_failure(frame.processor, str(frame.error))
             else:
                 await self.send(error_message(PIPELINE_ERROR, str(frame.error), warning=not fatal))
+
+    async def _on_speak_failure(self, service: FrameProcessor, description: str):
+        """Report a failed speak request, and retry it on the next speak entry.
+
+        As in the Voice Agent API, each failure is a ``SPEAK_REQUEST_FAILED``
+        warning; a fallback entry then speaks the same text, and with none left
+        the agent reports ``FAILED_TO_SPEAK``.
+        """
+        text = self.last_speech_request
+        if text is None or (service, text) == self._failed_speech:
+            # Already handled: a failure can be reported more than once.
+            return
+        self._failed_speech = (service, text)
+        if self.on_speech_failed:
+            await self.on_speech_failed()
+        await self.send(error_message(SPEAK_REQUEST_FAILED, description, warning=True))
+        index = self.tts_services.index(service)
+        if index + 1 < len(self.tts_services):
+            fallback = self.tts_services[index + 1]
+            logger.info(f"{self}: speaking with fallback {fallback} after {service} failed")
+            await self.speech_injector.push_frame(ManuallySwitchServiceFrame(service=fallback))
+            await self.speech_injector.push_frame(TTSSpeakFrame(text))
+        else:
+            await self.send(error_message(FAILED_TO_SPEAK, "No speak provider could speak."))
 
     async def _watch_client_messages(self):
         """End the session when the client goes quiet, as the Voice Agent API does."""
@@ -589,6 +620,7 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         """
         super().__init__(**kwargs)
         self._processor = processor
+        processor.on_speech_failed = self._on_speech_failed
         self._processor.on_turn_end = self._mark_turn_end
         self._experimental = experimental
         self._response_text = ""
@@ -606,9 +638,9 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._turn_languages: list[str] | None = None
         # Returns the listen language hints in effect, for ``languages_hinted``.
         self.languages_hinted: Callable[[], list[str] | None] = lambda: None
-        # The text of the segment whose audio the transport is about to send,
-        # announced with that audio's first chunk.
-        self._next_segment_text: str | None = None
+        # Segments the transport is sending, in order: [text, announced, words
+        # still to be spoken].
+        self._segments: deque[list] = deque()
         # Segments the TTS has started that haven't finished reaching the client.
         self._open_segments = 0
         self._bot_speaking = False
@@ -719,23 +751,32 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         """Follow spoken segments as the output transport sends them on.
 
         A TTS service pushes each segment's text (an ``AggregatedTextFrame``
-        that will be spoken) ahead of its audio, and a ``TTSTextFrame`` after
-        it; the transport sends them on in that order, and drops what an
-        interruption cuts. So the text is announced with the segment's first
-        audio, as in the Voice Agent API.
+        that will be spoken) ahead of its audio, and ``TTSTextFrame``s for its
+        words, or the whole segment, as they are spoken; the transport sends
+        them on in order and drops what an interruption cuts. A streaming TTS
+        may send several segments' text ahead of their audio, so segments queue:
+        the head is announced with the next audio, as in the Voice Agent API,
+        and leaves the queue once its words have been spoken.
         """
         if isinstance(frame, TTSTextFrame):
             if self._timed_segment and frame.text.strip():
                 _, start, words = self._timed_segment
                 words.append((frame.text.strip(), time.monotonic() - start))
-            self._open_segments = max(0, self._open_segments - 1)
+            if self._segments and self._segments[0][1]:
+                remaining = self._segments[0][2][len(_words(frame.text)) :]
+                self._segments[0][2] = remaining
+                if not remaining:
+                    self._segments.popleft()
+                    self._open_segments = max(0, self._open_segments - 1)
             await self._maybe_send_audio_done()
         elif isinstance(frame, AggregatedTextFrame):
-            if frame.will_be_spoken and frame.text.strip():
-                self._next_segment_text = frame.text.strip()
-        elif isinstance(frame, OutputAudioRawFrame) and self._next_segment_text:
+            if frame.will_be_spoken and _words(_STAGE_DIRECTIONS.sub(" ", frame.text)):
+                # [text, announced, words still to be spoken]
+                self._segments.append([frame.text.strip(), False, _words(frame.text)])
+        elif isinstance(frame, OutputAudioRawFrame) and self._segments and not self._segments[0][1]:
             await self._stop_slowness_watch()
-            text, self._next_segment_text = self._next_segment_text, None
+            self._segments[0][1] = True
+            text = self._segments[0][0]
             if self.include_timing_data:
                 # Sent when the segment ends, with when each character played.
                 await self._flush_timed_segment()
@@ -756,7 +797,7 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                     )
         elif isinstance(frame, InterruptionFrame):
             await self._flush_timed_segment()
-            self._next_segment_text = None
+            self._segments.clear()
             self._open_segments = 0
 
     async def _on_transcription(self, frame: InterimTranscriptionFrame | TranscriptionFrame):
@@ -839,6 +880,11 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                 )
         await self._processor.send_conversation_text("assistant", text, audio_timing=timing)
 
+    async def _on_speech_failed(self):
+        """Forget a segment the TTS started but failed to speak."""
+        self._open_segments = max(0, self._open_segments - 1)
+        await self._maybe_send_audio_done()
+
     async def _maybe_send_audio_done(self):
         """Send a held AgentAudioDone once the agent has nothing left to say."""
         if not self._audio_done_pending or self._bot_speaking:
@@ -881,8 +927,9 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             and not isinstance(frame, TTSTextFrame)
             and frame.will_be_spoken
         ):
-            # The TTS starting a segment.
+            # The TTS starting a segment; kept should it fail and a fallback retry it.
             self._open_segments += 1
+            self._processor.last_speech_request = frame.text
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._turn_transcripts = []
             self._turn_languages = None
@@ -953,6 +1000,10 @@ class DeepgramVoiceAgentObserver(BaseObserver):
             self._interrupted = False
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._flush_timed_segment()
+            while self._segments and self._segments[0][1]:
+                # Spoken, whatever words the TTS reported.
+                self._segments.popleft()
+                self._open_segments = max(0, self._open_segments - 1)
             self._bot_speaking = False
             self._speaking_announced = False
             if not self._interrupted:
@@ -976,3 +1027,11 @@ def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
+
+
+_STAGE_DIRECTIONS = re.compile(r"\*[^*\n]+\*")
+
+
+def _words(text: str) -> list[str]:
+    """The words of a text, for matching what a TTS has spoken against it."""
+    return [w for w in (re.sub(r"[^\w']", "", w).lower() for w in text.split()) if w]
