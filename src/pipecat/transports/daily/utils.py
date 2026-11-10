@@ -301,24 +301,31 @@ class DailyRESTHelper:
     async def get_token(
         self,
         room_url: str,
-        expiry_time: float = 60 * 60,
+        expiry_time: float | None = None,
         eject_at_token_exp: bool | None = None,
-        owner: bool = True,
+        owner: bool | None = None,
         params: DailyMeetingTokenParams | None = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 
+        For `exp`, `is_owner` and `eject_at_token_exp`, an explicit argument
+        wins over the value in `params`, and the value in `params` wins over
+        the default. `room_name` is always taken from `room_url`.
+
         Args:
             room_url: Daily room URL.
-            expiry_time: Token validity duration in seconds (default: 1 hour).
+            expiry_time: Token validity duration in seconds. If unset, the
+                `exp` in `params` is kept; if that is unset too, the token
+                expires in 1 hour.
             eject_at_token_exp: Whether to eject the user when the token
-                expires. Leave it unset (None) to let the room's
-                `eject_at_room_exp` setting apply. Setting it to True or
+                expires. If unset, the value in `params` is kept; if that is
+                unset too, the field is left out so the room's
+                `eject_at_room_exp` setting applies. Setting it to True or
                 False overrides the room's ejection settings for this token.
-            owner: Whether token has owner privileges.
-            params: Optional additional token properties. Note that room_name,
-                exp, and is_owner will be set based on the other function
-                parameters regardless of values in params.
+            owner: Whether token has owner privileges. If unset, the
+                `is_owner` in `params` is kept; if that is unset too, the
+                token is an owner token.
+            params: Optional additional token properties.
 
         Returns:
             Meeting token.
@@ -331,27 +338,28 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: int = int(time.time() + expiry_time)
-
         room_name = self.get_name_from_url(room_url)
 
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
 
         if params is None:
-            params = DailyMeetingTokenParams(
-                properties=DailyMeetingTokenProperties(
-                    room_name=room_name,
-                    is_owner=owner,
-                    exp=expiration,
-                    eject_at_token_exp=eject_at_token_exp,
-                )
-            )
-        else:
-            params.properties.room_name = room_name
-            params.properties.exp = expiration
-            if eject_at_token_exp is not None:
-                params.properties.eject_at_token_exp = eject_at_token_exp
-            params.properties.is_owner = owner
+            params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties())
+
+        properties = params.properties
+        properties.room_name = room_name
+
+        if expiry_time is not None:
+            properties.exp = int(time.time() + expiry_time)
+        elif properties.exp is None:
+            properties.exp = int(time.time() + 60 * 60)
+
+        if owner is not None:
+            properties.is_owner = owner
+        elif properties.is_owner is None:
+            properties.is_owner = True
+
+        if eject_at_token_exp is not None:
+            properties.eject_at_token_exp = eject_at_token_exp
 
         json = params.model_dump(exclude_none=True)
 
