@@ -116,9 +116,11 @@ class MiniMaxTTSSettings(TTSSettings):
             treated as "basic" elsewhere.
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
-        pronunciation_dict: Pronunciation replacements, each entry in MiniMax's
-            ``original/replacement`` form (e.g. ``"processing/(chu3)(li3)"``).
-            Sent as the API's ``pronunciation_dict.tone`` list.
+        pronunciation_dict: Pronunciation replacements, each an
+            ``"original/replacement"`` string. The replacement is plain text
+            (``"omg/oh my god"``), IPA in parentheses (``"Pipecat/(ˈpaɪpkæt)"``),
+            pinyin with tone numbers in parentheses (``"处理/(chu3)(li3)"``), or
+            Japanese kana. Sent as the request's ``pronunciation_dict.tone`` list.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -433,8 +435,9 @@ class MiniMaxHttpTTSService(TTSService):
         text_normalization_mode = self._text_normalization_mode()
         if text_normalization_mode is not None:
             payload["text_normalization_mode"] = text_normalization_mode
-        if self._settings.pronunciation_dict is not None:
-            payload["pronunciation_dict"] = {"tone": self._settings.pronunciation_dict}
+        pronunciation_dict = assert_given(self._settings.pronunciation_dict)
+        if pronunciation_dict is not None:
+            payload["pronunciation_dict"] = {"tone": pronunciation_dict}
 
         try:
             async with self._session.post(
