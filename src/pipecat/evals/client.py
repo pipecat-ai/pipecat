@@ -44,6 +44,7 @@ from pipecat.evals.serializer import (
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
+    EvalAudioCapabilities,
     EvalClientSerializer,
     EvalConnectionFlags,
 )
@@ -203,9 +204,11 @@ class _BotSpeechGate(FrameProcessor):
     folded into it. A turn that sends nothing drops the same way what the bot
     says before it starts speaking again.
 
-    Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    Segment attribution needs an STT that transcribes one segment at a time.
+    An unsegmented STT's ordinary sends wait for the bot to stop speaking and
+    its open turn to close. After an interrupting send, an untagged transcript
+    has no trustworthy audio origin, so the gate reports an error instead of
+    allowing old speech to become the new reply's evidence.
     """
 
     def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
@@ -222,11 +225,28 @@ class _BotSpeechGate(FrameProcessor):
         self._trace = trace
         self._starts = starts
         self._segment_started_at: float | None = None
+        self._reported_ambiguous_transcript = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._starts is None:
-            pass
+        if isinstance(frame, _BotSegmentTranscriptionFrame):
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
+                return
+        elif self._starts is None:
+            if (
+                direction == FrameDirection.DOWNSTREAM
+                and isinstance(frame, TranscriptionFrame)
+                and not isinstance(frame, _BotSegmentTranscriptionFrame)
+                and self._stream.talked_over_until is not None
+            ):
+                if not self._reported_ambiguous_transcript:
+                    self._reported_ambiguous_transcript = True
+                    await self.push_error(
+                        "Cannot attribute streaming transcription after interrupted speech"
+                    )
+                return
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
@@ -236,11 +256,6 @@ class _BotSpeechGate(FrameProcessor):
             self._starts.append(self._segment_started_at or time.monotonic())
             self._segment_started_at = None
             self._stream.bot_segment_ended()
-        elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            talked_over_until = self._stream.talked_over_until
-            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
-                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
-                return
         await self.push_frame(frame, direction)
 
 
@@ -265,6 +280,7 @@ class _BotFrameSink(FrameProcessor):
         *,
         persona: EvalPersona | None = None,
         persona_hears: bool = False,
+        answer_enabled: bool = True,
     ):
         """Initialize the sink.
 
@@ -273,11 +289,25 @@ class _BotFrameSink(FrameProcessor):
             persona: The simulated caller, else ``None``.
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
+            answer_enabled: Whether the caller may answer before admission.
         """
         super().__init__()
         self._stream = stream
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
+        self._answer_enabled = answer_enabled
+        self._pending_answer: LLMContextFrame | None = None
+
+    async def allow_answers(self) -> None:
+        """Admit the caller and replay an already observed greeting once."""
+        self._answer_enabled = True
+        pending, self._pending_answer = self._pending_answer, None
+        await self._answer(pending)
+
+    async def cleanup(self):
+        """Release any greeting held while the target's support was checked."""
+        self._pending_answer = None
+        await super().cleanup()
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -317,6 +347,9 @@ class _BotFrameSink(FrameProcessor):
     async def _answer(self, frame: LLMContextFrame | None) -> None:
         """Push the frame that has the persona answer, unless there is none or it hung up."""
         if frame is None or self._persona is None or self._persona.hung_up:
+            return
+        if not self._answer_enabled:
+            self._pending_answer = frame
             return
         await self.push_frame(frame)
 
@@ -555,6 +588,7 @@ class EvalClient:
         # handshake() waits on it.
         self._handshake_over = asyncio.Event()
         self._refusal: EvalBotUnavailableError | None = None
+        self._audio_capabilities: EvalAudioCapabilities | None = None
         self._next_id = 0
 
     @property
@@ -647,6 +681,18 @@ class EvalClient:
         if self._refusal is not None:
             raise self._refusal
 
+        if self._session_params.require_audio_support:
+            capabilities = self._audio_capabilities
+            needs_input = self.sends_user_audio
+            needs_output = self._params.bot_audio
+            if (needs_input and (capabilities is None or not capabilities.audio_input)) or (
+                needs_output and (capabilities is None or not capabilities.audio_output)
+            ):
+                raise EvalBotUnavailableError(
+                    "error",
+                    "The target has not advertised the audio transport support this run requires",
+                )
+
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
         # transport understands this): raise the function-call report level if it
@@ -668,6 +714,8 @@ class EvalClient:
         # set it up.
         if self._params.context:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
+        if self._sink is not None:
+            await self._sink.allow_answers()
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -900,11 +948,16 @@ class EvalClient:
         if self._record_path and self._params.bot_audio:
             self._recorder = EvalClientRecorder(self._user_audio_rate or EVAL_STT_SAMPLE_RATE)
         transport = EvalClientTransport(
-            self._connect_url(), params, flags=self._connection_flags(), recorder=self._recorder
+            self._connect_url(),
+            params,
+            flags=self._connection_flags(),
+            recorder=self._recorder,
+            timing=self._stream.transport_timing,
         )
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
+            self._audio_capabilities = _transport.audio_capabilities
             self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
@@ -933,7 +986,15 @@ class EvalClient:
         context = persona.context if persona is not None else LLMContext()
         # With no STT there is no aggregator to hand the persona the bot's turns;
         # it hears them through the sink instead.
-        self._sink = _BotFrameSink(self._stream, persona=persona, persona_hears=bot_stt is None)
+        self._sink = _BotFrameSink(
+            self._stream,
+            persona=persona,
+            persona_hears=bot_stt is None,
+            answer_enabled=not (
+                self._session_params.require_audio_support
+                and (self.sends_user_audio or self._params.bot_audio)
+            ),
+        )
 
         inbound: list = [transport.input()]
         if bot_stt is not None:

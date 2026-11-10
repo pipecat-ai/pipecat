@@ -89,6 +89,11 @@ from pipecat.frames.frames import (
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 
+# Transport-observed timing, independent of synthesis or transcription latency.
+USER_TEXT_SENT_EVENT = "user_text_sent"
+USER_AUDIO_SENT_EVENT = "user_audio_sent"
+BOT_AUDIO_RECEIVED_EVENT = "bot_audio_received"
+
 
 class EvalBotEndedError(Exception):
     """The bot ended the call before the awaited event arrived, so it never will."""
@@ -176,6 +181,21 @@ class EvalEventStream:
         # Whether the bot closed the connection. Kept apart from its queued
         # bot_ended event, which a drop of the bot's pending output discards.
         self._bot_ended = False
+        # A harness service failure invalidates subsequent evidence, even if
+        # its queued event is discarded at a turn boundary or interruption.
+        self._harness_error: dict | None = None
+        self._harness_failed = asyncio.Event()
+
+    @property
+    def harness_error(self) -> dict | None:
+        """The first harness pipeline error, independent of event consumption."""
+        return self._harness_error
+
+    async def wait_harness_error(self) -> dict:
+        """Wait for a harness pipeline failure without consuming the bot's events."""
+        await self._harness_failed.wait()
+        assert self._harness_error is not None
+        return self._harness_error
 
     @property
     def bot_speaking(self) -> bool:
@@ -294,9 +314,21 @@ class EvalEventStream:
         self.touch()
         self.events_seen.append(event)
         self.latest_event_times[event["type"]] = time.monotonic()
+        if event["type"] == "harness_error" and self._harness_error is None:
+            self._harness_error = dict(event)
+            self._harness_failed.set()
         preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
+
+    async def transport_timing(self, event_type: str, at: float) -> None:
+        """Record a transport boundary on the stream's monotonic clock.
+
+        Args:
+            event_type: The input-delivery or raw bot-audio boundary.
+            at: Monotonic time observed at the transport, before pipeline work.
+        """
+        await self.append({"type": event_type, "at": round(at - self._t0, 3)})
 
     async def next_any(self, deadline: float) -> dict:
         """Pop the next queued event, whatever its type.

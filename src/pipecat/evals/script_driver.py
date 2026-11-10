@@ -88,17 +88,56 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         self.turns = [EvalScriptTurnResult(turn_index=i) for i in range(len(scenario.turns))]
 
     async def run(self) -> list[EvalAssertionFailure]:
+        """Drive the turns until completion or a failure in the harness's own pipeline."""
+        driving = asyncio.create_task(self._run_turns(), name="eval-script-turns")
+        failed = asyncio.create_task(self._stream.wait_harness_error(), name="eval-script-error")
+        try:
+            await asyncio.wait((driving, failed), return_when=asyncio.FIRST_COMPLETED)
+            if driving.done():
+                failures, error = driving.result()
+                if error is None:
+                    return failures
+            else:
+                driving.cancel()
+                await asyncio.gather(driving, return_exceptions=True)
+                error = failed.result()
+                failures = [failure for turn in self.turns for failure in turn.failures]
+
+            failure = EvalAssertionFailure(
+                turn_index=self._trace.turn,
+                expectation_index=-1,
+                event_name="<error>",
+                reason="the eval harness pipeline failed",
+                kind="error",
+            )
+            self.record_failure(failure)
+            failures.append(failure)
+            self._trace.log("error: the eval harness pipeline failed")
+            await self._progress(
+                EvalScriptTurnProgress(self._trace.turn, -1, "<error>", "failed", failure.reason)
+            )
+            return failures
+        finally:
+            driving.cancel()
+            failed.cancel()
+            await asyncio.gather(driving, failed, return_exceptions=True)
+
+    async def _run_turns(self) -> tuple[list[EvalAssertionFailure], dict | None]:
         """Drive the scenario's turns in order, filling in their records."""
         failures: list[EvalAssertionFailure] = []
         for turn_idx, turn in enumerate(self._scenario.turns):
+            if self._stream.harness_error is not None:
+                break
             self._trace.turn = turn_idx
             self._trace.log(f"--- turn {turn_idx}: {turn.user!r}")
             turn_started = time.monotonic()
-            turn_failures = await self._run_turn(turn, turn_idx)
             record = self.turns[turn_idx]
+            try:
+                turn_failures = await self._run_turn(turn, turn_idx)
+            finally:
+                record.duration_ms = int((time.monotonic() - turn_started) * 1000)
             record.status = "failed" if turn_failures else "passed"
             record.failures = turn_failures
-            record.duration_ms = int((time.monotonic() - turn_started) * 1000)
             failures.extend(turn_failures)
             if turn_failures:
                 # By default a failed turn ends the scenario: it leaves the
@@ -111,7 +150,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
                     break
                 self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
-        return failures
+        # Snapshot before returning: an error reported after the driver completed
+        # must not turn its finished result into a failure during teardown.
+        return failures, self._stream.harness_error
 
     def result(
         self,
@@ -231,16 +272,18 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         # Only the event-anchored wait can fail; the pure-delay form just
         # sleeps. So event is never None here, but fall back for typing.
         event_name = send_after.event or "send_after"
-        self._trace.log(f"FAIL: {event_name}: {reason}")
-        status = "timeout" if kind == "send_after_timeout" else "failed"
-        await self._progress(EvalScriptTurnProgress(turn_idx, -1, event_name, status, reason))
-        return EvalAssertionFailure(
+        failure = EvalAssertionFailure(
             turn_index=turn_idx,
             expectation_index=-1,
             event_name=event_name,
             reason=reason,
             kind=kind,
         )
+        self.turns[turn_idx].failures.append(failure)
+        self._trace.log(f"FAIL: {event_name}: {reason}")
+        status = "timeout" if kind == "send_after_timeout" else "failed"
+        await self._progress(EvalScriptTurnProgress(turn_idx, -1, event_name, status, reason))
+        return failure
 
     async def _wait_send_after(self, send_after: EvalSendAfter) -> None:
         """Wait until ``send_after.event`` has been seen and ``delay_ms`` more have passed.
@@ -303,7 +346,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         one budget per expectation, and a turn whose bot ended the call fails at
         once.
         """
-        failures: list[EvalAssertionFailure] = []
+        # Keep decided failures in the turn while later expectations still
+        # wait, so a harness error cannot erase the evidence already scored.
+        failures = self.turns[turn_idx].failures
         resolved = self.turns[turn_idx].expectations
         anchor = time.monotonic()
         for exp_idx, expectation in enumerate(turn.expect):
@@ -314,13 +359,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 )
             except TimeoutError:
                 reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
-                failures.append(await self._unmatched(turn_idx, exp_idx, expectation, reason))
+                await self._unmatched(turn_idx, exp_idx, expectation, reason)
                 break
             except EvalBotEndedError:
                 reason = f"the bot ended the call before a matching {expectation.event!r} event"
-                failures.append(
-                    await self._unmatched(turn_idx, exp_idx, expectation, reason, "bot_ended")
-                )
+                await self._unmatched(turn_idx, exp_idx, expectation, reason, "bot_ended")
                 break
 
             if failure:
@@ -354,15 +397,17 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         self.turns[turn_idx].expectations.append(
             EvalExpectationResult(exp_idx, expectation.event, passed=False)
         )
-        self._trace.log(f"FAIL: {expectation.event}: {reason}")
-        status = "timeout" if kind == "timeout" else "failed"
-        await self._progress(
-            EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, status, reason)
-        )
-        return EvalAssertionFailure(
+        failure = EvalAssertionFailure(
             turn_index=turn_idx,
             expectation_index=exp_idx,
             event_name=expectation.event,
             reason=reason,
             kind=kind,
         )
+        self.turns[turn_idx].failures.append(failure)
+        self._trace.log(f"FAIL: {expectation.event}: {reason}")
+        status = "timeout" if kind == "timeout" else "failed"
+        await self._progress(
+            EvalScriptTurnProgress(turn_idx, exp_idx, expectation.event, status, reason)
+        )
+        return failure

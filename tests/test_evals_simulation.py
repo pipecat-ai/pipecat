@@ -554,6 +554,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             await stream.append(
                 {"type": PERSONA_TURN_EVENT, "text": "Capital of Germany?", "at": 1.0}
             )
+            await stream.append({"type": "user_text_sent", "at": 1.0})
             await stream.append({"type": "bot_interrupted", "at": 1.1})
             await stream.append(
                 {
@@ -564,6 +565,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 }
             )
             await stream.append({"type": PERSONA_TURN_EVENT, "text": "Thanks", "at": 3.5})
+            await stream.append({"type": "user_text_sent", "at": 3.5})
             await stream.append(
                 {"type": "llm_response", "text": "Bye!", "at": 3.9, "started_at": 3.8}
             )
@@ -1049,11 +1051,13 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
         failures = await driver.run()
         await task
         self.assertEqual(
-            [(f.kind, f.reason) for f in failures], [("error", "OLLamaLLMService: 400")]
+            [(f.kind, f.reason) for f in failures], [("error", "the eval harness pipeline failed")]
         )
         self.assertTrue(client.hung_up)
         result = driver.result(failures=failures, duration_ms=0, events_seen=[], debug_log=[])
-        self.assertEqual((result.ended_by, result.error), ("error", "OLLamaLLMService: 400"))
+        self.assertEqual(
+            (result.ended_by, result.error), ("error", "the eval harness pipeline failed")
+        )
         self.assertFalse(result.passed)
 
     async def test_a_judge_with_no_goal_verdict_is_the_runs_error(self):

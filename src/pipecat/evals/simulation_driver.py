@@ -6,6 +6,7 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
@@ -17,7 +18,12 @@ from pipecat.evals.client import (
     EvalClient,
 )
 from pipecat.evals.conversation import EvalConversation
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import (
+    BOT_AUDIO_RECEIVED_EVENT,
+    USER_AUDIO_SENT_EVENT,
+    USER_TEXT_SENT_EVENT,
+    EvalEventStream,
+)
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import (
@@ -111,8 +117,43 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._observed = 0
 
     async def run(self) -> list[EvalAssertionFailure]:
-        """Watch the conversation until it ends, then judge it."""
+        """Converse and judge until completion or a failure in the harness pipeline."""
+        started = time.monotonic()
         self._persona.on_end_call(self._on_end_call)
+        driving = asyncio.create_task(self._watch_and_judge(), name="eval-simulation")
+        failed = asyncio.create_task(
+            self._stream.wait_harness_error(), name="eval-simulation-error"
+        )
+        try:
+            await asyncio.wait((driving, failed), return_when=asyncio.FIRST_COMPLETED)
+            if driving.done():
+                failures, error = driving.result()
+                if error is None:
+                    return failures
+            else:
+                driving.cancel()
+                await asyncio.gather(driving, return_exceptions=True)
+                error = failed.result()
+
+            self._ended_by = "error"
+            self._succeeded = False
+            self._metrics = []
+            self._goal_confidence = None
+            self._goal_probabilities = {}
+            await self._client.hang_up()
+            self._duration_s = round(time.monotonic() - started, 3)
+            self._observe_new_events()
+            self._conversation.end_bot_turn()
+            return [self._harness_failure(error.get("text", ""))]
+        finally:
+            driving.cancel()
+            failed.cancel()
+            await asyncio.gather(driving, failed, return_exceptions=True)
+
+    async def _watch_and_judge(self) -> tuple[list[EvalAssertionFailure], dict | None]:
+        """Watch the conversation until it ends, then judge it."""
+        if self._stream.harness_error is not None:
+            return [], self._stream.harness_error
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription
         # of what it said, in text mode its LLM text.
@@ -122,7 +163,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # a spoken sentence refreshes without making an event, so a reply in
         # progress on either side is never silence, only nothing happening is.
         self._stream.touch()
-        failures: list[EvalAssertionFailure] = []
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
@@ -131,6 +171,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # waits for the bot's reply to it, or this long, before ending.
         closing_ends: float | None = None
         while self._ended_by is None:
+            if self._stream.harness_error is not None:
+                return [], self._stream.harness_error
             lull_ends = self._stream.last_activity + simulation.max_silence_s
             waits = [deadline, lull_ends] + ([closing_ends] if closing_ends is not None else [])
             try:
@@ -161,8 +203,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif event["type"] == BOT_ENDED_EVENT:
                 self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
-                self._ended_by = "error"
-                failures.append(self._harness_failure(event.get("text", "")))
+                return [], event
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 await self._report("user", event.get("text", ""))
@@ -183,9 +224,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._observe_new_events()
         self._conversation.end_bot_turn()
         await self._report("ended", self._ended_by)
-        if failures:
-            return failures
-        return await self._judge_conversation()
+        if self._stream.harness_error is not None:
+            return [], self._stream.harness_error
+        failures = await self._judge_conversation()
+        # A teardown-late error must not change a result already completed.
+        return failures, self._stream.harness_error
 
     def result(
         self,
@@ -287,7 +330,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             turn_index=self._turns,
             expectation_index=-1,
             event_name="<harness>",
-            reason=text,
+            reason="the eval harness pipeline failed",
             kind="error",
         )
 
@@ -385,10 +428,18 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 bound = f"at least {low:g}"
             reason = f"{described}, {bound}"
             if value is None:
-                score, passed = None, True
+                score, passed = None, False
             else:
                 inside = (low is None or value >= low) and (high is None or value <= high)
                 score, passed = (1.0 if inside else 0.0), inside
+        if score is None:
+            failure_kind = "error"
+        elif passed:
+            failure_kind = None
+        elif metric.measure == "function_calls":
+            failure_kind = "function_calls"
+        else:
+            failure_kind = "out_of_range"
         self._trace.log(
             f"measure: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
             f"{'' if passed else ' (failed)'}: {reason}"
@@ -399,9 +450,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             passed=passed,
             reason=reason,
             value=value,
-            failure_kind=(
-                None if passed else ("out_of_range" if metric.calls is None else "function_calls")
-            ),
+            failure_kind=failure_kind,
         )
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
@@ -423,36 +472,53 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 return None, "no reply to measure"
             return float(longest), f"longest reply {longest} words"
         if measure == "latency":
-            slowest = max(self._reply_latencies(), default=None)
-            if slowest is None:
+            latencies = self._reply_latencies()
+            if not latencies:
                 return None, "no reply to time"
+            if any(value is None for value in latencies):
+                return None, "one or more replies could not be timed"
+            slowest = max(value for value in latencies if value is not None)
             timed = (
-                "from the persona stopping to the first spoken sentence"
+                "to the first received audio"
                 if self._simulation.bot_audio
                 else "to the first token"
             )
             return slowest, f"slowest reply {slowest:.2f} s {timed}"
         raise ValueError(f"unknown measure {measure!r}")
 
-    def _reply_latencies(self) -> list[float]:
-        """Seconds from each persona turn to the bot's first word of the reply.
+    def _reply_latencies(self) -> list[float | None]:
+        """Seconds from completed input delivery to the first received reply.
 
-        In text mode, from the send to the first LLM token; in audio mode, from
-        the bot noticing the persona stop to its first spoken sentence.
+        Audio input is anchored at the final paced PCM send, not synthesis or
+        the bot's VAD. Audio output ends at raw PCM arrival before gap filling
+        or transcription. Both boundaries are observed by the client transport.
         """
-        if self._simulation.bot_audio:
-            sent, replied = "user_stopped_speaking", "tts_response"
-        else:
-            sent, replied = PERSONA_TURN_EVENT, "llm_response"
-        latencies: list[float] = []
+        sent = USER_AUDIO_SENT_EVENT if self._simulation.user_audio else USER_TEXT_SENT_EVENT
+        replied = "response" if self._simulation.bot_audio else "llm_response"
+        latencies: list[float | None] = []
         sent_at: float | None = None
-        for event in self._stream.events_seen:
+        audio_at: float | None = None
+        # A paced send's completion can be reported by the media sender after
+        # incoming audio was processed. Use observation times, not queue order.
+        for event in sorted(self._stream.events_seen, key=lambda item: item.get("at", 0.0)):
             if event["type"] == sent:
                 sent_at = event.get("at")
+                audio_at = None
+            elif (
+                event["type"] == BOT_AUDIO_RECEIVED_EVENT
+                and sent_at is not None
+                and audio_at is None
+            ):
+                audio_at = event.get("at")
             elif event["type"] == replied and sent_at is not None:
-                first_word = event.get("started_at", event.get("at"))
-                if first_word is not None:
-                    latencies.append(round(max(0.0, first_word - sent_at), 3))
+                first_word = audio_at if self._simulation.bot_audio else event.get("started_at")
+                # Retain unavailable evidence: measuring only the other replies
+                # would silently certify a required bound on a subset of them.
+                latencies.append(
+                    round(first_word - sent_at, 3)
+                    if first_word is not None and first_word >= sent_at
+                    else None
+                )
                 sent_at = None
         return latencies
 
