@@ -15,9 +15,8 @@ from typing import Any
 from loguru import logger
 from websockets.protocol import State
 
-from pipecat.audio.resamplers.input_audio_resampler import InputAudioResampler
 from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
-from pipecat.audio.utils import create_file_resampler, pcm_to_wav
+from pipecat.audio.utils import create_file_resampler, create_stream_resampler, pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -166,7 +165,7 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._send_resampler = InputAudioResampler()
+        self._send_resampler = create_stream_resampler(clear_after_secs=None)
 
         self._muted: bool = False
         self._user_id: str = ""
