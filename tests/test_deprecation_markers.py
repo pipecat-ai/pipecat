@@ -285,8 +285,8 @@ def test_no_deprecation_warnings_at_import_time():
     aliases defined inside pipecat.frames.frames, and the deprecated stop
     strategies in pipecat.turns.user_stop. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
-    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
-    e.g. ``audioop`` on Python 3.12 — don't trip it.
+    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib and
+    third-party warnings don't trip it.
     """
     script = (
         "import sys, warnings\n"

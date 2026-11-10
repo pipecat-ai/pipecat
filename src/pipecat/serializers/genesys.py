@@ -20,7 +20,6 @@ Audio Format:
 - Mono (external channel) or Stereo (external on left, internal on right)
 """
 
-import audioop
 import json
 import uuid
 from datetime import timedelta
@@ -30,6 +29,7 @@ from typing import Any
 from loguru import logger
 from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -685,7 +685,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             if not data:
                 return None
 
-            return audioop.lin2ulaw(data, 2)
+            return g711.pcm_to_ulaw(data)
 
         elif isinstance(frame, InterruptionFrame):
             await self._reset_audio_out()
@@ -770,7 +770,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         if not audio_data:
             return None
 
-        audio = await self._resample_audio_in(audioop.ulaw2lin(audio_data, 2))
+        audio = await self._resample_audio_in(g711.ulaw_to_pcm(audio_data))
         if not audio:
             return None
 

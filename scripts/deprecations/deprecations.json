@@ -289,6 +289,50 @@
       "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
     },
     {
+      "subject": "pipecat.audio.utils.alaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.alaw_to_pcm",
+      "message": "`pipecat.audio.utils.alaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.alaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_alaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_alaw",
+      "message": "`pipecat.audio.utils.pcm_to_alaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_alaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_ulaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_ulaw",
+      "message": "`pipecat.audio.utils.pcm_to_ulaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_ulaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.ulaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.ulaw_to_pcm",
+      "message": "`pipecat.audio.utils.ulaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.ulaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
       "subject": "AICQuailVADAnalyzer.minimum_speech_duration",
       "module": "pipecat.audio.vad.aic_quail_vad",
       "kind": "parameter",

@@ -6,7 +6,6 @@
 
 """Plivo WebSocket frame serializer for audio streaming."""
 
-import audioop
 import base64
 import json
 from typing import Any, cast
@@ -14,6 +13,7 @@ from typing import Any, cast
 from loguru import logger
 from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -165,7 +165,7 @@ class PlivoFrameSerializer(FrameSerializer):
             if not data:
                 return None
 
-            payload = base64.b64encode(audioop.lin2ulaw(data, 2)).decode("utf-8")
+            payload = base64.b64encode(g711.pcm_to_ulaw(data)).decode("utf-8")
             answer = {
                 "event": "playAudio",
                 "media": {
@@ -246,7 +246,7 @@ class PlivoFrameSerializer(FrameSerializer):
 
             payload = base64.b64decode(payload_base64)
 
-            audio = await self._resample_audio_in(audioop.ulaw2lin(payload, 2))
+            audio = await self._resample_audio_in(g711.ulaw_to_pcm(payload))
             if not audio:
                 return None
 
