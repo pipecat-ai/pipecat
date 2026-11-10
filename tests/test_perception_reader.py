@@ -119,9 +119,20 @@ def _finalized(frames) -> list[bool]:
     return [f.finalized for f in frames if isinstance(f, TranscriptionFrame)]
 
 
+def _reader(
+    *,
+    classifier: BaseClassifier,
+    questions: dict[str, PerceptionQuestion],
+    timeout: float | None = None,
+) -> PerceptionReader:
+    """A reader with one source, which asks ``classifier`` these questions."""
+    source = PerceptionSource(classifier=classifier, questions=questions, timeout=timeout)
+    return PerceptionReader(sources=[source])
+
+
 @pytest.mark.asyncio
 async def test_the_signals_are_declared_at_start():
-    reader = PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS)
+    reader = _reader(classifier=FakeClassifier(), questions=QUESTIONS)
 
     down, _ = await run_test(reader, frames_to_send=[])
 
@@ -136,7 +147,7 @@ async def test_the_signals_are_declared_at_start():
 @pytest.mark.asyncio
 async def test_each_answer_is_set_as_a_signal_on_its_transcription():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS),
+        _reader(classifier=FakeClassifier(), questions=QUESTIONS),
         frames_to_send=[_transcription("I already gave you my order number.")],
         expected_down_frames=[PerceptionMetadataFrame, PerceptionFrame, TranscriptionFrame],
     )
@@ -153,7 +164,7 @@ async def test_a_choice_reports_at_most_its_max_labels():
     question = QUESTIONS["tone"].model_copy(update={"max_labels": 1})
 
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeClassifier(), questions={"tone": question}),
+        _reader(classifier=FakeClassifier(), questions={"tone": question}),
         frames_to_send=[_transcription("Hello.")],
         expected_down_frames=[PerceptionMetadataFrame, PerceptionFrame, TranscriptionFrame],
     )
@@ -166,7 +177,7 @@ async def test_a_turn_is_asked_about_with_the_bots_words_before_it():
     classifier = FakeClassifier()
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=QUESTIONS),
+        _reader(classifier=classifier, questions=QUESTIONS),
         frames_to_send=[
             _transcription("Hi."),
             LLMContextAssistantTurnFrame(text="What's your order number?", timestamp="now"),
@@ -183,7 +194,7 @@ async def test_a_turn_is_asked_about_with_the_bots_words_before_it():
 @pytest.mark.asyncio
 async def test_a_late_reading_lets_the_transcription_pass_unread():
     down, up = await run_test(
-        PerceptionReader(classifier=FakeClassifier(delay=1.0), questions=QUESTIONS, timeout=0.05),
+        _reader(classifier=FakeClassifier(delay=1.0), questions=QUESTIONS, timeout=0.05),
         frames_to_send=[_transcription("Hello.")],
         expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame],
     )
@@ -195,9 +206,7 @@ async def test_a_late_reading_lets_the_transcription_pass_unread():
 @pytest.mark.asyncio
 async def test_a_failed_reading_is_reported_and_the_transcription_still_passes():
     down, up = await run_test(
-        PerceptionReader(
-            classifier=FakeClassifier(error=ClassifierError("down")), questions=QUESTIONS
-        ),
+        _reader(classifier=FakeClassifier(error=ClassifierError("down")), questions=QUESTIONS),
         frames_to_send=[_transcription("Hello.")],
         expected_down_frames=[PerceptionMetadataFrame, TranscriptionFrame],
     )
@@ -209,7 +218,7 @@ async def test_a_failed_reading_is_reported_and_the_transcription_still_passes()
 @pytest.mark.asyncio
 async def test_a_classifier_that_cant_be_set_up_leaves_the_reader_unusable():
     classifier = FakeClassifier(setup_error=ClassifierError("no model"))
-    reader = PerceptionReader(classifier=classifier, questions=QUESTIONS)
+    reader = _reader(classifier=classifier, questions=QUESTIONS)
 
     down, up = await run_test(reader, frames_to_send=[_transcription("Hello.")])
 
@@ -220,24 +229,17 @@ async def test_a_classifier_that_cant_be_set_up_leaves_the_reader_unusable():
     assert classifier.asked == []
 
 
-def test_a_name_that_cant_be_written_in_a_reading_is_refused():
-    with pytest.raises(ValueError):
-        PerceptionReader(
-            classifier=FakeClassifier(), questions={"speech rate": QUESTIONS["energy"]}
-        )
-
-
 @pytest.mark.asyncio
 async def test_the_classifiers_metrics_are_pushed_when_metrics_are_on():
     frames = [_transcription("Hello."), SleepFrame(sleep=0.2)]
 
     with_metrics, _ = await run_test(
-        PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS),
+        _reader(classifier=FakeClassifier(), questions=QUESTIONS),
         frames_to_send=frames,
         pipeline_params=PipelineParams(enable_metrics=True),
     )
     without_metrics, _ = await run_test(
-        PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS),
+        _reader(classifier=FakeClassifier(), questions=QUESTIONS),
         frames_to_send=frames,
     )
 
@@ -258,7 +260,7 @@ def _released(frames) -> list:
 @pytest.mark.asyncio
 async def test_a_text_reading_goes_on_as_soon_as_its_read():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeClassifier(), questions=QUESTIONS),
+        _reader(classifier=FakeClassifier(), questions=QUESTIONS),
         frames_to_send=[
             STTMetadataFrame(service_name="stt", ttfs_p99_latency=0.3),
             VADUserStartedSpeakingFrame(),
@@ -354,7 +356,7 @@ async def test_an_audio_classifier_hears_the_users_speech():
     classifier = FakeAudioClassifier()
 
     down, _ = await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             LLMContextAssistantTurnFrame(text="What's your order number?", timestamp="now"),
             SleepFrame(sleep=0.05),
@@ -377,7 +379,7 @@ async def test_each_stop_is_heard_with_the_audio_just_before_it():
     classifier = FakeAudioClassifier(min_secs=1.5)
 
     down, _ = await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 0.5),
@@ -401,7 +403,7 @@ async def test_a_short_turn_at_the_start_of_a_call_is_heard_after_silence():
     classifier = FakeAudioClassifier(min_secs=5.0)
 
     down, _ = await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 1),
@@ -436,7 +438,7 @@ async def test_a_short_turn_is_heard_with_the_users_speech_before_it():
     classifier = FakeAudioClassifier(probabilities=[0.2, 0.9])
 
     down, _ = await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=_two_turns(_audio(1, 2), _audio(2, 0.2)),
     )
 
@@ -449,7 +451,7 @@ async def test_a_short_turn_is_heard_with_the_users_speech_before_it():
 @pytest.mark.asyncio
 async def test_a_new_turn_doesnt_get_the_last_turns_reading():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.0, 1.0], probabilities=[0.2, 0.9]),
             questions=AUDIO_QUESTIONS,
             timeout=0.05,
@@ -465,7 +467,7 @@ async def test_the_audio_between_the_users_speech_is_kept():
     classifier = FakeAudioClassifier(min_secs=2.5)
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 1),
@@ -489,7 +491,7 @@ async def test_audio_heard_while_the_user_is_muted_is_heard_as_silence():
     classifier = FakeAudioClassifier(min_secs=2.0)
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             _audio(1, 1),
             UserMuteStartedFrame(),
@@ -512,7 +514,7 @@ async def test_speech_while_the_user_is_muted_isnt_read():
     classifier = FakeAudioClassifier()
 
     down, _ = await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             UserMuteStartedFrame(),
             VADUserStartedSpeakingFrame(),
@@ -529,7 +531,7 @@ async def test_speech_while_the_user_is_muted_isnt_read():
 @pytest.mark.asyncio
 async def test_a_late_audio_reading_lets_the_transcription_pass_unread():
     down, up = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[1.0]), questions=AUDIO_QUESTIONS, timeout=0.05
         ),
         frames_to_send=[
@@ -563,7 +565,7 @@ async def test_each_pause_sends_the_audio_since_the_turns_last_clip():
     classifier = FakeAudioClassifier()
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=_two_pauses(_audio(1, 2), _audio(2, 3)),
     )
 
@@ -578,7 +580,7 @@ async def test_a_short_last_stretch_reaches_back_into_the_turn():
     classifier = FakeAudioClassifier(min_secs=2.0)
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=_two_pauses(_audio(1, 3), _audio(2, 0.5)),
     )
 
@@ -590,7 +592,7 @@ async def test_a_short_last_stretch_reaches_back_into_the_turn():
 @pytest.mark.asyncio
 async def test_a_transcription_gets_the_answers_about_the_turns_latest_clip():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(probabilities=[0.2, 0.9]), questions=AUDIO_QUESTIONS
         ),
         frames_to_send=_two_pauses(_audio(1, 2), _audio(2, 2)),
@@ -602,7 +604,7 @@ async def test_a_transcription_gets_the_answers_about_the_turns_latest_clip():
 @pytest.mark.asyncio
 async def test_a_late_clip_leaves_its_speech_unread():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.0, 1.0], probabilities=[0.2, 0.9]),
             questions=AUDIO_QUESTIONS,
             timeout=0.05,
@@ -619,7 +621,7 @@ async def test_each_stop_is_read_even_while_an_earlier_clip_is_being_read():
     classifier = FakeAudioClassifier(delays=[0.3])
 
     await run_test(
-        PerceptionReader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -640,7 +642,7 @@ async def test_each_stop_is_read_even_while_an_earlier_clip_is_being_read():
 @pytest.mark.asyncio
 async def test_a_stop_during_an_earlier_read_gets_its_own_clips_reading():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.5, 0.0], probabilities=[0.2, 0.9]),
             questions=AUDIO_QUESTIONS,
         ),
@@ -662,7 +664,7 @@ async def test_a_stop_during_an_earlier_read_gets_its_own_clips_reading():
 @pytest.mark.asyncio
 async def test_a_transcription_of_no_new_speech_gets_no_reading():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -684,7 +686,7 @@ def _readings(frames) -> list:
 @pytest.mark.asyncio
 async def test_a_text_reading_is_broadcast_both_ways():
     down, up = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeClassifier(), questions={"hesitation": AUDIO_QUESTIONS["hesitation"]}
         ),
         frames_to_send=[_transcription("Hello.")],
@@ -698,7 +700,7 @@ async def test_a_text_reading_is_broadcast_both_ways():
 @pytest.mark.asyncio
 async def test_every_clip_reading_is_broadcast():
     down, up = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(probabilities=[0.2, 0.9]), questions=AUDIO_QUESTIONS
         ),
         frames_to_send=_two_pauses(_audio(1, 2), _audio(2, 2)),
@@ -715,7 +717,7 @@ async def test_every_clip_reading_is_broadcast():
 @pytest.mark.asyncio
 async def test_a_transcription_waits_for_the_user_to_stop_speaking():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -731,7 +733,7 @@ async def test_a_transcription_waits_for_the_user_to_stop_speaking():
 @pytest.mark.asyncio
 async def test_the_timeout_counts_from_when_the_user_stops_speaking():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS, timeout=0.2),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS, timeout=0.2),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -748,7 +750,7 @@ async def test_the_timeout_counts_from_when_the_user_stops_speaking():
 @pytest.mark.asyncio
 async def test_the_timeout_counts_from_stop_secs_before_the_vad_stop(stop_secs, read):
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.3]), questions=AUDIO_QUESTIONS, timeout=0.45
         ),
         frames_to_send=[
@@ -767,7 +769,7 @@ async def test_the_timeout_counts_from_stop_secs_before_the_vad_stop(stop_secs, 
 @pytest.mark.asyncio
 async def test_transcriptions_of_the_same_speech_share_one_deadline():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.3]), questions=AUDIO_QUESTIONS, timeout=0.2
         ),
         frames_to_send=[
@@ -790,7 +792,7 @@ async def test_a_transcription_stops_waiting_for_a_user_who_keeps_speaking(monke
     monkeypatch.setattr(reader_module, "_SPEECH_END_WAIT_SECS", 0.1)
 
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -808,7 +810,7 @@ async def test_a_user_who_keeps_speaking_doesnt_get_their_earlier_speechs_readin
     monkeypatch.setattr(reader_module, "_SPEECH_END_WAIT_SECS", 0.1)
 
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -828,7 +830,7 @@ async def test_a_user_who_keeps_speaking_doesnt_get_their_earlier_speechs_readin
 @pytest.mark.asyncio
 async def test_a_clip_read_after_its_turn_is_still_broadcast():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(delays=[0.3]), questions=AUDIO_QUESTIONS, timeout=0.05
         ),
         frames_to_send=[
@@ -848,7 +850,7 @@ async def test_a_clip_read_after_its_turn_is_still_broadcast():
 @pytest.mark.asyncio
 async def test_an_interruption_doesnt_drop_a_transcription_waiting_for_its_reading():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(delays=[0.2]), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(delays=[0.2]), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -866,7 +868,7 @@ async def test_an_interruption_doesnt_drop_a_transcription_waiting_for_its_readi
 @pytest.mark.asyncio
 async def test_only_the_last_transcription_of_the_users_speech_is_finalized():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -884,7 +886,7 @@ async def test_only_the_last_transcription_of_the_users_speech_is_finalized():
 @pytest.mark.asyncio
 async def test_a_transcription_sent_within_the_stts_latency_goes_with_the_rest():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             STTMetadataFrame(service_name="stt", ttfs_p99_latency=0.3),
             VADUserStartedSpeakingFrame(),
@@ -903,7 +905,7 @@ async def test_a_transcription_sent_within_the_stts_latency_goes_with_the_rest()
 @pytest.mark.asyncio
 async def test_no_transcription_is_finalized_when_the_user_speaks_again_before_the_reading():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(delays=[0.2]), questions=AUDIO_QUESTIONS),
+        _reader(classifier=FakeAudioClassifier(delays=[0.2]), questions=AUDIO_QUESTIONS),
         frames_to_send=[
             VADUserStartedSpeakingFrame(),
             _audio(1, 2),
@@ -922,7 +924,7 @@ async def test_no_transcription_is_finalized_when_the_user_speaks_again_before_t
 @pytest.mark.asyncio
 async def test_an_audio_reader_adds_its_wait_to_the_stt_latency_it_passes_on():
     down, _ = await run_test(
-        PerceptionReader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS, timeout=0.5),
+        _reader(classifier=FakeAudioClassifier(), questions=AUDIO_QUESTIONS, timeout=0.5),
         frames_to_send=[STTMetadataFrame(service_name="stt", ttfs_p99_latency=0.3)],
     )
 
@@ -932,7 +934,7 @@ async def test_an_audio_reader_adds_its_wait_to_the_stt_latency_it_passes_on():
 @pytest.mark.asyncio
 async def test_an_unusable_audio_reader_passes_the_stt_latency_on_as_it_is():
     down, _ = await run_test(
-        PerceptionReader(
+        _reader(
             classifier=FakeAudioClassifier(setup_error=ClassifierError("no key")),
             questions=AUDIO_QUESTIONS,
         ),
@@ -1297,17 +1299,7 @@ def test_a_classifier_goes_in_one_source():
         PerceptionReader(sources=[_source(classifier, "tone"), _source(classifier, "energy")])
 
 
-def test_a_reader_takes_sources_or_a_classifier():
-    with pytest.raises(ValueError):
-        PerceptionReader(
-            classifier=FakeClassifier(),
-            questions=QUESTIONS,
-            sources=[_source(FakeAudioClassifier(), "hesitation")],
-        )
-    with pytest.raises(ValueError):
-        PerceptionReader(sources=[_source(FakeClassifier(), "tone")], timeout=1.0)
-    with pytest.raises(ValueError):
-        PerceptionReader(classifier=FakeClassifier())
+def test_a_reader_needs_a_source():
     with pytest.raises(ValueError):
         PerceptionReader(sources=[])
 

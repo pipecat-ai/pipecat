@@ -159,16 +159,15 @@ class PerceptionReader(FrameProcessor):
     before it. A classifier that can hear, as its ``supports_audio`` says,
     hears the user's audio each time they stop speaking: their speech, and the
     audio heard just before it when that's shorter than the classifier takes.
-    The transcriptions of that speech wait for its answers, up to ``timeout``
-    seconds after the user stopped.
+    The transcriptions of that speech wait for its answers, up to its source's
+    ``timeout`` after the user stopped.
 
-    A reader asks one classifier, or several as its ``sources``. Each source is
-    asked its own questions about the same turn, all at once, and their signals
-    go in the turn's one reading, in the sources' order. A transcription goes
-    on once every source has read it or run out of time. A source that's late
-    or whose classifier fails leaves its signals out, and a transcription none
-    of them read passes unread. A classifier that can't be set up leaves the
-    reader unusable.
+    A reader asks each of its ``sources``, a classifier with its own questions,
+    about the same turn, all at once, and their signals go in the turn's one
+    reading, in the sources' order. A transcription goes on once every source
+    has read it or run out of time. A source that's late or whose classifier
+    fails leaves its signals out, and a transcription none of them read passes
+    unread. A classifier that can't be set up leaves the reader unusable.
 
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)`` for the LLM to read
@@ -177,13 +176,17 @@ class PerceptionReader(FrameProcessor):
     Example::
 
         reader = PerceptionReader(
-            classifier=JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY")),
-            questions={
-                "frustration": PerceptionQuestion(
-                    question=YesNoQuestion(instructions="Is the user frustrated?"),
-                    description="The chance the user is frustrated, from 0 to 1.",
+            sources=[
+                PerceptionSource(
+                    classifier=JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY")),
+                    questions={
+                        "frustration": PerceptionQuestion(
+                            question=YesNoQuestion(instructions="Is the user frustrated?"),
+                            description="The chance the user is frustrated, from 0 to 1.",
+                        ),
+                    },
                 ),
-            },
+            ],
         )
 
         pipeline = Pipeline([transport.input(), stt, reader, user_aggregator, llm, ...])
@@ -206,46 +209,19 @@ class PerceptionReader(FrameProcessor):
         )
     """
 
-    def __init__(
-        self,
-        *,
-        classifier: BaseClassifier | None = None,
-        questions: Mapping[str, PerceptionQuestion] | None = None,
-        timeout: float | None = None,
-        sources: Sequence[PerceptionSource] | None = None,
-        **kwargs,
-    ):
+    def __init__(self, *, sources: Sequence[PerceptionSource], **kwargs):
         """Initialize the processor.
 
         Args:
-            classifier: What answers the questions about each turn, for a
-                reader that asks one classifier.
-            questions: The classifier's questions, by the name of the signal
-                each reports.
-            timeout: Seconds a transcription waits for the classifier's
-                answers. By default 0.5 for a text classifier, counted from
-                when the transcription arrives, and 2 for an audio classifier,
-                counted from when the user stops speaking.
             sources: The classifiers to ask, each with its questions and its
-                timeout, in place of ``classifier``, ``questions`` and
-                ``timeout``.
+                timeout.
             **kwargs: Additional arguments passed to the parent.
 
         Raises:
-            ValueError: If a name can't be written in a reading, if two
-                sources report the same signal or ask the same classifier, or
-                if the reader is given both sources and a classifier, or
-                neither.
+            ValueError: If there are no sources, or if two report the same
+                signal or ask the same classifier.
         """
         super().__init__(**kwargs)
-        if sources is None:
-            if classifier is None or questions is None:
-                raise ValueError(f"{self} needs sources, or a classifier and its questions")
-            sources = [
-                PerceptionSource(classifier=classifier, questions=questions, timeout=timeout)
-            ]
-        elif classifier is not None or questions is not None or timeout is not None:
-            raise ValueError(f"{self} takes sources or a classifier, not both")
         if not sources:
             raise ValueError(f"{self} needs at least one source")
         if len({id(source.classifier) for source in sources}) < len(sources):
@@ -276,11 +252,6 @@ class PerceptionReader(FrameProcessor):
     def sources(self) -> list[PerceptionSource]:
         """The classifiers asked about each turn, each with its questions."""
         return list(self._sources)
-
-    @property
-    def classifier(self) -> BaseClassifier:
-        """The classifier that answers the questions: the first source's, of several."""
-        return self._sources[0].classifier
 
     @property
     def questions(self) -> dict[str, PerceptionQuestion]:
