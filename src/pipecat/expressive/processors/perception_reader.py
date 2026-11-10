@@ -28,7 +28,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -165,9 +165,9 @@ class PerceptionReader(FrameProcessor):
 
     A text classifier reads each final transcription, with the bot's reply
     before it. A classifier that can hear, as its ``supports_audio`` says,
-    hears the user's speech each time they stop: the latest, with what they
-    said before it since the bot last spoke when that's shorter than the
-    classifier answers best. It
+    hears the user's speech each time they stop: the latest, topped up with
+    the end of what they said before it since the bot last spoke when that's
+    shorter than the classifier answers best. It
     hears one clip at a time, and of the clips that come while it's busy, only
     the newest. The transcriptions of that speech wait for its answers, up to
     its source's ``timeout`` after the user stopped.
@@ -333,8 +333,8 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            await self._handle_bot_started_speaking(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame)
@@ -382,8 +382,8 @@ class PerceptionReader(FrameProcessor):
         if muted:
             await self._cancel_clip_reads()
 
-    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
-        self._audio.bot_started_speaking()
+    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        self._audio.bot_stopped_speaking()
 
     async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
@@ -632,12 +632,13 @@ class _RecentSpeech:
 
     Each stretch of speech is kept with the silence around it: up to a second
     of the audio heard before the VAD reported it, and the silence the VAD
-    waited for after it. A classifier's clip is the latest stretch, with the
-    ones before it joined on until it's as long as the classifier answers
-    best. Speech from before the bot spoke or before a mute is never joined to
-    speech after it, so a reply is heard on its own: speech from before the
-    bot's turn says how the user sounded then, not how they reply. Audio heard
-    while the user is muted isn't kept.
+    waited for after it. A classifier's clip is the latest stretch whole,
+    topped up from the end of the speech before it until it's as long as the
+    classifier answers best. Speech from before the bot stopped speaking or
+    before a mute is never joined to speech after it, so a reply is heard on
+    its own: speech from before or during the bot's turn says how the user
+    sounded then, not how they reply. Audio heard while the user is muted isn't
+    kept.
     """
 
     def __init__(self, classifiers: Sequence[BaseClassifier]):
@@ -700,8 +701,8 @@ class _RecentSpeech:
         long_enough = audio and len(audio) >= self._bytes(classifier.min_audio_secs)
         return ClassifierAudio(audio=audio, sample_rate=self._sample_rate) if long_enough else None
 
-    def bot_started_speaking(self):
-        """Keep the speech from before the bot spoke out of the clips after it.
+    def bot_stopped_speaking(self):
+        """Keep the speech from before and during the bot's turn out of the clips after it.
 
         Speech the user is in the middle of is kept whole.
         """
@@ -735,13 +736,13 @@ class _RecentSpeech:
             del self._stretches[0]
 
     def _latest(self, secs: float) -> bytes:
-        """The latest stretches of speech joined, from the newest back until they last secs."""
-        joined = b""
-        for stretch in reversed(self._stretches):
-            if joined and len(joined) >= self._bytes(secs):
-                break
-            joined = stretch + joined
-        return joined
+        """The latest stretch of speech, topped up from the end of the ones before it to last secs."""
+        if not self._stretches:
+            return b""
+        *earlier, latest = self._stretches
+        missing = max(0, self._bytes(secs) - len(latest))
+        top_up = b"".join(earlier)[-missing:] if missing else b""
+        return top_up + latest
 
     def _bytes(self, secs: float) -> int:
         """How many bytes of 16-bit mono audio make secs seconds."""

@@ -81,8 +81,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Hume hears how each turn sounded: the user's tone of voice and whether
     # they sound unsure. The LLM reads it at the head of the user's message.
-    # Hume answers best with at least 5 seconds of audio, so the user's pauses
-    # are heard with what they said before them, up to when the bot last spoke.
+    # Hume answers best with at least 5 seconds of audio, so a short stretch of
+    # speech is topped up with the end of what the user said before it, back to
+    # when the bot last spoke.
     hume = PerceptionSource(
         classifier=HumeAudioClassifier(api_key=os.environ["HUME_API_KEY"]),
         questions={
