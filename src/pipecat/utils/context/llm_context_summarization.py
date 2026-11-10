@@ -167,7 +167,9 @@ class LLMAutoContextSummarizationConfig:
             and self.summary_config.target_context_tokens > self.max_context_tokens
         ):
             # Use 80% of max_context_tokens as a reasonable default
-            self.summary_config.target_context_tokens = int(self.max_context_tokens * 0.8)
+            self.summary_config.target_context_tokens = int(
+                self.max_context_tokens * SUMMARY_TOKEN_BUFFER
+            )
 
 
 @deprecated(
@@ -230,7 +232,7 @@ class LLMContextSummarizationConfig:
             and self.target_context_tokens > self.max_context_tokens
         ):
             # Use 80% of max_context_tokens as a reasonable default
-            self.target_context_tokens = int(self.max_context_tokens * 0.8)
+            self.target_context_tokens = int(self.max_context_tokens * SUMMARY_TOKEN_BUFFER)
 
         if self.max_unsummarized_messages is not None and self.max_unsummarized_messages < 1:
             raise ValueError("max_unsummarized_messages must be at least 1")
