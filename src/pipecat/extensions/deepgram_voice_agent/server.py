@@ -65,7 +65,7 @@ from pipecat.workers.runner import WorkerRunner
 PIPELINE_IN_SAMPLE_RATE = 16000
 PIPELINE_OUT_SAMPLE_RATE = 24000
 # Default client sample rates by encoding, as in the Voice Agent API.
-DEFAULT_SAMPLE_RATES = {"linear16": 24000, "mp3": 24000, "mulaw": 8000, "alaw": 8000}
+DEFAULT_SAMPLE_RATES = {"linear16": 24000, "mulaw": 8000, "alaw": 8000}
 
 
 class DeepgramVoiceAgentServer:
@@ -197,7 +197,6 @@ class DeepgramVoiceAgentServer:
                 input_encoding=in_encoding,
                 output_encoding=out_encoding,
                 output_container=audio_out.get("container") or "none",
-                output_bitrate=audio_out.get("bitrate"),
             )
         except (KeyError, ValueError) as e:
             raise SettingsError(f"Invalid audio settings: {e}")

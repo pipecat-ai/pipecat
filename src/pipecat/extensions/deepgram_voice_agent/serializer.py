@@ -37,21 +37,7 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 
 INPUT_ENCODINGS = {"linear16", "mulaw", "alaw"}
-OUTPUT_ENCODINGS = {"linear16", "mulaw", "alaw", "mp3"}
-DEFAULT_MP3_BITRATE = 48000
-
-
-def mp3_available() -> bool:
-    """Whether MP3 output is available (it needs the ``lameenc`` package).
-
-    Returns:
-        Whether it is.
-    """
-    try:
-        import lameenc  # noqa: F401
-    except ImportError:
-        return False
-    return True
+OUTPUT_ENCODINGS = {"linear16", "mulaw", "alaw"}
 
 
 def _wav_header(sample_rate: int, encoding: str) -> bytes:
@@ -82,9 +68,8 @@ class DeepgramVoiceAgentSerializer(FrameSerializer):
     """Serializer for the Deepgram Voice Agent API wire format.
 
     Binary messages are mono audio in the encodings and rates the client chose
-    in its ``Settings`` message: ``linear16``, ``mulaw`` or ``alaw`` in, and
-    those or ``mp3`` out (with the optional ``lameenc`` package). Output may
-    use a ``wav`` container, whose header goes out ahead of the first audio.
+    in its ``Settings`` message: ``linear16``, ``mulaw`` or ``alaw``, in and
+    out. Output may use a ``wav`` container, whose header goes out ahead of the first audio.
     Text messages become :class:`~pipecat.frames.frames.InputTransportMessageFrame`
     with the parsed JSON object as ``message``, or the raw text when it isn't
     a JSON object. Outgoing transport messages are sent as JSON text.
@@ -99,7 +84,6 @@ class DeepgramVoiceAgentSerializer(FrameSerializer):
         input_encoding: str = "linear16",
         output_encoding: str = "linear16",
         output_container: str = "none",
-        output_bitrate: int | None = None,
         **kwargs,
     ):
         """Initialize the serializer.
@@ -111,7 +95,6 @@ class DeepgramVoiceAgentSerializer(FrameSerializer):
             input_encoding: Encoding of the audio the client sends.
             output_encoding: Encoding the client wants audio in.
             output_container: ``none``, or ``wav`` for a WAV header first.
-            output_bitrate: Bitrate for ``mp3`` output, in bits per second.
             **kwargs: Additional arguments passed to :class:`FrameSerializer`.
 
         Raises:
@@ -124,23 +107,17 @@ class DeepgramVoiceAgentSerializer(FrameSerializer):
             raise ValueError(f"Unsupported audio output encoding: {output_encoding}")
         if output_container not in ("none", "wav"):
             raise ValueError(f"Unsupported audio output container: {output_container}")
-        if output_container == "wav" and output_encoding == "mp3":
-            raise ValueError("The wav container doesn't support mp3 audio.")
-        if output_encoding == "mp3" and not mp3_available():
-            raise ValueError("mp3 output needs the lameenc package on this server.")
         self._client_in_sample_rate = client_in_sample_rate
         self._client_out_sample_rate = client_out_sample_rate
         self._pipeline_in_sample_rate = pipeline_in_sample_rate
         self._input_encoding = input_encoding
         self._output_encoding = output_encoding
         self._output_container = output_container
-        self._output_bitrate = output_bitrate or DEFAULT_MP3_BITRATE
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         # A client may split a 16-bit sample across two messages.
         self._input_remainder = b""
         self._header_sent = False
-        self._mp3_encoder = None
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize outgoing audio and transport messages.
@@ -174,21 +151,7 @@ class DeepgramVoiceAgentSerializer(FrameSerializer):
         audio = frame.audio
         if frame.sample_rate != rate:
             audio = await self._output_resampler.resample(audio, frame.sample_rate, rate)
-        if self._output_encoding == "mp3":
-            return bytes(self._mp3().encode(audio))
         return audio
-
-    def _mp3(self):
-        if self._mp3_encoder is None:
-            import lameenc
-
-            encoder = lameenc.Encoder()
-            encoder.set_bit_rate(self._output_bitrate // 1000)
-            encoder.set_in_sample_rate(self._client_out_sample_rate)
-            encoder.set_channels(1)
-            encoder.set_quality(2)
-            self._mp3_encoder = encoder
-        return self._mp3_encoder
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserialize client audio and JSON messages.

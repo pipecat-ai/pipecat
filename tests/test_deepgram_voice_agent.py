@@ -348,17 +348,9 @@ class TestDeepgramVoiceAgentAudioFormats(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first.startswith(b"RIFF") and b"WAVEfmt " in first[:16])
         self.assertFalse(second.startswith(b"RIFF"))
 
-    async def test_mp3_output(self):
-        data = await self._serializer(output_encoding="mp3", rate=24000).serialize(
-            self._audio(24000)
-        )
-        # MP3 frames start with a sync word (11 set bits), once the encoder has
-        # buffered enough to emit one.
-        self.assertTrue(data is None or data[0] == 0xFF)
-
     def test_unsupported_encoding_is_refused(self):
         with self.assertRaises(ValueError):
-            self._serializer(output_encoding="opus")
+            self._serializer(output_encoding="mp3")
 
 
 class TestDeepgramVoiceAgentValidation(unittest.IsolatedAsyncioTestCase):

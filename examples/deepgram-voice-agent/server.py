@@ -18,10 +18,8 @@ Environment:
 
 Install and run::
 
-    pip install "pipecat-ai[deepgram-voice-agent,openai,anthropic]"
+    pip install "pipecat-ai[deepgram,openai,anthropic,runner]"
     python examples/deepgram-voice-agent/server.py --port 8765
-
-The ``deepgram-voice-agent`` extra includes ``lameenc``, for ``mp3`` output.
 """
 
 import argparse
