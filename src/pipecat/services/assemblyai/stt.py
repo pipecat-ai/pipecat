@@ -734,6 +734,24 @@ class AssemblyAISTTService(WebsocketSTTService):
                 logger.warning(f"{self} ignoring language_codes update: {e}")
                 delta = replace(delta, language_codes=NOT_GIVEN)
 
+        # Switching to a capped model can leave more codes in effect than it
+        # accepts: the stored ones, when this update doesn't replace them or its
+        # own list was dropped above. The reconnect's URL would then fail every
+        # time, so keep the current model instead.
+        if is_given(delta.model) and is_u3_pro_model(delta.model):
+            codes = (
+                delta.language_codes
+                if is_given(delta.language_codes)
+                else self._settings.language_codes
+            )
+            if isinstance(codes, list):
+                try:
+                    max_codes = _max_language_codes_for_model(delta.model)
+                    _prepare_language_codes(codes, max_codes=max_codes)
+                except ValueError as e:
+                    logger.warning(f"{self} ignoring model update: {e}")
+                    delta = replace(delta, model=NOT_GIVEN)
+
         changed = await super()._update_settings(delta)
 
         if not changed:

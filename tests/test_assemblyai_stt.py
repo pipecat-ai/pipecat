@@ -1061,6 +1061,40 @@ def test_update_settings_over_limit_language_codes_still_reconnects_for_other_fi
     assert _query(service)["language_codes"] == [json.dumps(["es"])]
 
 
+@pytest.mark.parametrize(
+    "delta",
+    [
+        AssemblyAISTTService.Settings(model="u3-rt-pro"),
+        AssemblyAISTTService.Settings(model="u3-rt-pro", language_codes=OVER_LIMIT_LANGUAGES),
+    ],
+    ids=["model_only", "model_with_over_limit_codes"],
+)
+def test_update_settings_capped_model_switch_over_stored_limit_ignored(delta):
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-3-6-pro",
+            language_codes=OVER_LIMIT_LANGUAGES,
+        ),
+    )
+    sent, reconnects = _stub_connection(service)
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        asyncio.run(service._update_settings(delta))
+    finally:
+        logger.remove(handler_id)
+
+    # u3-rt-pro caps the stored eleven codes at ten, so its reconnect URL could
+    # never be built. The model change is dropped and the session left as-is.
+    assert reconnects == []
+    assert sent == []
+    assert service._settings.model == "universal-3-6-pro"
+    assert "ignoring model update" in sink.getvalue()
+    assert len(json.loads(_query(service)["language_codes"][0])) == 11
+
+
 def test_update_settings_language_codes_uncapped_on_universal_3_6_pro():
     service = AssemblyAISTTService(
         api_key="test-key",
