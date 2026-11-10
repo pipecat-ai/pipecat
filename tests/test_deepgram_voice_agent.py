@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 import unittest
 
+from pipecat.extensions.deepgram_voice_agent.listen import DeepgramListenUpdater, create_listen
 from pipecat.extensions.deepgram_voice_agent.processor import (
     DeepgramVoiceAgentProcessor,
 )
@@ -21,6 +23,7 @@ from pipecat.frames.frames import (
     EndWorkerFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     LLMMessagesAppendFrame,
     LLMUpdateSettingsFrame,
     OutputAudioRawFrame,
@@ -183,3 +186,102 @@ class TestDeepgramVoiceAgentServices(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDeepgramVoiceAgentInjection(unittest.IsolatedAsyncioTestCase):
+    async def _run(self, message, *, user_speaking=False, agent_speaking=False):
+        processor = DeepgramVoiceAgentProcessor()
+        processor._user_speaking = user_speaking
+        processor._agent_speaking = agent_speaking
+        down, _ = await run_test(processor, frames_to_send=[InputTransportMessageFrame(message)])
+        return down
+
+    async def test_agent_message_is_refused_while_the_user_speaks(self):
+        down = await self._run(
+            {"type": "InjectAgentMessage", "content": "Hi", "behavior": "queue"},
+            user_speaking=True,
+        )
+        self.assertEqual(_messages(down)[0]["code"], "INJECT_AGENT_MESSAGE_DURING_USER_SPEECH")
+        self.assertFalse(any(isinstance(f, TTSSpeakFrame) for f in down))
+
+    async def test_agent_message_without_behavior_is_refused_while_the_agent_speaks(self):
+        down = await self._run({"type": "InjectAgentMessage", "content": "Hi"}, agent_speaking=True)
+        self.assertEqual(_messages(down)[0]["code"], "INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH")
+
+    async def test_queued_agent_message_waits_for_the_agent(self):
+        down = await self._run(
+            {"type": "InjectAgentMessage", "content": "Hi", "behavior": "queue"},
+            agent_speaking=True,
+        )
+        self.assertEqual([f.text for f in down if isinstance(f, TTSSpeakFrame)], ["Hi"])
+        self.assertFalse(any(isinstance(f, InterruptionFrame) for f in down))
+
+    async def test_interrupting_agent_message_barges_in(self):
+        down = await self._run(
+            {"type": "InjectAgentMessage", "content": "Hi", "behavior": "interrupt"},
+            agent_speaking=True,
+        )
+        types = [type(f) for f in down]
+        self.assertLess(types.index(InterruptionFrame), types.index(TTSSpeakFrame))
+
+    async def test_injected_user_message_barges_in_and_ends_the_agent_turn(self):
+        down = await self._run({"type": "InjectUserMessage", "content": "Hi"}, agent_speaking=True)
+        self.assertTrue(any(isinstance(f, InterruptionFrame) for f in down))
+        self.assertEqual(
+            [m["type"] for m in _messages(down)],
+            ["UserStartedSpeaking", "AgentAudioDone", "ConversationText", "History"],
+        )
+
+
+class TestDeepgramListenUpdater(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.sent: list[dict] = []
+        self.pushed: list = []
+
+        async def send(message):
+            self.sent.append(message)
+
+        async def push_frame(frame):
+            self.pushed.append(frame)
+
+        self.listen = create_listen(
+            {"provider": {"type": "deepgram", "model": "nova-3"}}, deepgram_api_key="test"
+        )
+        self.updater = DeepgramListenUpdater(
+            self.listen,
+            send=send,
+            push_frame=push_frame,
+            deepgram_api_key="test",
+            http_session=None,  # type: ignore[arg-type]
+        )
+
+    async def _settle(self):
+        await asyncio.sleep(0.05)
+
+    async def test_starts_on_the_requested_api(self):
+        self.assertIs(self.listen.active, self.listen.v1)
+
+    async def test_unsupported_fields_are_refused_with_a_warning(self):
+        await self.updater.update({"provider": {"model": "nova-3", "verbose": True}})
+        self.assertEqual(self.sent[0]["type"], "Warning")
+        self.assertEqual(self.sent[0]["code"], "UPDATE_LISTEN_UNSUPPORTED_FIELDS_CHANGED")
+        self.assertIn("verbose", self.sent[0]["description"])
+
+    async def test_too_many_keyterms_are_an_error(self):
+        await self.updater.update({"provider": {"model": "nova-3", "keyterms": ["k"] * 101}})
+        self.assertEqual(self.sent[0]["code"], "INVALID_SETTINGS")
+
+    async def test_unchanged_settings_are_acknowledged(self):
+        await self.updater.update({"provider": {"type": "deepgram", "model": "nova-3"}})
+        await self._settle()
+        self.assertEqual(self.sent, [{"type": "ListenUpdated"}])
+        self.assertEqual(self.pushed, [])
+
+    async def test_update_waits_for_the_user_to_stop_speaking(self):
+        await self.updater.set_user_speaking(True)
+        await self.updater.update({"provider": {"type": "deepgram", "model": "nova-3"}})
+        await self._settle()
+        self.assertEqual(self.sent, [])
+        await self.updater.set_user_speaking(False)
+        await self._settle()
+        self.assertEqual(self.sent, [{"type": "ListenUpdated"}])
