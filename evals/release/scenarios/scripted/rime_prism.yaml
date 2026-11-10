@@ -1,0 +1,26 @@
+name: rime_prism
+scenarios:
+  - name: typed_tools_and_handoff
+    turns:
+      - expect:
+          - event: response
+      - user: "Remember that my invoice number is 123."
+        expect:
+          - event: response
+      - user: "Look up the payment status of the invoice number I gave you."
+        expect:
+          - event: function_call
+            name: lookup_invoice
+            args:
+              invoice_id: "123"
+          - event: response
+            text_contains: "paid"
+      - user: "Transfer me to billing support."
+        expect:
+          - event: function_call
+            name: transfer_to_billing
+          - event: response
+      - user: "Which department handles this conversation now?"
+        expect:
+          - event: response
+            text_contains: "Billing support"
