@@ -248,17 +248,21 @@ class CartesiaTTSSettings(TTSSettings):
             accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
+        normalization: How Cartesia reads numbers, dates and phone numbers in the
+            transcript. ``"auto"`` (Cartesia's default) follows the request's language,
+            and a language or locale code such as ``"en-GB"`` reads them in that
+            convention whatever language is spoken. ``"off"`` skips normalization and
+            is only for text that is already spelled out: digits and symbols left in
+            the text come out garbled or not at all. Word timestamps, and so the LLM
+            context, carry the original text in every mode.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
-        normalization: How Cartesia normalizes the transcript before synthesis:
-            ``"auto"`` (Cartesia's default), ``"off"``, or a locale code such as
-            ``"en-GB"`` to pin the normalizer independently of the language.
     """
 
     accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaTTSService(WebsocketTTSService):
@@ -611,7 +615,7 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
-        if self._settings.normalization:
+        if assert_given(self._settings.normalization):
             msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
@@ -1076,7 +1080,7 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
-            if self._settings.normalization:
+            if assert_given(self._settings.normalization):
                 payload["normalization"] = self._settings.normalization
 
             headers = {
