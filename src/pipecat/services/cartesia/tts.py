@@ -257,6 +257,13 @@ class CartesiaTTSSettings(TTSSettings):
             context, carry the original text in every mode.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
