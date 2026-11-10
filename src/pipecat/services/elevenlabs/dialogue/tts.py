@@ -317,8 +317,9 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         if self._seed is not None:
             url += f"&seed={self._seed}"
 
-        if self._settings.apply_text_normalization is not None:
-            url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
+        apply_text_normalization = assert_given(self._settings.apply_text_normalization)
+        if apply_text_normalization is not None:
+            url += f"&apply_text_normalization={apply_text_normalization}"
 
         language_code = elevenlabs_language_code(
             assert_given(model), assert_given(self._settings.language)
