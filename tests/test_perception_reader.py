@@ -30,6 +30,7 @@ from pipecat.expressive.processors.perception_reader import (
     PerceptionSource,
 )
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     ErrorFrame,
     InputAudioRawFrame,
     InterruptionFrame,
@@ -546,6 +547,55 @@ async def test_speech_before_a_mute_isnt_joined_to_speech_after_it():
     assert classifier.clips == [
         ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE),
         ClassifierAudio(audio=_pcm(3, 1), sample_rate=SAMPLE_RATE),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_speech_before_the_bot_spoke_isnt_joined_to_speech_after_it():
+    classifier = FakeAudioClassifier(min_secs=1.0, preferred_secs=5.0)
+
+    await run_test(
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 2),
+            VADUserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            _audio(2, 1),
+            VADUserStoppedSpeakingFrame(),
+            _transcription("Yes."),
+        ],
+    )
+
+    assert classifier.clips == [
+        ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE),
+        ClassifierAudio(audio=_pcm(2, 1), sample_rate=SAMPLE_RATE),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_speech_the_user_is_in_when_the_bot_starts_is_kept():
+    classifier = FakeAudioClassifier(min_secs=1.0, preferred_secs=5.0)
+
+    await run_test(
+        _reader(classifier=classifier, questions=AUDIO_QUESTIONS),
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            _audio(1, 2),
+            VADUserStoppedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            _audio(2, 1),
+            BotStartedSpeakingFrame(),
+            _audio(2, 1),
+            VADUserStoppedSpeakingFrame(),
+            _transcription("Wait, no."),
+        ],
+    )
+
+    assert classifier.clips == [
+        ClassifierAudio(audio=_pcm(1, 2), sample_rate=SAMPLE_RATE),
+        ClassifierAudio(audio=_pcm(2, 2), sample_rate=SAMPLE_RATE),
     ]
 
 

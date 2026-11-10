@@ -28,6 +28,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -165,7 +166,8 @@ class PerceptionReader(FrameProcessor):
     A text classifier reads each final transcription, with the bot's reply
     before it. A classifier that can hear, as its ``supports_audio`` says,
     hears the user's speech each time they stop: the latest, with what they
-    said before it when that's shorter than the classifier answers best. It
+    said before it since the bot last spoke when that's shorter than the
+    classifier answers best. It
     hears one clip at a time, and of the clips that come while it's busy, only
     the newest. The transcriptions of that speech wait for its answers, up to
     its source's ``timeout`` after the user stopped.
@@ -331,6 +333,9 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame)
             await self.push_frame(frame, direction)
@@ -376,6 +381,9 @@ class PerceptionReader(FrameProcessor):
         self._audio.mute(muted)
         if muted:
             await self._cancel_clip_reads()
+
+    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        self._audio.bot_started_speaking()
 
     async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
@@ -626,10 +634,10 @@ class _RecentSpeech:
     of the audio heard before the VAD reported it, and the silence the VAD
     waited for after it. A classifier's clip is the latest stretch, with the
     ones before it joined on until it's as long as the classifier answers
-    best, so a short reply is heard with what the user said before it rather
-    than with the silence they listened in. Audio heard while the user is
-    muted isn't kept, and speech from before a mute is never joined to speech
-    after it.
+    best. Speech from before the bot spoke or before a mute is never joined to
+    speech after it, so a reply is heard on its own: speech from before the
+    bot's turn says how the user sounded then, not how they reply. Audio heard
+    while the user is muted isn't kept.
     """
 
     def __init__(self, classifiers: Sequence[BaseClassifier]):
@@ -691,6 +699,13 @@ class _RecentSpeech:
             audio = audio[-self._bytes(classifier.max_audio_secs) :]
         long_enough = audio and len(audio) >= self._bytes(classifier.min_audio_secs)
         return ClassifierAudio(audio=audio, sample_rate=self._sample_rate) if long_enough else None
+
+    def bot_started_speaking(self):
+        """Keep the speech from before the bot spoke out of the clips after it.
+
+        Speech the user is in the middle of is kept whole.
+        """
+        self._stretches.clear()
 
     def mute(self, muted: bool):
         """Drop the speech kept when the user is muted, and end any speech they're in."""
