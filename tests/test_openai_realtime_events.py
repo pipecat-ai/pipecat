@@ -25,3 +25,28 @@ def test_parse_response_done_with_only_status():
     assert isinstance(evt, events.ResponseDone)
     assert evt.response.usage is None
     assert evt.response.status_details is None
+
+
+def test_parse_session_updated_with_unmodeled_transcription_fields():
+    """The server echoes transcription fields Pipecat may not model; parsing ignores them."""
+    transcription = {
+        "model": "gpt-live-transcribe",
+        "language": None,
+        "languages": ["en", "es"],
+        "prompt": None,
+        "a_field_openai_adds_later": True,
+    }
+    raw = json.dumps(
+        {
+            "event_id": "ev_1",
+            "type": "session.updated",
+            "session": {"type": "realtime", "audio": {"input": {"transcription": transcription}}},
+        }
+    )
+
+    evt = events.parse_server_event(raw)
+
+    assert isinstance(evt, events.SessionUpdatedEvent)
+    parsed = evt.session.audio.input.transcription
+    assert parsed.model == "gpt-live-transcribe"
+    assert parsed.languages == ["en", "es"]
