@@ -17,7 +17,6 @@ from xml.sax.saxutils import escape
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -276,8 +275,6 @@ class AWSPollyTTSService(TTSService):
 
         self._aws_session = aiobotocore.session.get_session()
 
-        self._resampler = create_stream_resampler()
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -346,6 +343,8 @@ class AWSPollyTTSService(TTSService):
         try:
             # Construct the parameters dictionary
             ssml = self._construct_ssml(text)
+            # AWS only supports 8000 and 16000 for PCM.
+            sample_rate = 8000 if self.sample_rate == 8000 else 16000
 
             params = {
                 "Text": ssml,
@@ -353,8 +352,7 @@ class AWSPollyTTSService(TTSService):
                 "OutputFormat": "pcm",
                 "VoiceId": self._settings.voice,
                 "Engine": self._settings.engine,
-                # AWS only supports 8000 and 16000 for PCM. We select 16000.
-                "SampleRate": "16000",
+                "SampleRate": str(sample_rate),
                 "LexiconNames": self._settings.lexicon_names,
             }
 
@@ -374,8 +372,6 @@ class AWSPollyTTSService(TTSService):
                     logger.error(f"{self} No audio stream in response")
                     return
 
-                audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
-
                 await self.start_tts_usage_metrics(text)
 
                 CHUNK_SIZE = self.chunk_size
@@ -384,7 +380,7 @@ class AWSPollyTTSService(TTSService):
                     chunk = audio_data[i : i + CHUNK_SIZE]
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
+                        frame = TTSAudioRawFrame(chunk, sample_rate, 1, context_id=context_id)
                         yield frame
 
         except (BotoCoreError, ClientError) as error:
