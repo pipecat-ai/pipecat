@@ -30,7 +30,7 @@ from pipecat.adapters.llm.schemas.direct_function import DirectFunction
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.llm.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
-from pipecat.audio.utils import create_stream_resampler
+from pipecat.audio.resamplers.input_audio_resampler import InputAudioResampler
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     CancelFrame,
@@ -421,7 +421,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._audio_config = audio_config or (
             params.audio_config if params is not None else AudioConfig()
         )
-        self._input_resampler = create_stream_resampler()
+        self._input_resampler = InputAudioResampler()
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
         if isinstance(tools, list):
@@ -719,10 +719,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
     async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
         """Convert the user's audio to the input rate the session declares."""
-        rate = self._audio_config.input_sample_rate
-        if frame.sample_rate == rate:
-            return frame.audio
-        return await self._input_resampler.resample(frame.audio, frame.sample_rate, rate)
+        return await self._input_resampler.resample(
+            frame.audio, frame.sample_rate, self._audio_config.input_sample_rate
+        )
 
     async def _handle_interruption_frame(self):
         pass
@@ -1813,6 +1812,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return
 
         self._triggering_assistant_response = True
+        # User audio is dropped while the trigger plays, so the audio after it
+        # must not start with the end of the audio before.
+        await self._input_resampler.reset()
 
         # Send the trigger audio, if we're fully connected and set up
         if self._connected_time:

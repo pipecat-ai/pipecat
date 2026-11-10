@@ -22,7 +22,6 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -203,7 +202,6 @@ class MetaSTTService(WebsocketSTTService):
         self._session_ready = asyncio.Event()
         self._session_id: str | None = None
         self._turn_id: int | None = None
-        self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -218,8 +216,12 @@ class MetaSTTService(WebsocketSTTService):
         return language_to_meta_language(language)
 
     @property
-    def _send_sample_rate(self) -> int:
-        """The rate audio is sent at, which the API limits to 24 kHz or 16 kHz."""
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, which the API limits to 24 kHz or 16 kHz.
+
+        Returns:
+            The sample rate in Hz.
+        """
         if self.sample_rate == META_NATIVE_SAMPLE_RATE:
             return META_NATIVE_SAMPLE_RATE
         return META_FALLBACK_SAMPLE_RATE
@@ -261,9 +263,6 @@ class MetaSTTService(WebsocketSTTService):
         Transcription frames are pushed from the receive task, not yielded from
         this coroutine.
         """
-        if self.sample_rate != self._send_sample_rate:
-            audio = await self._resampler.resample(audio, self.sample_rate, self._send_sample_rate)
-
         if (
             audio
             and self._websocket
@@ -282,7 +281,7 @@ class MetaSTTService(WebsocketSTTService):
 
         handshake: dict[str, Any] = {
             "authorization": {"accessToken": f"Bearer {self._api_key}"},
-            "audioEncoding": f"PCM_{self._send_sample_rate // 1000}KHZ",
+            "audioEncoding": f"PCM_{self.send_sample_rate // 1000}KHZ",
             "model": assert_given(s.model),
             "mode": assert_given(s.mode),
             # Every partial carries the complete current hypothesis, which is
@@ -344,10 +343,10 @@ class MetaSTTService(WebsocketSTTService):
             self._session_ready.clear()
             self._session_id = None
 
-            if self.sample_rate != self._send_sample_rate:
+            if self.sample_rate != self.send_sample_rate:
                 logger.debug(
                     f"{self} resampling audio from {self.sample_rate} to "
-                    f"{self._send_sample_rate}: Meta accepts only 16 kHz or 24 kHz"
+                    f"{self.send_sample_rate}: Meta accepts only 16 kHz or 24 kHz"
                 )
 
             websocket = await self._websocket_connect(

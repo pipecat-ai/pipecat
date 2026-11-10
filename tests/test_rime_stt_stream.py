@@ -24,6 +24,7 @@ from rimelabs_sdk import (
     TranscriptionPartial,
 )
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -270,6 +271,19 @@ async def test_unsupported_rate_is_resampled(client):
         await wait(stream.exhausted)
         assert stream.options["input_format"].sample_rate == 16000
         assert 0 < len(b"".join(stream.chunks)) <= 3 * 3200
+
+
+@pytest.mark.asyncio
+async def test_pre_speech_and_speech_are_resampled_as_one_stream(client):
+    service = RimeSTTService(api_key="test", sample_rate=44100)
+    pre_speech, speech = bytes(range(256)) * 34, bytes(range(255, -1, -1)) * 34
+    async with harness(service):
+        await send(service, audio(pre_speech, rate=44100))
+        await speak(service, audio(speech, rate=44100))
+        stream = await next_stream(client)
+        await wait(stream.exhausted)
+        expected = await create_stream_resampler().resample(pre_speech + speech, 44100, 16000)
+        assert b"".join(stream.chunks) == expected
 
 
 @pytest.mark.asyncio

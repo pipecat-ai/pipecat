@@ -4,13 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import json
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+import numpy as np
 import pytest
 from aiohttp import web
+from websockets.protocol import State
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.audio.utils import create_stream_resampler
+from pipecat.frames.frames import InputAudioRawFrame, TranscriptionFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.elevenlabs.stt import (
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
@@ -286,3 +293,23 @@ async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
     assert len(captured) == 1
     assert captured[0].text == COMMITTED_TEXT
     assert captured[0].language is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_audio_at_a_rate_elevenlabs_does_not_take_is_sent_at_16_khz():
+    service = ElevenLabsRealtimeSTTService(api_key="test-key")
+    service._sample_rate = 32000
+    sent: list[str] = []
+    service._websocket = MagicMock(state=State.OPEN, send=AsyncMock(side_effect=sent.append))
+    t = np.arange(3200) / 32000
+    audio = (np.sin(2 * np.pi * 220 * t) * 8000).astype(np.int16).tobytes()
+    frame = InputAudioRawFrame(audio=audio, sample_rate=32000, num_channels=1)
+
+    await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
+
+    message = json.loads(sent[0])
+    assert audio_format_from_sample_rate(service.send_sample_rate) == "pcm_16000"
+    assert message["sample_rate"] == 16000
+    assert base64.b64decode(message["audio_base_64"]) == (
+        await create_stream_resampler().resample(audio, 32000, 16000)
+    )

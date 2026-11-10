@@ -19,6 +19,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InputAudioRawFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -171,7 +172,7 @@ async def test_input_gap_mid_turn_sends_silence_to_end_it(monkeypatch, turn_open
 
 
 @pytest.mark.asyncio
-async def test_input_gap_silence_is_resampled_and_counted_at_the_pipeline_rate(monkeypatch):
+async def test_input_gap_silence_is_sent_and_counted_at_16_khz(monkeypatch):
     monkeypatch.setattr(zoom_ai_stt, "INPUT_GAP_SECS", 0.02)
     service = _live(sample_rate=8000)
     websocket = _FakeWebsocket()
@@ -184,21 +185,20 @@ async def test_input_gap_silence_is_resampled_and_counted_at_the_pipeline_rate(m
     task.cancel()
 
     sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
-    # Up to 450 ms at 16 kHz; the resampler holds back the rest.
-    assert 0 < len(sent) <= 16000 * 2 * 450 // 1000
+    assert len(sent) == 16000 * 2 * 450 // 1000
     assert service._stt_usage_pending_seconds == pytest.approx(0.45)
 
 
 @pytest.mark.asyncio
-async def test_keepalive_silence_is_resampled_and_counted(monkeypatch):
+async def test_keepalive_silence_is_sent_and_counted(monkeypatch):
     service = _live(sample_rate=24000)
     websocket = _FakeWebsocket()
     service._websocket = websocket
 
-    await service._send_keepalive(bytes(24000 * 2 // 10))  # 100 ms at 24 kHz
+    await service._send_keepalive(bytes(16000 * 2 // 10))  # 100 ms at 16 kHz
 
     sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
-    assert 0 < len(sent) <= 16000 * 2 // 10
+    assert len(sent) == 16000 * 2 // 10
     assert service._stt_usage_pending_seconds == pytest.approx(0.1)
 
 
@@ -232,8 +232,8 @@ async def test_off_rate_audio_is_resampled_to_16_khz(monkeypatch):
     service._websocket = _FakeWebsocket()
 
     for _ in range(10):
-        async for _ in service.run_stt(b"\x00" * 1600):
-            pass
+        frame = InputAudioRawFrame(audio=b"\x00" * 1600, sample_rate=8000, num_channels=1)
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
 
     audio_sent = b"".join(service._websocket.sent)
     # 8 kHz in, 16 kHz out: twice the bytes, less what the resampler still holds.

@@ -14,6 +14,7 @@ from websockets.protocol import State
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import InputAudioRawFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws import stt as aws_stt
 from pipecat.services.aws.stt import AWSTranscribeSTTService
 
@@ -33,8 +34,8 @@ async def _transcribe_sends(monkeypatch, sample_rate: int, audio: bytes) -> list
     service = AWSTranscribeSTTService(api_key="secret", aws_access_key_id="key")
     service._sample_rate = sample_rate
     service._websocket = MagicMock(state=State.OPEN, send=AsyncMock())
-    async for _ in service.run_stt(audio):
-        pass
+    frame = InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
+    await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
     return sent
 
 

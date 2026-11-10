@@ -24,7 +24,6 @@ from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -396,7 +395,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._session_ready = False
-        self._resampler = create_stream_resampler()
 
         # Server-side VAD is disabled by default (turn_detection=False).
         # Set to None or a dict to enable server-side VAD.
@@ -435,6 +433,15 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             True, as this service supports metrics generation.
         """
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 24 kHz the Realtime API takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return OPENAI_SAMPLE_RATE
 
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when server-side VAD drives turns.
@@ -669,12 +676,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _send_audio(self, audio: bytes):
         """Send audio data via ``input_audio_buffer.append``.
 
-        Resamples from the pipeline sample rate to 24 kHz if needed.
-
         Args:
-            audio: Raw audio bytes at the pipeline sample rate.
+            audio: Raw audio bytes at 24 kHz.
         """
-        audio = await self._resampler.resample(audio, self.sample_rate, OPENAI_SAMPLE_RATE)
         if not audio:
             return
         payload = base64.b64encode(audio).decode("utf-8")

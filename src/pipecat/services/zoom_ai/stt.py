@@ -33,7 +33,6 @@ from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
@@ -429,7 +428,6 @@ class ZoomAISTTService(WebsocketSTTService):
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._url = _check_url(url)
         self._should_interrupt = should_interrupt
-        self._resampler = create_stream_resampler()
         self._user_turn_open = False
         self._receive_task = None
         self._session_closed = asyncio.Event()
@@ -460,6 +458,15 @@ class ZoomAISTTService(WebsocketSTTService):
             the locale of their base language.
         """
         return language_to_zoom_ai_language(language)
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 16 kHz Scribe takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return SCRIBE_SAMPLE_RATE
 
     @property
     def supports_ttfs(self) -> bool:
@@ -551,7 +558,7 @@ class ZoomAISTTService(WebsocketSTTService):
         Transcriptions are pushed from the receive task, not yielded here.
 
         Args:
-            audio: Raw PCM16 mono audio at the pipeline sample rate.
+            audio: Raw PCM16 mono audio at 16 kHz.
 
         Yields:
             None.
@@ -585,15 +592,13 @@ class ZoomAISTTService(WebsocketSTTService):
                 continue
             self._gap_filled = True
             window_ms = self._view.silence_duration_ms or 1000
-            silence = bytes(self.sample_rate * (window_ms + 100) // 1000 * 2)
+            silence = bytes(self.send_sample_rate * (window_ms + 100) // 1000 * 2)
             await self._send_audio(silence)
             # Gap silence is real audio submitted to the service, so it counts toward usage.
             self._record_stt_audio_usage(silence)
 
     async def _send_audio(self, audio: bytes):
-        """Send pipeline-rate audio to Scribe, resampled to 16 kHz."""
-        if self.sample_rate != SCRIBE_SAMPLE_RATE:
-            audio = await self._resampler.resample(audio, self.sample_rate, SCRIBE_SAMPLE_RATE)
+        """Send 16 kHz audio to Scribe."""
         if audio and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._websocket.send(audio)
