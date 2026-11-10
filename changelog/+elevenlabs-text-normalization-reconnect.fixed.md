@@ -1,0 +1,1 @@
+- Fixed `ElevenLabsTTSService` not applying an `apply_text_normalization` change from `TTSUpdateSettingsFrame` until its next reconnect. The change now reconnects right away.
