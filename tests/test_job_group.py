@@ -27,6 +27,7 @@ from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.base_worker import BaseWorker
+from pipecat.pipeline.job_decorator import job
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -778,6 +779,31 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         response_msgs = [m for m in sent if isinstance(m, BusJobResponseMessage)]
         self.assertEqual(len(response_msgs), 1)
         self.assertEqual(response_msgs[0].status, JobStatus.CANCELLED)
+
+    async def test_job_handler_exception_propagates_error(self):
+        """If a @job handler raises an exception, the requester receives JobError."""
+        parent = StubTask("parent")
+        await setup_task(self.bus, self.registry, parent)
+
+        class BrokenWorker(BaseWorker):
+            @job(name="work")
+            async def on_work(self, message):
+                raise RuntimeError("handler bug")
+
+        worker = BrokenWorker("worker")
+        await setup_task(self.bus, self.registry, worker)
+
+        t = parent.job("worker", params=JobParams(name="work"))
+
+        async def run_job():
+            async with t:
+                pass
+
+        with self.assertRaises(JobError) as ctx:
+            await asyncio.wait_for(run_job(), timeout=2.0)
+
+        self.assertIn("worker 'worker' errored", str(ctx.exception))
+        self.assertEqual(t.response, {"error": "handler bug"})
 
 
 if __name__ == "__main__":
