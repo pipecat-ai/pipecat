@@ -7,9 +7,16 @@
 """Prism aggregation with separate application edits and provider transcripts."""
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from pipecat.frames.frames import Frame, InputTextRawFrame, LLMContextFrame, LLMRunFrame
+from pipecat.frames.frames import (
+    Frame,
+    InputTextRawFrame,
+    LLMContextFrame,
+    LLMRunFrame,
+    SystemFrame,
+    TTSStoppedFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregator,
@@ -39,6 +46,14 @@ class _RimeContextFrame(LLMContextFrame):
     instruction: str | None = None
     response_metadata: dict[str, str] | None = None
     text: str | None = None
+
+
+@dataclass
+class _RimeOutputStoppedFrame(SystemFrame):
+    """Identify the output whose stop frame passed through the transport queue."""
+
+    context_id: str
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -139,7 +154,17 @@ class _RimeUserAggregator(_ApplicationHistory, LLMUserAggregator):
 
 
 class _RimeAssistantAggregator(_ApplicationHistory, LLMAssistantAggregator):
-    pass
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Return output identities after their stop frames pass through the transport."""
+        await super().process_frame(frame, direction)
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, TTSStoppedFrame)
+            and frame.context_id is not None
+        ):
+            await self.push_frame(
+                _RimeOutputStoppedFrame(context_id=frame.context_id), FrameDirection.UPSTREAM
+            )
 
 
 class RimeContextAggregatorPair(LLMContextAggregatorPair):

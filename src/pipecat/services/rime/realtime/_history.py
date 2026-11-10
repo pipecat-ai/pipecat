@@ -57,6 +57,13 @@ class Record:
             if isinstance(self.message.get("content"), str):
                 self.texts[self.server_ids[0]] = self.message["content"]
 
+    def matches(self, message: dict, *, shared: bool = False) -> bool:
+        """Match tool progress aliases only when omitted provider records are preserved."""
+        return _equivalent(self.accepted, message) or (
+            (shared or self.accepted.get("role") != "tool")
+            and any(_equivalent(variant, message) for variant in self.variants)
+        )
+
 
 class History:
     """Own conversion and mutations for one SDK conversation.
@@ -138,10 +145,7 @@ class History:
                 (
                     record
                     for record in self.records
-                    if record.identity not in used
-                    and any(
-                        _equivalent(value, message) for value in [record.accepted, *record.variants]
-                    )
+                    if record.identity not in used and record.matches(message, shared=shared)
                 ),
                 None,
             )
@@ -327,10 +331,7 @@ class History:
             else [None] * len(messages)
         )
         retained_records = [
-            record
-            if record
-            and any(_equivalent(value, message) for value in [record.accepted, *record.variants])
-            else None
+            record if record and record.matches(message) else None
             for record, message in zip(retained_records, messages)
         ]
         retained_ids = [record.identity for record in retained_records if record is not None]

@@ -48,6 +48,8 @@ Queue `RimeReplyFrame(text="Remember invoice 314")` through the Rime user aggreg
 
 `InputTextRawFrame(text="...")` also starts a native turn, with system-frame priority. It can overtake queued history and settings frames. Use `RimeReplyFrame(text=...)` when that order matters.
 
+Queued replies wait for preceding updates, but do not capture a fixed copy of session state. Later independent updates can take effect while a reply waits for provider admission. Tool results must remain able to update history during that wait.
+
 The existing `LLMMessagesAppendFrame(messages=[...], run_llm=True)` path, including RTVI text input, imports history before requesting a reply. It remains suitable for explicit history edits. Imported history is not treated as fresh typed input.
 
 ## Settings, tools, and fillers

@@ -29,7 +29,6 @@ except ModuleNotFoundError as error:
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -75,6 +74,7 @@ from pipecat.services.rime.realtime._aggregators import (
     RimeContextAggregatorPair,
     RimeReplyFrame,
     _RimeContextFrame,
+    _RimeOutputStoppedFrame,
 )
 from pipecat.services.rime.realtime._conversation import (
     Conversation,
@@ -544,9 +544,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     else:
                         self._audio.put_nowait((self._input_epoch, frame))
                 await self.push_frame(frame, direction)
-            elif isinstance(frame, BotStoppedSpeakingFrame):
-                self._latest_audio_output = None
-                await self.push_frame(frame, direction)
+            elif isinstance(frame, _RimeOutputStoppedFrame):
+                if (
+                    direction == FrameDirection.UPSTREAM
+                    and self._latest_audio_output is not None
+                    and self._latest_audio_output.context_id == frame.context_id
+                ):
+                    self._latest_audio_output = None
             elif isinstance(frame, InterruptionFrame):
                 self._interruption_epoch += 1
                 self._spawn_request(self._interrupt())
@@ -662,7 +666,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                             await self._fail(error)
                     self._conversation.suppressing_tools = False
 
-    async def _request_reply(self, tool_call, instruction, metadata, text, parent) -> r.ResponseRef:
+    async def _request_reply(
+        self,
+        tool_call: r.ToolCallRef | None,
+        instruction: str | None,
+        metadata: dict[str, str] | None,
+        text: str | None,
+        parent: r.ResponseRef | None,
+    ) -> r.ResponseRef:
         self._request_pending = True
         try:
             return await self._create_reply(tool_call, instruction, metadata, text, parent)
@@ -673,7 +684,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 self._conversation.release(self._admitted_response)
                 self._admitted_response = None
 
-    async def _create_reply(self, tool_call, instruction, metadata, text, parent) -> r.ResponseRef:
+    async def _create_reply(
+        self,
+        tool_call: r.ToolCallRef | None,
+        instruction: str | None,
+        metadata: dict[str, str] | None,
+        text: str | None,
+        parent: r.ResponseRef | None,
+    ) -> r.ResponseRef:
         if text is not None:
             self._pending_text = text
             try:
