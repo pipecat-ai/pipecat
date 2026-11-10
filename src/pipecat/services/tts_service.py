@@ -605,6 +605,8 @@ class TTSService(AIService):
         """
         await super().setup(setup)
         self._sample_rate = self._init_sample_rate or setup.audio_out_sample_rate
+        source = "service" if self._init_sample_rate else "pipeline"
+        logger.debug(f"{self}: TTS sample rate {self._sample_rate} Hz (from {source})")
         if setup.enable_expressive_conversation:
             self._expression_formatter = ExpressionFormatter(self.get_expression_adapter, self)
             self._aggregated_frame_sequencer.llm_markup = EXPRESSION_TAG_PATTERN
@@ -2305,6 +2307,10 @@ class TTSService(AIService):
             await self._push_resampler_tail(context_id, playback)
             playback.audio_rate = frame.sample_rate
             if frame.sample_rate != self.sample_rate:
+                logger.debug(
+                    f"{self}: resampling TTS audio from {frame.sample_rate} Hz "
+                    f"to {self.sample_rate} Hz"
+                )
                 playback.resampler = create_stream_resampler(clear_after_secs=None)
         if playback.resampler:
             frame.audio = await playback.resampler.resample(
