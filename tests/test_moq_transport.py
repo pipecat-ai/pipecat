@@ -1342,6 +1342,56 @@ class TestInterruptionCutProtection(unittest.IsolatedAsyncioTestCase):
             await client.publish_audio(self._pcm(0.1))
         self.assertEqual(len(client._publish_protected), 0)
 
+    async def test_the_cut_commits_without_yielding(self):
+        """base_output's audio task calls ``publish_audio`` concurrently
+        with the cut; an await between the drain and the last replayed
+        write would let a later chunk land inside the replay. A remainder
+        past the pacing budget replays without a single sleep."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        first = self._pcm(0.04)
+        second = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(first, interruptible=False)
+            await client.publish_audio(second, interruptible=False)
+            client._audio_out.write.reset_mock()
+            sleep = AsyncMock()
+            with patch.object(moq_transport.asyncio, "sleep", sleep):
+                await client.cut_audio()
+        sleep.assert_not_awaited()
+        silence, one, two = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(one, first)
+        self.assertEqual(two, second)
+
+    async def test_a_protected_write_in_flight_at_the_cut_lands_after_the_replay(self):
+        """A protected chunk sleeping in ``publish_audio``'s pacing when
+        the interruption lands commits after the whole cut, behind the
+        replayed remainder, and is recorded as protected."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        committed = self._pcm(0.04)
+        in_flight = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(committed, interruptible=False)
+            writer = asyncio.ensure_future(client.publish_audio(in_flight, interruptible=False))
+            for _ in range(3):
+                await asyncio.sleep(0)
+            await client.cut_audio()
+            await writer
+        first, silence, replay, late = self._written(client)
+        self.assertEqual(first, committed)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(replay, committed)
+        self.assertEqual(late, in_flight)
+        self.assertEqual(client._publish_protected[-1][1], in_flight)
+
 
 # ----------------------------------------------------------------------
 # Write-ahead cap: default and pacing bound
@@ -1505,6 +1555,74 @@ class TestOutputTransportInterruption(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             await transport.cancel(CancelFrame())
+
+
+# ----------------------------------------------------------------------
+# Client event handler signatures
+# ----------------------------------------------------------------------
+
+
+class TestClientEventHandlerSignatures(unittest.IsolatedAsyncioTestCase):
+    """``on_client_connected`` / ``on_client_disconnected`` handlers take
+    ``(transport, client)``; a legacy ``(transport)``-only handler keeps
+    firing through an adapter, with a deprecation warning."""
+
+    def _make_transport(self):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            broadcast = MagicMock(name="broadcast")
+            broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+            origin = MagicMock(name="origin")
+            origin.create_broadcast.return_value = broadcast
+            moq_mock.OriginProducer.return_value = origin
+            return MOQTransport(params=params)
+
+    async def _settle(self, seen):
+        for _ in range(100):
+            if seen:
+                return
+            await asyncio.sleep(0.01)
+        self.fail("event handler never fired")
+
+    async def test_handlers_receive_the_client(self):
+        transport = self._make_transport()
+        seen = []
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            seen.append(client)
+
+        await transport._on_client_connected()
+        await self._settle(seen)
+        self.assertEqual(seen, [{"id": transport._params.peer_id}])
+
+    async def test_a_legacy_single_argument_handler_still_fires(self):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning, match="on_client_connected"):
+
+            @transport.event_handler("on_client_connected")
+            async def on_client_connected(transport):
+                seen.append(transport)
+
+        await transport._on_client_connected()
+        await self._settle(seen)
+        self.assertEqual(seen, [transport])
+
+    async def test_a_legacy_sync_handler_still_fires(self):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning, match="on_client_disconnected"):
+
+            @transport.event_handler("on_client_disconnected")
+            def on_client_disconnected(transport):
+                seen.append(transport)
+
+        await transport._on_client_disconnected()
+        await self._settle(seen)
+        self.assertEqual(seen, [transport])
 
 
 # ----------------------------------------------------------------------

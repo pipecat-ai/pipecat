@@ -16,6 +16,7 @@ making MoQ a full bidirectional RTVI transport.
 """
 
 import asyncio
+import inspect
 import re
 import secrets
 import time
@@ -889,16 +890,25 @@ class MOQTransportClient:
         protected audio keeps playing while cancelled speech is cut
         (matching base_output, which preserves uninterruptible frames
         still in its queue).
+
+        Runs concurrently with the output transport's audio task, which
+        may be inside :meth:`publish_audio` with the next chunk. The
+        drain, silence and replay therefore commit synchronously — no
+        await from drain to last replayed write — so a concurrent chunk
+        can only land after the whole cut, never inside it. The replayed
+        remainder was already paced once, so skipping the pacing sleep
+        overshoots the write-ahead cap by at most the cut silence.
         """
         had_audio = self._publish_audio_clock is not None
         protected = self._take_protected_remainder()
         self.reset_audio_pacing()
         if not had_audio or self._audio_out is None or not self._audio_out_sample_rate:
             return
+        now = time.monotonic()
         samples = int(self._audio_out_sample_rate * _AUDIO_CUT_SILENCE_S)
-        await self.publish_audio(b"\x00\x00" * samples)
+        self._commit_audio(b"\x00\x00" * samples, now, interruptible=True)
         for chunk in protected:
-            await self.publish_audio(chunk, interruptible=False)
+            self._commit_audio(chunk, now, interruptible=False)
 
     def _take_protected_remainder(self) -> list[bytes]:
         """Drain the protected ledger, returning the unplayed audio.
@@ -964,6 +974,20 @@ class MOQTransportClient:
                 if self._publish_audio_clock is None:
                     now = time.monotonic()
 
+        self._commit_audio(audio, now, interruptible=interruptible)
+
+    def _commit_audio(self, audio: bytes, now: float, *, interruptible: bool):
+        """Write a chunk to the audio track, advancing clock, pts and ledger.
+
+        Synchronous on purpose: :meth:`cut_audio` commits its silence and
+        replay through here so the cut can't interleave with a concurrent
+        :meth:`publish_audio` (which awaits only in its pacing sleep,
+        before committing).
+        """
+        audio_out = self._audio_out
+        rate = self._audio_out_sample_rate
+        if audio_out is None or not rate:
+            return
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
             # Writes resumed after idle (turn gap, interruption re-anchor).
             # Re-anchor encoder timeline: an un-anchored gap is measured as
@@ -972,7 +996,7 @@ class MOQTransportClient:
             # compounding per turn).
             gap = None if self._publish_audio_clock is None else now - self._publish_audio_clock
             if gap is None or gap > _EPOCH_REANCHOR_MIN_GAP_S:
-                self._audio_out.reset_epoch()
+                audio_out.reset_epoch()
                 # Carry the idle gap into the presentation timeline. The
                 # player anchors pts to wall clock on the first frame and
                 # holds that anchor while it buffers, so a timeline that
@@ -997,10 +1021,10 @@ class MOQTransportClient:
 
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.
-        duration_s = len(audio) / (self._audio_out_sample_rate * 2)
+        duration_s = len(audio) / (rate * 2)
         self._publish_audio_clock += duration_s
 
-        self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
+        audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
 
         # Keep the protected ledger current: drop chunks that have played
@@ -2167,6 +2191,44 @@ class MOQOutputTransport(BaseOutputTransport):
             return False
 
 
+def _adapt_legacy_client_handler(event_name: str, handler):
+    """Wrap a ``(transport)``-only client-event handler to accept the client arg.
+
+    A handler already taking ``(transport, client)`` — or whose signature
+    can't be inspected — is returned unchanged.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return handler
+    params = list(sig.parameters.values())
+    if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+        return handler
+    positional = [
+        p
+        for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(positional) != 1:
+        return handler
+    warn_deprecated(
+        f"`{event_name}(transport)` is deprecated since 1.8.0 and will be removed in "
+        f"2.0.0. Use `{event_name}(transport, client)` instead.",
+        stacklevel=4,
+    )
+    if inspect.iscoroutinefunction(handler):
+
+        async def adapted_async(transport, client):
+            await handler(transport)
+
+        return adapted_async
+
+    def adapted(transport, client):
+        handler(transport)
+
+    return adapted
+
+
 class MOQTransport(BaseTransport):
     """MOQ transport that connects to a MOQ relay via the ``moq`` library.
 
@@ -2192,9 +2254,11 @@ class MOQTransport(BaseTransport):
       first and every redialed one (or the serve bind is up)
     - ``on_disconnected`` — the session ended. Client mode redials after
       it, so end the call from ``on_client_disconnected`` instead
-    - ``on_client_connected`` — peer broadcast announced (client joined)
+    - ``on_client_connected`` — peer broadcast announced (client joined);
+      receives the client as ``{"id": peer_id}``
     - ``on_client_disconnected`` — the peer is gone: it said goodbye, or
-      it stayed missing for ``connection_timeout``
+      it stayed missing for ``connection_timeout``; receives the client
+      as ``{"id": peer_id}``
     - ``on_track_subscribed`` — remote track subscription succeeded
     - ``on_error`` — error in the underlying transport; receives the
       message and the exception
@@ -2288,6 +2352,22 @@ class MOQTransport(BaseTransport):
         See :meth:`MOQTransportClient.disconnect` for details.
         """
         await self._client.disconnect()
+
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        ``on_client_connected`` and ``on_client_disconnected`` handlers
+        take ``(transport, client)``, matching the other transports; a
+        legacy handler written as ``(transport)`` alone is adapted, with
+        a deprecation warning.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        if event_name in ("on_client_connected", "on_client_disconnected"):
+            handler = _adapt_legacy_client_handler(event_name, handler)
+        super().add_event_handler(event_name, handler)
 
     # ------------------------------------------------------------------
     # MOQTransportClient callbacks.
