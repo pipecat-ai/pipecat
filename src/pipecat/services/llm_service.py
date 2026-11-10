@@ -40,6 +40,8 @@ from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientFunctionCallRequestFrame,
+    ClientFunctionCallResultFrame,
     EndFrame,
     ErrorFrame,
     ExpressionMetadataFrame,
@@ -505,6 +507,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # again or stops being advertised (see _sync_registered_tool_handlers).
         self._explicitly_unregistered_function_names: set[str | None] = set()
         self._function_call_tasks: dict[asyncio.Task | None, FunctionCallRunnerItem] = {}
+        # Client function calls waiting for the client's answer, by tool call id.
+        self._client_function_calls: dict[str, asyncio.Future] = {}
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
@@ -1027,6 +1031,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
+        elif isinstance(frame, ClientFunctionCallResultFrame):
+            self._handle_client_function_call_result(frame)
         elif isinstance(frame, TTSMetadataFrame) and self._expressive:
             self._handle_tts_metadata(frame)
         elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
@@ -1338,6 +1344,75 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await cleanup()
             except Exception as e:
                 logger.error(f"{self} error running tool cleanup {cleanup}: {e}")
+
+    def register_client_function(
+        self,
+        function_name: str | None,
+        *,
+        cancel_on_interruption: bool | None = None,
+        timeout_secs: float | None = None,
+    ):
+        """Register a function that the client executes.
+
+        Use this when the state a tool acts on lives in the client — a game, a
+        native app, a page — rather than somewhere the server can reach. The
+        tool is still advertised to the LLM the usual way (in the
+        ``LLMContext``), but instead of running a handler here, the service
+        pushes a :class:`~pipecat.frames.frames.ClientFunctionCallRequestFrame`
+        downstream and waits for the matching
+        :class:`~pipecat.frames.frames.ClientFunctionCallResultFrame`. Delivering
+        the request and turning the client's answer into a result frame is the
+        job of whatever speaks the client's protocol, typically a serializer
+        and the processor that goes with it.
+
+        A client function behaves like any other registered function: a
+        synchronous call holds the LLM until the client answers, interruptions
+        and timeouts cancel it, and a result arriving after the call settled is
+        ignored.
+
+        Args:
+            function_name: The name of the function. Use None for a catch-all
+                that sends every function call without its own handler to the
+                client.
+            cancel_on_interruption: Whether an interruption cancels the call.
+                Same meaning as in :meth:`register_function`: ``False`` makes
+                the call asynchronous. Defaults to ``None`` (True).
+            timeout_secs: How long to wait for the client, overriding the
+                global ``function_call_timeout_secs``. Defaults to ``None``.
+        """
+        self.register_function(
+            function_name,
+            self._run_client_function_call,
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )
+
+    async def _run_client_function_call(self, params: FunctionCallParams):
+        """Handler for client functions: ask the client and report its answer."""
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._client_function_calls[params.tool_call_id] = future
+        try:
+            await self.push_frame(
+                ClientFunctionCallRequestFrame(
+                    function_name=params.function_name,
+                    tool_call_id=params.tool_call_id,
+                    arguments=params.arguments,
+                )
+            )
+            result = await future
+        finally:
+            self._client_function_calls.pop(params.tool_call_id, None)
+        await params.result_callback(result)
+
+    def _handle_client_function_call_result(self, frame: ClientFunctionCallResultFrame):
+        future = self._client_function_calls.get(frame.tool_call_id)
+        if future is None or future.done():
+            logger.debug(
+                f"{self} Ignoring client result for function call [{frame.tool_call_id}]:"
+                " no call is waiting for it (it may have timed out or been cancelled)."
+            )
+            return
+        future.set_result(frame.result)
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
