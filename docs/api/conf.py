@@ -100,7 +100,6 @@ autodoc_mock_imports = [
     "torch",
     "torch.nn",
     "torch.nn.functional",
-    "torchaudio",
     # moondream dependencies
     "transformers",
     "transformers.AutoTokenizer",

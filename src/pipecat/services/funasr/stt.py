@@ -41,6 +41,9 @@ except ModuleNotFoundError as e:
 # automatic language detection.
 _FUNASR_LANGUAGES = {"zh", "en", "ja", "ko", "yue", "nospeech"}
 
+# FunASR models read 16 kHz audio.
+_FUNASR_SAMPLE_RATE = 16000
+
 
 def language_to_funasr_language(language: Language | str | None) -> str:
     """Map a language value to a SenseVoice language code.
@@ -91,11 +94,21 @@ class FunASRSTTService(SegmentedSTTService):
     multilingual (Chinese, Cantonese, English, Japanese, Korean, ...) with strong
     Chinese accuracy and fast non-autoregressive inference.
 
-    Audio is expected as 16 kHz, 16-bit signed PCM (the pipecat STT default).
+    Segments are resampled to the 16 kHz the model reads.
     """
 
     Settings = FunASRSTTSettings
     _settings: Settings
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Receive segments as raw 16-bit PCM, which the model reads directly."""
+        return False
+
+    @property
+    def segment_sample_rate(self) -> int:
+        """Receive segments at 16 kHz, the rate FunASR reads."""
+        return _FUNASR_SAMPLE_RATE
 
     def __init__(
         self,

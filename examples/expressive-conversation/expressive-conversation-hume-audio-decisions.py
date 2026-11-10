@@ -16,7 +16,11 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.expressive.expression import ExpressionDelivery, ExpressionSound
 from pipecat.expressive.perception import format_perception
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.expressive.processors.perception_reader import PerceptionQuestion, PerceptionReader
+from pipecat.expressive.processors.perception_reader import (
+    PerceptionQuestion,
+    PerceptionReader,
+    PerceptionSource,
+)
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -79,7 +83,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # they sound unsure. The LLM reads it at the head of the user's message.
     # Hume hears at least 5 seconds of audio, so a short turn is heard with the
     # audio just before it, and with silence at the start of a call.
-    reader = PerceptionReader(
+    hume = PerceptionSource(
         classifier=HumeAudioClassifier(api_key=os.environ["HUME_API_KEY"]),
         questions={
             "tone": PerceptionQuestion(
@@ -102,6 +106,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         },
     )
+    reader = PerceptionReader(sources=[hume])
 
     # Eleven v3 and v4 perform audio tags, which the Text-to-Dialogue service
     # serves.

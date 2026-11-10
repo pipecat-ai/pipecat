@@ -175,10 +175,10 @@ class MistralLLMService(OpenAILLMService):
             "max_tokens": self._settings.max_tokens,
         }
 
-        # Handle Mistral-specific parameter mapping
-        # Mistral uses "random_seed" instead of "seed"
+        # Mistral uses "random_seed" instead of "seed". The OpenAI client has no
+        # such keyword argument, so it travels in extra_body.
         if isinstance(self._settings.seed, int):
-            params["random_seed"] = self._settings.seed
+            self._merge_extra_body(params, {"random_seed": self._settings.seed})
 
         # Add any extra parameters
         params.update(self._settings.extra)

@@ -16,7 +16,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
-from pipecat.audio.utils import pcm_to_wav
+from pipecat.audio.utils import create_file_resampler, pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -806,6 +806,8 @@ class SegmentedSTTService(STTService):
     :attr:`wants_wav_segments` to return ``False`` so they receive the
     unwrapped buffer instead. This is a subclass-level contract, not a
     user-configurable option: the format is dictated by what the model expects.
+    Likewise, a model that reads one sample rate overrides
+    :attr:`segment_sample_rate`, and each segment is resampled to it.
 
     A segment ends right where the VAD stopped, and models tend to drop or
     garble the final word when the audio ends that abruptly, so each segment
@@ -841,6 +843,7 @@ class SegmentedSTTService(STTService):
         self._content = None
         self._wave = None
         self._speech_buffer = SpeechSegmentBuffer()
+        self._segment_resampler = create_file_resampler()
         # Numbers the user's speech segments, so a transcript can tell whether
         # its segment is still the latest.
         self._segment_count = 0
@@ -905,6 +908,15 @@ class SegmentedSTTService(STTService):
         """
         return True
 
+    @property
+    def segment_sample_rate(self) -> int:
+        """The sample rate of the segments passed to :meth:`run_stt`.
+
+        Defaults to the service's input sample rate. Local models that read a
+        fixed rate override this to receive their segments at that rate.
+        """
+        return self.sample_rate
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame, marking a TranscriptionFrame finalized when its segment is the latest.
 
@@ -949,8 +961,12 @@ class SegmentedSTTService(STTService):
         self._record_stt_audio_usage(pcm)
         await self.emit_stt_usage_metrics()
 
+        pcm = await self._segment_resampler.resample(
+            pcm, self.sample_rate, self.segment_sample_rate
+        )
+
         if self.wants_wav_segments:
-            audio = pcm_to_wav(pcm, self.sample_rate)
+            audio = pcm_to_wav(pcm, self.segment_sample_rate)
         else:
             # Local models read the buffer as raw 16-bit PCM; wrapping it in a
             # WAV container would make them misread the 44-byte header as audio.

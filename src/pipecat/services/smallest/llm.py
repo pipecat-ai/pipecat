@@ -11,20 +11,29 @@ through the Waves API's OpenAI-compatible chat completions endpoint.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 
 from pipecat import version as pipecat_version
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
 class SmallestLLMSettings(BaseOpenAILLMService.Settings):
-    """Settings for SmallestLLMService."""
+    """Settings for SmallestLLMService.
 
-    pass
+    Parameters:
+        prompt_cache_key: Key grouping the requests of one conversation, so
+            each turn is served where that conversation is already cached.
+            Use a fresh value per conversation and never share one between
+            conversations.
+    """
+
+    prompt_cache_key: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestLLMService(OpenAILLMService):
@@ -63,7 +72,7 @@ class SmallestLLMService(OpenAILLMService):
             default_headers: Additional HTTP headers to include in requests.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        default_settings = self.Settings(model="electron")
+        default_settings = self.Settings(model="electron", prompt_cache_key=None)
 
         if settings is not None:
             default_settings.apply_update(settings)
@@ -101,3 +110,22 @@ class SmallestLLMService(OpenAILLMService):
         return super().create_client(
             api_key=api_key, base_url=base_url, default_headers=merged_headers, **kwargs
         )
+
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+        """Build parameters for a Smallest AI chat completion request.
+
+        Extends the base OpenAI parameters with Electron's ``prompt_cache_key``.
+
+        Args:
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+
+        self._merge_extra_body(params, {"prompt_cache_key": self._settings.prompt_cache_key})
+
+        return params

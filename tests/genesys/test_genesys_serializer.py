@@ -7,7 +7,10 @@
 """Tests for the Genesys AudioHook serializer."""
 
 import asyncio
+import audioop
 import json
+import math
+import struct
 
 import pytest
 
@@ -406,6 +409,29 @@ class TestGenesysAudioHookSerializer:
         await serializer.deserialize(json.dumps(sample_resumed_message))
         assert isinstance(await serializer.deserialize(caller_audio), InputAudioRawFrame)
         assert await serializer.serialize(bot_audio) is not None
+
+    @pytest.mark.asyncio
+    async def test_a_pause_drops_the_bot_audio_the_resampler_holds(
+        self, sample_open_message, sample_paused_message, sample_resumed_message
+    ):
+        """Bot audio held when Genesys pauses doesn't start the audio after it resumes."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._sample_rate = 8000
+        tone = b"".join(
+            struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * n / 24000)))
+            for n in range(480)
+        )
+        silence = b"\x00\x00" * 480
+
+        await serializer.deserialize(json.dumps(sample_open_message))
+        for _ in range(5):
+            await serializer.serialize(OutputAudioRawFrame(tone, 24000, 1))
+        await serializer.deserialize(json.dumps(sample_paused_message))
+        await serializer.deserialize(json.dumps(sample_resumed_message))
+        written = await serializer.serialize(OutputAudioRawFrame(silence, 24000, 1))
+
+        samples = struct.unpack(f"<{len(written)}h", audioop.ulaw2lin(written, 2))
+        assert max(abs(sample) for sample in samples) < 100
 
     @pytest.mark.asyncio
     async def test_handle_update_message(self, sample_update_message):

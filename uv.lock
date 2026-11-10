@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -6026,7 +6026,6 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
-    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "docstring-parser" },
     { name = "loguru" },
     { name = "loudness" },
@@ -6044,7 +6043,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "sentencex" },
     { name = "soundfile" },
-    { name = "soxr" },
     { name = "typing-extensions" },
     { name = "wait-for2", marker = "python_full_version < '3.12'" },
     { name = "websockets" },
@@ -6154,7 +6152,6 @@ local = [
 local-smart-turn = [
     { name = "coremltools" },
     { name = "torch" },
-    { name = "torchaudio" },
     { name = "transformers" },
 ]
 mcp = [
@@ -6231,6 +6228,9 @@ sentry = [
 ]
 simli = [
     { name = "simli-ai" },
+]
+soxr = [
+    { name = "soxr" },
 ]
 speechmatics = [
     { name = "speechmatics-agent-stt" },
@@ -6309,7 +6309,6 @@ requires-dist = [
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<2" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
-    { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = ">=0.6.0,<0.10" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'", specifier = ">=0.6.0,<0.10" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
@@ -6376,7 +6375,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["webrtc"], marker = "extra == 'webrtc-video'" },
     { name = "pipecat-ai-context-hub", marker = "extra == 'cli'", specifier = ">=0.9.0,<1" },
     { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.3.0" },
-    { name = "pipecat-resampler", specifier = ">=0.1.1,<1" },
+    { name = "pipecat-resampler", specifier = ">=0.2.0,<1" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "pocket-tts", marker = "extra == 'pocket-tts'", specifier = ">=2.1.0,<3" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
@@ -6405,14 +6404,13 @@ requires-dist = [
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=2.1.0" },
     { name = "soundfile", specifier = "~=0.13.1" },
-    { name = "soxr", specifier = "~=1.0.0" },
+    { name = "soxr", marker = "extra == 'soxr'", specifier = "~=1.0.0" },
     { name = "speechmatics-agent-stt", marker = "extra == 'speechmatics'", specifier = "~=0.3.0" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = ">=1.0.13,<2" },
     { name = "tokenizers", marker = "extra == 'tone'", specifier = ">=0.23,<1" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
-    { name = "torchaudio", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
     { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=5.10.0,<6" },
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=5.10.0,<6" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.20.0,<1" },
@@ -6422,7 +6420,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resampy", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resampy", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "soxr", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -6490,17 +6488,17 @@ wheels = [
 
 [[package]]
 name = "pipecat-resampler"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e4/44/8424333dc344b5c38e363ff2020725c0de4942d112648e30a9640e48e36e/pipecat_resampler-0.1.1.tar.gz", hash = "sha256:a8006ae5e44fdae3a8ec09d91fd19effee27bc71a226454b5a3dd14b07d22777", size = 23958, upload-time = "2026-11-07T07:20:20.035Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/44/5c3979f3bf0a3d60de9180f66407bad1f36f3eb3f9271cff8d4e06899ebb/pipecat_resampler-0.2.0.tar.gz", hash = "sha256:13785269925842f5cc121ee413200c9becb51e65a219630b1faabbd561d211b7", size = 33116, upload-time = "2026-11-08T21:37:50.54Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/57/726a0c7f30c0f4ef7a175b0f0c744bc2c76b187604523ffdfb91bf8408bf/pipecat_resampler-0.1.1-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:5ceb819bb1da6f62f9bdba7fb7875b6665666436a9417d8d0101d7c56ce3e88c", size = 27213, upload-time = "2026-11-07T07:20:09.729Z" },
-    { url = "https://files.pythonhosted.org/packages/61/d8/7c2aa43e7469f56c1e626060913ec5fe91077776eb690208e886327bac35/pipecat_resampler-0.1.1-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:f7d5150744210fbd126bd95364bb17d11286db34719b15d15758f4688ab52cac", size = 24189, upload-time = "2026-11-07T07:20:11.332Z" },
-    { url = "https://files.pythonhosted.org/packages/6a/11/2644abae79a0ae4d91f7a2878cd8e9b5447f08affb98eaef0fc47748eb46/pipecat_resampler-0.1.1-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b75ffbd7d5ee8d896e9ede4705595f7dcff9128e46685e6d40a1ef045f505690", size = 47314, upload-time = "2026-11-07T07:20:12.586Z" },
-    { url = "https://files.pythonhosted.org/packages/9a/eb/3fdd3b3194a805b88d6d6cc130fc87f740aa05178c6d3286de467cca470d/pipecat_resampler-0.1.1-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:2ef17183004c78dbbc0e45a80b513f0e3eef131849221b6e16f01360c506c8ba", size = 54473, upload-time = "2026-11-07T07:20:13.956Z" },
-    { url = "https://files.pythonhosted.org/packages/05/85/5f5d9561339e419ff77ddb1fafcafd526d009163aaad122d79d6e62763d2/pipecat_resampler-0.1.1-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:7bb04b1b65b341e6e7829e66e1eec7a58df05e43e7d1238de988d783b52f187b", size = 46117, upload-time = "2026-11-07T07:20:15.823Z" },
-    { url = "https://files.pythonhosted.org/packages/78/7c/bf7f2991808f0c779e6693859c0abb3a5817c76ae2a8a2f239e2d4ee3adb/pipecat_resampler-0.1.1-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:a5ef511bd650814480efe1f743bf273325b8c1b75b9130508b7afd00a822a108", size = 53804, upload-time = "2026-11-07T07:20:17.207Z" },
-    { url = "https://files.pythonhosted.org/packages/95/78/762247c32f730c56747e3b71b94f3a05e0d67a9c2f0ee089cbf5656a9b7f/pipecat_resampler-0.1.1-cp311-abi3-win_amd64.whl", hash = "sha256:790bed1d4c723cd5b8c4ddcd552e52ace7d7507996e9fb13bf2669ad08c7e593", size = 25799, upload-time = "2026-11-07T07:20:18.848Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/f2/7668afaf7a4616a67013e3e51b3bc792c28c671d9649c0631f463217d734/pipecat_resampler-0.2.0-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:3ed443aede93cacf7807c78372b8bcfaad0a310292abe0dcd3bad68e4985a2e1", size = 35143, upload-time = "2026-11-08T21:37:41.847Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/8e/36b0741125f002266e44343c96a0c01f41d3b367067a5ea8a6f411a7bd65/pipecat_resampler-0.2.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:0d1011551732b8ea4da0e8d9552b4ed6acfd0c2eee795146fc07942237db8731", size = 32305, upload-time = "2026-11-08T21:37:43.072Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/96/d22e970fa83299c4c6cf4c9e1df4b15706ae168eefbb40f839282c106b4f/pipecat_resampler-0.2.0-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9ad428cacb4aaf31144947819c8ed5d97e881e6642c99937dc1159bd60b48ed2", size = 66810, upload-time = "2026-11-08T21:37:44.207Z" },
+    { url = "https://files.pythonhosted.org/packages/47/5e/a397b19d2c9e782839122e5ccbe4af0a51017c5d04d465dbf3052ee1befe/pipecat_resampler-0.2.0-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:30ec9ff494c4304fa0723aac711d526445fac4f345adc1f02e9b8885597653d7", size = 74348, upload-time = "2026-11-08T21:37:45.383Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/a5/aee3073b4ae29cbbedbff94a047edd231587411dbdbf747d873760a6d82d/pipecat_resampler-0.2.0-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6c05d98f8363f156ff8bd46384ab2197eabc57f26cf8f99be61bec3ed3816ce2", size = 64873, upload-time = "2026-11-08T21:37:46.743Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/3e/f72d66374c14aaf759512cc6e35ac7d0c12293dc1819d07f0610c6b4b926/pipecat_resampler-0.2.0-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:bffd83ca22f9610f5553bba7bdd755b7a56176d4544cfdb648f99d8c2288532c", size = 73081, upload-time = "2026-11-08T21:37:47.959Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/92/6328df22ed52f890c8c4dd2beeb3fb88bfa1b41ccfb51a8a68b32ce18a7a/pipecat_resampler-0.2.0-cp311-abi3-win_amd64.whl", hash = "sha256:78ed622d015756000c7888286a47cd250c68c28054bcd80f112c41c4b6019548", size = 33920, upload-time = "2026-11-08T21:37:49.353Z" },
 ]
 
 [[package]]
@@ -9742,20 +9740,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bf/2b/17cb15a383cf2135330371e034d13b9043dc6d8bd07c871b5aa3064fbed1/torch_complex-0.4.4.tar.gz", hash = "sha256:4153fd6b24a0bad689e6f193bfbd00f38283b1890d808bef684ddc6d1f63fd3f", size = 10025, upload-time = "2024-06-28T07:10:28.136Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/c5/9b4d756a7ada951e9b17dcc636f98ed1073c737ae809b150ef408afb6298/torch_complex-0.4.4-py3-none-any.whl", hash = "sha256:6ab4ecd4f3a16e3adb70a7f7cd2e769a9dfd07d7a8e27d04ff9c621ebbe34b13", size = 9125, upload-time = "2024-06-28T07:10:26.651Z" },
-]
-
-[[package]]
-name = "torchaudio"
-version = "2.11.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "torch" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/2a/c2b0f44906f8a4e8d90facdf68bc76bb14e72a0cbb9cc0457ca1c2fcd101/torchaudio-2.11.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:917667ab3e357d286b0e2405a33dc538e4344d554b72e1b2b03382a4352ca857", size = 699189, upload-time = "2026-10-28T15:21:42.129Z" },
-    { url = "https://files.pythonhosted.org/packages/90/c7/e352c0a0f34653f3f6a581b580352ab1c83e5d04019826ade4dfc26cf664/torchaudio-2.11.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:ad1175202b5cdb7585a38c1330845430e128c4ed8ceb770639318aa40fc1994b", size = 1678033, upload-time = "2026-10-28T15:21:43.28Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/ad/b0bf9bfa9db80acf0ce660e01a67b3b735343ab51ce1410b18d2aaed254c/torchaudio-2.11.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:0173b5b51e1368aa88de3cbe4e98508b5e9df4d8d59356c4e1fbc830c96191ef", size = 1816417, upload-time = "2026-10-28T15:21:45.007Z" },
-    { url = "https://files.pythonhosted.org/packages/6b/9e/549c9bb2d139fe78c90c9381f9ffbfc87232336df4537a65ea31d51fcdee/torchaudio-2.11.1-py3-none-win_amd64.whl", hash = "sha256:46ea71634d181f797370f046075ea982043c228b38d674fd7d9fc1c855a37b6a", size = 334360, upload-time = "2026-10-28T15:21:40.715Z" },
 ]
 
 [[package]]

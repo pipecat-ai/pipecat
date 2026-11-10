@@ -401,6 +401,8 @@ class RimeSTTService(STTService):
             previous=self._last_segment,
         )
         self._segment = self._last_segment = segment
+        # Each segment is its own stream on Rime's side.
+        await self._resampler.reset()
         pre_speech = self._pre_speech.stop()
         if pre_speech:
             self._record_stt_audio_usage(pre_speech)

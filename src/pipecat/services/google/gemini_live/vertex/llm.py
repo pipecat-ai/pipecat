@@ -78,7 +78,10 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            location: GCP region for Vertex AI endpoint (e.g., "us-east4").
+            location: GCP region for the Vertex AI endpoint (e.g., "us-central1"). The Live
+                models are served from a subset of regions, narrower than the one the other
+                Gemini models reach; a region that doesn't serve the model rejects the
+                session when it connects.
             project_id: Google Cloud project ID.
             model: Model identifier to use.
 

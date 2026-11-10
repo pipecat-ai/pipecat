@@ -86,6 +86,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -1545,8 +1547,10 @@ def _persona() -> EvalPersona:
 class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     """The sink is the boundary between the bot's side of the pipeline and the user's."""
 
-    def _sink(self, **kwargs) -> tuple[_BotFrameSink, _Collector]:
+    async def _sink(self, **kwargs) -> tuple[_BotFrameSink, _Collector]:
         sink = _BotFrameSink(_stream(bot_audio=True), **kwargs)
+        await sink.setup(frame_processor_setup(TaskManager()))
+        self.addAsyncCleanup(sink.cleanup)
         nxt = _Collector()
         sink.link(nxt)
         return sink, nxt
@@ -1560,13 +1564,13 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             await sink.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def test_inject_pushes_downstream(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         frame = TTSSpeakFrame("hello")
         await sink.inject(frame)
         self.assertEqual(nxt.frames, [frame])
 
     async def test_the_bots_frames_stop_at_the_sink(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         await self._push(
             sink,
             *_bot_response("Hello"),
@@ -1578,14 +1582,14 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(nxt.frames, [])
 
     async def test_a_scripted_run_swallows_the_computed_interruption(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         await self._push(sink, InterruptionFrame(), LLMContextFrame(LLMContext()))
         self.assertEqual(nxt.frames, [])  # no persona: nothing to interrupt or run
 
     async def test_a_persona_is_interrupted_and_runs_per_context_frame(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona)
+        sink, nxt = await self._sink(persona=persona)
         interruption = InterruptionFrame()
         run = LLMContextFrame(context)
         await self._push(sink, interruption, run)
@@ -1594,7 +1598,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_hang_up_silences_the_persona(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         persona.hang_up()
         await self._push(sink, LLMContextFrame(context), *_bot_response("Anything else?"))
         self.assertEqual(nxt.frames, [])
@@ -1603,7 +1607,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_hands_the_bots_response_to_the_persona(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response("Hello ", "there"))
         self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello there"}])
         self.assertEqual(len(nxt.frames), 1)
@@ -1613,7 +1617,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_waits_for_the_bots_function_call(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(
             sink,
             LLMFullResponseStartFrame(),
@@ -1635,7 +1639,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_upstream_frames_are_not_the_bots(self):
         # The persona's own function call travels upstream through the sink; it
         # is neither an event nor held back.
-        sink, _ = self._sink()
+        sink, _ = await self._sink()
         prev = _Collector()
         prev.link(sink)
         call = FunctionCallInProgressFrame(function_name="end_call", tool_call_id="c", arguments={})
@@ -1646,7 +1650,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_ignores_an_empty_response(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response())
         self.assertEqual(context.get_messages(), [])
         self.assertEqual(nxt.frames, [])
@@ -1660,16 +1664,18 @@ def _untimed(events: list[dict]) -> list[dict]:
 class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
     """The persona's text-mode responses become one send-text each."""
 
-    def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
+    async def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
         trace = EvalTrace()
         stream = _stream(bot_audio=True)
         relay = _PersonaTurnRelay(lambda text: {"type": "send-text", "text": text}, trace, stream)
+        await relay.setup(frame_processor_setup(TaskManager()))
+        self.addAsyncCleanup(relay.cleanup)
         nxt = _Collector()
         relay.link(nxt)
         return relay, nxt, trace
 
     async def test_skip_tts_response_is_sent_as_one_text_turn(self):
-        relay, nxt, trace = self._relay()
+        relay, nxt, trace = await self._relay()
         frames = _bot_response("Hi ", "there.", skip_tts=True)
         for frame in frames:
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -1685,7 +1691,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_spoken_response_is_only_traced(self):
-        relay, nxt, trace = self._relay()
+        relay, nxt, trace = await self._relay()
         # In audio mode the TTS speaks the text and forwards the end frame after it.
         for frame in (
             LLMFullResponseStartFrame(),
@@ -1702,7 +1708,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_response_without_words_is_not_a_turn(self):
         # An end_call-only response, or one cut off before any word went out.
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         for frame in (
@@ -1716,7 +1722,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
     async def test_an_end_call_made_while_the_response_is_spoken_follows_its_turn(self):
         # In audio mode the persona calls end_call before the TTS has spoken
         # the response it came with.
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
         await relay.end_call({"type": "end_call", "text": "done"})
         self.assertEqual(relay._stream.events_seen, [])
@@ -1734,7 +1740,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_an_end_call_with_no_response_going_out_is_appended_at_once(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         # The response already went out.
         for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -1749,7 +1755,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_a_response_interrupted_before_a_word_went_out_is_not_a_turn(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         for frame in (
             LLMFullResponseStartFrame(),
             LLMTextFrame(text="Could you"),
@@ -1759,7 +1765,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relay._stream.events_seen, [])
 
     async def test_an_interrupted_response_is_a_turn_of_the_words_that_went_out(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
         await relay.end_call({"type": "end_call", "text": "done"})
         for frame in (

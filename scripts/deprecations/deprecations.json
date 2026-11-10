@@ -223,15 +223,59 @@
       "location": "pipecat/adapters/services/perplexity_adapter.py"
     },
     {
+      "subject": "RNNoiseFilter.resampler_quality",
+      "module": "pipecat.audio.filters.rnnoise_filter",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/filters/rnnoise_filter.py"
+    },
+    {
       "subject": "ResampyResampler",
       "module": "pipecat.audio.resamplers.resampy_resampler",
       "kind": "class",
       "deprecated_in": "1.2.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "SOXRAudioResampler",
-      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
+      "replacement": "SincAudioResampler",
+      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SincAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
       "location": "pipecat/audio/resamplers/resampy_resampler.py"
+    },
+    {
+      "subject": "SincStreamAudioResampler.clear_after_secs",
+      "module": "pipecat.audio.resamplers.sinc_stream_resampler",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "flush",
+      "message": "Use :meth:`flush` or :meth:`reset` at the end of each stream instead. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/resamplers/sinc_stream_resampler.py"
+    },
+    {
+      "subject": "SOXRAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincAudioResampler",
+      "message": "`SOXRAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_resampler.py"
+    },
+    {
+      "subject": "SOXRStreamAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_stream_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincStreamAudioResampler",
+      "message": "`SOXRStreamAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincStreamAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_stream_resampler.py"
     },
     {
       "subject": "LocalCoreMLSmartTurnAnalyzer",
@@ -254,6 +298,50 @@
       "replacement": "LocalSmartTurnAnalyzerV3",
       "message": "`LocalSmartTurnAnalyzerV2` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `LocalSmartTurnAnalyzerV3` instead.",
       "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.alaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.alaw_to_pcm",
+      "message": "`pipecat.audio.utils.alaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.alaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_alaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_alaw",
+      "message": "`pipecat.audio.utils.pcm_to_alaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_alaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_ulaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_ulaw",
+      "message": "`pipecat.audio.utils.pcm_to_ulaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_ulaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.ulaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.ulaw_to_pcm",
+      "message": "`pipecat.audio.utils.ulaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.ulaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
     },
     {
       "subject": "AICQuailVADAnalyzer.minimum_speech_duration",
@@ -3817,6 +3905,17 @@
       "relation": "use_existing",
       "replacement": "settings=MiniMaxHttpTTSService.Settings(voice=...)",
       "message": "Use ``settings=MiniMaxHttpTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/minimax/tts.py"
+    },
+    {
+      "subject": "MiniMaxTTSSettings.text_normalization",
+      "module": "pipecat.services.minimax.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_normalization_mode=\"basic\"",
+      "message": "Use ``text_normalization_mode=\"basic\"`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/minimax/tts.py"
     },
     {

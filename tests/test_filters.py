@@ -189,6 +189,21 @@ class TestFunctionFilter(unittest.IsolatedAsyncioTestCase):
 
 
 class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
+    async def test_blank_wake_phrases_do_not_pass_unrelated_speech(self):
+        wake_filter = WakeCheckFilter(wake_phrases=["", " \t", "Hey, Pipecat"])
+        frames_to_send = [
+            TranscriptionFrame(user_id="test", text="Unrelated speech ", timestamp=""),
+            TranscriptionFrame(user_id="test", text="Hey, Pipecat", timestamp=""),
+        ]
+
+        received_down, _ = await run_test(
+            wake_filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[TranscriptionFrame],
+        )
+
+        self.assertEqual(received_down[0].text, "Hey, Pipecat")
+
     async def test_no_wake_word(self):
         filter = WakeCheckFilter(wake_phrases=["Hey, Pipecat"])
         frames_to_send = [TranscriptionFrame(user_id="test", text="Phrase 1", timestamp="")]

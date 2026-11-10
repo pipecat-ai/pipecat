@@ -63,6 +63,32 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown(text, "*")
         self.assertEqual(alnum_only(result), alnum_only(text))
 
+    async def test_link_markup_in_inline_code_kept(self):
+        cases = {
+            "Use `[label](https://example.com)` here.": ("Use [label](https://example.com) here."),
+            "Use `![alt](image.png)` here.": "Use ![alt](image.png) here.",
+            "`[Python](https://example.com/Python_(language))`": (
+                "[Python](https://example.com/Python_(language))"
+            ),
+        }
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in cases.items():
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_inline_code_and_normal_links(self):
+        cases = {
+            "[Guide](https://example.com) shows `[label](url)` and `![alt](image.png)`.": (
+                "Guide shows [label](url) and ![alt](image.png)."
+            ),
+            "Read [`__init__`](https://example.com).": "Read __init__.",
+            "[Link](`url`) followed by `[label](target)`.": ("Link followed by [label](target)."),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
     async def test_no_change_to_plain_text(self):
         text = "Hello world"
         result = await strip_markdown(text, "*")
@@ -277,6 +303,22 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         text = "50%"
         result = await expand_percentages(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
+
+    async def test_thousands_separator(self):
+        # The separator is part of the number, not a prefix left in front of it.
+        self.assertEqual(
+            await expand_percentages("1,500%", "*"), "one thousand, five hundred percent"
+        )
+        self.assertEqual(
+            await expand_percentages("12,500%", "*"), "twelve thousand, five hundred percent"
+        )
+        self.assertEqual(await expand_percentages("1,000,000%", "*"), "one million percent")
+        self.assertEqual(
+            await expand_percentages("1,234.5%", "*"),
+            "one thousand, two hundred and thirty-four point five percent",
+        )
+        # A long number without a separator is still read whole.
+        self.assertEqual(await expand_percentages("1000%", "*"), "one thousand percent")
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):

@@ -11,7 +11,9 @@ Reads the YAML frontmatter of every ``reports/<provider>/<unit>/<date>.md`` in a
 reports checkout and renders one Markdown page: PRs to review, branches awaiting
 a PR, changes to consider (with how long each gap has been open), units that
 could not be researched, and units with nothing new — each linking its report.
-An optional highlights file is inserted at the top. Run::
+An optional highlights file is inserted at the top. ``render_issue`` renders the
+same page for the digest issue with only the high-priority changes to consider
+listed, since the full list outgrows GitHub's issue size limit. Run::
 
     uv run python scripts/provider-watch/digest.py --reports ./_reports --date 2026-08-20 \\
         --highlights highlights.md --out ./_reports/digests/2026-08-20.md
@@ -20,7 +22,10 @@ An optional highlights file is inserted at the top. Run::
 from __future__ import annotations
 
 import argparse
+import functools
+import re
 import sys
+from collections.abc import Callable
 from datetime import date as _date
 from pathlib import Path
 
@@ -80,7 +85,109 @@ def _age(first_seen, date: str) -> str:
     return f" (since {seen}, {weeks} week{'s' if weeks != 1 else ''})"
 
 
+def _considerations_in_full(considerations: list, *, date: str, repo_url: str | None) -> list[str]:
+    """Every change to consider with its note and open question, by priority; low folded away."""
+    lines = []
+    by_priority: dict[str, list] = {}
+    for report, gap in considerations:
+        by_priority.setdefault(str(gap.get("priority") or "unranked"), []).append((report, gap))
+    for priority in PRIORITY_ORDER + sorted(set(by_priority) - set(PRIORITY_ORDER)):
+        group = by_priority.get(priority)
+        if not group:
+            continue
+        items = [
+            f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}"
+            + (f" — {gap['note']}" if gap.get("note") else "")
+            + (f" — *needs a call: {gap['needs']}*" if gap.get("needs") else "")
+            for report, gap in group
+        ]
+        if priority == "low":
+            lines += (
+                [f"<details><summary><b>Low</b> ({len(items)})</summary>", ""]
+                + items
+                + ["", "</details>", ""]
+            )
+        else:
+            lines += [f"**{priority.capitalize()}**", ""] + items + [""]
+    return lines
+
+
+def _considerations_for_issue(
+    considerations: list, *, date: str, repo_url: str | None, digest_url: str
+) -> list[str]:
+    """High-priority changes to consider by title; the rest counted and left to the full digest."""
+    lines = []
+    high = [(r, g) for r, g in considerations if g.get("priority") == "high"]
+    if high:
+        lines += ["**High**", ""]
+        lines += [
+            f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}"
+            for report, gap in high
+        ]
+        lines.append("")
+    others: dict[str, int] = {}
+    for _, gap in considerations:
+        priority = str(gap.get("priority") or "unranked")
+        if priority != "high":
+            others[priority] = others.get(priority, 0) + 1
+    counts = ", ".join(
+        f"{others[p]} {p}"
+        for p in PRIORITY_ORDER + sorted(set(others) - set(PRIORITY_ORDER))
+        if p in others
+    )
+    lines += [
+        f"The [full digest]({digest_url}) lists every change to consider with its notes"
+        + (f", including {counts}." if counts else "."),
+        "",
+    ]
+    return lines
+
+
 def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: str | None) -> str:
+    """The full digest for ``date``."""
+    return _render(
+        reports,
+        date=date,
+        highlights=highlights,
+        repo_url=repo_url,
+        render_considerations=_considerations_in_full,
+    )
+
+
+def render_issue(
+    reports: list[dict], *, date: str, highlights: str | None, repo_url: str | None, digest_url: str
+) -> str:
+    """The digest issue's body: the digest with only its high-priority changes to consider, by title.
+
+    GitHub caps an issue body at 65,536 characters, and the full list of changes
+    to consider outgrows that, so the rest are counted and linked at ``digest_url``.
+    """
+    return _render(
+        reports,
+        date=date,
+        highlights=highlights,
+        repo_url=repo_url,
+        render_considerations=functools.partial(_considerations_for_issue, digest_url=digest_url),
+    )
+
+
+def highlights_of(digest_text: str) -> str | None:
+    """The authored highlights at the top of a rendered digest, if it has any."""
+    counts_line = re.search(r"^\*\*\d+ units researched\*\*", digest_text, re.MULTILINE)
+    if not counts_line:
+        return None
+    title_end = digest_text.find("\n")
+    return digest_text[title_end : counts_line.start()].strip() or None
+
+
+def _render(
+    reports: list[dict],
+    *,
+    date: str,
+    highlights: str | None,
+    repo_url: str | None,
+    render_considerations: Callable[..., list[str]],
+) -> str:
     prs = [(r, pr) for r in reports for pr in (r.get("prs") or []) if isinstance(pr, dict)]
     open_prs = [(r, pr) for r, pr in prs if pr.get("state") in {"open", "merged", "closed"}]
     branches = [(r, pr) for r, pr in prs if pr.get("state") == "branch"]
@@ -126,27 +233,7 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
         lines.append("")
     if considerations:
         lines += ["## Changes to consider", ""]
-        by_priority: dict[str, list] = {}
-        for report, gap in considerations:
-            by_priority.setdefault(str(gap.get("priority") or "unranked"), []).append((report, gap))
-        for priority in PRIORITY_ORDER + sorted(set(by_priority) - set(PRIORITY_ORDER)):
-            group = by_priority.get(priority)
-            if not group:
-                continue
-            items = [
-                f"- {_link(report, repo_url)} — {gap.get('item')}{_age(gap.get('first_seen'), date)}"
-                + (f" — {gap['note']}" if gap.get("note") else "")
-                + (f" — *needs a call: {gap['needs']}*" if gap.get("needs") else "")
-                for report, gap in group
-            ]
-            if priority == "low":
-                lines += (
-                    [f"<details><summary><b>Low</b> ({len(items)})</summary>", ""]
-                    + items
-                    + ["", "</details>", ""]
-                )
-            else:
-                lines += [f"**{priority.capitalize()}**", ""] + items + [""]
+        lines += render_considerations(considerations, date=date, repo_url=repo_url)
     if errors:
         lines += ["## Did not complete", ""]
         lines += [f"- {_link(r, repo_url)} — {r['error']}" for r in errors]
@@ -156,7 +243,7 @@ def render(reports: list[dict], *, date: str, highlights: str | None, repo_url: 
 
     lines += [
         "---",
-        "To record a decision about an item above, reply on this issue naming the service and enough of "
+        "To record a decision about a change to consider, reply on this issue naming the service and enough of "
         "the item to identify it, one decision per line — e.g. `deepgram/stt, diarize_model: skip, "
         "the extra= workaround is fine` or `openai/realtime, tool_choice: tracked in #5400, stop reporting`. "
         "Fixes need no comment: the next run sees the code change. It reads these comments for "

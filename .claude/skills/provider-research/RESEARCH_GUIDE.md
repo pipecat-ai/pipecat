@@ -76,7 +76,7 @@ cd <scratch_dir>/wt-<provider>-<unit-suffix>
 In the worktree, cycling steps 1–4 once per item:
 
 1. Make the item's change. Update the docstring `Defaults to "..."` text and any test fixtures that pin the old value. If you resumed an existing branch, check whether the change is already there before editing.
-2. Add the item's changelog fragment `changelog/+<short-slug>.changed.md` (or `.fixed.md`; never a guessed PR number — `publish.py` renames the fragment to the real number once the PR is opened). — one line, user-facing, per `CONTRIBUTING.md`: `- \`CartesiaTTSService\` now defaults to \`sonic-4\`, Cartesia's successor to \`sonic-3.5\`.`
+2. Add the item's changelog fragment `changelog/+<short-slug>.changed.md` (or `.fixed.md`; never a guessed PR number — `publish.py` renames the fragment to the real number once the PR is opened). — a main single line starting with `- ` followed by a clear, user-facing description of the change, per `CONTRIBUTING.md`. No line wrapping. For example: `- \`CartesiaTTSService\` now defaults to \`sonic-4\`, Cartesia's successor to \`sonic-3.5\`.`
 3. Check with the repo's own pre-commit hooks, from inside the worktree using the main checkout's environment:
 
    ```bash

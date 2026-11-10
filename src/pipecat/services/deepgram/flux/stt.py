@@ -208,6 +208,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
             language_hints=None,
         )
 

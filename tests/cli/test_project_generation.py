@@ -541,6 +541,9 @@ def test_project_generation(config_data, temp_output_dir):
     # Verify pyproject.toml has correct dependencies
     pyproject_content = pyproject_file.read_text()
     assert "pipecat-ai[" in pyproject_content, "pyproject.toml should have pipecat-ai dependencies"
+    assert tomllib.loads(pyproject_content)["project"]["requires-python"] == ">=3.11,<3.15", (
+        "pyproject.toml should exclude Python versions onnxruntime has no wheels for"
+    )
 
     if config.stt_service == "rime_stt":
         dependencies = tomllib.loads(pyproject_content)["project"]["dependencies"]

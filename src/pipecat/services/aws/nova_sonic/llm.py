@@ -30,6 +30,7 @@ from pipecat.adapters.llm.schemas.direct_function import DirectFunction
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.llm.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     CancelFrame,
@@ -420,6 +421,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._audio_config = audio_config or (
             params.audio_config if params is not None else AudioConfig()
         )
+        self._input_resampler = create_stream_resampler()
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
         if isinstance(tools, list):
@@ -701,8 +703,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if self._triggering_assistant_response:
             return
 
+        audio = await self._resample_input_audio(frame)
+
         # Session continuation: let the helper buffer audio during the transition window
-        self._sc.on_audio_input(frame.audio)
+        self._sc.on_audio_input(audio)
 
         # Stop sending audio to the old stream once a handoff is in progress.
         # Audio is still being buffered above and will be replayed to the new
@@ -711,7 +715,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if self._sc.handoff_in_progress:
             return
 
-        await self._send_user_audio_event(frame.audio)
+        await self._send_user_audio_event(audio)
+
+    async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
+        """Convert the user's audio to the input rate the session declares."""
+        rate = self._audio_config.input_sample_rate
+        if frame.sample_rate == rate:
+            return frame.audio
+        return await self._input_resampler.resample(frame.audio, frame.sample_rate, rate)
 
     async def _handle_interruption_frame(self):
         pass

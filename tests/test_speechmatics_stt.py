@@ -708,7 +708,7 @@ async def test_open_connection_supported_sample_rate_connects(monkeypatch, rate)
     service._sample_rate = rate
     client = Mock(return_value=Mock(connect=AsyncMock()))
     monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
-    service.create_task = Mock()
+    service.create_task = Mock(side_effect=lambda coroutine, *args, **kwargs: coroutine.close())
 
     ok = await service._open_connection(report_error=True)
 

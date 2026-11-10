@@ -89,7 +89,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             ...
 
     Args:
-        phrases: List of wake phrases to detect.
+        phrases: List of wake phrases to detect. Entries that are blank after
+            stripping punctuation are ignored.
         timeout: Inactivity timeout in seconds before returning to IDLE.
             In timeout mode, the timer resets on activity (user, bot speech).
             In single activation mode, acts as a keepalive window — the strategy
@@ -111,7 +112,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Initialize the wake phrase user turn start strategy.
 
         Args:
-            phrases: List of wake phrases to detect.
+            phrases: List of wake phrases to detect. Entries that are blank after
+                stripping punctuation are ignored.
             timeout: Inactivity timeout in seconds before returning to IDLE.
                 In timeout mode, the timer resets on activity. In single activation
                 mode, acts as a keepalive window after wake phrase detection.
@@ -120,14 +122,15 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             **kwargs: Additional keyword arguments passed to parent.
         """
         super().__init__(**kwargs)
-        self._phrases = phrases
         self._timeout = timeout
         self._single_activation = single_activation
 
         # The transcript is matched with its punctuation stripped, so the phrases are too.
-        self._patterns: list[re.Pattern] = [
-            compile_phrase_pattern(self._strip_punctuation(phrase)) for phrase in phrases
-        ]
+        self._patterns: list[tuple[str, re.Pattern]] = []
+        for phrase in phrases:
+            normalized = self._strip_punctuation(phrase).strip()
+            if normalized:
+                self._patterns.append((phrase, compile_phrase_pattern(normalized)))
 
         self._state = _WakeState.IDLE
         self._accumulated_text = ""
@@ -257,9 +260,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         if len(self._accumulated_text) > 250:
             self._accumulated_text = self._accumulated_text[-250:]
 
-        for i, pattern in enumerate(self._patterns):
+        for phrase, pattern in self._patterns:
             if pattern.search(self._accumulated_text):
-                phrase = self._phrases[i]
                 logger.debug(f"{self} wake phrase detected: {phrase!r}")
                 self._transition_to_awake(phrase)
                 return True
