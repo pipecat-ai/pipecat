@@ -29,7 +29,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 from loguru import logger
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -87,6 +87,15 @@ class EvalSessionParams(BaseModel):
         require_audio_support: Refuse audio runs unless the target advertises
             the requested transport directions before ``bot-ready``. False
             preserves compatibility with targets that predate this metadata.
+        max_bot_audio_bytes: Optional cumulative byte limit for normalized bot
+            PCM admitted from the wire and, independently, PCM emitted into the
+            harness pipeline, including gap-fill silence. Quotas are per run
+            and are not replenished when audio is consumed or interrupted.
+            Exceeding either quota ends the run with an unscored harness error.
+        max_user_audio_buffer_bytes: Optional byte limit for the caller PCM
+            assembled by ``say_with_pauses``, checked before allocating pauses
+            or extending the aggregate. Both limits require positive, even
+            integers; ``None`` preserves unrestricted local behavior.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -110,6 +119,8 @@ class EvalSessionParams(BaseModel):
     cache_dir: str | None = None
     use_cache: bool = True
     require_audio_support: bool = False
+    max_bot_audio_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
+    max_user_audio_buffer_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

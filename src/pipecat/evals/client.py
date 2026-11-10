@@ -45,6 +45,7 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
     EvalAudioCapabilities,
+    EvalAudioLimitError,
     EvalClientSerializer,
     EvalConnectionFlags,
 )
@@ -79,7 +80,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import CANCEL_TIMEOUT_SECS, PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregator,
@@ -589,6 +590,9 @@ class EvalClient:
         self._handshake_over = asyncio.Event()
         self._refusal: EvalBotUnavailableError | None = None
         self._audio_capabilities: EvalAudioCapabilities | None = None
+        self._audio_failed = False
+        self._audio_cancel_sent = False
+        self._active_transport: EvalClientTransport | None = None
         self._next_id = 0
 
     @property
@@ -635,12 +639,19 @@ class EvalClient:
     async def start(self) -> None:
         """Build the eval pipeline and start running it, which connects to the bot."""
         transport = self._transport()
+        self._active_transport = transport
         pipeline = Pipeline(self._processors(transport))
+        bounded_audio = (
+            self._session_params.max_bot_audio_bytes is not None
+            or self._session_params.max_user_audio_buffer_bytes is not None
+        )
         self._worker = PipelineWorker(
             pipeline,
             params=self._pipeline_params(),
             enable_rtvi=False,
             cancel_on_idle_timeout=False,
+            # Leave time to cancel a held audio-input task during cleanup.
+            cancel_timeout_secs=1.0 if bounded_audio else CANCEL_TIMEOUT_SECS,
         )
 
         @self._worker.event_handler("on_pipeline_error")
@@ -738,19 +749,40 @@ class EvalClient:
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
         self._stopping = True
+        bounded_audio = (
+            self._session_params.max_bot_audio_bytes is not None
+            or self._session_params.max_user_audio_buffer_bytes is not None
+        )
+        current = asyncio.current_task()
+        abort_audio = bounded_audio and (
+            self._audio_failed
+            or self._stream.harness_error is not None
+            or (current is not None and current.cancelling() > 0)
+        )
+        if (
+            self._session_params.max_bot_audio_bytes is not None
+            and self._active_transport is not None
+        ):
+            await self._active_transport.input().close_audio()
         # Write the recording first: the recorder is harness-owned and fed raw
         # audio by the transport, so nothing below clears it, but writing here
         # lands it even if the teardown raises.
         await self._write_recording()
         # End the bot's session whatever its disconnect handler does, so it
         # doesn't wait out its pipeline's idle timeout.
-        await self._send_cancel()
+        if abort_audio:
+            await self._send_audio_cancel()
+        else:
+            await self._send_cancel()
         if self._worker is None or self._run_task is None:
             return
         # End the worker (which disconnects the transport), falling back to
         # cancel if it doesn't wind down cleanly.
         try:
-            await self._worker.queue_frame(EndFrame())
+            if abort_audio:
+                await self._worker.cancel(reason="eval audio admission failed")
+            else:
+                await self._worker.queue_frame(EndFrame())
             await asyncio.wait_for(self._run_task, timeout=5.0)
         except (TimeoutError, asyncio.CancelledError, Exception):
             self._run_task.cancel()
@@ -832,11 +864,23 @@ class EvalClient:
         await self._drop_bot_speech_if_talking_over()
         sample_rate = self._user_tts.sample_rate
         pcm = bytearray()
+        maximum = self._session_params.max_user_audio_buffer_bytes
         for part in parts:
             if isinstance(part, str):
-                pcm.extend(await self._user_tts.synthesize(part))
+                audio = await self._user_tts.synthesize(part)
+                if maximum is not None and len(audio) > maximum - len(pcm):
+                    await self._audio_failure("The eval caller exceeded its PCM buffer limit")
+                    raise EvalAudioLimitError("The eval caller exceeded its PCM buffer limit")
+                pcm.extend(audio)
             else:
-                pcm.extend(b"\x00\x00" * (sample_rate * part // 1000))
+                if maximum is not None and (type(part) is not int or part < 0 or sample_rate <= 0):
+                    await self._audio_failure("The eval caller has an invalid audio pause")
+                    raise EvalAudioLimitError("The eval caller has an invalid audio pause")
+                samples = sample_rate * part // 1000
+                if maximum is not None and samples * 2 > maximum - len(pcm):
+                    await self._audio_failure("The eval caller exceeded its PCM buffer limit")
+                    raise EvalAudioLimitError("The eval caller exceeded its PCM buffer limit")
+                pcm.extend(b"\x00\x00" * samples)
         for frame in (
             TTSStartedFrame(),
             TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
@@ -959,7 +1003,9 @@ class EvalClient:
             audio_out_enabled=self.sends_user_audio,
             audio_in_sample_rate=EVAL_STT_SAMPLE_RATE if self._params.bot_audio else 0,
             audio_out_sample_rate=self._user_audio_rate,
-            serializer=EvalClientSerializer(),
+            serializer=EvalClientSerializer(
+                max_bot_audio_bytes=self._session_params.max_bot_audio_bytes
+            ),
         )
         # The recorder is fed the raw audio by both edges; the paced streams
         # would make the recording stutter.
@@ -971,6 +1017,8 @@ class EvalClient:
             flags=self._connection_flags(),
             recorder=self._recorder,
             timing=self._stream.transport_timing,
+            max_bot_audio_bytes=self._session_params.max_bot_audio_bytes,
+            audio_failure=self._audio_failure,
         )
 
         @transport.event_handler("on_bot_ready")
@@ -984,6 +1032,12 @@ class EvalClient:
             # closes it too, and that is not the bot's doing.
             if self._stopping:
                 return
+            sent_close = getattr(getattr(websocket, "protocol", None), "close_sent", None)
+            if self._session_params.max_bot_audio_bytes is not None and (
+                websocket.close_code == 1009 or getattr(sent_close, "code", None) == 1009
+            ):
+                await self._audio_failure("The eval audio connection exceeded its message limit")
+                return
             # Before bot-ready a close is a refusal, such as Pipecat Cloud's
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
@@ -991,6 +1045,30 @@ class EvalClient:
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
+
+    async def _audio_failure(self, reason: str) -> None:
+        """Latch audio failures ahead of processors that may be stalled on PCM."""
+        if self._audio_failed or self._stopping:
+            return
+        self._audio_failed = True
+        await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": reason})
+        await self._send_audio_cancel()
+        if self._worker is not None:
+            await self._worker.cancel(reason="eval audio admission failed")
+
+    async def _send_audio_cancel(self) -> None:
+        """End the target session without traversing a stalled input processor."""
+        if self._audio_cancel_sent or self._active_transport is None:
+            return
+        self._audio_cancel_sent = True
+        message = self._message("client-message", {"t": EVAL_CANCEL_MESSAGE_TYPE, "d": {}})
+        try:
+            async with asyncio.timeout(1.0):
+                await self._active_transport.output().send_message(
+                    OutputTransportMessageUrgentFrame(message=message.model_dump())
+                )
+        except Exception:
+            pass
 
     def _processors(self, transport: EvalClientTransport) -> list:
         """The pipeline's processors: inbound from the bot, the sink, outbound to the bot.
