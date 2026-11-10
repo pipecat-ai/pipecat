@@ -70,3 +70,21 @@ async def test_nova_sonic_sends_user_audio_at_the_declared_input_rate():
     await service._handle_input_audio_frame(InputAudioRawFrame(clip, 24000, 1))
 
     service._send_user_audio_event.assert_awaited_once_with(await _resampled(clip, 24000, 16000))
+
+
+@pytest.mark.asyncio
+async def test_nova_sonic_user_audio_after_the_trigger_is_a_new_stream():
+    nova_sonic = pytest.importorskip("pipecat.services.aws.nova_sonic.llm")
+    service = nova_sonic.AWSNovaSonicLLMService(
+        secret_access_key="test", access_key_id="test", region="us-east-1"
+    )
+    service._send_user_audio_event = AsyncMock()
+    service._is_assistant_response_trigger_needed = lambda: True
+    before, after = _tone(24000, 4800), _tone(24000, 4800)
+
+    await service._handle_input_audio_frame(InputAudioRawFrame(before, 24000, 1))
+    await service.trigger_assistant_response()
+    service._triggering_assistant_response = False  # the trigger audio has played
+    await service._handle_input_audio_frame(InputAudioRawFrame(after, 24000, 1))
+
+    service._send_user_audio_event.assert_awaited_with(await _resampled(after, 24000, 16000))
