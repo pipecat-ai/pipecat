@@ -132,35 +132,42 @@ class DeepgramVoiceAgentServer:
                 pass
 
     async def _receive_settings(self, websocket: WebSocket) -> dict[str, Any] | None:
-        """Wait for ``Settings``; report any other first message as an error."""
-        message = await websocket.receive()
-        if message["type"] == "websocket.disconnect":
-            return None
-        text = message.get("text")
-        if text is None:
-            await self._reject(
-                websocket,
-                NON_SETTINGS_MESSAGE_BEFORE_SETTINGS,
-                "The first message must be Settings, not audio.",
-            )
-            return None
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            data = None
-        if not isinstance(data, dict) or data.get("type") not in CLIENT_MESSAGE_TYPES:
-            await self._reject(
-                websocket, UNPARSABLE_CLIENT_MESSAGE, f"Could not parse client message: {text!r}"
-            )
-            return None
-        if data["type"] != "Settings":
-            await self._reject(
-                websocket,
-                NON_SETTINGS_MESSAGE_BEFORE_SETTINGS,
-                f"The first message must be Settings, not {data['type']}.",
-            )
-            return None
-        return data
+        """Wait for ``Settings``; report any other message before it as an error.
+
+        ``KeepAlive`` is allowed before ``Settings``.
+        """
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return None
+            text = message.get("text")
+            if text is None:
+                await self._reject(
+                    websocket,
+                    NON_SETTINGS_MESSAGE_BEFORE_SETTINGS,
+                    "The first message must be Settings, not audio.",
+                )
+                return None
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                data = None
+            if not isinstance(data, dict) or data.get("type") not in CLIENT_MESSAGE_TYPES:
+                await self._reject(
+                    websocket,
+                    UNPARSABLE_CLIENT_MESSAGE,
+                    f"Could not parse client message: {text!r}",
+                )
+                return None
+            if data["type"] == "Settings":
+                return data
+            if data["type"] != "KeepAlive":
+                await self._reject(
+                    websocket,
+                    NON_SETTINGS_MESSAGE_BEFORE_SETTINGS,
+                    f"The first message must be Settings, not {data['type']}.",
+                )
+                return None
 
     async def _reject(self, websocket: WebSocket, code: str, description: str):
         await websocket.send_text(json.dumps(error_message(code, description)))

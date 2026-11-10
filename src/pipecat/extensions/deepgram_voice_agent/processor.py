@@ -21,7 +21,6 @@ from typing import Any
 from loguru import logger
 
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     ClientFunctionCallRequestFrame,
     ClientFunctionCallResultFrame,
@@ -30,6 +29,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallsStartedFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
     TTSSpeakFrame,
+    TTSStartedFrame,
     TTSUpdateSettingsFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -234,7 +235,10 @@ class DeepgramVoiceAgentProcessor(FrameProcessor):
     async def _inject_user_message(self, content: str):
         if self.on_turn_end:
             self.on_turn_end()
+        # An injected message is a new user turn: it barges in on whatever the
+        # agent is saying or about to say.
         await self.send({"type": "UserStartedSpeaking"})
+        await self.broadcast_interruption()
         await self.send({"type": "ConversationText", "role": "user", "content": content})
         await self.push_frame(
             LLMMessagesAppendFrame([{"role": "user", "content": content}], run_llm=True)
@@ -253,7 +257,8 @@ class DeepgramVoiceAgentObserver(BaseObserver):
     - ``UserStartedSpeaking`` when a user turn starts.
     - ``ConversationText`` (``assistant``) with each LLM response's text.
     - ``FunctionCallRequest`` for each client function call.
-    - ``AgentStartedSpeaking`` with latencies, and ``AgentAudioDone``.
+    - ``AgentStartedSpeaking`` with latencies, ahead of the audio, and
+      ``AgentAudioDone`` when the audio ends (not when an interruption cuts it).
 
     The user's ``ConversationText`` comes from the user aggregator, which
     knows the turn's final text; see :meth:`on_user_turn_stopped`.
@@ -271,6 +276,10 @@ class DeepgramVoiceAgentObserver(BaseObserver):
         self._processor.on_turn_end = self._mark_turn_end
         self._response_text = ""
         self._response_called_functions = False
+        # Audio cut short by an interruption doesn't end with AgentAudioDone.
+        self._interrupted = False
+        # AgentStartedSpeaking goes out once per agent turn, ahead of its audio.
+        self._speaking_announced = False
         self._turn_end_time: float | None = None
         self._first_text_time: float | None = None
 
@@ -307,6 +316,9 @@ class DeepgramVoiceAgentObserver(BaseObserver):
 
         if isinstance(frame, UserStartedSpeakingFrame):
             await send({"type": "UserStartedSpeaking"})
+        elif isinstance(frame, InterruptionFrame):
+            self._interrupted = True
+            self._speaking_announced = False
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._mark_turn_end()
         elif isinstance(frame, LLMFullResponseStartFrame):
@@ -340,10 +352,16 @@ class DeepgramVoiceAgentObserver(BaseObserver):
                     ],
                 }
             )
-        elif isinstance(frame, BotStartedSpeakingFrame):
+        elif isinstance(frame, TTSStartedFrame) and not self._speaking_announced:
+            # Synthesis starting, not playback: the client hears about the turn
+            # before its first audio arrives.
+            self._speaking_announced = True
+            self._interrupted = False
             await send({"type": "AgentStartedSpeaking", **self._latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await send({"type": "AgentAudioDone"})
+            self._speaking_announced = False
+            if not self._interrupted:
+                await send({"type": "AgentAudioDone"})
 
     def _latencies(self) -> dict[str, float]:
         now = time.monotonic()
