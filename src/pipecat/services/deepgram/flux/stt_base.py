@@ -306,6 +306,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._register_event_handler("on_end_of_turn")
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
+        self._register_event_handler("on_configure_success")
+        self._register_event_handler("on_configure_failure")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -752,12 +754,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             case FluxMessageType.CONFIGURE_SUCCESS:
                 logger.info(f"{self}: Configure accepted: {data}")
                 await self._on_configure_acked()
+                await self._call_event_handler("on_configure_success", data)
             case FluxMessageType.CONFIGURE_FAILURE:
                 error_code = data.get("error_code", "unknown")
                 description = data.get("description", "no description")
                 error_msg = f"Configure rejected: [{error_code}] {description}"
                 logger.warning(f"{self}: {error_msg}")
                 await self._on_configure_acked()
+                await self._call_event_handler("on_configure_failure", data)
                 await self.push_error(error_msg=error_msg)
 
     async def _handle_connection_established(self, data: dict[str, Any]):

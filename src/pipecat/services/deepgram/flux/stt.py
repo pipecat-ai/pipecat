@@ -60,6 +60,14 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     - on_end_of_turn(service, transcript): Deepgram detected end of turn (EOT)
     - on_eager_end_of_turn(service, transcript): Deepgram predicted end of turn (EagerEOT)
     - on_turn_resumed(service): User resumed speaking after EagerEOT
+    - on_configure_success(service, message): Deepgram applied a mid-stream
+      settings update (a ``Configure`` message, sent for fields such as
+      ``keyterm`` and the thresholds). ``message`` is the ``ConfigureSuccess``.
+    - on_configure_failure(service, message): Deepgram rejected one;
+      ``message`` is the ``ConfigureFailure``.
+
+    ``on_connected`` fires once Flux confirms a connection is ready for audio,
+    including after a reconnect for a settings change.
 
     Example::
 

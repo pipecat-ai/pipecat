@@ -682,6 +682,7 @@ class DeepgramSTTService(STTService):
                         connection.on(EventType.ERROR, self._on_error)
 
                         logger.debug(f"{self}: Websocket connection initialized")
+                        await self._call_event_handler("on_connected")
 
                         keepalive_task = self.create_task(
                             self._keepalive_handler(), f"{self}::keepalive"
