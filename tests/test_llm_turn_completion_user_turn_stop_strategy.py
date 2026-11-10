@@ -40,7 +40,8 @@ from pipecat.turns.user_stop import (
     LLMTurnCompletionUserTurnStopStrategy,
     SpeechTimeoutUserTurnStopStrategy,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.turns.user_turn_strategies import (
     EagerUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
@@ -95,8 +96,10 @@ class TestLLMTurnCompletionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase
         await self.strategy.process_frame(StartFrame())
 
         (update,) = self.pushed
-        self.assertTrue(update.delta.filter_incomplete_user_turns)
-        self.assertIs(update.delta.user_turn_completion_config, self.strategy.config)
+        (build_extension,) = update.delta.extensions
+        extension = build_extension()
+        self.assertIsInstance(extension, LLMTurnCompletionLLMExtension)
+        self.assertIs(extension.config, self.strategy.config)
         self.assertTrue(update.reach_inactive_services)
 
     async def test_each_marker_gives_its_decision(self):

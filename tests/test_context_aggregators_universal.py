@@ -2589,7 +2589,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_turn_completion_markers_stripped_from_transcript(self):
         """Turn completion markers should be stripped from assistant transcript."""
-        from pipecat.turns.user_turn_completion_mixin import (
+        from pipecat.turns.user_turn_completion import (
             USER_TURN_COMPLETE_MARKER,
             USER_TURN_INCOMPLETE_SHORT_MARKER,
         )

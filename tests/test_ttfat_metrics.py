@@ -22,10 +22,12 @@ from google.genai.types import (
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import TTFATMetricsData, TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -173,10 +175,8 @@ class TestTTFATServiceReporting:
         recording TTFAT downstream of that would time the filter instead.
         """
         service = GoogleLLMService(api_key="test-key")
-        service._filter_incomplete_user_turns = True
-        # State in which _push_turn_text drops the text outright.
-        service._user_turn_completion_voiced = True
-        service._turn_marker = None
+        # Holds the text back until a marker appears.
+        service.add_extension(LLMTurnCompletionLLMExtension())
 
         recorded = []
         pushed = []
@@ -184,12 +184,12 @@ class TestTTFATServiceReporting:
         async def fake_stop_ttfat(**kwargs):
             recorded.append(True)
 
-        async def capture_frame(frame, direction=None):
+        async def capture_frame(self, frame, direction=None):
             pushed.append(frame)
 
         with (
             patch.object(service, "stop_ttfat_metrics", fake_stop_ttfat),
-            patch.object(service, "push_frame", capture_frame),
+            patch.object(FrameProcessor, "push_frame", capture_frame),
         ):
             await service._push_llm_text("Hello")
 

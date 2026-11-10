@@ -5591,6 +5591,17 @@
       "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
     },
     {
+      "subject": "pipecat.turns.user_turn_completion_mixin",
+      "module": "pipecat.turns.user_turn_completion_mixin",
+      "kind": "module",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.turns.user_turn_completion",
+      "message": "Moved to :mod:`pipecat.turns.user_turn_completion`. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_turn_completion_mixin.py"
+    },
+    {
       "subject": "TaskManager.setup",
       "module": "pipecat.utils.asyncio.task_manager",
       "kind": "method",

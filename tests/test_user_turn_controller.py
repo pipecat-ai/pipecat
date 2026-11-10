@@ -55,7 +55,7 @@ from pipecat.turns.user_stop import (
     UserTurnStoppedParams,
     deferred,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
