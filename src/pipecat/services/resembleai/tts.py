@@ -37,6 +37,13 @@ class ResembleAITTSSettings(TTSSettings):
     Parameters:
         apply_custom_pronunciations: Whether Resemble AI applies the team's
             custom pronunciations to matching words in the input text.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     apply_custom_pronunciations: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

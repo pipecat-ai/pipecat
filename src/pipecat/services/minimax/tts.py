@@ -121,6 +121,13 @@ class MiniMaxTTSSettings(TTSSettings):
             (``"omg/oh my god"``), IPA in parentheses (``"Pipecat/(ˈpaɪpkæt)"``),
             pinyin with tone numbers in parentheses (``"处理/(chu3)(li3)"``), or
             Japanese kana. Sent as the request's ``pronunciation_dict.tone`` list.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
