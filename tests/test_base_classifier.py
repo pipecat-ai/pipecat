@@ -306,6 +306,9 @@ class TestAudio:
 
         assert classifier.clips == [clip]
 
+    def test_a_classifier_answers_best_with_its_shortest_clip_by_default(self):
+        assert _AudioClassifier().preferred_audio_secs == 1.0
+
     def test_a_clip_knows_how_long_it_is(self):
         assert _clip(2.5).duration_secs == 2.5
 

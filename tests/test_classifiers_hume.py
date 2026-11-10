@@ -210,7 +210,7 @@ async def test_the_clip_is_sent_as_a_16khz_mono_wav():
 
 
 @pytest.mark.asyncio
-async def test_a_clip_shorter_than_five_seconds_is_refused_without_a_request():
+async def test_a_clip_shorter_than_a_second_is_refused_without_a_request():
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -220,9 +220,17 @@ async def test_a_clip_shorter_than_five_seconds_is_refused_without_a_request():
     classifier = HumeAudioClassifier(client=_client(handler))
 
     with pytest.raises(ClassifierError):
-        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip(4.5)])
+        await classifier.ask("A caller.", {"hesitant": HESITANT}, inputs=[_clip(0.5)])
 
     assert seen == []
+
+
+def test_hume_hears_a_second_to_five_minutes_and_answers_best_from_five_seconds():
+    classifier = HumeAudioClassifier(client=_client(lambda request: _reply({})))
+
+    assert classifier.min_audio_secs == 1.0
+    assert classifier.max_audio_secs == 300.0
+    assert classifier.preferred_audio_secs == 5.0
 
 
 @pytest.mark.asyncio
