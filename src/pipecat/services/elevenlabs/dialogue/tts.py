@@ -59,9 +59,13 @@ class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
             Text-to-Dialogue endpoints it also decides whether a v4
             Professional Voice Clone runs as a PVC or an IVC. Dropped with a
             warning on models that don't read it, such as eleven_v3.
-        apply_text_normalization: Text normalization mode ("auto", "on",
-            "off"), controlling whether the model spells out numbers, dates and
-            currencies. ElevenLabs defaults to "auto".
+        apply_text_normalization: Whether ElevenLabs converts numbers, dates and
+            currencies to words before the model speaks them. ``"on"`` always
+            converts, so ``07/03/2026`` is read as "July third, twenty
+            twenty-six". ``"off"`` skips the conversion and leaves the text to the
+            model. ``"auto"`` (ElevenLabs' default) lets ElevenLabs decide. Word
+            timestamps, and so the LLM context, carry the original text in every
+            mode.
     """
 
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
