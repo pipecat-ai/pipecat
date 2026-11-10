@@ -20,6 +20,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.expressive.formatter import (
     EXPRESSION_TAG_PATTERN,
@@ -131,6 +132,10 @@ class _AudioContextPlayback:
     # TTSTextFrames, and any frames queued behind them that arrived before audio,
     # are held until the audio confirms that the text was actually spoken.
     held_frames: list[Frame] = field(default_factory=list)
+    # The rate of the context's latest audio, and the resampler converting it
+    # when it isn't the service's rate.
+    audio_rate: int = 0
+    resampler: BaseAudioResampler | None = None
 
 
 # The text types an LLM writes its replies in, where expressive conversation
@@ -399,8 +404,6 @@ class TTSService(AIService):
         self._aggregated_frame_sequencer = AggregatedFrameSequencer(
             name=str(self), streaming=self._is_streaming_tokens
         )
-
-        self._resampler = create_stream_resampler()
 
         self._tts_contexts: dict[str, TTSContext] = {}
         self._streamed_text: str = ""
@@ -814,6 +817,9 @@ class TTSService(AIService):
         This method must be implemented by subclasses to provide actual TTS functionality.
         The base class logs the synthesized text before invoking this method, so
         implementations should not log it again.
+
+        Audio frames can carry the provider's own sample rate: the base class
+        resamples them to :attr:`sample_rate` as they play.
 
         Args:
             text: The text to synthesize into speech.
@@ -2032,12 +2038,12 @@ class TTSService(AIService):
         in_sample_rate: int | None = None,
         context_id: str | None = None,
     ) -> AsyncGenerator[Frame, None]:
-        """Stream audio frames from an async byte iterator with optional resampling.
+        """Stream audio frames from an async byte iterator.
 
         For WAV data, use `strip_wav_header=True` to strip the header and
         auto-detect the source sample rate. For raw PCM data, pass
-        `in_sample_rate` directly. Audio is resampled to `self.sample_rate` when
-        the source rate differs.
+        `in_sample_rate` directly. Frames carry the source sample rate, and
+        audio at another rate than `self.sample_rate` is resampled as it plays.
 
         Args:
             iterator: Async iterator yielding audio bytes.
@@ -2050,11 +2056,6 @@ class TTSService(AIService):
         buffer = bytearray()
         source_sample_rate = in_sample_rate
         need_to_strip_wav_header = strip_wav_header
-
-        async def maybe_resample(audio: bytes) -> bytes:
-            if source_sample_rate and source_sample_rate != self.sample_rate:
-                return await self._resampler.resample(audio, source_sample_rate, self.sample_rate)
-            return audio
 
         async for chunk in iterator:
             if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
@@ -2070,21 +2071,17 @@ class TTSService(AIService):
             # Round to nearest even number.
             aligned_length = len(buffer) & ~1  # 111111111...11110
             if aligned_length > 0:
-                aligned_chunk = await maybe_resample(bytes(buffer[:aligned_length]))
+                aligned_chunk = bytes(buffer[:aligned_length])
                 buffer = buffer[aligned_length:]  # keep any leftover byte
-
-                if len(aligned_chunk) > 0:
-                    frame = TTSAudioRawFrame(
-                        bytes(aligned_chunk), self.sample_rate, 1, context_id=context_id
-                    )
-                    yield frame
+                sample_rate = source_sample_rate or self.sample_rate
+                yield TTSAudioRawFrame(aligned_chunk, sample_rate, 1, context_id=context_id)
 
         if len(buffer) > 0:
             # Make sure we don't need an extra padding byte.
             if len(buffer) % 2 == 1:
                 buffer.extend(b"\x00")
-            audio = await maybe_resample(bytes(buffer))
-            yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+            sample_rate = source_sample_rate or self.sample_rate
+            yield TTSAudioRawFrame(bytes(buffer), sample_rate, 1, context_id=context_id)
 
     #
     # Word frames
@@ -2267,6 +2264,7 @@ class TTSService(AIService):
             playback.held_frames.append(item)
         else:
             if isinstance(item, TTSAudioRawFrame):
+                await self._resample_context_audio(context_id, item, playback)
                 # Set the word-timestamp baseline once, on the first audio chunk.
                 if not playback.received_audio:
                     await self.stop_ttfb_metrics()
@@ -2283,6 +2281,7 @@ class TTSService(AIService):
                 if tts_context is not None:
                     item.append_to_context = tts_context.append_to_context
             elif isinstance(item, TTSStoppedFrame):
+                await self._push_resampler_tail(context_id, playback)
                 # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
                 await self._release_held_frames_without_audio(context_id, playback)
                 await self._apply_force_complete(context_id, playback.received_audio)
@@ -2292,8 +2291,43 @@ class TTSService(AIService):
                     item.pts = self._word_timestamp_tracker.last_pts
             await self.push_frame(item)
 
+    async def _resample_context_audio(
+        self, context_id: str, frame: TTSAudioRawFrame, playback: _AudioContextPlayback
+    ):
+        """Convert an audio frame of the playing context to the service's sample rate.
+
+        One resampler converts all of a context's audio at a rate, so the audio
+        stays continuous across frames however far apart the provider sends them.
+        """
+        if frame.sample_rate != playback.audio_rate:
+            # Audio at another rate, the service's included, ends the audio the
+            # resampler was converting.
+            await self._push_resampler_tail(context_id, playback)
+            playback.audio_rate = frame.sample_rate
+            if frame.sample_rate != self.sample_rate:
+                playback.resampler = create_stream_resampler(clear_after_secs=None)
+        if playback.resampler:
+            frame.audio = await playback.resampler.resample(
+                frame.audio, frame.sample_rate, self.sample_rate
+            )
+            frame.sample_rate = self.sample_rate
+            frame.num_frames = len(frame.audio) // (2 * frame.num_channels)
+
+    async def _push_resampler_tail(self, context_id: str, playback: _AudioContextPlayback):
+        """Push the audio the context's resampler still holds, and drop the resampler."""
+        if not playback.resampler:
+            return
+        audio = await playback.resampler.flush()
+        playback.resampler = None
+        playback.audio_rate = 0
+        if audio:
+            await self.push_frame(
+                TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+            )
+
     async def _end_audio_context(self, context_id: str, playback: _AudioContextPlayback):
         """Finish the playing audio context once it ends or goes quiet."""
+        await self._push_resampler_tail(context_id, playback)
         # Words the provider never timed come before the stop frame.
         await self._release_held_frames_without_audio(context_id, playback)
         await self._apply_force_complete(context_id, playback.received_audio)

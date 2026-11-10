@@ -383,9 +383,8 @@ async def test_bland_tts_unsupported_pipeline_rate_falls_back():
     assert "22050" in sink.getvalue() and "48000" in sink.getvalue(), sink.getvalue()
     assert _of_type(captured, "init")[0]["audio"]["sample_rate"] == 48000
     audio_frames = [frame for frame in down_frames if isinstance(frame, TTSAudioRawFrame)]
-    # frames are tagged with the rate Bland actually rendered; the output
-    # transport resamples to the pipeline rate
-    assert all(frame.sample_rate == 48000 for frame in audio_frames)
+    # the audio Bland rendered at 48 kHz is resampled to the pipeline rate
+    assert audio_frames and all(frame.sample_rate == 22050 for frame in audio_frames)
 
 
 @pytest.mark.asyncio

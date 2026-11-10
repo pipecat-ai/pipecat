@@ -7,6 +7,7 @@
 """Tests for SincStreamAudioResampler."""
 
 import unittest
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -202,7 +203,8 @@ class TestSincStreamAudioResamplerLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await resampler.flush(), b"")
 
     async def test_flush_after_an_inactivity_clear_is_empty(self):
-        resampler = SincStreamAudioResampler(clear_after_secs=0.2)
+        with self.assertWarns(DeprecationWarning):
+            resampler = SincStreamAudioResampler(clear_after_secs=0.2)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.0):
             await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.5):
@@ -221,7 +223,8 @@ class TestSincStreamAudioResamplerLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_inactivity_discards_the_held_audio(self):
-        resampler = SincStreamAudioResampler(clear_after_secs=0.2)
+        with self.assertWarns(DeprecationWarning):
+            resampler = SincStreamAudioResampler(clear_after_secs=0.2)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.0):
             await stream(resampler, tone(1000, 24000), chunk_sizes(24000, 960), 24000, 8000)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.5):
@@ -230,13 +233,28 @@ class TestSincStreamAudioResamplerLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_pause, await self._fresh_output())
 
     async def test_a_short_pause_keeps_the_held_audio(self):
-        resampler = SincStreamAudioResampler(clear_after_secs=0.2)
+        with self.assertWarns(DeprecationWarning):
+            resampler = SincStreamAudioResampler(clear_after_secs=0.2)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.0):
             await stream(resampler, tone(1000, 24000), chunk_sizes(24000, 960), 24000, 8000)
         with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.1):
             after_pause = await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
 
         self.assertNotEqual(after_pause, await self._fresh_output())
+
+    async def test_a_long_pause_keeps_the_held_audio_by_default(self):
+        resampler = SincStreamAudioResampler()
+        with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=100.0):
+            await stream(resampler, tone(1000, 24000), chunk_sizes(24000, 960), 24000, 8000)
+        with patch("pipecat.audio.resamplers.sinc_stream_resampler.time.time", return_value=110.0):
+            after_pause = await resampler.resample(self.CHUNK.tobytes(), 24000, 8000)
+
+        self.assertNotEqual(after_pause, await self._fresh_output())
+
+    def test_clear_after_secs_none_does_not_warn(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            SincStreamAudioResampler(clear_after_secs=None)
 
 
 if __name__ == "__main__":

@@ -165,7 +165,7 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._send_resampler = create_stream_resampler(clear_after_secs=None)
+        self._send_resampler = create_stream_resampler()
 
         self._muted: bool = False
         self._user_id: str = ""

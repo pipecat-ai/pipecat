@@ -245,6 +245,17 @@
       "location": "pipecat/audio/resamplers/resampy_resampler.py"
     },
     {
+      "subject": "SincStreamAudioResampler.clear_after_secs",
+      "module": "pipecat.audio.resamplers.sinc_stream_resampler",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "flush",
+      "message": "Use :meth:`flush` or :meth:`reset` at the end of each stream instead. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/resamplers/sinc_stream_resampler.py"
+    },
+    {
       "subject": "SOXRAudioResampler",
       "module": "pipecat.audio.resamplers.soxr_resampler",
       "kind": "class",

@@ -471,7 +471,7 @@ class BaseOutputTransport(FrameProcessor):
             # the resampler must not discard its filter tail on its own: it runs
             # ahead of playback and would otherwise treat the pause between two
             # TTS chunks as the end of the stream.
-            self._resampler = create_stream_resampler(clear_after_secs=None)
+            self._resampler = create_stream_resampler()
 
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.

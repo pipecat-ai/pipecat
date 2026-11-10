@@ -24,6 +24,7 @@ from typing import cast
 
 from loguru import logger
 
+from pipecat.audio.utils import create_file_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -46,6 +47,10 @@ DEFAULT_CACHE_DIR = _default_cache_dir()
 
 # Default sample rate for generated audio (matches pipecat input default).
 DEFAULT_SAMPLE_RATE = 16000
+
+# The rate the cache stores audio at, and the inner service synthesizes at, so
+# one cached utterance serves every pipeline rate.
+CACHE_SAMPLE_RATE = 24000
 
 
 def tts_sample_rate(voice_cfg: dict) -> int:
@@ -100,9 +105,11 @@ class CachingTTSService(TTSService):
     """A pipeline TTS that wraps a real service and caches its audio on disk.
 
     On a ``TTSSpeakFrame`` it emits the cached audio when present, otherwise
-    it runs the wrapped service, caches the audio, and forwards it. The
-    inner service's lifecycle is forwarded so it works inside the pipeline.
-    Only local and HTTP inner services are supported.
+    it runs the wrapped service, caches the audio, and forwards it. The cache
+    stores audio at ``CACHE_SAMPLE_RATE``, and the audio is resampled to the
+    pipeline's rate as it plays. The inner service's lifecycle is forwarded so
+    it works inside the pipeline. Only local and HTTP inner services are
+    supported.
     """
 
     def __init__(
@@ -141,6 +148,7 @@ class CachingTTSService(TTSService):
         self._cache_key = cache_key
         self._cache_dir_override = cache_dir
         self._use_cache = use_cache
+        self._utterance_resampler = create_file_resampler()
 
     async def setup(self, setup):
         """Set up this service and forward setup to the inner service."""
@@ -148,9 +156,9 @@ class CachingTTSService(TTSService):
         await self._inner.setup(setup)
 
     async def start(self, frame: StartFrame):
-        """Start this service and the inner one, the inner with metrics off since it has no downstream."""
+        """Start this service and the inner one, the inner at the cache's rate and with metrics off since it has no downstream."""
         await super().start(frame)
-        inner_start = StartFrame(audio_out_sample_rate=self.sample_rate, enable_metrics=False)
+        inner_start = StartFrame(audio_out_sample_rate=CACHE_SAMPLE_RATE, enable_metrics=False)
         await self._inner.start(inner_start)
 
     async def stop(self, frame):
@@ -178,10 +186,12 @@ class CachingTTSService(TTSService):
             The utterance as 16-bit mono PCM, at this service's sample rate.
         """
         audio = bytearray()
+        sample_rate = self.sample_rate
         async for frame in self.run_tts(text, self.create_context_id()):
             if isinstance(frame, TTSAudioRawFrame):
                 audio.extend(frame.audio)
-        return bytes(audio)
+                sample_rate = frame.sample_rate
+        return await self._resample(bytes(audio), sample_rate, self.sample_rate)
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Emit the audio for ``text`` from cache, or by driving the inner service.
@@ -199,32 +209,40 @@ class CachingTTSService(TTSService):
         if cache_file is not None and cache_file.exists():
             try:
                 pcm, cached_sr = _read_wav(cache_file)
-                if cached_sr == self.sample_rate:
+                if cached_sr == CACHE_SAMPLE_RATE:
                     yield TTSStartedFrame()
-                    yield TTSAudioRawFrame(audio=pcm, sample_rate=self.sample_rate, num_channels=1)
+                    yield TTSAudioRawFrame(audio=pcm, sample_rate=CACHE_SAMPLE_RATE, num_channels=1)
                     yield TTSStoppedFrame()
                     return
                 logger.info(
-                    f"Cache SR {cached_sr} != requested {self.sample_rate} "
-                    f"for {text!r} — regenerating"
+                    f"Cached audio for {text!r} is at {cached_sr} Hz, not "
+                    f"{CACHE_SAMPLE_RATE} Hz: regenerating"
                 )
             except Exception as e:
                 logger.warning(f"Cache read failed for {cache_file}: {e} — regenerating")
 
         # Cache miss: drive the inner service, capturing its audio as we forward it.
         captured = bytearray()
+        captured_rate = CACHE_SAMPLE_RATE
         inner_frames = cast(
             AsyncGenerator[Frame | None, None], self._inner.run_tts(text, context_id)
         )
         async for frame in inner_frames:
             if isinstance(frame, TTSAudioRawFrame):
                 captured.extend(frame.audio)
+                captured_rate = frame.sample_rate
             elif isinstance(frame, ErrorFrame):
                 logger.warning(f"TTS error during synthesis of {text!r}: {frame.error}")
             yield frame
 
         if cache_file is not None and captured:
-            _write_wav(cache_file, bytes(captured), self.sample_rate)
+            pcm = await self._resample(bytes(captured), captured_rate, CACHE_SAMPLE_RATE)
+            _write_wav(cache_file, pcm, CACHE_SAMPLE_RATE)
+
+    async def _resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
+        """Resample a whole utterance."""
+        audio = audio[: len(audio) - len(audio) % 2]
+        return await self._utterance_resampler.resample(audio, in_rate, out_rate)
 
     def _cache_file(self, text: str) -> Path:
         """Resolve the WAV cache path for ``text`` (keyed by config identity + text)."""
