@@ -1,5 +1,7 @@
 """Sentencex adapter offset and incremental aggregation contracts."""
 
+import re
+
 import pytest
 
 from pipecat.utils.string import match_endofsentence
@@ -142,8 +144,50 @@ async def test_unbroken_lookahead_has_bounded_tokenizer_work(monkeypatch):
     aggregator = SimpleTextAggregator()
     text = "I. " + "x" * 10_000 + " more words without punctuation"
     assert [a.text async for a in aggregator.aggregate(text)] == []
-    assert calls == ["I. x", "I. " + "x" * 10_000 + " "]
+    # After the retry, each space is checked with the previous word only.
+    assert calls == [
+        "I. x",
+        "I. " + "x" * 10_000 + " ",
+        "x" * 10_000 + " m",
+        "more w",
+        "words w",
+        "without p",
+    ]
     assert (await aggregator.flush()).text == text
+
+
+@pytest.mark.asyncio
+async def test_space_boundary_checks_the_previous_word(monkeypatch):
+    from pipecat.utils.text import simple_text_aggregator
+
+    calls = []
+
+    def space_ends_sentence(text, **kwargs):
+        calls.append(text)
+        match = re.search(r"\S(\s+)\S", text)
+        return match.start(1) if match else 0
+
+    monkeypatch.setattr(simple_text_aggregator, "match_endofsentence", space_ends_sentence)
+    aggregator = SimpleTextAggregator()
+    assert [a.text async for a in aggregator.aggregate("uno  dos tres")] == ["uno", "dos"]
+    assert calls == ["uno  d", "dos t"]
+    assert (await aggregator.flush()).text == "tres"
+
+
+@pytest.mark.asyncio
+async def test_space_after_punctuation_is_checked_once(monkeypatch):
+    from pipecat.utils.text import simple_text_aggregator
+
+    calls = []
+
+    def unresolved(text, **kwargs):
+        calls.append(text)
+        return 0
+
+    monkeypatch.setattr(simple_text_aggregator, "match_endofsentence", unresolved)
+    aggregator = SimpleTextAggregator()
+    assert [a.text async for a in aggregator.aggregate("Hola. adios")] == []
+    assert calls == ["Hola. a"]
 
 
 @pytest.mark.asyncio

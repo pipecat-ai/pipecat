@@ -69,8 +69,8 @@ class SimpleTextAggregator(BaseTextAggregator):
         """Aggregate text and yield completed aggregations.
 
         In SENTENCE mode, processes the input text character-by-character. When
-        sentence-ending punctuation is detected, it waits for non-whitespace
-        lookahead before calling sentencex.
+        sentence-ending punctuation, or a space after a word, is detected, it
+        waits for non-whitespace lookahead before calling sentencex.
 
         In TOKEN mode, yields the text immediately without buffering.
 
@@ -111,6 +111,9 @@ class SimpleTextAggregator(BaseTextAggregator):
         - ``...you and I. Did?``: the question mark ends the lookahead word and
           starts a new candidate. First check the earlier period without ``?``;
           then wait for lookahead after ``?``.
+        - ``word N``: some languages, such as Thai, end a sentence at a space.
+          While no punctuation candidate is pending, check the previous word,
+          the spaces and ``N``, and accept only a boundary at the spaces.
 
         A confirmed boundary emits only the prefix; the following text stays in
         the buffer. After a word-end retry, stop checking that candidate even if
@@ -122,8 +125,8 @@ class SimpleTextAggregator(BaseTextAggregator):
             char: The character just appended to the aggregation buffer.
             protected_end: Buffer offset before which no sentence boundary is
                 accepted. Subclasses pass the end of the last closed tag or
-                pattern, so punctuation inside it (``<spell>St. Louis</spell>``)
-                never splits the text.
+                pattern, so punctuation or spaces inside it
+                (``<spell>St. Louis</spell>``) never split the text.
 
         Returns:
             Aggregation if a sentence boundary is confirmed, otherwise None.
@@ -137,23 +140,13 @@ class SimpleTextAggregator(BaseTextAggregator):
             # For "...I. Did?", check "...I. Did" for the earlier boundary.
             # Including "?" could make the terminal-punctuation fallback accept
             # the whole buffer. This temporary slice does not discard the "?".
-            candidate = self._text[:-1] if is_punctuation else self._text
-            if protected_end:
-                # Blank out punctuation up to protected_end with equal-width
-                # spaces, so boundary offsets still refer to self._text.
-                protected = "".join(
-                    " " if c in SENTENCE_ENDING_PUNCTUATION else c
-                    for c in candidate[:protected_end]
-                )
-                candidate = protected + candidate[protected_end:]
+            end = len(self._text) - 1 if is_punctuation else len(self._text)
+            candidate = self._masked_text(0, end, protected_end)
             eos_marker = match_endofsentence(candidate, language=self.language)
             if eos_marker:
-                result = Aggregation(
-                    text=self._text[:eos_marker].strip(" "), type=TextType.SENTENCE
-                )
-                # Keep the lookahead text for the next sentence ("N" in "Hello. N").
-                self._text = self._text[eos_marker:]
-                self._lookahead_state = _LookaheadState.IDLE
+                result = self._take_sentence(eos_marker)
+        elif self._lookahead_state == _LookaheadState.IDLE and not char.isspace():
+            result = self._check_space_boundary(protected_end)
 
         # A trailing "?" in "...I. Did?" needs its own lookahead, whether or not
         # the retry above found a boundary at the earlier period.
@@ -161,6 +154,50 @@ class SimpleTextAggregator(BaseTextAggregator):
             self._lookahead_state = _LookaheadState.AWAITING_CHARACTER
 
         return result
+
+    def _check_space_boundary(self, protected_end: int) -> Aggregation | None:
+        """Check whether the spaces before the newest character end a sentence."""
+        start = self._spaces_start()
+        if start is None:
+            return None
+
+        # Only the previous word decides, so long text without a boundary
+        # isn't scanned again at every word.
+        word_start = start - 1
+        while word_start > 0 and not self._text[word_start - 1].isspace():
+            word_start -= 1
+        window = self._masked_text(word_start, len(self._text), protected_end)
+        eos_marker = word_start + match_endofsentence(window, language=self.language)
+        return self._take_sentence(start) if eos_marker == start else None
+
+    def _spaces_start(self) -> int | None:
+        """Return where the spaces before the newest character start, if a word precedes them."""
+        end = len(self._text) - 1
+        start = end
+        while start > 0 and self._text[start - 1].isspace():
+            start -= 1
+        # A space after punctuation belongs to the punctuation candidate.
+        after_word = 0 < start < end and self._text[start - 1] not in SENTENCE_ENDING_PUNCTUATION
+        return start if after_word else None
+
+    def _masked_text(self, start: int, end: int, protected_end: int) -> str:
+        """Return the buffer from start to end, masking punctuation and spaces before protected_end."""
+        text = self._text[start:end]
+        # Mask with "_" rather than a space, which can end a sentence. Equal
+        # width keeps boundary offsets referring to the buffer.
+        protected = max(min(protected_end, end) - start, 0)
+        masked = "".join(
+            "_" if c.isspace() or c in SENTENCE_ENDING_PUNCTUATION else c for c in text[:protected]
+        )
+        return masked + text[protected:]
+
+    def _take_sentence(self, end: int) -> Aggregation:
+        """Remove the sentence ending at end from the buffer and return it."""
+        sentence = Aggregation(text=self._text[:end].strip(" "), type=TextType.SENTENCE)
+        # Keep the lookahead text for the next sentence ("N" in "Hello. N").
+        self._text = self._text[end:]
+        self._lookahead_state = _LookaheadState.IDLE
+        return sentence
 
     def _advance_lookahead(self, char: str, *, is_punctuation: bool) -> bool:
         """Advance the pending candidate and decide whether to check its boundary.
