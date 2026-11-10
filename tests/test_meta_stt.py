@@ -13,7 +13,8 @@ import pytest
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.frames.frames import InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.meta.stt import MetaSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
@@ -130,10 +131,9 @@ async def test_audio_encoding_follows_the_pipeline_sample_rate(monkeypatch, samp
 async def test_off_rate_audio_is_resampled_before_it_is_sent(monkeypatch):
     service, websocket = await _connected(monkeypatch, 8000)
 
-    # The stream resampler buffers, so a single short chunk yields nothing.
     for _ in range(10):
-        async for _ in service.run_stt(b"\x00" * 1600):
-            pass
+        frame = InputAudioRawFrame(audio=b"\x00" * 1600, sample_rate=8000, num_channels=1)
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
 
     audio_sent = b"".join(chunk for chunk in websocket.sent if isinstance(chunk, bytes))
     # 8 kHz in, 16 kHz out: twice the bytes, less what the resampler still holds.

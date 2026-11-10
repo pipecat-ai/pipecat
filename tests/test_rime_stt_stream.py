@@ -26,6 +26,7 @@ from rimelabs_sdk import (
     TranscriptionPartial,
 )
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -275,7 +276,20 @@ async def test_unsupported_rate_is_resampled(client):
 
 
 @pytest.mark.asyncio
-async def test_each_segment_is_resampled_as_a_new_stream(client):
+async def test_pre_speech_and_speech_are_resampled_as_one_stream(client):
+    service = RimeSTTService(api_key="test", sample_rate=44100)
+    pre_speech, speech = bytes(range(256)) * 34, bytes(range(255, -1, -1)) * 34
+    async with harness(service):
+        await send(service, audio(pre_speech, rate=44100))
+        await speak(service, audio(speech, rate=44100))
+        stream = await next_stream(client)
+        await wait(stream.exhausted)
+        expected = await create_stream_resampler().resample(pre_speech + speech, 44100, 16000)
+        assert b"".join(stream.chunks) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_segment_does_not_start_with_the_previous_segments_audio(client):
     service = RimeSTTService(api_key="test", sample_rate=44100)
     tone = b"".join(
         struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * n / 44100))) for n in range(4410)
@@ -283,6 +297,8 @@ async def test_each_segment_is_resampled_as_a_new_stream(client):
     async with harness(service):
         await speak(service, audio(tone, rate=44100))
         await wait((await next_stream(client)).exhausted)
+        # More than the pre-speech window of silence between the segments.
+        await send(service, *[audio(bytes(8820), rate=44100) for _ in range(12)])
         await speak(service, audio(bytes(8820), rate=44100))
         stream = await next_stream(client)
         await wait(stream.exhausted)

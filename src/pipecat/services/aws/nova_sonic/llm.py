@@ -1813,6 +1813,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return
 
         self._triggering_assistant_response = True
+        # User audio is dropped while the trigger plays, so the audio after it
+        # must not start with the end of the audio before.
+        await self._input_resampler.reset()
 
         # Send the trigger audio, if we're fully connected and set up
         if self._connected_time:

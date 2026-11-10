@@ -16,7 +16,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
-from pipecat.audio.utils import create_file_resampler, pcm_to_wav
+from pipecat.audio.utils import create_file_resampler, create_stream_resampler, pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -55,6 +55,10 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
+
+    Input audio reaches :meth:`run_stt` at :attr:`send_sample_rate`, resampled
+    when it arrives at another rate. A service whose provider takes only some
+    rates overrides :attr:`send_sample_rate` and gives the provider that rate.
 
     Includes an optional keepalive mechanism that sends silent audio when no real
     audio has been sent for a configurable timeout, preventing servers from closing
@@ -161,6 +165,7 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._send_resampler = create_stream_resampler()
 
         self._muted: bool = False
         self._user_id: str = ""
@@ -241,14 +246,33 @@ class STTService(AIService):
         """
         return self._sample_rate
 
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the sample rate audio is sent to the provider at.
+
+        Input audio at another rate is resampled to it before :meth:`run_stt`.
+        Defaults to :attr:`sample_rate`.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return self.sample_rate
+
+    async def _resample_audio_frame(self, frame: InputAudioRawFrame) -> bytes:
+        """Return the frame's audio at the send sample rate."""
+        return await self._send_resampler.resample(
+            frame.audio, frame.sample_rate, self.send_sample_rate
+        )
+
     def _record_stt_audio_usage(self, audio: bytes | bytearray):
         """Accumulate client-measured audio seconds for usage metrics.
 
         Args:
-            audio: Raw 16-bit mono PCM audio bytes submitted to the service.
+            audio: Raw 16-bit mono PCM audio bytes submitted to the service, at
+                the send sample rate.
         """
-        if self.sample_rate > 0:
-            self._stt_usage_pending_seconds += len(audio) / (self.sample_rate * 2)
+        if self.send_sample_rate > 0:
+            self._stt_usage_pending_seconds += len(audio) / (self.send_sample_rate * 2)
 
     async def emit_stt_usage_metrics(self):
         """Emit an incremental STT usage metrics event.
@@ -340,7 +364,7 @@ class STTService(AIService):
         recognition functionality.
 
         Args:
-            audio: Raw audio bytes to transcribe.
+            audio: Raw audio bytes to transcribe, at :attr:`send_sample_rate`.
 
         Yields:
             Frame: Frames containing transcription results (typically TextFrame).
@@ -424,8 +448,9 @@ class STTService(AIService):
 
         If a reconnect is in progress, the frame is buffered and replayed
         once the connection is restored. If the service is muted, the frame
-        is dropped. Otherwise the frame is sent to the STT service and, if
-        a user_id is present, it is stored for use in transcription results.
+        is dropped. Otherwise the frame's audio is resampled to
+        :attr:`send_sample_rate` and sent to the STT service and, if a user_id
+        is present, it is stored for use in transcription results.
 
         Args:
             frame: The audio frame to process.
@@ -459,9 +484,11 @@ class STTService(AIService):
             )
             return
 
-        self._record_stt_audio_usage(frame.audio)
+        audio = await self._resample_audio_frame(frame)
 
-        await self.process_generator(self.run_stt(frame.audio))
+        self._record_stt_audio_usage(audio)
+
+        await self.process_generator(self.run_stt(audio))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling VAD events and audio segmentation.
@@ -504,8 +531,7 @@ class STTService(AIService):
                 delta = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(delta)
         elif isinstance(frame, STTMuteFrame):
-            self._muted = frame.mute
-            logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
+            await self._handle_stt_mute(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._reset_stt_ttfb_state()
             await self.push_frame(frame, direction)
@@ -647,6 +673,15 @@ class STTService(AIService):
             self._ttfb_timeout_handler(), name="stt_ttfb_timeout"
         )
 
+    async def _handle_stt_mute(self, frame: STTMuteFrame):
+        """Mute or unmute transcription."""
+        self._muted = frame.mute
+        logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
+        if frame.mute:
+            # Audio is dropped while muted, so the audio after unmuting must
+            # not start with the end of the audio before.
+            await self._send_resampler.reset()
+
     async def _ttfb_timeout_handler(self):
         """Wait for timeout then report TTFB using the last transcript timestamp.
 
@@ -760,7 +795,7 @@ class STTService(AIService):
                 elapsed = time.monotonic() - self._last_audio_time
                 if elapsed < self._keepalive_timeout:
                     continue
-                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
+                num_samples = int(self.send_sample_rate * _KEEPALIVE_SILENCE_DURATION)
                 silence = b"\x00" * (num_samples * 2)
                 await self._send_keepalive(silence)
                 self._last_audio_time = time.monotonic()
