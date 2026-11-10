@@ -281,9 +281,10 @@ def test_external_user_turn_completion_stop_strategy_warns():
 def test_no_deprecation_warnings_at_import_time():
     """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
-    Guards the suppression of @deprecated subclassing warnings for the task frame
-    aliases defined inside pipecat.frames.frames, and the deprecated stop
-    strategies in pipecat.turns.user_stop. Done in a subprocess for a
+    Guards against @deprecated subclassing warnings from the task frame aliases
+    in pipecat.frames.frames, the deprecated stop strategies in
+    pipecat.turns.user_stop, and the deprecated TTS base classes in
+    pipecat.services.tts_service. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
     "... is deprecated since X.Y.Z ..." message) so unrelated stdlib and
     third-party warnings don't trip it.
@@ -296,7 +297,8 @@ def test_no_deprecation_warnings_at_import_time():
         "    import pipecat.pipeline.worker\n"
         "    import pipecat.pipeline.runner\n"
         "    import pipecat.turns.user_stop\n"
-        "bad = [str(w.message) for w in caught\n"
+        "    import pipecat.services.tts_service\n"
+        "bad =[str(w.message) for w in caught\n"
         "       if issubclass(w.category, DeprecationWarning)\n"
         "       and ' is deprecated since ' in str(w.message)]\n"
         "if bad:\n"
