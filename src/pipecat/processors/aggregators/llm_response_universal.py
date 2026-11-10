@@ -2774,9 +2774,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Strip turn completion markers from assistant transcript.
 
         Turn completion markers are used internally for turn completion
-        detection and shouldn't appear in the final transcript. Only markers
-        seen on marker frames are removed, so a reply that merely contains a
-        marker character keeps it.
+        detection and shouldn't appear in the final transcript. Every marker
+        seen so far on a marker frame is removed, wherever it appears in the
+        text.
         """
         marker_found = False
         for marker in self._seen_turn_markers:
