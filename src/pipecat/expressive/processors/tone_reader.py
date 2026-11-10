@@ -80,6 +80,11 @@ class PipecatToneSource(PerceptionSource):
             "sarcasm": PerceptionQuestion(question=tone["sarcasm"], description=_SARCASM),
         }
 
+    @property
+    def names(self) -> list[str]:
+        """Tone's signals, ``emotion`` and ``sarcasm``, named before the model loads."""
+        return ["emotion", "sarcasm"]
+
 
 class PipecatToneReader(PerceptionReader):
     """Reads how each user turn was meant with Pipecat Tone.

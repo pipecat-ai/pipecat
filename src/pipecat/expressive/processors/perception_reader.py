@@ -85,7 +85,8 @@ class PerceptionSource:
     the user's audio.
 
     A classifier whose questions aren't known until it's set up gets a subclass
-    that overrides :attr:`questions`.
+    that overrides :attr:`questions`, and :attr:`names` to name its signals
+    before then.
 
     Example::
 
@@ -138,6 +139,11 @@ class PerceptionSource:
     def questions(self) -> dict[str, PerceptionQuestion]:
         """The questions asked about each turn, by the name of the signal each reports."""
         return self._questions
+
+    @property
+    def names(self) -> list[str]:
+        """The names of the signals the source reports, known before it's set up."""
+        return list(self.questions)
 
     @property
     def timeout(self) -> float:
@@ -275,10 +281,6 @@ class PerceptionReader(FrameProcessor):
                 await source.classifier.setup(self.task_manager)
         except ClassifierError as e:
             await self.push_error(f"{self}: {e}", e, force_treat_as_permanent=True)
-            return
-        # Questions that come from a classifier's setup are known only now.
-        if clash := self._name_clash():
-            await self.push_error(f"{self}: {clash}", force_treat_as_permanent=True)
 
     async def cleanup(self):
         """Clean up the processor and its classifiers."""
@@ -565,12 +567,7 @@ class PerceptionReader(FrameProcessor):
         """Why the sources can't share a reading, if two report a signal of the same name."""
         seen: set[str] = set()
         for source in self._sources:
-            try:
-                names = list(source.questions)
-            except ClassifierError:
-                # Questions that come from the classifier's setup.
-                continue
-            for name in names:
+            for name in source.names:
                 if name in seen:
                     return f"two sources report {name!r}, and a reading has one signal of a name"
                 seen.add(name)

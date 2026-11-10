@@ -251,16 +251,19 @@ async def test_tone_reads_a_turn_beside_another_classifier(monkeypatch):
     ]
 
 
+def test_a_source_beside_tone_cant_report_a_signal_of_tones_name(monkeypatch):
+    with pytest.raises(ValueError, match="sarcasm"):
+        _beside_tone(monkeypatch, "sarcasm")
+
+
 @pytest.mark.asyncio
-async def test_a_source_beside_tone_cant_report_a_signal_of_tones_name(monkeypatch):
-    reader = _beside_tone(monkeypatch, "sarcasm")
+async def test_tones_names_are_its_questions_once_the_model_loads(monkeypatch):
+    reader = _reader(monkeypatch, FakeReaderModel())
 
-    down, up = await run_test(reader, frames_to_send=[_transcription("Hello there.")])
+    await run_test(reader, frames_to_send=[])
 
-    assert not reader.is_usable
-    assert [f for f in up if isinstance(f, ErrorFrame) and "sarcasm" in f.error]
-    assert not [f for f in down if isinstance(f, PerceptionMetadataFrame)]
-    assert [f.perception for f in down if isinstance(f, TranscriptionFrame)] == [None]
+    tone = reader.sources[0]
+    assert tone.names == list(tone.questions)
 
 
 def test_the_readers_timeout_is_its_sources():
