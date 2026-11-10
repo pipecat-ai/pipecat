@@ -695,28 +695,12 @@ def test_language_code_and_language_codes_together_warns():
 
 
 def test_language_codes_over_limit_raises():
-    # AssemblyAI rejects an over-long list at connect time for capped models; fail where it was set.
+    # AssemblyAI rejects an over-long list at connect time; fail where it was set.
     with pytest.raises(ValueError, match="at most 10 languages"):
         AssemblyAISTTService(
             api_key="test-key",
-            settings=AssemblyAISTTService.Settings(
-                model="universal-3-5-pro",
-                language_codes=OVER_LIMIT_LANGUAGES,
-            ),
+            settings=AssemblyAISTTService.Settings(language_codes=OVER_LIMIT_LANGUAGES),
         )
-
-
-def test_language_codes_uncapped_on_universal_3_6_pro():
-    # Universal-3.6 Pro has no documented cap, so more than 10 codes are accepted.
-    service = AssemblyAISTTService(
-        api_key="test-key",
-        settings=AssemblyAISTTService.Settings(
-            model="universal-3-6-pro",
-            language_codes=OVER_LIMIT_LANGUAGES,
-        ),
-    )
-    expected = ["en", "es", "de", "fr", "it", "pt", "tr", "nl", "sv", "no", "da"]
-    assert _query(service)["language_codes"] == [json.dumps(expected)]
 
 
 def test_language_codes_regional_variants_resolve_to_base_codes():
@@ -1000,10 +984,7 @@ def test_update_settings_language_codes_with_agent_context_sends_both():
 
 
 def test_update_settings_language_codes_over_limit_ignored():
-    service = AssemblyAISTTService(
-        api_key="test-key",
-        settings=AssemblyAISTTService.Settings(model="universal-3-5-pro"),
-    )
+    service = AssemblyAISTTService(api_key="test-key")
     sent, reconnects = _stub_connection(service)
 
     sink = io.StringIO()
@@ -1023,10 +1004,7 @@ def test_update_settings_language_codes_over_limit_ignored():
 def test_update_settings_language_codes_over_limit_leaves_settings_intact():
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(
-            model="universal-3-5-pro",
-            language_codes=[Language.ES],
-        ),
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
     )
     _stub_connection(service)
 
@@ -1041,10 +1019,7 @@ def test_update_settings_language_codes_over_limit_leaves_settings_intact():
 def test_update_settings_over_limit_language_codes_still_reconnects_for_other_fields():
     service = AssemblyAISTTService(
         api_key="test-key",
-        settings=AssemblyAISTTService.Settings(
-            model="universal-3-5-pro",
-            language_codes=[Language.ES],
-        ),
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
     )
     sent, reconnects = _stub_connection(service)
 
@@ -1059,24 +1034,6 @@ def test_update_settings_over_limit_language_codes_still_reconnects_for_other_fi
     assert reconnects == ["disconnect", "connect"]
     assert sent == []
     assert _query(service)["language_codes"] == [json.dumps(["es"])]
-
-
-def test_update_settings_language_codes_uncapped_on_universal_3_6_pro():
-    service = AssemblyAISTTService(
-        api_key="test-key",
-        settings=AssemblyAISTTService.Settings(
-            model="universal-3-6-pro",
-            language_codes=[Language.ES],
-        ),
-    )
-    sent, reconnects = _stub_connection(service)
-
-    delta = AssemblyAISTTService.Settings(language_codes=OVER_LIMIT_LANGUAGES)
-    asyncio.run(service._update_settings(delta))
-
-    expected = ["en", "es", "de", "fr", "it", "pt", "tr", "nl", "sv", "no", "da"]
-    assert sent == [{"language_codes": expected}]
-    assert reconnects == []
 
 
 def test_update_settings_mixed_delta_reconnects_without_update_configuration():

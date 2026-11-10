@@ -73,23 +73,11 @@ U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
 # parameter and only takes effect on a new connection.
 HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
 
-# Longest declared-language list the streaming API accepts. The Sync API sets no
-# such limit, so it prepares its codes without a cap. Universal-3.6 Pro has no
-# documented cap.
+# Longest declared-language list the streaming API accepts, on every U3 Pro model
+# including Universal-3.6 Pro. AssemblyAI's docs don't state it, but the server
+# rejects a longer list with error 3006 and closes the session. The Sync API sets
+# no such limit, so it prepares its codes without a cap.
 MAX_LANGUAGE_CODES = 10
-UNCAPPED_LANGUAGE_CODES_MODELS = ("universal-3-6-pro",)
-
-
-def _is_uncapped_language_codes_model(model: str | None | NotGiven) -> bool:
-    """Return whether a model has no cap on declared language codes."""
-    return isinstance(model, str) and model.startswith(UNCAPPED_LANGUAGE_CODES_MODELS)
-
-
-def _max_language_codes_for_model(model: str | None | NotGiven) -> int | None:
-    """Return the language codes cap for the given model, or None if uncapped."""
-    if _is_uncapped_language_codes_model(model):
-        return None
-    return MAX_LANGUAGE_CODES
 
 
 def is_u3_pro_model(model: str | None | NotGiven) -> bool:
@@ -247,13 +235,12 @@ class AssemblyAISTTSettings(STTSettings):
             ``[Language.EN, Language.ES]``) steer toward that subset while keeping
             code-switching among them. Order is significant — the steering prompt
             follows the declared order. Regional variants resolve to their base code,
-            so at most 10 distinct languages (except on Universal-3.6 Pro, which has no
-            cap). Steering is prompt-based, so it applies to U3 Pro models only and is
-            not sent for other models — including ``universal-streaming-multilingual``,
-            which transcribes multilingual audio without steering. Unlike most settings,
-            a change applies to a live session without reconnecting; pass an empty list
-            to clear steering back to the model default. Defaults to None (not sent; no
-            steering).
+            so at most 10 distinct languages. Steering is prompt-based, so it applies
+            to U3 Pro models only and is not sent for other models — including
+            ``universal-streaming-multilingual``, which transcribes multilingual audio
+            without steering. Unlike most settings, a change applies to a live session
+            without reconnecting; pass an empty list to clear steering back to the
+            model default. Defaults to None (not sent; no steering).
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
         max_speakers: Hard cap on the number of speaker labels, an integer in
@@ -560,10 +547,9 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         # AssemblyAI rejects an over-long declared-language list at connect time,
         # so fail where it was set. Counted after resolution, since that is the
-        # list the server sees. Universal-3.6 Pro has no cap.
+        # list the server sees.
         if isinstance(default_settings.language_codes, list):
-            max_codes = _max_language_codes_for_model(default_settings.model)
-            _prepare_language_codes(default_settings.language_codes, max_codes=max_codes)
+            _prepare_language_codes(default_settings.language_codes)
 
         # Language steering is prompt-based and therefore U3 Pro-only. Other
         # models — including universal-streaming-multilingual, which transcribes
@@ -724,9 +710,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         if isinstance(delta.language_codes, list):
             try:
-                model = delta.model if is_given(delta.model) else self._settings.model
-                max_codes = _max_language_codes_for_model(model)
-                _prepare_language_codes(delta.language_codes, max_codes=max_codes)
+                _prepare_language_codes(delta.language_codes)
             except ValueError as e:
                 # An over-long list closes the session server-side rather than
                 # being ignored, and one that reached _settings would fail every
@@ -776,9 +760,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
             return
 
-        max_codes = _max_language_codes_for_model(self._settings.model)
         await self._send_update_configuration(
-            language_codes=_prepare_language_codes(language_codes, max_codes=max_codes)
+            language_codes=_prepare_language_codes(language_codes)
         )
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -910,10 +893,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if s.keyterms_prompt is not None:
             params["keyterms_prompt"] = json.dumps(s.keyterms_prompt)
         if is_u3_pro_model(s.model) and isinstance(s.language_codes, list):
-            max_codes = _max_language_codes_for_model(s.model)
-            params["language_codes"] = json.dumps(
-                _prepare_language_codes(s.language_codes, max_codes=max_codes)
-            )
+            params["language_codes"] = json.dumps(_prepare_language_codes(s.language_codes))
 
         if params:
             query_string = urlencode(params)
