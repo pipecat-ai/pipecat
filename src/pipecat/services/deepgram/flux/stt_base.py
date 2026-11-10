@@ -507,6 +507,19 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             # check every 100ms
             await asyncio.sleep(0.1)
 
+    async def force_end_turn(self):
+        """End the user's turn now, without waiting for Flux to detect it.
+
+        Sends Flux a ``ForceEndTurn`` message. Flux ends the turn in progress
+        as usual, with an ``EndOfTurn`` whose ``trigger`` is ``manual``; with
+        no turn in progress it ignores the request.
+        """
+        if not self._transport_is_active():
+            logger.warning(f"{self}: not connected, can't force the end of the turn")
+            return
+        logger.debug(f"{self}: forcing the end of the turn")
+        await self._transport_send_json({"type": "ForceEndTurn"})
+
     async def _send_close_stream(self) -> None:
         """Sends a CloseStream control message to Deepgram Flux.
 

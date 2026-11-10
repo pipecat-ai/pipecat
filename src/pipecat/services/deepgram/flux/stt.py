@@ -66,6 +66,9 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     - on_configure_failure(service, message): Deepgram rejected one;
       ``message`` is the ``ConfigureFailure``.
 
+    Call :meth:`force_end_turn` to end the user's turn without waiting for Flux
+    to detect it, e.g. when the user presses a button.
+
     ``on_connected`` fires once Flux confirms a connection is ready for audio,
     including after a reconnect for a settings change.
 

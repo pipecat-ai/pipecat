@@ -800,6 +800,20 @@ class DeepgramSTTService(STTService):
                     )
                 )
 
+    async def finalize(self):
+        """Transcribe all the audio sent so far now, without waiting for a pause.
+
+        Sends Deepgram a ``Finalize`` message
+        (https://developers.deepgram.com/docs/finalize). The final transcript
+        it produces carries ``from_finalize`` in its ``result``; once it
+        arrives, every word sent before the call has been transcribed. Called
+        when a local VAD reports that the user stopped speaking.
+        """
+        if self._connection:
+            # Mark that we're awaiting a from_finalize response
+            self.request_finalize()
+            await self._connection.send_finalize(ListenV1Finalize(type="Finalize"))
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram-specific handling.
 
@@ -810,9 +824,5 @@ class DeepgramSTTService(STTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            # https://developers.deepgram.com/docs/finalize
-            # Mark that we're awaiting a from_finalize response
-            if self._connection:
-                self.request_finalize()
-                await self._connection.send_finalize(ListenV1Finalize(type="Finalize"))
-                logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+            await self.finalize()
+            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

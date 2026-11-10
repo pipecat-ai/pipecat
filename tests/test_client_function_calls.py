@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultFrame,
     InterruptionFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -140,3 +141,72 @@ class TestClientFunctionCalls(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSpeculativeFunctionCalls(unittest.IsolatedAsyncioTestCase):
+    """A speculative function runs before the turn is confirmed; others wait for it."""
+
+    def _service(self) -> tuple[MockLLMService, list]:
+        service = MockLLMService()
+        service._task_manager = TaskManager()
+        broadcast_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **frame_kwargs):
+            broadcast_frames.append(frame_cls(**frame_kwargs))
+
+        async def mock_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+            pass
+
+        service.broadcast_frame = mock_broadcast_frame
+        service.push_frame = mock_push_frame
+        service._speculation_gate.begin_speculation(True)
+        return service, broadcast_frames
+
+    async def _run_call(self, service: MockLLMService, name: str):
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=name, tool_call_id="call_1", arguments={}, context=LLMContext()
+                )
+            ]
+        )
+        await asyncio.sleep(0.01)
+
+    async def test_non_speculative_call_withdraws_the_speculation(self):
+        service, broadcast = self._service()
+        ran = []
+
+        async def book(params):
+            ran.append(params.tool_call_id)
+            await params.result_callback("booked")
+
+        service.register_function("book", book)
+        await self._run_call(service, "book")
+
+        self.assertEqual(ran, [])
+        self.assertIsInstance(broadcast[0], UserTurnResponseCancelFrame)
+
+    async def test_speculative_call_runs_during_the_speculation(self):
+        service, broadcast = self._service()
+        ran = []
+
+        async def lookup(params):
+            ran.append(params.tool_call_id)
+            await params.result_callback("found")
+
+        service.register_function("lookup", lookup, speculative=True)
+        await self._run_call(service, "lookup")
+
+        self.assertEqual(ran, ["call_1"])
+        self.assertFalse(any(isinstance(f, UserTurnResponseCancelFrame) for f in broadcast))
+
+    async def test_speculative_call_is_cancelled_when_the_speculation_is_withdrawn(self):
+        service, broadcast = self._service()
+        service.register_client_function("lookup", speculative=True)
+        await self._run_call(service, "lookup")
+
+        await service._handle_user_turn_response_cancel(UserTurnResponseCancelFrame())
+        await asyncio.sleep(0.05)
+
+        self.assertIsInstance(broadcast[-1], FunctionCallCancelFrame)
+        self.assertEqual(service._client_function_calls, {})
