@@ -2738,7 +2738,7 @@ class AudioContextTTSService(WebsocketTTSService):
     "`AudioContextWordTTSService` is deprecated since 0.0.105 and will be removed in 2.0.0. "
     "Use `WebsocketTTSService` instead."
 )
-class AudioContextWordTTSService(AudioContextTTSService):
+class AudioContextWordTTSService(WebsocketTTSService):
     """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated:: 0.0.105
