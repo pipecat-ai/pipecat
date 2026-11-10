@@ -116,6 +116,11 @@ class MiniMaxTTSSettings(TTSSettings):
             treated as "basic" elsewhere.
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
+        pronunciation_dict: Pronunciation replacements, each an
+            ``"original/replacement"`` string. The replacement is plain text
+            (``"omg/oh my god"``), IPA in parentheses (``"Pipecat/(ˈpaɪpkæt)"``),
+            pinyin with tone numbers in parentheses (``"处理/(chu3)(li3)"``), or
+            Japanese kana. Sent as the request's ``pronunciation_dict.tone`` list.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -126,6 +131,7 @@ class MiniMaxTTSSettings(TTSSettings):
     text_normalization_mode: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latex_read: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -258,6 +264,7 @@ class MiniMaxHttpTTSService(TTSService):
             text_normalization=None,
             text_normalization_mode=None,
             latex_read=None,
+            pronunciation_dict=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -428,6 +435,9 @@ class MiniMaxHttpTTSService(TTSService):
         text_normalization_mode = self._text_normalization_mode()
         if text_normalization_mode is not None:
             payload["text_normalization_mode"] = text_normalization_mode
+        pronunciation_dict = assert_given(self._settings.pronunciation_dict)
+        if pronunciation_dict is not None:
+            payload["pronunciation_dict"] = {"tone": pronunciation_dict}
 
         try:
             async with self._session.post(
