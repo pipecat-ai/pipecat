@@ -8,15 +8,22 @@ import asyncio
 import json
 import unittest
 
-from pipecat.extensions.deepgram_voice_agent.listen import DeepgramListenUpdater, create_listen
+from pipecat.extensions.deepgram_voice_agent.listen import (
+    DeepgramListenUpdater,
+    check_listen_provider,
+    create_listen,
+)
 from pipecat.extensions.deepgram_voice_agent.processor import (
+    DeepgramVoiceAgentLLMInputGate,
     DeepgramVoiceAgentProcessor,
 )
 from pipecat.extensions.deepgram_voice_agent.serializer import DeepgramVoiceAgentSerializer
 from pipecat.extensions.deepgram_voice_agent.services import (
     SettingsError,
+    StageDirectionFilter,
     check_endpoint_functions,
     function_schemas,
+    speak_settings,
 )
 from pipecat.frames.frames import (
     ClientFunctionCallResultFrame,
@@ -24,13 +31,16 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
+    LLMContextFrame,
     LLMMessagesAppendFrame,
     LLMUpdateSettingsFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
     TTSSpeakFrame,
     TTSUpdateSettingsFrame,
+    UserStartedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.tests.utils import run_test
 
 
@@ -209,12 +219,33 @@ class TestDeepgramVoiceAgentInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_messages(down)[0]["code"], "INJECT_AGENT_MESSAGE_DURING_AGENT_SPEECH")
 
     async def test_queued_agent_message_waits_for_the_agent(self):
-        down = await self._run(
-            {"type": "InjectAgentMessage", "content": "Hi", "behavior": "queue"},
-            agent_speaking=True,
+        processor = DeepgramVoiceAgentProcessor()
+        processor._agent_speaking = True
+        down, _ = await run_test(
+            processor,
+            frames_to_send=[
+                InputTransportMessageFrame(
+                    {"type": "InjectAgentMessage", "content": "Hi", "behavior": "queue"}
+                )
+            ],
         )
-        self.assertEqual([f.text for f in down if isinstance(f, TTSSpeakFrame)], ["Hi"])
-        self.assertFalse(any(isinstance(f, InterruptionFrame) for f in down))
+        self.assertFalse(any(isinstance(f, (TTSSpeakFrame, InterruptionFrame)) for f in down))
+        self.assertEqual(list(processor._queued_messages), ["Hi"])
+
+    async def test_queued_agent_message_is_dropped_by_a_barge_in(self):
+        processor = DeepgramVoiceAgentProcessor()
+        processor._agent_speaking = True
+        down, _ = await run_test(
+            processor,
+            frames_to_send=[
+                InputTransportMessageFrame(
+                    {"type": "InjectAgentMessage", "content": "Hi", "behavior": "queue"}
+                ),
+                InputTransportMessageFrame({"type": "InjectUserMessage", "content": "Stop"}),
+            ],
+        )
+        self.assertEqual(list(processor._queued_messages), [])
+        self.assertFalse(any(isinstance(f, TTSSpeakFrame) for f in down))
 
     async def test_interrupting_agent_message_barges_in(self):
         down = await self._run(
@@ -285,3 +316,90 @@ class TestDeepgramListenUpdater(unittest.IsolatedAsyncioTestCase):
         await self.updater.set_user_speaking(False)
         await self._settle()
         self.assertEqual(self.sent, [{"type": "ListenUpdated"}])
+
+
+class TestDeepgramVoiceAgentAudioFormats(unittest.IsolatedAsyncioTestCase):
+    def _serializer(self, **kwargs) -> DeepgramVoiceAgentSerializer:
+        return DeepgramVoiceAgentSerializer(
+            client_in_sample_rate=8000,
+            client_out_sample_rate=kwargs.pop("rate", 8000),
+            pipeline_in_sample_rate=16000,
+            **kwargs,
+        )
+
+    def _audio(self, rate=8000) -> OutputAudioRawFrame:
+        return OutputAudioRawFrame(
+            audio=b"\x10\x00" * (rate // 10), sample_rate=rate, num_channels=1
+        )
+
+    async def test_mulaw_output_is_one_byte_per_sample(self):
+        data = await self._serializer(output_encoding="mulaw").serialize(self._audio())
+        self.assertEqual(len(data), 800)
+
+    async def test_mulaw_input_becomes_pipeline_pcm(self):
+        frame = await self._serializer(input_encoding="mulaw").deserialize(b"\xff" * 800)
+        self.assertIsInstance(frame, InputAudioRawFrame)
+        self.assertEqual(frame.sample_rate, 16000)
+
+    async def test_wav_container_sends_a_header_once(self):
+        serializer = self._serializer(output_container="wav")
+        first = await serializer.serialize(self._audio())
+        second = await serializer.serialize(self._audio())
+        self.assertTrue(first.startswith(b"RIFF") and b"WAVEfmt " in first[:16])
+        self.assertFalse(second.startswith(b"RIFF"))
+
+    async def test_mp3_output(self):
+        data = await self._serializer(output_encoding="mp3", rate=24000).serialize(
+            self._audio(24000)
+        )
+        # MP3 frames start with a sync word (11 set bits), once the encoder has
+        # buffered enough to emit one.
+        self.assertTrue(data is None or data[0] == 0xFF)
+
+    def test_unsupported_encoding_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._serializer(output_encoding="opus")
+
+
+class TestDeepgramVoiceAgentValidation(unittest.IsolatedAsyncioTestCase):
+    async def test_stage_directions_are_not_spoken(self):
+        stage_filter = StageDirectionFilter()
+        self.assertEqual(await stage_filter.filter("*beep*"), "")
+        self.assertEqual(await stage_filter.filter("Hi *waves* there."), "Hi there.")
+
+    def test_speak_speed_is_passed_on(self):
+        settings = speak_settings({"provider": {"model": "aura-2-thalia-en", "speed": 1.1}})
+        self.assertEqual(settings.voice, "aura-2-thalia-en")
+        self.assertEqual(settings.speed, 1.1)
+
+    def test_custom_speak_endpoint_is_refused(self):
+        with self.assertRaises(SettingsError):
+            speak_settings({"provider": {"model": "aura-2-thalia-en"}, "endpoint": {"url": "x"}})
+
+    def test_language_hints_need_the_multilingual_model(self):
+        with self.assertRaises(ValueError) as error:
+            check_listen_provider({"language_hints": ["en"]}, model="flux-general-en")
+        self.assertIn("flux-general-multi", str(error.exception))
+        check_listen_provider({"language_hints": ["en"]}, model="flux-general-multi")
+
+    def test_keyterms_with_surrounding_whitespace_are_refused(self):
+        with self.assertRaises(ValueError):
+            check_listen_provider({"keyterms": [" padded "]}, model="nova-3")
+
+
+class TestDeepgramVoiceAgentLLMInputGate(unittest.IsolatedAsyncioTestCase):
+    async def test_drops_one_inference_when_armed(self):
+        gate = DeepgramVoiceAgentLLMInputGate()
+        gate.skip_next_inference = True
+        down, _ = await run_test(
+            gate, frames_to_send=[LLMContextFrame(LLMContext()), LLMContextFrame(LLMContext())]
+        )
+        self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)
+
+    async def test_a_new_turn_disarms_it(self):
+        gate = DeepgramVoiceAgentLLMInputGate()
+        gate.skip_next_inference = True
+        down, _ = await run_test(
+            gate, frames_to_send=[UserStartedSpeakingFrame(), LLMContextFrame(LLMContext())]
+        )
+        self.assertEqual(len([f for f in down if isinstance(f, LLMContextFrame)]), 1)

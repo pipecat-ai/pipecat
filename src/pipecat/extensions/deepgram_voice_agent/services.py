@@ -15,6 +15,7 @@ the think and speak services, and the function handlers for server-side
 import asyncio
 import ipaddress
 import json
+import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -39,9 +40,11 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.text.base_text_filter import BaseTextFilter
 
 DEFAULT_SPEAK_MODEL = "aura-2-thalia-en"
 ENDPOINT_FUNCTION_TIMEOUT_SECS = 10.0
+_STAGE_DIRECTION = re.compile(r"\*[^*\n]+\*")
 
 
 class SettingsError(Exception):
@@ -147,6 +150,38 @@ async def create_llm(
     raise SettingsError(f"Unsupported think provider: {provider_type}")
 
 
+async def validate_think_update(
+    think: Mapping[str, Any] | None,
+    *,
+    credentials: ProviderCredentials,
+    http_session: aiohttp.ClientSession,
+):
+    """Check an ``UpdateThink`` before applying it.
+
+    Args:
+        think: The requested ``think`` settings.
+        credentials: Provider credentials.
+        http_session: HTTP session, used to check that the model exists.
+
+    Raises:
+        SettingsError: If the provider isn't supported or configured, or the
+            model doesn't exist.
+    """
+    provider = _provider(think)
+    provider_type = provider.get("type")
+    if provider_type is None or provider_type == "mock":
+        return
+    if provider_type == "open_ai":
+        if not credentials.openai_api_key:
+            raise SettingsError("The open_ai think provider is not configured on this server.")
+        await _check_openai_model(provider.get("model"), credentials, http_session)
+    elif provider_type == "anthropic":
+        if not credentials.anthropic_api_key:
+            raise SettingsError("The anthropic think provider is not configured on this server.")
+    else:
+        raise SettingsError(f"Unsupported think provider: {provider_type}")
+
+
 async def _check_openai_model(
     model: str | None, credentials: ProviderCredentials, http_session: aiohttp.ClientSession
 ):
@@ -188,15 +223,8 @@ def create_tts(
         The TTS service.
 
     Raises:
-        SettingsError: If the provider isn't supported.
+        SettingsError: If the settings aren't supported.
     """
-    if isinstance(speak, list):
-        speak = speak[0] if speak else None
-    provider = _provider(speak)
-    provider_type = provider.get("type", "deepgram")
-    if provider_type != "deepgram":
-        raise SettingsError(f"Unsupported speak provider: {provider_type}")
-
     from pipecat.services.deepgram.tts import DeepgramHttpTTSService
 
     # One streamed HTTP request per utterance: Voice Agent sessions idle for long
@@ -205,10 +233,64 @@ def create_tts(
         api_key=credentials.deepgram_api_key,
         aiohttp_session=http_session,
         sample_rate=sample_rate,
-        settings=DeepgramHttpTTSService.Settings(
-            voice=provider.get("model") or DEFAULT_SPEAK_MODEL
-        ),
+        settings=speak_settings(speak, default_voice=DEFAULT_SPEAK_MODEL),
+        text_filters=[StageDirectionFilter()],
     )
+
+
+def speak_settings(speak: Any, *, default_voice: str | None = None):
+    """Check ``agent.speak`` (or an ``UpdateSpeak``) and build the TTS settings for it.
+
+    ``speak`` may list fallback providers; the first is used. Only the
+    ``deepgram`` provider, without a custom ``endpoint``, is supported.
+
+    Args:
+        speak: The speak settings, an object or a list of them.
+        default_voice: Voice to use when none is given; None leaves it unset.
+
+    Returns:
+        The TTS settings (a delta when ``default_voice`` is None).
+
+    Raises:
+        SettingsError: If the settings aren't supported.
+    """
+    from pipecat.services.deepgram.tts import DeepgramHttpTTSService
+
+    if isinstance(speak, list):
+        speak = speak[0] if speak else None
+    speak = speak or {}
+    if speak.get("endpoint"):
+        raise SettingsError("Custom speak endpoints aren't supported.")
+    provider = _provider(speak)
+    provider_type = provider.get("type", "deepgram")
+    if provider_type != "deepgram":
+        raise SettingsError(f"Unsupported speak provider: {provider_type}")
+    voice = provider.get("model") or default_voice
+    fields: dict[str, Any] = {}
+    if voice:
+        fields["voice"] = voice
+    if provider.get("speed") is not None:
+        fields["speed"] = float(provider["speed"])
+    return DeepgramHttpTTSService.Settings(**fields)
+
+
+class StageDirectionFilter(BaseTextFilter):
+    """Removes stage directions (``*beep*``, ``*laughs*``) from text before it's spoken.
+
+    The Voice Agent API doesn't speak text between asterisks, and a reply that
+    is only a stage direction isn't spoken at all.
+    """
+
+    async def filter(self, text: str) -> str:
+        """Remove stage directions.
+
+        Args:
+            text: The text to speak.
+
+        Returns:
+            The text without stage directions.
+        """
+        return " ".join(_STAGE_DIRECTION.sub(" ", text).split())
 
 
 def function_schemas(functions: list[Mapping[str, Any]]) -> ToolsSchema:
@@ -427,5 +509,8 @@ __all__ = [
     "create_llm",
     "create_tts",
     "endpoint_function_handler",
+    "speak_settings",
+    "validate_think_update",
+    "StageDirectionFilter",
     "function_schemas",
 ]

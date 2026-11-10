@@ -16,9 +16,12 @@ Environment:
 - ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL``: the ``open_ai`` think provider.
 - ``ANTHROPIC_API_KEY``: the ``anthropic`` think provider.
 
-Run::
+Install and run::
 
+    pip install "pipecat-ai[deepgram-voice-agent,openai,anthropic]"
     python examples/deepgram-voice-agent/server.py --port 8765
+
+The ``deepgram-voice-agent`` extra includes ``lameenc``, for ``mp3`` output.
 """
 
 import argparse

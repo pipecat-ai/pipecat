@@ -29,13 +29,18 @@ from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.stt_service import STTService
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 DEFAULT_V1_MODEL = "nova-3"
 DEFAULT_V2_MODEL = "flux-general-en"
 MAX_KEYTERMS = 100
 LISTEN_UPDATE_TIMEOUT_SECS = 15.0
+MULTILINGUAL_V2_MODEL = "flux-general-multi"
+# Flux's eager end-of-turn threshold when the client sets none. The agent starts
+# replying at an eager end of turn, before the turn is confirmed, as the Voice
+# Agent API does.
+DEFAULT_EAGER_EOT_THRESHOLD = 0.5
 
 # Provider fields an UpdateListen may change.
 UPDATABLE_PROVIDER_FIELDS = {
@@ -62,6 +67,30 @@ V1_SETTINGS_FIELDS = {"model", "keyterms"}
 UPDATE_LISTEN_UNSUPPORTED_FIELDS_CHANGED = "UPDATE_LISTEN_UNSUPPORTED_FIELDS_CHANGED"
 FAILED_TO_START_LISTENING = "FAILED_TO_START_LISTENING"
 INVALID_SETTINGS = "INVALID_SETTINGS"
+
+
+def check_listen_provider(provider: Mapping[str, Any], *, model: str):
+    """Check listen provider settings the way the Voice Agent API does.
+
+    Args:
+        provider: The ``listen.provider`` settings.
+        model: The model they apply to.
+
+    Raises:
+        ValueError: Describing the first problem found.
+    """
+    if provider.get("type", "deepgram") != "deepgram":
+        raise ValueError(f"Unsupported listen provider: {provider.get('type')}")
+    keyterms = provider.get("keyterms") or []
+    if len(keyterms) > MAX_KEYTERMS:
+        raise ValueError(f"At most {MAX_KEYTERMS} keyterms are allowed.")
+    for keyterm in keyterms:
+        if not isinstance(keyterm, str) or not keyterm.strip() or keyterm != keyterm.strip():
+            raise ValueError(
+                f"Keyterms must be non-empty, without leading or trailing whitespace: {keyterm!r}"
+            )
+    if provider.get("language_hints") and model != MULTILINGUAL_V2_MODEL:
+        raise ValueError(f"`language_hint` is only supported on the {MULTILINGUAL_V2_MODEL} model.")
 
 
 def is_v2_model(model: str) -> bool:
@@ -94,7 +123,9 @@ class DeepgramV1STTService(DeepgramSTTService):
         frame = super().service_metadata_frame()
         frame.user_turn_strategies = UserTurnStrategies(
             start=[TranscriptionUserTurnStartStrategy()],
-            stop=[SpeechTimeoutUserTurnStopStrategy()],
+            # The external strategy takes a proposed end of turn, which the
+            # Voice Agent extension makes to end a turn early.
+            stop=[SpeechTimeoutUserTurnStopStrategy(), ExternalUserTurnStopStrategy()],
         )
         return frame
 
@@ -149,11 +180,8 @@ def create_listen(
         ValueError: If the provider isn't Deepgram or has too many keyterms.
     """
     provider = dict((listen or {}).get("provider") or {})
-    if provider.get("type", "deepgram") != "deepgram":
-        raise ValueError(f"Unsupported listen provider: {provider.get('type')}")
-    if len(provider.get("keyterms") or []) > MAX_KEYTERMS:
-        raise ValueError(f"At most {MAX_KEYTERMS} keyterms are allowed.")
     model = provider.get("model") or DEFAULT_V1_MODEL
+    check_listen_provider(provider, model=model)
     tags = [tag] if tag else None
 
     v1_settings: dict[str, Any] = (
@@ -174,12 +202,15 @@ def create_listen(
     v2 = DeepgramFluxSTTService(
         api_key=deepgram_api_key,
         tag=tags,
+        enable_eager_end_of_turn=True,
         settings=DeepgramFluxSTTService.Settings(
             model=v2_settings.get("model") or DEFAULT_V2_MODEL,
             keyterm=v2_settings.get("keyterms") or [],
             eot_threshold=v2_settings.get("eot_threshold"),
-            eager_eot_threshold=v2_settings.get("eager_eot_threshold"),
+            eager_eot_threshold=v2_settings.get("eager_eot_threshold")
+            or DEFAULT_EAGER_EOT_THRESHOLD,
             eot_timeout_ms=v2_settings.get("eot_timeout_ms"),
+            language_hints=v2_settings.get("language_hints") or None,
         ),
     )
     active = v2 if is_v2_model(model) else v1
@@ -300,11 +331,11 @@ class DeepgramListenUpdater:
                 }
             )
             return
-        if provider.get("type", "deepgram") != "deepgram":
-            await self._error(INVALID_SETTINGS, f"Unsupported listen provider: {provider['type']}")
-            return
-        if len(provider.get("keyterms") or []) > MAX_KEYTERMS:
-            await self._error(INVALID_SETTINGS, f"At most {MAX_KEYTERMS} keyterms are allowed.")
+        model = provider.get("model") or self._listen.settings[self._listen.active].get("model")
+        try:
+            check_listen_provider(provider, model=model or DEFAULT_V1_MODEL)
+        except ValueError as e:
+            await self._error(INVALID_SETTINGS, str(e))
             return
 
         self._latest += 1

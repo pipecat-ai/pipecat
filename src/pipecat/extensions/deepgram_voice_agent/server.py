@@ -37,6 +37,7 @@ from pipecat.extensions.deepgram_voice_agent.processor import (
     UNPARSABLE_CLIENT_MESSAGE,
     DeepgramVoiceAgentObserver,
     DeepgramVoiceAgentProcessor,
+    DeepgramVoiceAgentSpeechInjector,
     error_message,
 )
 from pipecat.extensions.deepgram_voice_agent.serializer import DeepgramVoiceAgentSerializer
@@ -48,16 +49,23 @@ from pipecat.extensions.deepgram_voice_agent.services import (
     create_tts,
     endpoint_function_handler,
     function_schemas,
+    validate_think_update,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
+from pipecat.turns.user_turn_strategies import StrategyMode, UserTurnStrategiesParams
 from pipecat.workers.runner import WorkerRunner
 
 PIPELINE_IN_SAMPLE_RATE = 16000
 PIPELINE_OUT_SAMPLE_RATE = 24000
+# Default client sample rates by encoding, as in the Voice Agent API.
+DEFAULT_SAMPLE_RATES = {"linear16": 24000, "mp3": 24000, "mulaw": 8000, "alaw": 8000}
 
 
 class DeepgramVoiceAgentServer:
@@ -175,11 +183,24 @@ class DeepgramVoiceAgentServer:
         audio = settings.get("audio") or {}
         audio_in = audio.get("input") or {}
         audio_out = audio.get("output") or {}
-        for direction, config in (("input", audio_in), ("output", audio_out)):
-            if config.get("encoding", "linear16") != "linear16":
-                raise SettingsError(f"Unsupported audio {direction} encoding: {config['encoding']}")
-        if audio_out.get("container", "none") != "none":
-            raise SettingsError(f"Unsupported audio output container: {audio_out['container']}")
+        in_encoding = audio_in.get("encoding", "linear16")
+        out_encoding = audio_out.get("encoding", "linear16")
+        try:
+            serializer = DeepgramVoiceAgentSerializer(
+                client_in_sample_rate=int(
+                    audio_in.get("sample_rate") or DEFAULT_SAMPLE_RATES[in_encoding]
+                ),
+                client_out_sample_rate=int(
+                    audio_out.get("sample_rate") or DEFAULT_SAMPLE_RATES[out_encoding]
+                ),
+                pipeline_in_sample_rate=PIPELINE_IN_SAMPLE_RATE,
+                input_encoding=in_encoding,
+                output_encoding=out_encoding,
+                output_container=audio_out.get("container") or "none",
+                output_bitrate=audio_out.get("bitrate"),
+            )
+        except (KeyError, ValueError) as e:
+            raise SettingsError(f"Invalid audio settings: {e}")
 
         agent = settings.get("agent") or {}
         think = agent.get("think") or {}
@@ -221,9 +242,22 @@ class DeepgramVoiceAgentServer:
             deepgram_api_key=self._credentials.deepgram_api_key,
             http_session=http_session,
         )
+        processor.listen = listen
+        processor.tts = tts
 
+        async def validate_think(think: Mapping[str, Any]):
+            await validate_think_update(
+                think, credentials=self._credentials, http_session=http_session
+            )
+
+        processor.validate_think = validate_think
+
+        # As in the Voice Agent API, a call goes out as soon as the LLM makes it,
+        # before the user's turn is confirmed, unless its function asks to wait
+        # (defer_until_eot). Anything not declared still runs on the client.
         llm.register_client_function(None, timeout_secs=self._function_call_timeout_secs)
         for function in functions:
+            speculative = not function.get("defer_until_eot", False)
             if function.get("endpoint"):
                 llm.register_function(
                     function["name"],
@@ -234,13 +268,28 @@ class DeepgramVoiceAgentServer:
                         allow_nonpublic=self._allow_nonpublic_endpoints,
                     ),
                     timeout_secs=self._function_call_timeout_secs,
+                    speculative=speculative,
+                )
+            else:
+                llm.register_client_function(
+                    function["name"],
+                    timeout_secs=self._function_call_timeout_secs,
+                    speculative=speculative,
                 )
 
         context = LLMContext(tools=function_schemas(functions)) if functions else LLMContext()
         # The active listen service recommends the turn strategies: Flux detects
-        # turns itself, and the v1 service needs no VAD either.
-        aggregators = LLMContextAggregatorPair(context)
+        # turns itself, and the v1 service needs no VAD either. Either ends a turn
+        # when the service proposes it, as an interrupting message has it do.
+        aggregators = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies_params=UserTurnStrategiesParams(stop_mode=StrategyMode.FIRST)
+            ),
+        )
         observer.languages_hinted = lambda: listen.settings[listen.active].get("language_hints")
+        processor.speech_injector = DeepgramVoiceAgentSpeechInjector()
+        processor.agent_busy = observer.agent_busy
 
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
@@ -250,11 +299,7 @@ class DeepgramVoiceAgentServer:
                 audio_in_sample_rate=PIPELINE_IN_SAMPLE_RATE,
                 audio_out_sample_rate=PIPELINE_OUT_SAMPLE_RATE,
                 add_wav_header=False,
-                serializer=DeepgramVoiceAgentSerializer(
-                    client_in_sample_rate=int(audio_in.get("sample_rate", 16000)),
-                    client_out_sample_rate=int(audio_out.get("sample_rate", 24000)),
-                    pipeline_in_sample_rate=PIPELINE_IN_SAMPLE_RATE,
-                ),
+                serializer=serializer,
             ),
         )
 
@@ -264,7 +309,9 @@ class DeepgramVoiceAgentServer:
                 processor,
                 listen.switcher,
                 aggregators.user(),
+                processor.llm_input_gate,
                 llm,
+                processor.speech_injector,
                 tts,
                 transport.output(),
                 aggregators.assistant(),
