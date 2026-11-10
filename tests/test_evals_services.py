@@ -226,6 +226,27 @@ class TestCachingTTSCache(unittest.IsolatedAsyncioTestCase):
             await _run_tts_pcm(tts24, "hello")
             self.assertEqual(inner24.calls, 1)
 
+    async def test_audio_at_the_inner_rate_is_cached_and_synthesized_at_this_rate(self):
+        import tempfile
+
+        import numpy as np
+
+        from pipecat.audio.utils import create_file_resampler
+
+        t = np.arange(2400) / 24000
+        tone = (np.sin(2 * np.pi * 220 * t) * 8000).astype(np.int16).tobytes()
+        expected = await create_file_resampler().resample(tone, 24000, 16000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = _CountingTTS(tone, 24000)
+            tts = CachingTTSService(inner, cache_key="k", cache_dir=tmp)
+            tts._sample_rate = 16000  # set by start(); skip the FrameProcessor lifecycle
+
+            self.assertEqual(await tts.synthesize("hello"), expected)
+            # The cached utterance is at this service's rate too.
+            self.assertEqual(await tts.synthesize("hello"), expected)
+            self.assertEqual(inner.calls, 1)
+
 
 def _fake_classifier(config):
     return _FakeClassifier(config)

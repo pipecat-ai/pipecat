@@ -24,6 +24,7 @@ from typing import cast
 
 from loguru import logger
 
+from pipecat.audio.utils import create_file_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -141,6 +142,7 @@ class CachingTTSService(TTSService):
         self._cache_key = cache_key
         self._cache_dir_override = cache_dir
         self._use_cache = use_cache
+        self._utterance_resampler = create_file_resampler()
 
     async def setup(self, setup):
         """Set up this service and forward setup to the inner service."""
@@ -178,10 +180,12 @@ class CachingTTSService(TTSService):
             The utterance as 16-bit mono PCM, at this service's sample rate.
         """
         audio = bytearray()
+        sample_rate = self.sample_rate
         async for frame in self.run_tts(text, self.create_context_id()):
             if isinstance(frame, TTSAudioRawFrame):
                 audio.extend(frame.audio)
-        return bytes(audio)
+                sample_rate = frame.sample_rate
+        return await self._at_sample_rate(bytes(audio), sample_rate)
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Emit the audio for ``text`` from cache, or by driving the inner service.
@@ -213,18 +217,26 @@ class CachingTTSService(TTSService):
 
         # Cache miss: drive the inner service, capturing its audio as we forward it.
         captured = bytearray()
+        captured_rate = self.sample_rate
         inner_frames = cast(
             AsyncGenerator[Frame | None, None], self._inner.run_tts(text, context_id)
         )
         async for frame in inner_frames:
             if isinstance(frame, TTSAudioRawFrame):
                 captured.extend(frame.audio)
+                captured_rate = frame.sample_rate
             elif isinstance(frame, ErrorFrame):
                 logger.warning(f"TTS error during synthesis of {text!r}: {frame.error}")
             yield frame
 
         if cache_file is not None and captured:
-            _write_wav(cache_file, bytes(captured), self.sample_rate)
+            pcm = await self._at_sample_rate(bytes(captured), captured_rate)
+            _write_wav(cache_file, pcm, self.sample_rate)
+
+    async def _at_sample_rate(self, audio: bytes, sample_rate: int) -> bytes:
+        """Resample a whole utterance from the inner service's rate to this service's."""
+        audio = audio[: len(audio) - len(audio) % 2]
+        return await self._utterance_resampler.resample(audio, sample_rate, self.sample_rate)
 
     def _cache_file(self, text: str) -> Path:
         """Resolve the WAV cache path for ``text`` (keyed by config identity + text)."""
