@@ -213,3 +213,13 @@ async def test_chunks_cut_mid_sample_play_whole_at_another_rate():
     audio = _audio(await _run(service))
 
     assert b"".join(f.audio for f in audio) == await _resampled(clip, 16000)
+
+
+@pytest.mark.asyncio
+async def test_audio_back_at_the_service_rate_follows_the_held_audio():
+    first, second = _tone(16000, 2000), _tone(_SERVICE_RATE, 3000)
+    service = MockTTSService([(first, 16000), (second, _SERVICE_RATE)])
+
+    audio = _audio(await _run(service))
+
+    assert b"".join(f.audio for f in audio) == await _resampled(first, 16000) + second
