@@ -931,7 +931,8 @@ class TavusOutputTransport(BaseOutputTransport):
         if self._params.audio_out_faster_than_realtime:
             await self._client.start_send_task()
         else:
-            self._send_interval = (self.audio_chunk_size / self._client.out_sample_rate) / 2
+            bytes_per_second = self._client.out_sample_rate * self._params.audio_out_channels * 2
+            self._send_interval = self.audio_chunk_size / bytes_per_second
             self._next_send_time = 0
 
         await self.set_transport_ready(frame)
