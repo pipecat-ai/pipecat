@@ -68,6 +68,14 @@ class StripMarkdown:
         # Fenced code blocks (``` or ~~~)
         text = re.sub(r"```[\s\S]*?```", "", text)
         text = re.sub(r"~~~[\s\S]*?~~~", "", text)
+        # Inline code: hold the payload aside so later rules can't rewrite it
+        codes: list[str] = []
+
+        def _hold(m: re.Match) -> str:
+            codes.append(m.group(1))
+            return f"{_CODE_OPEN}{len(codes) - 1}{_CODE_CLOSE}"
+
+        text = re.sub(r"`([^`]+)`", _hold, text)
         # Images and links, keeping the alt text or label. The label may hold one
         # level of brackets and the URL one of parentheses (``wiki/Python_(language)``);
         # a URL with an unbalanced parenthesis ends at the first ``)``.
@@ -77,14 +85,6 @@ class StripMarkdown:
                 r"\1",
                 text,
             )
-        # Inline code: hold the payload aside so later rules can't rewrite it
-        codes: list[str] = []
-
-        def _hold(m: re.Match) -> str:
-            codes.append(m.group(1))
-            return f"{_CODE_OPEN}{len(codes) - 1}{_CODE_CLOSE}"
-
-        text = re.sub(r"`([^`]+)`", _hold, text)
         # Strikethrough, with the space before it so the words around it still join
         text = re.sub(r"[ \t]?~~(?=\S).+?(?<=\S)~~", "", text)
         # Horizontal rules (---, ***, * * *), before list bullets so a spaced one
