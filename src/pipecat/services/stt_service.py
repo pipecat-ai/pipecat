@@ -380,7 +380,9 @@ class STTService(AIService):
         if not transcript or not words:
             return []
 
-        tagged_spans: list[tuple[_SpeakerT, int]] = []
+        # Where each run starts. The first starts at 0, so text before the first
+        # word (e.g. an audio event) stays in it.
+        boundaries: list[tuple[_SpeakerT, int]] = []
         cursor = 0
         for text, speaker in words:
             if speaker is None or not text:
@@ -388,13 +390,11 @@ class STTService(AIService):
             start = transcript.find(text, cursor)
             if start < 0:
                 return []
-            tagged_spans.append((speaker, start))
-            cursor = start + len(text)
-
-        boundaries: list[tuple[_SpeakerT, int]] = [(tagged_spans[0][0], 0)]
-        for speaker, start in tagged_spans[1:]:
-            if speaker != boundaries[-1][0]:
+            if not boundaries:
+                boundaries.append((speaker, 0))
+            elif speaker != boundaries[-1][0]:
                 boundaries.append((speaker, start))
+            cursor = start + len(text)
 
         runs: list[tuple[_SpeakerT, str]] = []
         for index, (speaker, start) in enumerate(boundaries):
@@ -466,16 +466,19 @@ class STTService(AIService):
             matched to the transcript (see :meth:`_speaker_runs`), a single
             ``(None, transcript)``.
         """
-        if words is not None:
-            runs = self._speaker_runs(transcript, words)
-            if runs:
-                speakers = [(self._speaker(label), text) for label, text in runs]
-                return [
-                    (speaker, self._apply_speaker_format(text, speaker))
-                    for speaker, text in speakers
-                ]
+        if words is None:
+            return [(None, transcript)]
+
+        runs = self._speaker_runs(transcript, words)
+        if not runs:
             logger.debug(f"{self} could not split result by speaker, emitting it unsplit")
-        return [(None, transcript)]
+            return [(None, transcript)]
+
+        diarized_runs: list[tuple[TranscriptionSpeaker | None, str]] = []
+        for label, text in runs:
+            speaker = self._speaker(label)
+            diarized_runs.append((speaker, self._apply_speaker_format(text, speaker)))
+        return diarized_runs
 
     async def _push_transcription_runs(
         self,
