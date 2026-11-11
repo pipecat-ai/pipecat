@@ -679,6 +679,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
         self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
 
+    async def test_year_is_read_as_a_year(self):
+        # A year is spoken the way a date is said aloud, not as a cardinal
+        # quantity ("one thousand, nine hundred and ninety-nine").
+        self.assertEqual(
+            await normalize_dates("Born on 1999-03-05", "*"),
+            "Born on March 5th, nineteen ninety-nine",
+        )
+        self.assertEqual(
+            await normalize_dates("Due 07/04/1905", "*"),
+            "Due July 4th, nineteen oh-five",
+        )
+        self.assertEqual(
+            await normalize_dates("Meeting on 2023-05-10", "*"),
+            "Meeting on May 10th, twenty twenty-three",
+        )
+        self.assertEqual(
+            await normalize_dates("Launch on 2005-01-02", "*"),
+            "Launch on January 2nd, two thousand and five",
+        )
+
     async def test_month_is_english_under_non_english_locale(self):
         # The month must stay English even when LC_TIME is a non-English locale,
         # to match the hardcoded-English year and ordinal suffix.
