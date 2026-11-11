@@ -78,6 +78,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # audio stream.
         self._executor: ThreadPoolExecutor | None = None
         self._vad_start_secs: float = 0.0
+        # Event loop reference for _predict_endpoint on executor threads.
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def speech_triggered(self) -> bool:
@@ -159,6 +161,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             from the ML model analysis.
         """
         loop = asyncio.get_running_loop()
+        self._event_loop = loop
         state, result = await loop.run_in_executor(
             self._model_executor, self._process_speech_segment, self._audio_buffer
         )
