@@ -289,7 +289,10 @@ class RTVIProcessor(FrameProcessor):
         """Handle an incoming transport message frame."""
         try:
             transport_message = frame.message
-            if transport_message.get("label") != RTVI.MESSAGE_LABEL:
+            if (
+                not isinstance(transport_message, dict)
+                or transport_message.get("label") != RTVI.MESSAGE_LABEL
+            ):
                 logger.warning(f"Ignoring not RTVI message: {transport_message}")
                 return
             message = RTVI.Message.model_validate(transport_message)
