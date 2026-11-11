@@ -49,6 +49,10 @@ To judge with OpenAI's [Decisions API](https://developers.openai.com/api/docs/gu
 instead, set `factory: evals.judges.openai_classifier`. It needs the `openai`
 extra and `OPENAI_API_KEY` exported.
 
+To judge with Google's Decisions API instead, set
+`factory: evals.judges.google_classifier`. It needs the `google` extra and
+`GOOGLE_API_KEY` exported.
+
 These classifiers give verdicts but not reasons. So a local LLM, the
 **explainer**, is told every `no` and every verdict the classifier is not sure
 about, and points to what in the conversation supports it. That is evidence to

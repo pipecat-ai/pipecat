@@ -96,6 +96,7 @@ google = [
   "google-cloud-speech>=2.33.0,<3",
   "google-cloud-texttospeech>=2.31.0,<3",
   "google-genai>=3.2.0,<4",
+  "httpx[http2]>=0.27,<1",
 ]
 gradium = []
 grok = []
