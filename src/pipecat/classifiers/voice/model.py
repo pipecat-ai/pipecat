@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        'In order to use Pipecat Voice Reader, you need to `uv add "pipecat-ai[voice-reader]"`.'
+        'In order to use Pipecat Voice Reader, you need to `uv add "pipecat-ai[expressive]"`.'
     )
     raise ImportError(f"Missing module: {e}") from e
 
@@ -101,7 +101,8 @@ class PipecatVoiceReaderModel:
         """Load the model from Hugging Face, downloading its files the first time.
 
         Args:
-            revision: The model's revision.
+            revision: The model's release on Hugging Face, or ``"main"`` for
+                the latest.
             variant: The model's size, ``"base"`` or ``"tiny"``.
             precision: ``"int8"`` or ``"fp32"``.
             threads: The CPU threads for one read.
