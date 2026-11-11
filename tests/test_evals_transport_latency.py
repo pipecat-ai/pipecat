@@ -26,6 +26,7 @@ from pipecat.evals.simulation_driver import EvalSimulationDriver
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -41,6 +42,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.websocket.client import (
+    WebsocketClientInputTransport,
     WebsocketClientOutputTransport,
     WebsocketClientParams,
 )
@@ -333,6 +335,40 @@ async def test_raw_bot_audio_is_timed_before_gap_fill_and_only_once_per_spoken_s
         InputAudioRawFrame(audio=b"\x01\x00" * 640, sample_rate=16000, num_channels=1)
     )
     assert timing.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_interruption_during_audio_timing_cannot_requeue_stale_pcm():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def timing(kind, observed_at):
+        entered.set()
+        await release.wait()
+
+    transport = EvalClientInputTransport(
+        None,
+        SimpleNamespace(is_closing=False, is_connected=True),
+        WebsocketClientParams(audio_in_enabled=True),
+        timing=timing,
+    )
+    incoming = asyncio.create_task(
+        transport.push_audio_frame(
+            InputAudioRawFrame(audio=b"\x01\x00" * 640, sample_rate=16000, num_channels=1)
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        with patch.object(WebsocketClientInputTransport, "push_frame", new=AsyncMock()):
+            await transport.push_frame(
+                InputTransportMessageFrame(message={"type": "bot-interrupted"})
+            )
+        assert not transport._bot_pcm
+        release.set()
+        await asyncio.wait_for(incoming, 1)
+        assert not transport._bot_pcm
+    finally:
+        incoming.cancel()
+        await asyncio.gather(incoming, return_exceptions=True)
 
 
 @pytest.mark.parametrize("user_audio", [False, True])

@@ -433,15 +433,17 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         """Buffer the bot's audio for the fill task."""
+        observed_at: float | None = None
         if frame.audio and not self._bot_audio_received:
             self._bot_audio_received = True
-            if self._timing is not None:
-                await self._timing(BOT_AUDIO_RECEIVED_EVENT, time.monotonic())
+            observed_at = time.monotonic()
         # Record the raw bot audio here (gapless within a turn), not the gap-filled
         # frames the fill task emits: those underruns would stutter the recording.
         if self._recorder is not None:
             self._recorder.add_bot(frame.audio, frame.sample_rate)
         self._bot_pcm.extend(frame.audio)
+        if self._timing is not None and observed_at is not None:
+            await self._timing(BOT_AUDIO_RECEIVED_EVENT, observed_at)
 
     async def _fill_task_handler(self):
         """Push one ~40ms frame every tick: buffered bot audio, or silence."""
