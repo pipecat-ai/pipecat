@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
     PerceptionMetadataFrame,
     TextType,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -1124,6 +1125,7 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=frame.user_id,
                 perception=frame.perception,
+                speaker=frame.speaker,
             )
         if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
@@ -1133,6 +1135,7 @@ class RTVIObserver(BaseObserver):
                         user_id=frame.user_id,
                         timestamp=frame.timestamp,
                         final=final,
+                        speaker=frame.speaker,
                     )
                 )
             )
@@ -1154,6 +1157,7 @@ class RTVIObserver(BaseObserver):
         user_id: str | None = None,
         msg_id: str | None = None,
         perception: list[PerceptionSignal] | None = None,
+        speaker: TranscriptionSpeaker | None = None,
     ):
         """Send a user input message."""
         signals = None
@@ -1176,6 +1180,7 @@ class RTVIObserver(BaseObserver):
                 user_id=user_id,
                 msg_id=msg_id,
                 perception=signals,
+                speaker=speaker,
             )
         )
         await self.send_rtvi_message(message)

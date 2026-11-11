@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     TextType,
+    TranscriptionSpeaker,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
@@ -740,6 +741,8 @@ class UserInputMessageData(BaseModel):
         perception: For a transcription, how the user said it, when the STT
             service reports a reading with it. Part of expressive conversation
             (alpha).
+        speaker: For a transcription, who said it, when the STT service's
+            diarization tells speakers apart.
     """
 
     text: str
@@ -749,6 +752,7 @@ class UserInputMessageData(BaseModel):
     user_id: str | None = None
     msg_id: str | None = None
     perception: list[UserPerceptionSignal] | None = None
+    speaker: TranscriptionSpeaker | None = None
 
 
 class UserInputMessage(BaseModel):
@@ -782,12 +786,15 @@ class STTRawTextMessageData(BaseModel):
         user_id: Identifier for the user who spoke.
         timestamp: When the user said it.
         final: Whether the transcription is final, as opposed to interim.
+        speaker: Who said it, when the STT service's diarization tells speakers
+            apart.
     """
 
     text: str
     user_id: str
     timestamp: str
     final: bool
+    speaker: TranscriptionSpeaker | None = None
 
 
 class STTRawTextMessage(BaseModel):
