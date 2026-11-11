@@ -26,7 +26,12 @@ from pipecat.classifiers.base_classifier import (
     ClassifierResult,
     ScoreResult,
 )
-from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
+from pipecat.expressive.perception import (
+    PerceptionCapabilities,
+    PerceptionSignal,
+    PerceptionTerm,
+    merge_perception,
+)
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndFrame,
@@ -179,6 +184,11 @@ class PerceptionReader(FrameProcessor):
     fails leaves its signals out, and a transcription none of them read passes
     unread. A classifier that can't be set up leaves the reader unusable.
 
+    A transcription that already carries a reading, such as the STT service's,
+    gets the reader's added to it, and the reader declares the signals declared
+    before it together with its own. With ``replace_perception``, the reader's
+    reading replaces the one the transcription carries instead.
+
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)`` for the LLM to read
     the turns.
@@ -219,12 +229,21 @@ class PerceptionReader(FrameProcessor):
         )
     """
 
-    def __init__(self, *, sources: Sequence[PerceptionSource], **kwargs):
+    def __init__(
+        self,
+        *,
+        sources: Sequence[PerceptionSource],
+        replace_perception: bool = False,
+        **kwargs,
+    ):
         """Initialize the processor.
 
         Args:
             sources: The classifiers to ask, each with its questions and its
                 timeout.
+            replace_perception: Whether the reader's reading replaces the one
+                a transcription carries, such as the STT service's, instead of
+                being added to it.
             **kwargs: Additional arguments passed to the parent.
 
         Raises:
@@ -245,6 +264,11 @@ class PerceptionReader(FrameProcessor):
         self._sources = list(sources)
         self._text_sources = [s for s in self._sources if not s.classifier.supports_audio]
         self._audio_sources = [s for s in self._sources if s.classifier.supports_audio]
+        # Whether the reader's reading replaces the one a transcription
+        # carries, and the signals declared before the reader, which its
+        # transcriptions can carry too.
+        self._replace_perception = replace_perception
+        self._declared_before: PerceptionCapabilities | None = None
         # The bot's last reply, which the user's turn is read against.
         self._previous: str | None = None
         # For the sources that hear: the user's recent speech, their reads of
@@ -321,6 +345,10 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, PerceptionMetadataFrame) and direction == FrameDirection.DOWNSTREAM:
+            # Declared again with the reader's signals, which its transcriptions carry too.
+            await self._handle_perception_metadata(frame)
+            await self._declare_signals()
         elif isinstance(frame, STTMetadataFrame):
             await self._handle_stt_metadata(frame)
             await self.push_frame(frame, direction)
@@ -358,7 +386,11 @@ class PerceptionReader(FrameProcessor):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         if frame.text.strip() and self.is_usable:
-            frame.perception = self._reading(await self._wait(self._read_text(frame.text)))
+            reading = self._reading(await self._wait(self._read_text(frame.text)))
+            self._set_reading(frame, reading)
+
+    async def _handle_perception_metadata(self, frame: PerceptionMetadataFrame):
+        self._declared_before = frame.perception
 
     async def _handle_stt_metadata(self, frame: STTMetadataFrame):
         self._stt_latency = frame.ttfs_p99_latency
@@ -389,21 +421,23 @@ class PerceptionReader(FrameProcessor):
         self._previous = frame.text
 
     async def _declare_signals(self):
-        """Push the signals the reader reports, if it can report them."""
-        if self.is_usable:
+        """Push the signals the reader's transcriptions can carry, if any."""
+        capabilities = self._capabilities()
+        if capabilities.signals:
             await self.push_frame(
-                PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
+                PerceptionMetadataFrame(service_name=self.name, perception=capabilities)
             )
 
     def _capabilities(self) -> PerceptionCapabilities:
-        """The signals the reader reports, from its sources' questions."""
-        return PerceptionCapabilities(
-            signals=[
+        """The signals declared before the reader, and its sources' when it can report them."""
+        own = PerceptionCapabilities()
+        if self.is_usable:
+            own.signals = [
                 PerceptionTerm(name, question.description, labels=self._labels(question.question))
                 for source in self._sources
                 for name, question in source.questions.items()
             ]
-        )
+        return self._declared_before.merge(own) if self._declared_before else own
 
     def _labels(self, question: ClassifierQuestion) -> list[str]:
         """The labels a signal can report: a choice's options, or none."""
@@ -516,7 +550,7 @@ class PerceptionReader(FrameProcessor):
         over = speech_end is not None and self._audio.ended_at == speech_end
         for transcription, reading in zip(held, readings):
             frame = transcription.frame
-            frame.perception = reading
+            self._set_reading(frame, reading)
             frame.finalized = over and transcription is held[-1]
             await self.push_frame(frame)
 
@@ -564,6 +598,15 @@ class PerceptionReader(FrameProcessor):
             signals for source in self._sources if (signals := readings.get(source)) is not None
         ]
         return [signal for signals in read for signal in signals] if read else None
+
+    def _set_reading(self, frame: TranscriptionFrame, reading: list[PerceptionSignal] | None):
+        """Set the reading on a transcription, replacing or added to the one it carries."""
+        if not reading:
+            return
+        if self._replace_perception:
+            frame.perception = reading
+        else:
+            frame.perception = merge_perception(frame.perception, reading)
 
     async def _cancel_clip_reads(self):
         """Stop the reads of the latest clips still running, if any."""
