@@ -13,9 +13,11 @@ accompanying configurations (as FunctionSchemas or in provider-specific
 formats).
 """
 
+import dataclasses
 import inspect
 import types
 from collections.abc import Awaitable, Callable, Mapping
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -27,6 +29,7 @@ from typing import (
 )
 
 import docstring_parser
+from pydantic import BaseModel
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 
@@ -220,14 +223,32 @@ class BaseDirectFunctionWrapper:
         if origin is Union or origin is types.UnionType:
             return {"anyOf": [self._typehint_to_jsonschema(arg) for arg in args]}
 
-        # Handle List, Tuple, Set with specific item types
-        if origin in (list, tuple, set) and args:
+        # Handle List and Set with specific item types
+        if origin in (list, set) and args:
             return {"type": "array", "items": self._typehint_to_jsonschema(args[0])}
+
+        # A tuple's items can differ from each other, and a fixed-length tuple
+        # says so in the schema (JSON Schema 2020-12 prefixItems).
+        if origin is tuple and args:
+            if len(args) == 2 and args[1] is Ellipsis:  # tuple[int, ...]
+                return {"type": "array", "items": self._typehint_to_jsonschema(args[0])}
+            return {
+                "type": "array",
+                "prefixItems": [self._typehint_to_jsonschema(arg) for arg in args],
+                "minItems": len(args),
+                "maxItems": len(args),
+            }
 
         # Handle Dict with specific key/value types
         if origin is dict and len(args) == 2:
             # For JSON Schema, keys must be strings
             return {"type": "object", "additionalProperties": self._typehint_to_jsonschema(args[1])}
+
+        # Handle Pydantic models and dataclasses: their fields' defaults decide
+        # what is required, and they carry their own (nested) field schemas.
+        model_schema = self._model_to_jsonschema(type_hint)
+        if model_schema is not None:
+            return model_schema
 
         # Handle TypedDict
         if hasattr(type_hint, "__annotations__"):
@@ -253,6 +274,102 @@ class BaseDirectFunctionWrapper:
 
         # Default to any type if we can't determine the specific schema
         return {}
+
+    def _model_to_jsonschema(self, type_hint: Any) -> dict[str, Any] | None:
+        """Build a JSON Schema for a Pydantic model or a dataclass.
+
+        Both expose ``__annotations__``, which used to make them fall into the
+        TypedDict branch. That marked every field required, even the ones with a
+        default, so the model was told to send values it could leave out.
+
+        Returns:
+            The schema, or None if the type hint is neither of the two.
+        """
+        if isinstance(type_hint, type) and issubclass(type_hint, BaseModel):
+            # Pydantic already knows which fields are required, nested models
+            # included; it also drops the keys we can't express in a tool schema.
+            return type_hint.model_json_schema()
+
+        if not dataclasses.is_dataclass(type_hint) or not isinstance(type_hint, type):
+            return None
+
+        properties = {}
+        required = []
+        # A field without a default still has to be sent. Anything else
+        # (including default_factory) can be left out.
+        hints = get_type_hints(type_hint)
+        for field in dataclasses.fields(type_hint):
+            properties[field.name] = self._typehint_to_jsonschema(hints.get(field.name))
+            if (
+                field.default is dataclasses.MISSING
+                and field.default_factory is dataclasses.MISSING
+            ):
+                required.append(field.name)
+
+        schema = {"type": "object", "properties": properties}
+        if required:
+            schema["required"] = required
+        return schema
+
+    def _convert_arg(self, value: Any, type_hint: Any) -> Any:
+        """Turn a value the LLM sent back into the type the function declares.
+
+        The LLM only ever produces JSON, so a ``Unit`` parameter arrives as
+        ``"celsius"`` and a ``Window`` one as a plain dict. Converting upfront
+        means the function body can use its parameters as annotated.
+        """
+        if type_hint is None or type_hint is Any or value is None:
+            return value
+
+        origin = get_origin(type_hint)
+        args = get_args(type_hint)
+
+        if origin is Union or origin is types.UnionType:
+            for arg in args:
+                converted = self._convert_arg(value, arg)
+                if converted is not value:
+                    return converted
+            return value
+
+        if isinstance(type_hint, type) and issubclass(type_hint, Enum):
+            try:
+                return type_hint(value)
+            except ValueError:
+                return value
+
+        if isinstance(type_hint, type) and issubclass(type_hint, BaseModel):
+            return value if isinstance(value, type_hint) else type_hint.model_validate(value)
+
+        if dataclasses.is_dataclass(type_hint) and isinstance(type_hint, type):
+            if isinstance(value, type_hint):
+                return value
+            if isinstance(value, Mapping):
+                hints = get_type_hints(type_hint)
+                known = {f.name for f in dataclasses.fields(type_hint)}
+                kwargs = {
+                    key: self._convert_arg(item, hints.get(key))
+                    for key, item in value.items()
+                    if key in known
+                }
+                return type_hint(**kwargs)
+            return value
+
+        if origin is tuple and isinstance(value, (list, tuple)):
+            if len(args) == 2 and args[1] is Ellipsis:
+                return tuple(self._convert_arg(item, args[0]) for item in value)
+            if len(args) == len(value):
+                return tuple(self._convert_arg(item, hint) for item, hint in zip(value, args))
+            return value
+
+        if origin is list and isinstance(value, (list, tuple)):
+            item_hint = args[0] if args else None
+            return [self._convert_arg(item, item_hint) for item in value]
+
+        if origin is dict and isinstance(value, Mapping):
+            value_hint = args[1] if len(args) == 2 else None
+            return {key: self._convert_arg(item, value_hint) for key, item in value.items()}
+
+        return value
 
 
 class DirectFunctionWrapper(BaseDirectFunctionWrapper):
@@ -284,7 +401,11 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
         Returns:
             The result of the function call.
         """
-        return await self.function(params=params, **args)
+        hints = get_type_hints(self.function)
+        converted = {
+            name: self._convert_arg(value, hints.get(name)) for name, value in args.items()
+        }
+        return await self.function(params=params, **converted)
 
 
 def tool_options(
