@@ -1393,6 +1393,48 @@ class TestInterruptionCutProtection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(late, in_flight)
         self.assertEqual(client._publish_protected[-1][1], in_flight)
 
+    async def test_a_cut_landing_late_in_the_writers_pacing_sleep_still_replays_first(self):
+        """A writer whose pacing sleep expires just as the cut lands can
+        only commit after the whole cut: a replay that paced its writes
+        would yield mid-cut and let the woken writer land inside it."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        committed = self._pcm(0.04)
+        in_flight = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        real_sleep = asyncio.sleep
+        release = asyncio.Event()
+
+        async def paced_sleep(delay):
+            if not release.is_set():
+                # Writer's pacing sleep: hold until released.
+                await release.wait()
+            else:
+                # Pacing sleep after release (a non-atomic cut's replay):
+                # hand the woken writer the loop.
+                for _ in range(3):
+                    await real_sleep(0)
+
+        with patch.object(moq_transport, "time", clock):
+            with patch.object(moq_transport.asyncio, "sleep", paced_sleep):
+                await client.publish_audio(committed, interruptible=False)
+                writer = asyncio.ensure_future(client.publish_audio(in_flight, interruptible=False))
+                for _ in range(3):
+                    await real_sleep(0)
+                clock.t += 0.025
+                # Writer's sleep expires as the interruption lands.
+                release.set()
+                await client.cut_audio()
+                await writer
+        first, silence, replay, late = self._written(client)
+        self.assertEqual(first, committed)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(replay, committed, played_s=0.025)
+        self.assertEqual(late, in_flight)
+        self.assertEqual(client._publish_protected[-1][1], in_flight)
+
 
 # ----------------------------------------------------------------------
 # Write-ahead cap: default and pacing bound
