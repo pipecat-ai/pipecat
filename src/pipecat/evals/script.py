@@ -319,7 +319,7 @@ Top-level optional fields:
     LLM text (``llm_response``), which is faster and silent.
 
 Any value can be pulled from a separate file with ``!include``, resolved
-relative to the scenario file's directory. This is handy for sharing the
+relative to the file that names it. This is handy for sharing the
 ``judge:`` and ``user:`` blocks across scenarios::
 
     user: !include user_audio.yaml
