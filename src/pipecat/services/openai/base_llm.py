@@ -24,6 +24,7 @@ from openai import (
     AsyncOpenAI,
     AsyncStream,
     BadRequestError,
+    ContentFilterFinishReasonError,
     DefaultAsyncHttpxClient,
     UnprocessableEntityError,
 )
@@ -505,6 +506,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # LLM completion
         response = await self._client.chat.completions.create(**params)
 
+        # A filtered reply is not a shorter reply: what came back was cut where the
+        # verdict landed, so the caller gets told instead of a half sentence.
+        if response.choices[0].finish_reason == "content_filter":
+            raise ContentFilterFinishReasonError()
+
         return response.choices[0].message.content
 
     def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
@@ -586,6 +592,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         # others a cumulative snapshot on every chunk. Holding the latest and
         # reporting it after the stream keeps that to one report per completion.
         token_usage: LLMTokenUsage | None = None
+        # A reply the provider's content filter cut short is not a reply that
+        # finished: the text before the verdict was already released, so apps
+        # hear a sentence stop mid-thought with nothing to act on.
+        content_filtered = False
 
         try:
             async with _closing(chunk_stream) as chunk_iter:
@@ -598,6 +608,11 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                     if chunk.choices is None or len(chunk.choices) == 0:
                         continue
+
+                    # Checked before the empty-delta early return below, since the
+                    # chunk carrying the verdict often has no content of its own.
+                    if chunk.choices[0].finish_reason == "content_filter":
+                        content_filtered = True
 
                     await self.stop_ttfb_metrics()
 
@@ -653,6 +668,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             # Report even if the response is interrupted or cancelled mid-stream.
             if token_usage:
                 await self.start_llm_usage_metrics(token_usage)
+
+        # Reported after the stream so the text released before the verdict is kept
+        # as it is, and the turn still ends the usual way. An `on_error` handler
+        # runs inside `push_error`, which is where an app that wants to cut off the
+        # audio it already started can do so.
+        if content_filtered:
+            await self.push_error(
+                error_msg="LLM response cut short by the content filter",
+                exception=ContentFilterFinishReasonError(),
+                category=ErrorCategory.CONTENT_FILTERED,
+            )
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
