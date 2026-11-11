@@ -5,6 +5,7 @@
 #
 
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -61,6 +62,13 @@ class TestGoogleUtils(unittest.TestCase):
 
 
 class TestGeminiApiHttpOptions(unittest.TestCase):
+    def setUp(self):
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GOOGLE_GENAI_USE_VERTEXAI", None)
+        os.environ.pop("GOOGLE_GENAI_USE_ENTERPRISE", None)
+
     def test_none_asks_v1beta(self):
         self.assertEqual(gemini_api_http_options(None), {"api_version": "v1beta"})
 
@@ -78,6 +86,15 @@ class TestGeminiApiHttpOptions(unittest.TestCase):
     def test_http_options_with_a_version_keep_it(self):
         options = gemini_api_http_options(types.HttpOptions(api_version="v1alpha"))
         self.assertEqual(options.api_version, "v1alpha")
+
+    def test_vertex_env_keeps_the_options_as_given(self):
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
+        self.assertEqual(gemini_api_http_options({"timeout": 5}), {"timeout": 5})
+
+    def test_enterprise_env_takes_precedence(self):
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+        os.environ["GOOGLE_GENAI_USE_ENTERPRISE"] = "false"
+        self.assertEqual(gemini_api_http_options(None), {"api_version": "v1beta"})
 
 
 class TestVertexCredentials(unittest.TestCase):

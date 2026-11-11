@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import os
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
@@ -184,13 +185,24 @@ GEMINI_API_VERSION = "v1beta"
 def gemini_api_http_options(http_options: dict[str, Any] | Any | None) -> Any:
     """The http_options for a Gemini Developer API client, on v1beta unless they name a version.
 
+    When ``GOOGLE_GENAI_USE_VERTEXAI`` or ``GOOGLE_GENAI_USE_ENTERPRISE`` makes
+    google-genai build a Vertex AI client instead (express mode, with an API
+    key), the http_options are returned as given, so the client keeps the SDK's
+    Vertex default: Vertex AI serves no ``v1beta``.
+
     Args:
         http_options: The client's http_options: None, a dictionary, or an
             object with an ``api_version`` attribute, which is set in place.
 
     Returns:
-        The http_options with an API version.
+        The http_options with an API version, or as given for a Vertex AI client.
     """
+    # google-genai's precedence: GOOGLE_GENAI_USE_ENTERPRISE, when set, wins.
+    use_vertex = os.environ.get(
+        "GOOGLE_GENAI_USE_ENTERPRISE", os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "")
+    )
+    if use_vertex.lower() in ("true", "1"):
+        return http_options
     if http_options is None:
         return {"api_version": GEMINI_API_VERSION}
     if isinstance(http_options, dict):
