@@ -497,13 +497,11 @@ class STTService(AIService):
             result: Raw result from the STT service, attached to every frame.
             finalized: Whether the result closes the utterance.
         """
-        finalize_pending = self._finalize_pending
+        finalized = finalized or self._finalize_pending
         self._finalize_pending = False
         timestamp = time_now_iso8601()
         for index, (speaker, text) in enumerate(runs):
             last = index == len(runs) - 1
-            if last:
-                self._finalize_pending = finalize_pending
             await self.push_frame(
                 TranscriptionFrame(
                     text,
