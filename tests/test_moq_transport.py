@@ -90,6 +90,7 @@ from pipecat.transports.moq.transport import (  # noqa: E402
     _is_peer_gone,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+from pipecat.utils.deprecation import _warned_sites  # noqa: E402
 from pipecat.utils.errors import ErrorCategory  # noqa: E402
 
 # ----------------------------------------------------------------------
@@ -1623,6 +1624,115 @@ class TestClientEventHandlerSignatures(unittest.IsolatedAsyncioTestCase):
         await transport._on_client_disconnected()
         await self._settle(seen)
         self.assertEqual(seen, [transport])
+
+    def _client_events(self):
+        return [
+            ("on_client_connected", lambda t: t._on_client_connected()),
+            ("on_client_disconnected", lambda t: t._on_client_disconnected()),
+        ]
+
+    async def _assert_explicit_removal(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport):
+            seen.append(transport)
+
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler(event_name, handler)
+        transport.remove_event_handler(event_name, handler)
+        self.assertEqual(transport._event_handlers[event_name].handlers, [])
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(seen, [])
+
+    async def test_a_legacy_handler_is_removed_by_its_original_callback(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_explicit_removal(event_name, fire)
+
+    async def _assert_self_removal_fires_once(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning):
+
+            @transport.event_handler(event_name)
+            async def handler(transport):
+                transport.remove_event_handler(event_name, handler)
+                seen.append(transport)
+
+        await fire(transport)
+        await self._settle(seen)
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(seen), 1)
+
+    async def test_a_legacy_handler_that_removes_itself_fires_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_self_removal_fires_once(event_name, fire)
+
+    async def _assert_cycles_leave_one_registration(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport):
+            seen.append(transport)
+
+        for _ in range(3):
+            _warned_sites.clear()
+            with pytest.warns(DeprecationWarning):
+                transport.add_event_handler(event_name, handler)
+            transport.remove_event_handler(event_name, handler)
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler(event_name, handler)
+        self.assertEqual(len(transport._event_handlers[event_name].handlers), 1)
+        await fire(transport)
+        await self._settle(seen)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(seen), 1)
+
+    async def test_repeated_registration_and_cleanup_leaves_one_registration(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_cycles_leave_one_registration(event_name, fire)
+
+    async def test_duplicate_legacy_registrations_are_removed_one_at_a_time(self):
+        transport = self._make_transport()
+
+        async def handler(transport):
+            pass
+
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler("on_client_connected", handler)
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler("on_client_connected", handler)
+        transport.remove_event_handler("on_client_connected", handler)
+        self.assertEqual(len(transport._event_handlers["on_client_connected"].handlers), 1)
+        transport.remove_event_handler("on_client_connected", handler)
+        self.assertEqual(transport._event_handlers["on_client_connected"].handlers, [])
+
+    async def _assert_two_argument_removal(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport, client):
+            seen.append(client)
+
+        transport.add_event_handler(event_name, handler)
+        transport.remove_event_handler(event_name, handler)
+        self.assertEqual(transport._event_handlers[event_name].handlers, [])
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(seen, [])
+
+    async def test_a_two_argument_handler_is_removed(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_two_argument_removal(event_name, fire)
 
 
 # ----------------------------------------------------------------------

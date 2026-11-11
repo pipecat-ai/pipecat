@@ -2317,6 +2317,10 @@ class MOQTransport(BaseTransport):
         self._input: MOQInputTransport | None = None
         self._output: MOQOutputTransport | None = None
 
+        # Wrappers adapting legacy client handlers, keyed by
+        # (event_name, original handler); one wrapper per registration.
+        self._legacy_handler_wrappers: dict[tuple, list] = {}
+
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_client_connected")
@@ -2366,8 +2370,30 @@ class MOQTransport(BaseTransport):
             handler: The function to call when the event occurs.
         """
         if event_name in ("on_client_connected", "on_client_disconnected"):
-            handler = _adapt_legacy_client_handler(event_name, handler)
+            adapted = _adapt_legacy_client_handler(event_name, handler)
+            if adapted is not handler:
+                self._legacy_handler_wrappers.setdefault((event_name, handler), []).append(adapted)
+                handler = adapted
         super().add_event_handler(event_name, handler)
+
+    def remove_event_handler(self, event_name: str, handler):
+        """Remove a previously added event handler.
+
+        A legacy ``(transport)``-only client handler is removed by the
+        callback originally passed to :meth:`add_event_handler`, as any
+        other handler.
+
+        Args:
+            event_name: The name of the event the handler was added for.
+            handler: The handler to remove.
+        """
+        key = (event_name, handler)
+        wrappers = self._legacy_handler_wrappers.get(key)
+        if wrappers:
+            handler = wrappers.pop()
+            if not wrappers:
+                del self._legacy_handler_wrappers[key]
+        super().remove_event_handler(event_name, handler)
 
     # ------------------------------------------------------------------
     # MOQTransportClient callbacks.
