@@ -618,6 +618,31 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
             await expand_currency("$2.05 million", "*"), "two point zero five million dollars"
         )
 
+    async def test_abbreviated_scale_after_amount(self):
+        # "$2.5m" used to read "two dollars and fifty centsm", and "$5m" was left
+        # for expand_units to turn into "$5 meters" in the full formatter.
+        self.assertEqual(
+            await expand_currency("They raised $2.5m", "*"),
+            "They raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("a $1.5bn deal", "*"), "a one point five billion dollars deal"
+        )
+        self.assertEqual(await expand_currency("$5m", "*"), "five million dollars")
+        self.assertEqual(await expand_currency("$500k", "*"), "five hundred thousand dollars")
+        self.assertEqual(await expand_currency("$3B", "*"), "three billion dollars")
+        self.assertEqual(await expand_currency("£3.5mn", "*"), "three point five million pounds")
+        self.assertEqual(await expand_currency("$1T", "*"), "one trillion dollars")
+        self.assertEqual(
+            await VoiceFormatter()("raised $5m last year", "*"),
+            "raised five million dollars last year",
+        )
+
+    async def test_amount_followed_by_other_letters_is_left_alone(self):
+        # An unrecognised suffix is not a scale, and the amount is not read as cents.
+        self.assertEqual(await expand_currency("$1.5x", "*"), "$1.5x")
+        self.assertEqual(await expand_currency("$5mo", "*"), "$5mo")
+
     async def test_currency_code_stays_apart_from_the_amount(self):
         # "US$5" used to expand to "USfive dollars".
         self.assertEqual(await expand_currency("US$5", "*"), "US five dollars")
