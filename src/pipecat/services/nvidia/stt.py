@@ -106,14 +106,15 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-def _speaker_tagged_words(alternative) -> list[tuple[str, int | None]]:
-    """Return an alternative's ``(word, speaker_tag)`` pairs, ``None`` for untagged words."""
+def _speaker_tagged_words(alternative) -> list[tuple[str, int | None]] | None:
+    """Return an alternative's ``(word, speaker_tag)`` pairs, or ``None`` without words."""
+    # Models such as canary-1b-asr return no words, so there is nothing to split.
+    words = getattr(alternative, "words", None)
+    if not words:
+        return None
     # NVIDIA numbers speakers from 1; 0 is the protobuf default for a word the
     # server did not tag.
-    return [
-        (getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None)
-        for word in getattr(alternative, "words", None) or []
-    ]
+    return [(getattr(word, "word", ""), getattr(word, "speaker_tag", 0) or None) for word in words]
 
 
 @dataclass

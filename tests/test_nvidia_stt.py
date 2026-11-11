@@ -5,10 +5,12 @@
 #
 
 import asyncio
+import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from loguru import logger
 
 pytest.importorskip("riva.client")
 
@@ -730,6 +732,27 @@ async def test_segmented_diarized_result_yields_one_frame_per_speaker_run():
         (TranscriptionSpeaker("2", 2), "Speaker 2: hello"),
     ]
     assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_segmented_result_without_words_is_not_split():
+    """A model that returns no words, such as canary-1b-asr, yields each segment whole."""
+    service = NvidiaSegmentedSTTService(
+        api_key="test-key",
+        settings=NvidiaSegmentedSTTService.Settings(speaker_diarization=True),
+    )
+    service._config = service._create_recognition_config()
+    response = _streaming_response("Hi there")
+    service._asr_service = SimpleNamespace(offline_recognize=lambda audio, config, future: response)
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="DEBUG", format="{message}")
+    try:
+        frames = [f async for f in service.run_stt(b"audio") if isinstance(f, TranscriptionFrame)]
+    finally:
+        logger.remove(handler_id)
+
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hi there")]
+    assert "could not split" not in sink.getvalue()
 
 
 if __name__ == "__main__":
