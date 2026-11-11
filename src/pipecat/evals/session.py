@@ -29,7 +29,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 from loguru import logger
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -84,6 +84,10 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
+        max_user_audio_buffer_bytes: Optional limit on the mono 16-bit PCM
+            assembled by ``say_with_pauses``, including synthesized text and
+            silence. Requires a positive, even integer. ``None`` leaves the
+            buffer unrestricted.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -106,6 +110,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    max_user_audio_buffer_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

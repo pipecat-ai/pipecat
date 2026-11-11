@@ -760,17 +760,30 @@ class EvalClient:
 
         Args:
             parts: Text to speak, or the milliseconds of silence between texts.
+
+        Raises:
+            ValueError: If a pause is invalid or the assembled PCM exceeds
+                ``max_user_audio_buffer_bytes`` when that limit is configured.
         """
         assert self._sink is not None  # pipeline built before any send
         assert self._user_tts is not None  # pauses need a voice to speak them
         await self._drop_bot_speech_if_talking_over()
         sample_rate = self._user_tts.sample_rate
         pcm = bytearray()
+        maximum = self._session_params.max_user_audio_buffer_bytes
         for part in parts:
             if isinstance(part, str):
-                pcm.extend(await self._user_tts.synthesize(part))
+                audio = await self._user_tts.synthesize(part)
+                if maximum is not None and len(audio) > maximum - len(pcm):
+                    raise ValueError("The eval caller exceeded its PCM buffer limit")
+                pcm.extend(audio)
             else:
-                pcm.extend(b"\x00\x00" * (sample_rate * part // 1000))
+                if maximum is not None and (type(part) is not int or part < 0 or sample_rate <= 0):
+                    raise ValueError("The eval caller has an invalid audio pause")
+                samples = sample_rate * part // 1000
+                if maximum is not None and samples * 2 > maximum - len(pcm):
+                    raise ValueError("The eval caller exceeded its PCM buffer limit")
+                pcm.extend(b"\x00\x00" * samples)
         for frame in (
             TTSStartedFrame(),
             TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
