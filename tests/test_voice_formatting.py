@@ -356,6 +356,18 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
+    async def test_speed_written_with_a_slash(self):
+        # "km/h" used to expand only "km", leaving "100 kilometers/h".
+        self.assertEqual(
+            await expand_units("Limit is 100 km/h", "*"), "Limit is 100 kilometers per hour"
+        )
+        self.assertEqual(await expand_units("at 50km/h", "*"), "at 50 kilometers per hour")
+        self.assertEqual(await expand_units("1 km/h", "*"), "1 kilometer per hour")
+        self.assertEqual(
+            await expand_units("wind at 9.8 m/s", "*"), "wind at 9.8 meters per second"
+        )
+        self.assertEqual(await expand_units("5m/s", "*"), "5 meters per second")
+
     async def test_km(self):
         result = await expand_units("5km away", "*")
         self.assertIn("kilometers", result)
