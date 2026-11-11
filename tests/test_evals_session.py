@@ -2304,6 +2304,52 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.failures[0].kind, "missing_function_call")
 
+    async def test_cancelled_call_stops_after_the_cancel_tool_starts(self):
+        # The bot reports the cancel tool running, then the call it cancelled
+        # stopping, back to back. The events keep that order, so a scenario can
+        # expect the cancel tool first and the cancelled call after it.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_turtles"},
+                    "tool_call_id": "call_cancel",
+                },
+            ),
+            _rtvi(
+                "llm-function-call-stopped",
+                {
+                    "function_name": "write_report",
+                    "tool_call_id": "call_turtles",
+                    "cancelled": True,
+                },
+            ),
+        )
+        scenario = EvalScriptScenario(
+            name="cancel_then_stopped",
+            turns=[
+                EvalScriptTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call",
+                            within_ms=2000,
+                            calls=[EvalFunctionCall(name="cancel_write_report")],
+                        ),
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=2000,
+                            calls=[EvalFunctionCall(name="write_report", args={"cancelled": True})],
+                        ),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
     async def test_text_mismatch_fails_clearly(self):
         self.server.on_text(
             "hi",
