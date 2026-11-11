@@ -629,6 +629,7 @@ class EvalClient:
             # HTTP 403 for a spent token, nothing listening) surfaces here.
             if isinstance(frame.exception, (InvalidHandshake, OSError)):
                 self._refuse("connect_failed", str(frame.exception))
+            self._stream.harness_failed(str(frame.error))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
         # Before the pipeline runs, so the persona is configured before it can

@@ -93,6 +93,10 @@ class EvalBotEndedError(Exception):
     """The bot ended the call before the awaited event arrived, so it never will."""
 
 
+class EvalHarnessError(Exception):
+    """A service in the harness's own pipeline failed, so what the bot does next is no evidence."""
+
+
 class EvalEventStream:
     """The bot's output as events: a queue the drivers read, fed by the pipeline.
 
@@ -176,6 +180,9 @@ class EvalEventStream:
         # Whether the bot closed the connection. Kept apart from its queued
         # bot_ended event, which a drop of the bot's pending output discards.
         self._bot_ended = False
+        # The harness's first pipeline error, kept apart from its queued
+        # harness_error event for the same reason.
+        self._harness_error: str | None = None
 
     @property
     def bot_speaking(self) -> bool:
@@ -211,6 +218,11 @@ class EvalEventStream:
     def bot_has_ended(self) -> bool:
         """Whether the bot ended the call (see :meth:`bot_ended`)."""
         return self._bot_ended
+
+    @property
+    def harness_error(self) -> str | None:
+        """The harness's first pipeline error, if any (see :meth:`harness_failed`)."""
+        return self._harness_error
 
     @property
     def bot_speech_outstanding(self) -> str:
@@ -265,6 +277,15 @@ class EvalEventStream:
         """The bot closed the connection: it sends nothing more, and is no longer speaking."""
         self._bot_ended = True
         self._bot_quiet.set()
+
+    def harness_failed(self, error: str) -> None:
+        """A service in the harness's own pipeline failed; the first error is kept.
+
+        Args:
+            error: The error's description.
+        """
+        if self._harness_error is None:
+            self._harness_error = error
 
     def _update_bot_transcribed(self) -> None:
         if (
@@ -374,6 +395,7 @@ class EvalEventStream:
                 arrive. The harness's transcription of what the bot said last
                 (audio mode) is waited for first, since it can land after the
                 bot is gone.
+            EvalHarnessError: If the harness's own pipeline failed.
         """
 
         def wanted(event: dict) -> bool:
@@ -386,6 +408,8 @@ class EvalEventStream:
                     self._trace.log(f"match: {event_type!r} from earlier in the turn")
                     return self._turn_log[i]
         while True:
+            if self._harness_error is not None:
+                raise EvalHarnessError(self._harness_error)
             if self._bot_ended and self._queue.empty():
                 if not await self.wait_bot_transcribed(deadline - time.monotonic()):
                     raise TimeoutError()
