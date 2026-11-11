@@ -613,7 +613,10 @@ class EvalClient:
         async def _on_pipeline_error(_worker, frame):
             # The transport connects as it starts, so a refused connection (an
             # HTTP 403 for a spent token, nothing listening) surfaces here.
-            if isinstance(frame.exception, (InvalidHandshake, OSError)):
+            from_target = (
+                frame.processor is transport.input() or frame.processor is transport.output()
+            )
+            if from_target and isinstance(frame.exception, (InvalidHandshake, OSError)):
                 self._refuse("connect_failed", str(frame.exception))
             self._stream.harness_failed(str(frame.error))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
@@ -634,19 +637,28 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
-            EvalBotUnavailableError: If the bot refuses the connection or closes
-                it before sending ``bot-ready``.
+            EvalBotUnavailableError: If the bot refuses the connection, closes
+                before ``bot-ready``, or a harness service fails during startup.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
         # the bot answers; our handler sets _handshake_over.
         timeout_s = self._session_params.bot_ready_timeout_s
+        ready = asyncio.create_task(self._handshake_over.wait(), name="eval-bot-ready")
+        failed = asyncio.create_task(self._stream.wait_harness_error(), name="eval-handshake-error")
         try:
-            await asyncio.wait_for(self._handshake_over.wait(), timeout=timeout_s)
-        except TimeoutError:
-            raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms") from None
-        if self._refusal is not None:
-            raise self._refusal
+            done, _ = await asyncio.wait(
+                (ready, failed), timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED
+            )
+            if self._refusal is not None:
+                raise self._refusal
+            self._raise_harness_failure()
+            if ready not in done:
+                raise TimeoutError(f"bot-ready not received within {int(timeout_s * 1000)}ms")
+        finally:
+            ready.cancel()
+            failed.cancel()
+            await asyncio.gather(ready, failed, return_exceptions=True)
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -669,6 +681,12 @@ class EvalClient:
         # set it up.
         if self._params.context:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
+        self._raise_harness_failure()
+
+    def _raise_harness_failure(self) -> None:
+        """Preserve a startup service error as a harness failure."""
+        if self._stream.harness_error is not None:
+            raise EvalBotUnavailableError("error", self._stream.harness_error)
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -837,7 +855,7 @@ class EvalClient:
 
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
-        if not self._handshake_over.is_set():
+        if not self._handshake_over.is_set() and self._stream.harness_error is None:
             self._refusal = EvalBotUnavailableError(kind, reason)
             self._handshake_over.set()
 

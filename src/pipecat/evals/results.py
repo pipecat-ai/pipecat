@@ -269,6 +269,9 @@ class EvalSimulationResult:
         error: When set, the run did not complete (a failed connect, a harness
             error); ``succeeded`` is then False and the run is neither a goal
             success nor a goal failure.
+        failure_kind: The run-level failure category, such as ``connect_failed``
+            for an unavailable target or ``error`` for a failed harness service.
+            ``None`` for results without a recorded run-level failure category.
         metrics: The quality metrics' outcomes.
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use);
@@ -307,6 +310,7 @@ class EvalSimulationResult:
     confidence: float | None = None
     probabilities: dict[str, float] = field(default_factory=dict)
     success: str = ""
+    failure_kind: str | None = None
 
     @property
     def passed(self) -> bool:
