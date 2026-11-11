@@ -6,7 +6,8 @@
 
 import asyncio
 import unittest
-from typing import Any, TypedDict
+from enum import Enum
+from typing import Any, Literal, TypedDict
 
 from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.services.llm_service import FunctionCallParams
@@ -243,6 +244,61 @@ class TestDirectFunction(unittest.TestCase):
         self.assertIs(called["params"], params)
         self.assertEqual(called["name"], "Alice")
         self.assertEqual(called["age"], 30)
+
+    def test_enum_and_literal_params(self):
+        class Unit(Enum):
+            C = "celsius"
+            F = "fahrenheit"
+
+        class Priority(Enum):
+            LOW = 1
+            HIGH = 2
+
+        async def my_function_enum_params(
+            params: FunctionCallParams,
+            unit: Unit,
+            priority: Priority,
+            mode: Literal["fast", "slow"],
+            count: Literal[1, 2, 3],
+            mixed: Literal["a", 1],
+        ):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function_enum_params)
+        self.assertEqual(
+            func.properties,
+            {
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+                "priority": {"type": "integer", "enum": [1, 2]},
+                "mode": {"type": "string", "enum": ["fast", "slow"]},
+                "count": {"type": "integer", "enum": [1, 2, 3]},
+                "mixed": {"enum": ["a", 1]},
+            },
+        )
+
+    def test_invoke_converts_enum_args(self):
+        called = {}
+
+        class Unit(Enum):
+            C = "celsius"
+            F = "fahrenheit"
+
+        class DummyParams:
+            pass
+
+        async def my_function(params: DummyParams, unit: Unit, mode: str):
+            called["unit"] = unit
+            called["mode"] = mode
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        params = DummyParams()
+        args = {"unit": "celsius", "mode": "fast"}
+
+        asyncio.run(func.invoke(args=args, params=params))
+        self.assertIsInstance(called["unit"], Unit)
+        self.assertEqual(called["unit"], Unit.C)
+        self.assertEqual(called["mode"], "fast")
 
 
 if __name__ == "__main__":
