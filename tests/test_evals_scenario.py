@@ -14,6 +14,7 @@ from loguru import logger
 from pipecat.evals.scenario import (
     EvalExpectation,
     EvalFunctionCall,
+    EvalRubric,
     EvalScenarioFile,
     EvalScriptScenario,
     EvalScriptTurn,
@@ -117,6 +118,74 @@ class TestScenarioGroups(unittest.TestCase):
         self.assertTrue(all(isinstance(s, EvalSimulationScenario) for s in scenarios))
         self.assertEqual([s.goal for s in scenarios], ["Book a table.", "Cancel a booking."])
         self.assertEqual(scenarios["diner/book"].persona, "An impatient diner.")
+
+    def test_an_entry_with_success_and_no_persona_or_turns_is_a_rubric(self):
+        scenarios = EvalScenarioFile.load(
+            _write(
+                """
+                name: diner
+                judge: {eval: {service: ollama, model: judge}}
+                metrics:
+                  - name: politeness
+                    criterion: "stays polite"
+                scenarios:
+                  - name: simulated
+                    persona: "An impatient diner."
+                    goal: "Book a table."
+                    success: "the bot booked a table"
+                  - name: production
+                    success: "the bot booked the table the caller asked for"
+                """
+            )
+        )
+        self.assertIsInstance(scenarios["diner/simulated"], EvalSimulationScenario)
+        rubric = scenarios["diner/production"]
+        assert isinstance(rubric, EvalRubric)
+        self.assertEqual(rubric.success, "the bot booked the table the caller asked for")
+        # The file's defaults are merged in, as for any entry.
+        self.assertEqual([m.name for m in rubric.metrics], ["politeness"])
+        self.assertEqual(rubric.judge, {"service": "ollama", "model": "judge"})
+
+    def test_a_rubric_leaves_out_the_measured_metrics_it_takes_from_the_file(self):
+        scenarios = EvalScenarioFile.load(
+            _write(
+                """
+                name: diner
+                metrics:
+                  - name: politeness
+                    criterion: "stays polite"
+                  - measure: words
+                    max_value: 40
+                scenarios:
+                  - name: simulated
+                    persona: "An impatient diner."
+                    goal: "Book a table."
+                    success: "the bot booked a table"
+                  - name: production
+                    success: "the bot booked the table the caller asked for"
+                """
+            )
+        )
+        simulated = scenarios["diner/simulated"]
+        assert isinstance(simulated, EvalSimulationScenario)
+        self.assertEqual([m.name for m in simulated.metrics], ["politeness", "words"])
+        production = scenarios["diner/production"]
+        self.assertEqual([m.name for m in production.metrics], ["politeness"])
+
+    def test_a_rubric_refuses_a_measured_metric_it_lists_itself(self):
+        path = _write(
+            """
+            name: diner
+            scenarios:
+              - name: production
+                success: "the bot booked a table"
+                metrics:
+                  - measure: words
+                    max_value: 40
+            """
+        )
+        with self.assertRaisesRegex(ValueError, "metric 'words' is measured"):
+            EvalScenarioFile.load(path)
 
     def test_a_file_knows_its_name_and_path_and_finds_a_scenario_by_name(self):
         path = _write(GROUP)

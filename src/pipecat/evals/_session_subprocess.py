@@ -26,12 +26,15 @@ from loguru import logger
 from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
 from pipecat.evals.scenario import EvalScenarioFile
 from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.simulation import EvalRubric
 from pipecat.evals.suite import capture_pipeline_logs
 
 
 async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
     """Build and run the session for the scenario named in ``config``, whichever kind it is."""
     loaded = EvalScenarioFile.load(Path(config["scenario_path"]))[config["scenario_name"]]
+    if isinstance(loaded, EvalRubric):
+        raise ValueError(f"{loaded.name} is a rubric, which has nothing to run")
     params = EvalSessionParams.model_validate(config["params"])
     session = EvalSession.from_scenario(loaded, config["bot_url"], params=params)
     return await session.run()

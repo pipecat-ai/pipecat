@@ -123,7 +123,7 @@ from pipecat.evals.results import (
 from pipecat.evals.scenario import EvalKind, EvalScenarioFile
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
-from pipecat.evals.simulation import EvalSimulationScenario
+from pipecat.evals.simulation import EvalRubric, EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import warn_deprecated
 
@@ -478,13 +478,17 @@ class EvalRun:
         """The run's scenario: as loaded when the run was built, else read from its file.
 
         Raises:
-            ValueError: If the file is invalid.
+            ValueError: If the file is invalid, or the scenario is a rubric,
+                which has nothing to run.
             KeyError: If the file holds no scenario of this name.
             FileNotFoundError: If the file doesn't exist.
         """
         loaded = self.loaded
         if loaded is None:
-            loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+            found = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+            if isinstance(found, EvalRubric):
+                raise ValueError(f"{self.scenario} is a rubric, which has nothing to run")
+            loaded = self.loaded = found
         return loaded
 
 
@@ -712,6 +716,9 @@ class EvalManifest:
                 except (ValueError, FileNotFoundError):
                     named = [(file_name, None)]
                 for run_name, one in named:
+                    # A rubric judges a call that already happened; there's nothing to run.
+                    if isinstance(one, EvalRubric):
+                        continue
                     kind, attempts = EvalKind.SCRIPT, settings.repeat
                     if isinstance(one, EvalSimulationScenario):
                         kind = EvalKind.SIMULATION
