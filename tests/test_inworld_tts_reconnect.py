@@ -83,8 +83,11 @@ class _FakeInworld:
                     # to flush to the socket before abort(), otherwise abort() discards
                     # buffered audioChunk / flushCompleted / contextClosed frames.
                     transport = websocket.transport
+                    deadline = asyncio.get_running_loop().time() + 5
                     while not transport.is_closing() and transport.get_write_buffer_size() > 0:
-                        await asyncio.sleep(0)
+                        if asyncio.get_running_loop().time() > deadline:
+                            break
+                        await asyncio.sleep(0.001)
                     transport.abort()
                     return
 
