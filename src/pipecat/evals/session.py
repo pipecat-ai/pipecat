@@ -84,6 +84,9 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
+        require_audio_support: Refuse audio runs unless the target advertises
+            the requested transport directions before ``bot-ready``. False
+            preserves compatibility with targets that predate this metadata.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -106,6 +109,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    require_audio_support: bool = False
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

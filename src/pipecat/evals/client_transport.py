@@ -20,12 +20,20 @@ lays each side out on its own timeline.
 """
 
 import asyncio
+import json
 import time
 import wave
 from pathlib import Path
 
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import create_file_resampler, mix_audio
-from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
+from pipecat.evals.serializer import (
+    EVAL_CAPABILITIES_MESSAGE_TYPE,
+    EvalAudioCapabilities,
+    EvalConnectionFlags,
+    eval_connect_message,
+    parse_eval_capabilities,
+)
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -393,9 +401,32 @@ class EvalClientTransport(RTVIClientTransport):
         super().__init__(*args, **kwargs)
         self._flags = flags or EvalConnectionFlags()
         self._recorder = recorder
+        self._audio_capabilities: EvalAudioCapabilities | None = None
+
+    @property
+    def audio_capabilities(self) -> EvalAudioCapabilities | None:
+        """The target's advertised audio configuration, or ``None`` when unknown."""
+        return self._audio_capabilities
+
+    async def _on_message(self, websocket, message):
+        """Read target capabilities before handing the RTVI handshake to the base transport."""
+        if not self.bot_ready:
+            try:
+                decoded = json.loads(message)
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                decoded = None
+            if (
+                isinstance(decoded, dict)
+                and decoded.get("label") == RTVI.MESSAGE_LABEL
+                and decoded.get("type") == EVAL_CAPABILITIES_MESSAGE_TYPE
+            ):
+                self._audio_capabilities = parse_eval_capabilities(decoded)
+                return
+        await super()._on_message(websocket, message)
 
     async def _on_connected(self, websocket):
         """Send ``eval-connect`` first, then fire the user's handler and start the handshake."""
+        self._audio_capabilities = None
         await self._session.send(eval_connect_message(self._flags))
         await super()._on_connected(websocket)
 

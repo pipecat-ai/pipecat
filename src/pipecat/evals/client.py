@@ -44,6 +44,7 @@ from pipecat.evals.serializer import (
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
+    EvalAudioCapabilities,
     EvalClientSerializer,
     EvalConnectionFlags,
     EvalFunctionCallCancelFrame,
@@ -265,6 +266,7 @@ class _BotFrameSink(FrameProcessor):
         *,
         persona: EvalPersona | None = None,
         persona_hears: bool = False,
+        answer_enabled: bool = True,
     ):
         """Initialize the sink.
 
@@ -273,11 +275,25 @@ class _BotFrameSink(FrameProcessor):
             persona: The simulated caller, else ``None``.
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
+            answer_enabled: Whether the caller may answer before admission.
         """
         super().__init__()
         self._stream = stream
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
+        self._answer_enabled = answer_enabled
+        self._pending_answer: LLMContextFrame | None = None
+
+    async def allow_answers(self) -> None:
+        """Admit the caller and replay an already observed greeting once."""
+        self._answer_enabled = True
+        pending, self._pending_answer = self._pending_answer, None
+        await self._answer(pending)
+
+    async def cleanup(self):
+        """Release any greeting held while the target's support was checked."""
+        self._pending_answer = None
+        await super().cleanup()
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -317,6 +333,9 @@ class _BotFrameSink(FrameProcessor):
     async def _answer(self, frame: LLMContextFrame | None) -> None:
         """Push the frame that has the persona answer, unless there is none or it hung up."""
         if frame is None or self._persona is None or self._persona.hung_up:
+            return
+        if not self._answer_enabled:
+            self._pending_answer = frame
             return
         await self.push_frame(frame)
 
@@ -555,6 +574,7 @@ class EvalClient:
         # handshake() waits on it.
         self._handshake_over = asyncio.Event()
         self._refusal: EvalBotUnavailableError | None = None
+        self._audio_capabilities: EvalAudioCapabilities | None = None
         self._next_id = 0
 
     @property
@@ -647,6 +667,18 @@ class EvalClient:
         if self._refusal is not None:
             raise self._refusal
 
+        if self._session_params.require_audio_support:
+            capabilities = self._audio_capabilities
+            needs_input = self.sends_user_audio
+            needs_output = self._params.bot_audio
+            if (needs_input and (capabilities is None or not capabilities.audio_input)) or (
+                needs_output and (capabilities is None or not capabilities.audio_output)
+            ):
+                raise EvalBotUnavailableError(
+                    "error",
+                    "The target has not advertised the audio transport support this run requires",
+                )
+
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
         # transport understands this): raise the function-call report level if it
@@ -668,6 +700,8 @@ class EvalClient:
         # set it up.
         if self._params.context:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
+        if self._sink is not None:
+            await self._sink.allow_answers()
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -905,6 +939,7 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
+            self._audio_capabilities = _transport.audio_capabilities
             self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
@@ -933,7 +968,15 @@ class EvalClient:
         context = persona.context if persona is not None else LLMContext()
         # With no STT there is no aggregator to hand the persona the bot's turns;
         # it hears them through the sink instead.
-        self._sink = _BotFrameSink(self._stream, persona=persona, persona_hears=bot_stt is None)
+        self._sink = _BotFrameSink(
+            self._stream,
+            persona=persona,
+            persona_hears=bot_stt is None,
+            answer_enabled=not (
+                self._session_params.require_audio_support
+                and (self.sends_user_audio or self._params.bot_audio)
+            ),
+        )
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
