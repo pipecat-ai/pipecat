@@ -13,9 +13,10 @@ other files::
     judge: !include judge_audio.yaml
     task_messages: !include prompts/greeting.yaml
 
-Include paths are not confined to the base directory; ``..`` and absolute
-paths reach anywhere the process can read. Use these loaders only on trusted
-documents.
+A path resolves relative to the file that names it, so an included file's own
+includes resolve against its directory. Paths are not confined to that
+directory; ``..`` and absolute paths reach anywhere the process can read. Use
+these loaders only on trusted documents.
 """
 
 from pathlib import Path
@@ -27,9 +28,11 @@ import yaml
 def add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path) -> None:
     """Register an ``!include <relative-path>`` constructor on ``loader_class``.
 
-    Included files load with the same loader class, so nested includes work and
-    scalars get the same resolver treatment as the top-level document. Paths
-    resolve against ``base_dir`` and may reach outside it.
+    Paths resolve against ``base_dir`` and may reach outside it. An included
+    file loads with a subclass of the loading class whose own includes resolve
+    against that file's directory, so a fragment's includes work wherever the
+    fragment is included from, and scalars and constructors get the same
+    treatment as in the top-level document.
 
     This mutates ``loader_class``. Register on a private subclass rather than
     on ``yaml.SafeLoader`` itself so the constructor has no global side
@@ -47,7 +50,7 @@ def add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path)
             )
         include_path = base_dir / str(loader.construct_scalar(node))
         with include_path.open(encoding="utf-8") as f:
-            return yaml.load(f, loader_class)
+            return yaml.load(f, include_loader(include_path.parent, base=type(loader)))
 
     loader_class.add_constructor("!include", _include)
 
@@ -61,8 +64,9 @@ def include_loader(
     registered, so ``base`` itself is left untouched.
 
     Args:
-        base_dir: Directory that ``!include`` paths resolve against, typically
-            the directory of the document being loaded.
+        base_dir: Directory that the document's ``!include`` paths resolve
+            against, typically the directory of the document being loaded. An
+            included file's own includes resolve against its directory.
         base: Loader class to subclass. Defaults to ``yaml.SafeLoader``; pass a
             custom SafeLoader subclass to keep its resolvers and constructors.
 

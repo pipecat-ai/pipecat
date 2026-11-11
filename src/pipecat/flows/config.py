@@ -345,10 +345,11 @@ class FlowConfig(BaseModel):
 
         Args:
             text: The YAML document.
-            base_dir: Directory that ``!include`` paths resolve against. When
-                omitted, ``!include`` is unavailable. An include can read any
-                file the process can read, so omit ``base_dir`` for text from
-                an untrusted source.
+            base_dir: Directory that the document's ``!include`` paths resolve
+                against; an included file's own includes resolve against its
+                directory. When omitted, ``!include`` is unavailable. An
+                include can read any file the process can read, so omit
+                ``base_dir`` for text from an untrusted source.
 
         Returns:
             The validated config.
@@ -372,11 +373,11 @@ class FlowConfig(BaseModel):
     def from_file(cls, path: str | Path) -> "FlowConfig":
         """Load a config from a ``.yaml``, ``.yml``, or ``.json`` file.
 
-        YAML files may use ``!include`` with paths relative to the file's
-        directory. Included paths are not confined to that directory, so load
-        only files you control. For a config from another source, such as a
-        request body, use :meth:`from_yaml` without ``base_dir`` or
-        :meth:`from_json`.
+        YAML files may use ``!include`` with paths relative to the directory of
+        the file that names them. Included paths are not confined to that
+        directory, so load only files you control. For a config from another
+        source, such as a request body, use :meth:`from_yaml` without
+        ``base_dir`` or :meth:`from_json`.
 
         Args:
             path: Path to the file.

@@ -247,7 +247,7 @@ A few things to know when writing one:
 Shared `judge:` and `user:` blocks live in small files in `scenarios/`
 (`judge_audio.yaml`, `judge_text.yaml`, `user_audio.yaml`, and
 `simulator.yaml` for simulations). Scenarios pull them in with `!include`,
-relative to the scenario file:
+relative to the file that names it:
 
 ```yaml
 user: !include ../user_audio.yaml
