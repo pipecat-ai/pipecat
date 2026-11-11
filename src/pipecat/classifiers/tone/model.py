@@ -20,7 +20,7 @@ try:
     from tokenizers import Tokenizer
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error('In order to use Pipecat Tone, you need to `uv add "pipecat-ai[expressive]"`.')
+    logger.error('In order to use Pipecat Tone, you need to `uv add "pipecat-ai[expressivity]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 TONE_REPO = "pipecat-ai/tone-models"
