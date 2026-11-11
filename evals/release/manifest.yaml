@@ -539,6 +539,8 @@ suite:
     scenarios: [scripted/expression_tagger, scripted/perception]
   - bot: expressive-conversation/expressive-conversation-hume-audio-decisions.py
     scenarios: [scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-voice-reader.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services
