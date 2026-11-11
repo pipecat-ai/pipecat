@@ -148,6 +148,20 @@ class SileroVADAnalyzer(VADAnalyzer):
 
     Implements VAD analysis using the pre-trained Silero ONNX model for
     accurate voice activity detection. Supports 8kHz and 16kHz sample rates.
+    Speech start and stop follow :class:`VADParams`, including optional
+    hysteresis via ``hold_confidence``.
+
+    Example::
+
+        vad = SileroVADAnalyzer(
+            params=VADParams(
+                confidence=0.55,
+                hold_confidence=0.35,
+                start_secs=0.2,
+                stop_secs=0.8,
+                min_volume=0.6,
+            )
+        )
 
     The model's recurrent state is reset about every two seconds of audio, but
     only during clear non-speech. Non-speech such as music, or long silence at
