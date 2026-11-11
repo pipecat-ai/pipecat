@@ -34,11 +34,9 @@ from pipecat.expressive.perception import (
 )
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
-    EagerTranscriptionFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InterimTranscriptionFrame,
     LLMContextAssistantTurnFrame,
     MetricsFrame,
     PerceptionFrame,
@@ -189,7 +187,7 @@ class PerceptionReader(FrameProcessor):
     A transcription that already carries a reading, such as the STT service's,
     gets the reader's added to it, and the reader declares the signals declared
     before it together with its own. With ``replace_perception``, the reader's
-    reading is the only one: what was perceived before it goes no further.
+    reading replaces the one the transcription carries instead.
 
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)`` for the LLM to read
@@ -243,8 +241,8 @@ class PerceptionReader(FrameProcessor):
         Args:
             sources: The classifiers to ask, each with its questions and its
                 timeout.
-            replace_perception: Whether the reader's reading replaces what was
-                perceived before it, such as by the STT service, instead of
+            replace_perception: Whether the reader's reading replaces the one
+                a transcription carries, such as the STT service's, instead of
                 being added to it.
             **kwargs: Additional arguments passed to the parent.
 
@@ -266,9 +264,9 @@ class PerceptionReader(FrameProcessor):
         self._sources = list(sources)
         self._text_sources = [s for s in self._sources if not s.classifier.supports_audio]
         self._audio_sources = [s for s in self._sources if s.classifier.supports_audio]
-        # Whether what was perceived before the reader is dropped, and
-        # otherwise the signals declared before it, which its transcriptions
-        # carry on.
+        # Whether the reader's reading replaces the one a transcription
+        # carries, and the signals declared before the reader, which its
+        # transcriptions can carry too.
         self._replace_perception = replace_perception
         self._declared_before: PerceptionCapabilities | None = None
         # The bot's last reply, which the user's turn is read against.
@@ -347,12 +345,6 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, (InterimTranscriptionFrame, EagerTranscriptionFrame)):
-            await self._handle_provisional_transcription(frame)
-            await self.push_frame(frame, direction)
-        elif self._replaces(frame, direction):
-            # What was perceived before the reader goes no further.
-            pass
         elif isinstance(frame, PerceptionMetadataFrame) and direction == FrameDirection.DOWNSTREAM:
             # Declared again with the reader's signals, which its transcriptions carry too.
             await self._handle_perception_metadata(frame)
@@ -386,14 +378,6 @@ class PerceptionReader(FrameProcessor):
         """Whether the transcription waits for an audio reading."""
         return bool(self._audio_sources and frame.text.strip() and self.is_usable)
 
-    def _replaces(self, frame: Frame, direction: FrameDirection) -> bool:
-        """Whether the frame is a perception from before the reader, which the reader replaces."""
-        return (
-            self._replace_perception
-            and direction == FrameDirection.DOWNSTREAM
-            and isinstance(frame, (PerceptionFrame, PerceptionMetadataFrame))
-        )
-
     async def _hold_transcription(self, frame: TranscriptionFrame):
         # The text sources read it while it waits for its speech to be heard.
         self._held.append(_HeldTranscription(frame, self._read_text(frame.text)))
@@ -401,16 +385,9 @@ class PerceptionReader(FrameProcessor):
             self._release_task = self.create_task(self._release_transcriptions())
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
-        reading = None
         if frame.text.strip() and self.is_usable:
             reading = self._reading(await self._wait(self._read_text(frame.text)))
-        self._set_reading(frame, reading)
-
-    async def _handle_provisional_transcription(
-        self, frame: InterimTranscriptionFrame | EagerTranscriptionFrame
-    ):
-        if self._replace_perception:
-            frame.perception = None
+            self._set_reading(frame, reading)
 
     async def _handle_perception_metadata(self, frame: PerceptionMetadataFrame):
         self._declared_before = frame.perception
@@ -623,10 +600,12 @@ class PerceptionReader(FrameProcessor):
         return [signal for signals in read for signal in signals] if read else None
 
     def _set_reading(self, frame: TranscriptionFrame, reading: list[PerceptionSignal] | None):
-        """Set the reading on a transcription, added to the one it carries unless replacing it."""
+        """Set the reading on a transcription, replacing or added to the one it carries."""
+        if not reading:
+            return
         if self._replace_perception:
             frame.perception = reading
-        elif reading:
+        else:
             frame.perception = merge_perception(frame.perception, reading)
 
     async def _cancel_clip_reads(self):

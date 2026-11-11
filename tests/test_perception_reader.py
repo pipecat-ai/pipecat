@@ -1581,31 +1581,24 @@ async def test_an_unusable_reader_declares_the_signals_declared_before_it():
 
 
 @pytest.mark.asyncio
-async def test_a_replacing_reader_drops_what_was_perceived_before_it():
+async def test_a_replacing_reader_replaces_the_reading_the_transcription_carries():
     down, _ = await run_test(
         PerceptionReader(
             sources=[_source(FakeClassifier(), "hesitation")], replace_perception=True
         ),
         frames_to_send=[
             PerceptionMetadataFrame(service_name="stt", perception=STT_SIGNALS),
-            PerceptionFrame(perception=[SPEECH_RATE]),
-            _read_by_the_stt(InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now")),
-            _read_by_the_stt(EagerTranscriptionFrame(text="Hello.", user_id="", timestamp="now")),
             _read_by_the_stt(_transcription("Hello.")),
         ],
     )
 
-    assert _declared(down) == [["hesitation"]]
-    assert [f.perception for f in down if isinstance(f, PerceptionFrame)] == [[HESITATION]]
-    provisional = [
-        f for f in down if isinstance(f, (InterimTranscriptionFrame, EagerTranscriptionFrame))
-    ]
-    assert [f.perception for f in provisional] == [None, None]
+    # A turn it doesn't read keeps the STT's reading, so both are still declared.
+    assert _declared(down) == [["hesitation"], ["speech_rate", "hesitation"]]
     assert _perception(down) == [[HESITATION]]
 
 
 @pytest.mark.asyncio
-async def test_a_replacing_reader_leaves_a_turn_it_doesnt_read_unread():
+async def test_a_replacing_reader_keeps_the_reading_of_a_turn_it_doesnt_read():
     down, _ = await run_test(
         PerceptionReader(
             sources=[_source(FakeClassifier(delay=1.0), "hesitation", timeout=0.05)],
@@ -1614,4 +1607,4 @@ async def test_a_replacing_reader_leaves_a_turn_it_doesnt_read_unread():
         frames_to_send=[_read_by_the_stt(_transcription("Hello."))],
     )
 
-    assert _perception(down) == [None]
+    assert _perception(down) == [[SPEECH_RATE]]
