@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.pipeline.job_context import JobError
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.live import events
@@ -862,7 +863,7 @@ async def test_intermediate_function_call_result_is_dropped():
 
 
 @pytest.mark.asyncio
-async def test_cancelled_function_call_reports_cancellation_to_the_backend():
+async def test_cancelled_function_call_reports_an_unknown_outcome_to_the_backend():
     service = _make_service(delegation=_responses_delegation())
     recorder = _EventRecorder()
     service.send_client_event = recorder
@@ -874,7 +875,24 @@ async def test_cancelled_function_call_reports_cancellation_to_the_backend():
 
     (item,) = recorder.of_type("response.item.create")
     assert item["item"]["call_id"] == "call_1"
-    assert "cancelled" in json.loads(item["item"]["output"])["error"]
+    assert item["item"]["output"] == async_tool_messages.CANCELLED_CALL_RESULT
+
+
+@pytest.mark.asyncio
+async def test_cancelled_function_call_sends_what_the_handler_reported():
+    service = _make_service(delegation=_responses_delegation())
+    recorder = _EventRecorder()
+    service.send_client_event = recorder
+    service._open_function_calls["call_1"] = "item_d1"
+
+    await service.push_frame(
+        FunctionCallCancelFrame(
+            function_name="get_weather", tool_call_id="call_1", result={"status": "submitted"}
+        )
+    )
+
+    (item,) = recorder.of_type("response.item.create")
+    assert json.loads(item["item"]["output"]) == {"status": "submitted"}
 
 
 @pytest.mark.asyncio
