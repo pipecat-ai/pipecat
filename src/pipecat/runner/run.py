@@ -138,7 +138,6 @@ from pipecat.runner.types import (
     LiveKitRunnerArguments,
     MOQRunnerArguments,
     RunnerArguments,
-    SIPRunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
@@ -1881,7 +1880,7 @@ async def _run_sip(args: argparse.Namespace):
 
     from pipecat.runner.sip import cleanup, configure, sip_runner_arguments
 
-    body = yaml.safe_load(Path(args.runner_body).read_text()) if args.runner_body else None
+    body = _runner_body(args)
     if body is None:
         body = {}
 
