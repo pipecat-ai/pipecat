@@ -79,7 +79,13 @@ class _FakeInworld:
                 await self._send(websocket, context_id, contextClosed={})
                 closed += 1
                 if index == 0 and closed == self.drop_after_turns:
-                    websocket.transport.abort()
+                    # Wait for pending transport writes (e.g. Windows ProactorEventLoop)
+                    # to flush to the socket before abort(), otherwise abort() discards
+                    # buffered audioChunk / flushCompleted / contextClosed frames.
+                    transport = websocket.transport
+                    while not transport.is_closing() and transport.get_write_buffer_size() > 0:
+                        await asyncio.sleep(0)
+                    transport.abort()
                     return
 
     @staticmethod
