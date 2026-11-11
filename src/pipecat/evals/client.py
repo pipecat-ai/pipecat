@@ -613,6 +613,7 @@ class EvalClient:
         async def _on_pipeline_error(_worker, frame):
             # The transport connects as it starts, so a refused connection (an
             # HTTP 403 for a spent token, nothing listening) surfaces here.
+            # EvalClientTransport caches the same processors used in the pipeline.
             from_target = (
                 frame.processor is transport.input() or frame.processor is transport.output()
             )
