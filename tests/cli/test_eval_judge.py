@@ -36,6 +36,21 @@ scenarios:
   - name: impossible
 """
 
+RUBRICS = """\
+name: diner
+judge: {eval: {service: ollama, model: judge}}
+scenarios:
+  - name: simulated
+    persona: A caller.
+    goal: Book a table.
+    success: the bot booked a table
+  - name: production
+    success: the bot booked the table the caller asked for
+    metrics:
+      - name: politeness
+        criterion: stays polite
+"""
+
 CONVERSATION = [
     {"role": "user", "content": "A table at six."},
     {"role": "tool_call", "name": "book", "arguments": {"time": "6"}, "cancelled": False},
@@ -159,6 +174,27 @@ class TestEvalJudge(unittest.TestCase):
         self.assertTrue(by_file["run.conversation.json"]["passed"])
         self.assertFalse(by_file["broken.conversation.json"]["passed"])
         self.assertIn("JSONDecodeError", by_file["broken.conversation.json"]["error"])
+
+    def test_a_rubric_judges_a_recorded_call(self):
+        rubrics = self.base / "diner.yaml"
+        rubrics.write_text(RUBRICS)
+        result, records = self._judge(str(rubrics), "-s", "production", str(self.conversation))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(_FakeJudge.configs[0]["model"], "judge")
+        [record] = records
+        self.assertEqual(record["scenario"], "diner/production")
+        self.assertEqual(record["success"], "the bot booked the table the caller asked for")
+        self.assertTrue(record["passed"])
+        self.assertEqual([m["name"] for m in record["metrics"]], ["politeness"])
+
+    def test_a_file_of_simulations_and_rubrics_needs_one_picked(self):
+        rubrics = self.base / "diner.yaml"
+        rubrics.write_text(RUBRICS)
+        result, records = self._judge(str(rubrics), str(self.conversation))
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("diner/simulated", result.output)
+        self.assertIn("diner/production", result.output)
+        self.assertEqual(records, [])
 
     def test_a_file_with_several_simulations_needs_one_picked(self):
         for args in ([], ["-s", "nope"]):

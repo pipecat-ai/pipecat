@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
+from pipecat.evals.simulation import EvalRubric, EvalSimulationMetric, EvalSimulationScenario
 from pipecat.evals.simulation_judge import EvalSimulationJudge
 
 
@@ -143,6 +143,70 @@ class TestSimulationJudge(unittest.IsolatedAsyncioTestCase):
             "judge: politeness = 0.50 (below 1.00): turn 2: turn 2 politeness",
             "\n".join(trace.lines),
         )
+
+
+class TestRubric(unittest.IsolatedAsyncioTestCase):
+    async def test_a_rubric_is_judged_like_a_simulation(self):
+        judge = _FakeJudge(failing=(2,))
+        rubric = EvalRubric(
+            name="booking",
+            success="the bot booked a table",
+            metrics=[EvalSimulationMetric("politeness", "stays polite", min_score=1.0)],
+        )
+        judgement = await EvalSimulationJudge(rubric, judge=judge).judge(MESSAGES)  # type: ignore[arg-type]
+        assert judgement.goal is not None
+        self.assertEqual(judgement.goal.reason, "because the bot booked a table")
+        [politeness] = judgement.metrics
+        self.assertEqual((politeness.score, politeness.passed), (0.5, False))
+
+    async def test_a_rubric_builds_its_judge_from_its_config(self):
+        configs: list[dict] = []
+
+        def from_config(config):
+            configs.append(config)
+            return _FakeJudge()
+
+        judge_config = {"service": "ollama", "model": "judge"}
+        rubric = EvalRubric(name="booking", success="the bot booked a table", judge=judge_config)
+        with patch("pipecat.evals.simulation_judge.EvalJudge.from_config", from_config):
+            await EvalSimulationJudge(rubric).judge(MESSAGES)
+        self.assertEqual(configs, [judge_config])
+
+    def test_from_dict_reads_a_rubric_file_s_keys(self):
+        rubric = EvalRubric.from_dict(
+            {
+                "name": "booking",
+                "judge": {"eval": {"service": "ollama", "model": "judge"}},
+                "success": " the bot booked a table ",
+                "metrics": [{"name": "politeness", "criterion": "stays polite", "min_score": 1}],
+            }
+        )
+        self.assertEqual(rubric.name, "booking")
+        self.assertEqual(rubric.success, "the bot booked a table")
+        self.assertEqual(
+            rubric.metrics, [EvalSimulationMetric("politeness", "stays polite", min_score=1.0)]
+        )
+        self.assertEqual(rubric.judge, {"service": "ollama", "model": "judge"})
+
+    def test_an_invalid_rubric_is_rejected(self):
+        cases = {
+            "no name": {"success": "booked"},
+            "no success": {"name": "r"},
+            "empty success": {"name": "r", "success": ""},
+            "a measured metric": {
+                "name": "r",
+                "success": "booked",
+                "metrics": [{"measure": "words", "max_value": 5}],
+            },
+            "a bad metric": {
+                "name": "r",
+                "success": "booked",
+                "metrics": [{"name": "x", "criterion": "c", "min_score": 2}],
+            },
+        }
+        for case, data in cases.items():
+            with self.subTest(case), self.assertRaisesRegex(ValueError, "^rubric: "):
+                EvalRubric.from_dict(data)
 
 
 if __name__ == "__main__":

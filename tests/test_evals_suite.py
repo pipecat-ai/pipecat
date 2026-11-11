@@ -653,6 +653,13 @@ class TestManifestSimulations(unittest.TestCase):
         # Attempt-major: every scenario's first attempt precedes any second one.
         self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
 
+    def test_a_rubric_entry_has_no_run(self):
+        (self.base / "scenarios" / "mixed.yaml").write_text(
+            SCRIPT.format(name="mixed") + "  - name: production\n    success: it got done\n"
+        )
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [mixed]\n")
+        self.assertEqual([r.scenario for r in manifest.runs], ["mixed/mixed"])
+
     def test_repeat_overrides_a_simulations_runs(self):
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=2)
         self.assertEqual([r.attempt for r in manifest.runs], [1, 2])

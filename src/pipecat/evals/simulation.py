@@ -163,6 +163,77 @@ class EvalSimulationMetric:
 
 
 @dataclass
+class EvalRubric:
+    """What a conversation is judged on, without the caller a simulation plays.
+
+    It judges a conversation the harness didn't drive, such as a production
+    call recorded by
+    :class:`~pipecat.evals.conversation_observer.EvalConversationObserver`,
+    with :class:`~pipecat.evals.simulation_judge.EvalSimulationJudge`. In a
+    scenario file (:mod:`pipecat.evals.scenario`), an entry with a
+    ``success:`` and neither ``persona:`` nor ``turns:`` is a rubric. Its
+    metrics are judged ones: a measured metric needs a live run.
+
+    Parameters:
+        name: The rubric's name.
+        success: What counts as the bot having done its job, judged over the
+            whole conversation.
+        metrics: The criteria every reply is judged on.
+        judge: Judge LLM config, as a simulation's ``judge``.
+
+    Raises:
+        ValueError: If the rubric has a measured metric.
+    """
+
+    name: str
+    success: str
+    metrics: list[EvalSimulationMetric] = field(default_factory=list)
+    judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
+
+    def __post_init__(self):
+        for metric in self.metrics:
+            if metric.measure is not None:
+                raise ValueError(
+                    f"rubric {self.name!r}: metric {metric.name!r} is measured; a rubric's "
+                    "metrics are judged ('criterion:'), since a measure needs a live run"
+                )
+
+    @classmethod
+    def from_dict(cls, data: dict, *, source: str | Path = "rubric") -> "EvalRubric":
+        """Build a rubric from a mapping with a rubric entry's keys.
+
+        Args:
+            data: ``name``, ``success``, and the optional ``metrics`` and
+                ``judge`` block, each as a scenario file writes it; other keys
+                are ignored.
+            source: Where the mapping came from, for error messages.
+
+        Returns:
+            The rubric.
+
+        Raises:
+            ValueError: If a key is invalid, or ``name`` or ``success`` is missing.
+        """
+        where = Path(source)
+        name = data.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{where}: missing or invalid 'name:' field")
+        success = data.get("success")
+        if not success or not isinstance(success, str) or not success.strip():
+            raise ValueError(f"{where}: missing or invalid 'success:' field (a non-empty string)")
+        _, _, judge = _parse_judge_block(data.get("judge"), where)
+        try:
+            return cls(
+                name=name,
+                success=success.strip(),
+                metrics=_parse_metrics(data.get("metrics"), where),
+                judge=judge,
+            )
+        except ValueError as e:
+            raise ValueError(f"{where}: {e}") from e
+
+
+@dataclass
 class EvalSimulationScenario:
     """A parsed simulation file.
 
