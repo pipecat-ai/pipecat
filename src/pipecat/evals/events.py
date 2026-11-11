@@ -182,6 +182,7 @@ class EvalEventStream:
         # The harness's first pipeline error, kept apart from its queued
         # harness_error event for the same reason.
         self._harness_error: str | None = None
+        self._harness_failed = asyncio.Event()
 
     @property
     def bot_speaking(self) -> bool:
@@ -276,6 +277,17 @@ class EvalEventStream:
         """
         if self._harness_error is None:
             self._harness_error = error
+            self._harness_failed.set()
+
+    async def wait_harness_error(self) -> str:
+        """Wait for the harness's first pipeline error without consuming its event.
+
+        Returns:
+            The first error's description, also available to other waiters.
+        """
+        await self._harness_failed.wait()
+        assert self._harness_error is not None
+        return self._harness_error
 
     def _update_bot_transcribed(self) -> None:
         if (
