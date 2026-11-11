@@ -20,12 +20,22 @@ lays each side out on its own timeline.
 """
 
 import asyncio
+import json
 import time
 import wave
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 
 from pipecat.audio.utils import create_file_resampler, mix_audio
-from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
+from pipecat.evals.serializer import (
+    EVAL_STT_SAMPLE_RATE,
+    EvalAudioLimitError,
+    EvalConnectionFlags,
+    _check_audio_message_size,
+    _checked_audio_limit,
+    eval_connect_message,
+)
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -48,6 +58,8 @@ from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 # chunks 1:1 rather than splitting them, and it's still fine-grained enough for the
 # VAD/turn models (well under their start/stop windows).
 FRAME_S = 0.04
+
+AudioFailure = Callable[[str], Awaitable[None]]
 
 
 async def _sleep_to_next_tick(next_send: float) -> float:
@@ -294,12 +306,25 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
     tick, silence filling the gaps.
     """
 
-    def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        recorder: "EvalClientRecorder | None" = None,
+        max_bot_audio_bytes: int | None = None,
+        audio_failure: AudioFailure | None = None,
+        **kwargs,
+    ):
         """Initialize the transport and its (lazily started) fill stream."""
         super().__init__(*args, **kwargs)
         self._bot_pcm = bytearray()
         self._fill_task = None
         self._recorder = recorder
+        self._max_bot_audio_bytes = _checked_audio_limit(max_bot_audio_bytes)
+        self._raw_audio_bytes = 0
+        self._paced_audio_bytes = 0
+        self._audio_failure = audio_failure
+        self._audio_failed = False
+        self._audio_closed = False
 
     async def start(self, frame: StartFrame):
         """Start the transport and, when audio is enabled, the gap-fill stream."""
@@ -309,12 +334,12 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
 
     async def stop(self, frame: EndFrame):
         """Stop the fill stream, then the transport."""
-        await self._cancel_fill_task()
+        await self.close_audio()
         await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the fill stream, then the transport."""
-        await self._cancel_fill_task()
+        await self.close_audio()
         await super().cancel(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -332,18 +357,67 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         """Buffer the bot's audio for the fill task."""
+        if self._audio_failed or self._audio_closed:
+            return
+        if self._max_bot_audio_bytes is not None:
+            if (
+                type(frame.sample_rate) is not int
+                or frame.sample_rate != EVAL_STT_SAMPLE_RATE
+                or type(frame.num_channels) is not int
+                or frame.num_channels != 1
+                or len(frame.audio) % 2
+            ):
+                await self.fail_audio("The eval target sent invalid PCM audio")
+                return
+            if len(frame.audio) > self._max_bot_audio_bytes - self._raw_audio_bytes:
+                await self.fail_audio("The eval target exceeded its PCM admission limit")
+                return
+            self._raw_audio_bytes += len(frame.audio)
         # Record the raw bot audio here (gapless within a turn), not the gap-filled
         # frames the fill task emits: those underruns would stutter the recording.
         if self._recorder is not None:
             self._recorder.add_bot(frame.audio, frame.sample_rate)
         self._bot_pcm.extend(frame.audio)
 
+    async def fail_audio(self, reason: str) -> None:
+        """Invalidate the run without waiting behind downstream audio queues."""
+        if self._audio_failed or self._audio_closed:
+            return
+        self._audio_failed = True
+        self._bot_pcm.clear()
+        task = self._fill_task
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+        if self._audio_failure is not None:
+            await self._audio_failure(reason)
+        else:
+            await self.push_error(reason)
+
+    async def close_audio(self) -> None:
+        """Stop audio admission and gap fill, leaving control messages available."""
+        self._audio_closed = True
+        await self._cancel_fill_task()
+        self._bot_pcm.clear()
+
     async def _fill_task_handler(self):
         """Push one ~40ms frame every tick: buffered bot audio, or silence."""
+        if self._max_bot_audio_bytes is not None and (
+            type(self.sample_rate) is not int
+            or self.sample_rate != EVAL_STT_SAMPLE_RATE
+            or type(self._params.audio_in_channels) is not int
+            or self._params.audio_in_channels != 1
+        ):
+            await self.fail_audio("The eval harness has an invalid PCM format")
+            return
         chunk = int(self.sample_rate * FRAME_S) * 2  # 16-bit mono
         silence = b"\x00" * chunk
         next_send = time.monotonic()
-        while True:
+        while not self._audio_failed and not self._audio_closed:
+            if self._max_bot_audio_bytes is not None:
+                if chunk > self._max_bot_audio_bytes - self._paced_audio_bytes:
+                    await self.fail_audio("The eval harness exceeded its PCM pipeline limit")
+                    return
+                self._paced_audio_bytes += chunk
             if len(self._bot_pcm) >= chunk:
                 pcm = bytes(self._bot_pcm[:chunk])
                 del self._bot_pcm[:chunk]
@@ -362,6 +436,7 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         if self._fill_task is not None:
             await self.cancel_task(self._fill_task)
             self._fill_task = None
+        self._bot_pcm.clear()
 
 
 class EvalClientTransport(RTVIClientTransport):
@@ -378,6 +453,8 @@ class EvalClientTransport(RTVIClientTransport):
         *args,
         flags: EvalConnectionFlags | None = None,
         recorder: "EvalClientRecorder | None" = None,
+        max_bot_audio_bytes: int | None = None,
+        audio_failure: AudioFailure | None = None,
         **kwargs,
     ):
         """Initialize the transport, optionally wiring a recorder to both edges.
@@ -387,25 +464,53 @@ class EvalClientTransport(RTVIClientTransport):
                 sends the defaults.
             recorder: Optional :class:`EvalClientRecorder` fed the raw audio on both
                 edges; ``None`` disables recording.
+            max_bot_audio_bytes: Optional independent raw and paced PCM quotas.
+            audio_failure: Receives static failure reasons independently of audio queues.
             *args: Forwarded to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
             **kwargs: Forwarded to the parent transport.
         """
         super().__init__(*args, **kwargs)
         self._flags = flags or EvalConnectionFlags()
         self._recorder = recorder
+        self._max_bot_audio_bytes = _checked_audio_limit(max_bot_audio_bytes)
+        self._audio_failure = audio_failure
 
     async def _on_connected(self, websocket):
         """Send ``eval-connect`` first, then fire the user's handler and start the handshake."""
         await self._session.send(eval_connect_message(self._flags))
         await super()._on_connected(websocket)
 
-    def input(self) -> WebsocketClientInputTransport:
+    async def _on_message(self, websocket, message):
+        """Refuse oversized or invalid bounded input before the RTVI ready parser."""
+        if self._max_bot_audio_bytes is not None:
+            try:
+                _check_audio_message_size(message)
+            except EvalAudioLimitError as exc:
+                await self.input().fail_audio(str(exc))
+                return
+            if not self.bot_ready:
+                try:
+                    json.loads(message)
+                except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
+                    await self.input().fail_audio("The eval target sent an invalid message")
+                    return
+        try:
+            await super()._on_message(websocket, message)
+        except EvalAudioLimitError as exc:
+            await self.input().fail_audio(str(exc))
+
+    def input(self) -> EvalClientInputTransport:
         """Return the gap-filling input transport."""
         if not self._input:
             self._input = EvalClientInputTransport(
-                self, self._session, self._params, recorder=self._recorder
+                self,
+                self._session,
+                self._params,
+                recorder=self._recorder,
+                max_bot_audio_bytes=self._max_bot_audio_bytes,
+                audio_failure=self._audio_failure,
             )
-        return self._input
+        return cast(EvalClientInputTransport, self._input)
 
     def output(self) -> WebsocketClientOutputTransport:
         """Return the stream-shaping output transport."""
