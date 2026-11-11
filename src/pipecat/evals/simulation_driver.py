@@ -374,6 +374,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         if metric.measure == "function_calls":
             value, passed, reason = self._calls_outcome(metric)
             score = 1.0 if passed else 0.0
+            failure_kind = None if passed else "function_calls"
         else:
             value, described = self._measurement(metric.measure or "")
             low, high = metric.min_value, metric.max_value
@@ -385,10 +386,11 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 bound = f"at least {low:g}"
             reason = f"{described}, {bound}"
             if value is None:
-                score, passed = None, True
+                score, passed, failure_kind = None, False, "error"
             else:
                 inside = (low is None or value >= low) and (high is None or value <= high)
                 score, passed = (1.0 if inside else 0.0), inside
+                failure_kind = None if inside else "out_of_range"
         self._trace.log(
             f"measure: {metric.name} = {'unscored' if score is None else f'{score:.2f}'}"
             f"{'' if passed else ' (failed)'}: {reason}"
@@ -399,9 +401,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             passed=passed,
             reason=reason,
             value=value,
-            failure_kind=(
-                None if passed else ("out_of_range" if metric.calls is None else "function_calls")
-            ),
+            failure_kind=failure_kind,
         )
 
     def _measurement(self, measure: str) -> tuple[float | None, str]:
