@@ -468,5 +468,23 @@ class TestRTVISendText(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestRTVITransportMessage(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.processor = RTVIProcessor()
+        self.processor._message_queue = asyncio.Queue()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    async def test_a_message_that_isnt_a_dict_is_ignored(self):
+        # A client can send any JSON value, but only a dict can be an RTVI message.
+        for message in (["hello"], "hello", 1, None):
+            with self.subTest(message=message):
+                await self.processor._handle_transport_message(
+                    InputTransportMessageFrame(message=message)
+                )
+                self.assertTrue(self.processor._message_queue.empty())
+
+
 if __name__ == "__main__":
     unittest.main()
