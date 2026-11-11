@@ -30,10 +30,14 @@ from pipecat.frames.frames import (
     LLMConfigureOutputFrame,
     LLMMessagesAppendFrame,
     OutputTransportMessageUrgentFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     StartFrame,
     SystemFrame,
     UserFileRawFrame,
     UserImageRawFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
@@ -375,6 +379,13 @@ class RTVIProcessor(FrameProcessor):
                 case "dtmf":
                     data = RTVI.DTMFInputData.model_validate(message.data)
                     await self._handle_dtmf(data)
+                case (
+                    "user-started-speaking"
+                    | "user-stopped-speaking"
+                    | "vad-user-started-speaking"
+                    | "vad-user-stopped-speaking"
+                ):
+                    await self._handle_inbound_speaking(message.type)
 
                 case _:
                     logger.warning(f"Unsupported RTVI message type: {message.type}")
@@ -459,6 +470,27 @@ class RTVIProcessor(FrameProcessor):
         except (KeyError, TypeError, ValueError) as e:
             # Handle missing keys, decoding errors, and invalid types
             logger.error(f"Error processing audio buffer: {e}")
+
+    async def _handle_inbound_speaking(self, message_type: str):
+        """Turn a client-originated speaking RTVI message into pipeline frames.
+
+        These types were previously server-to-client notifications only. A
+        client that runs VAD at the microphone can now send them inbound so a
+        bot with no local Silero analyzer can still take turns.
+
+        ``user-started-speaking`` / ``user-stopped-speaking`` become proposals
+        so :class:`~pipecat.turns.user_start.ExternalUserTurnStartStrategy`
+        owns the interruption. ``vad-user-*`` become VAD frames so the default
+        VAD start strategy can drive turns without a server-side analyzer.
+        """
+        if message_type == "user-started-speaking":
+            await self.push_frame(ProposedUserStartedSpeakingFrame())
+        elif message_type == "user-stopped-speaking":
+            await self.push_frame(ProposedUserStoppedSpeakingFrame())
+        elif message_type == "vad-user-started-speaking":
+            await self.push_frame(VADUserStartedSpeakingFrame())
+        elif message_type == "vad-user-stopped-speaking":
+            await self.push_frame(VADUserStoppedSpeakingFrame())
 
     async def _handle_dtmf(self, data: RTVI.DTMFInputData):
         """Handle DTMF keypresses from the client.
