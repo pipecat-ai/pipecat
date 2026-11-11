@@ -63,6 +63,11 @@ _AMBIGUOUS_UNIT_RE = re.compile(
     r"(\d+(?:\.\d+)?)(" + "|".join(re.escape(u) for u in _sorted_ambiguous) + r")\b"
 )
 
+# Degrees: "25°C", "72 °F", "a 90° turn". The degree sign is not a word, so a TTS
+# engine may skip it or read the scale letter on its own ("twenty-five C").
+_DEGREE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*°(?:\s*([CF])(?![a-zA-Z])|(?![a-zA-Z]))")
+_DEGREE_SCALES = {"C": " Celsius", "F": " Fahrenheit"}
+
 
 async def expand_units(text: str, text_type: str | TextType) -> str:
     """Expand unit abbreviations to their full spoken form.
@@ -92,5 +97,11 @@ async def expand_units(text: str, text_type: str | TextType) -> str:
         # plural in speech.
         return f"{number} {singular if number == '1' else plural}"
 
+    def _replace_degrees(match: re.Match) -> str:
+        number = match.group(1)
+        degrees = "degree" if number == "1" else "degrees"
+        return f"{number} {degrees}{_DEGREE_SCALES.get(match.group(2) or '', '')}"
+
+    text = _DEGREE_RE.sub(_replace_degrees, text)
     text = _UNIT_RE.sub(_replace, text)
     return _AMBIGUOUS_UNIT_RE.sub(_replace, text)

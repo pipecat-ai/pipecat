@@ -356,6 +356,18 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
+    async def test_degrees(self):
+        # The degree sign was left for the TTS engine, which may skip it.
+        self.assertEqual(
+            await expand_units("It is 25°C today", "*"), "It is 25 degrees Celsius today"
+        )
+        self.assertEqual(await expand_units("at 98.6°F", "*"), "at 98.6 degrees Fahrenheit")
+        self.assertEqual(await expand_units("72 °F", "*"), "72 degrees Fahrenheit")
+        self.assertEqual(await expand_units("1°C warmer", "*"), "1 degree Celsius warmer")
+        self.assertEqual(await expand_units("a 90° turn", "*"), "a 90 degrees turn")
+        # A degree sign directly followed by another word is left alone.
+        self.assertEqual(await expand_units("40°N", "*"), "40°N")
+
     async def test_km(self):
         result = await expand_units("5km away", "*")
         self.assertIn("kilometers", result)
