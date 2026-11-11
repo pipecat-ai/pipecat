@@ -203,9 +203,10 @@ class _BotSpeechGate(FrameProcessor):
     folded into it. A turn that sends nothing drops the same way what the bot
     says before it starts speaking again.
 
-    Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    Segment attribution needs an STT that transcribes one segment at a time.
+    After an interrupting send, an untagged streaming transcript has no known
+    audio origin. The gate drops it and reports a harness error so it cannot
+    become evidence for the new reply.
     """
 
     def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
@@ -222,11 +223,28 @@ class _BotSpeechGate(FrameProcessor):
         self._trace = trace
         self._starts = starts
         self._segment_started_at: float | None = None
+        self._reported_ambiguous_transcript = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._starts is None:
-            pass
+        if isinstance(frame, _BotSegmentTranscriptionFrame):
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
+                return
+        elif self._starts is None:
+            if (
+                direction == FrameDirection.DOWNSTREAM
+                and isinstance(frame, TranscriptionFrame)
+                and frame.text.strip()
+                and self._stream.speech_attribution_required
+            ):
+                if not self._reported_ambiguous_transcript:
+                    self._reported_ambiguous_transcript = True
+                    await self.push_error(
+                        "Cannot attribute streaming transcription after interrupted speech"
+                    )
+                return
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
@@ -236,11 +254,6 @@ class _BotSpeechGate(FrameProcessor):
             self._starts.append(self._segment_started_at or time.monotonic())
             self._segment_started_at = None
             self._stream.bot_segment_ended()
-        elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            talked_over_until = self._stream.talked_over_until
-            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
-                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
-                return
         await self.push_frame(frame, direction)
 
 

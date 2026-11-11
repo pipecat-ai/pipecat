@@ -153,6 +153,7 @@ class EvalEventStream:
         # reply, however late its transcription lands (audio mode).
         self._input_sent_at: float = 0.0
         self._talked_over_until: float | None = None
+        self._speech_attribution_required = False
         # Whether the turn sends nothing and waits for the bot's next speech,
         # which is its reply whether or not the bot's LLM produced it (a
         # presence check, say). Cleared when the bot starts speaking.
@@ -191,6 +192,15 @@ class EvalEventStream:
         ``None`` when the latest send did not talk over it.
         """
         return self._talked_over_until
+
+    @property
+    def speech_attribution_required(self) -> bool:
+        """Whether a turn interrupted speech and now requires audio-origin timestamps.
+
+        A later quiet send cannot establish the origin of an earlier untagged
+        transcript still in flight.
+        """
+        return self._speech_attribution_required
 
     @property
     def bot_transcribed(self) -> bool:
@@ -563,6 +573,8 @@ class EvalEventStream:
         self._awaiting_reply = True
         self._input_sent_at = time.monotonic()
         self._talked_over_until = math.inf if self.bot_speaking else None
+        if self.bot_speaking:
+            self._speech_attribution_required = True
         self._observing = False
 
     def observing_boundary(self) -> None:
