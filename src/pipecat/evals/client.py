@@ -223,6 +223,7 @@ class _BotSpeechGate(FrameProcessor):
         self._trace = trace
         self._starts = starts
         self._segment_started_at: float | None = None
+        # A missing audio origin invalidates the run; emit one error per session.
         self._reported_ambiguous_transcript = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
