@@ -736,7 +736,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         if "agent_context" in changed and isinstance(self._settings.agent_context, str):
             # update_agent_context() guards on model and clips.
             await self.update_agent_context(self._settings.agent_context)
-        if "language_codes" in changed:
+        if "language_codes" in changed and is_given(self._settings.language_codes):
             # _update_language_codes() guards on model and clears steering on [] or None.
             await self._update_language_codes(self._settings.language_codes)
 

@@ -18,7 +18,11 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import ProposedUserStartedSpeakingFrame
 from pipecat.services.assemblyai.models import AssemblyAIConnectionParams, TerminationMessage
-from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
+from pipecat.services.assemblyai.stt import (
+    AssemblyAISTTService,
+    _prepare_language_codes,
+    is_u3_pro_model,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -939,8 +943,6 @@ def test_update_settings_language_codes_none_clears_steering():
 
 
 def test_prepare_language_codes_none_and_empty():
-    from pipecat.services.assemblyai.stt import _prepare_language_codes
-
     assert _prepare_language_codes(None) == []
     assert _prepare_language_codes([]) == []
 
