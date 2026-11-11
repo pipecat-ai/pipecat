@@ -55,7 +55,6 @@ jobs:
             --extra sagemaker \
             --extra sarvam \
             --extra sip \
-            --extra sip-video \
             --extra soxr \
             --extra speechmatics \
             --extra tracing \

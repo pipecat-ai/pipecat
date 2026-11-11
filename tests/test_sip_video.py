@@ -27,10 +27,10 @@ from pipecat.transports.sip.transport import (  # noqa: E402
     _rgb_to_i420,
 )
 
-# The RGB/I420 conversions live behind the ``sip-video`` extra; tests
-# that exercise them skip when OpenCV isn't installed.
+# The RGB/I420 conversions need OpenCV, which the ``sip`` extra installs;
+# tests that exercise them skip when it isn't installed.
 requires_cv2 = pytest.mark.skipif(
-    importlib.util.find_spec("cv2") is None, reason="requires the sip-video extra (cv2)"
+    importlib.util.find_spec("cv2") is None, reason="requires OpenCV (cv2)"
 )
 
 WIDTH, HEIGHT = 64, 48

@@ -67,9 +67,8 @@ means a different :class:`~pipecat.transports.sip.connection.SIPConnection`.
 pipeline does its own STT, and baresip's ``sndfile`` driver covers
 recording at the stack level), participant permissions, instance ids.
 
-Video (requires the ``sip-video`` extra for OpenCV): calls made or
-answered with a video direction enabled exchange VP8, crossing the
-pipeline boundary as RGB ``InputImageRawFrame``/``OutputImageRawFrame``
+Video: calls made or answered with a video direction enabled exchange
+VP8, crossing the pipeline boundary as RGB ``InputImageRawFrame``/``OutputImageRawFrame``
 and converted to/from the call's packed I420 at the transport. The
 transport aligns the call's geometry with ``video_out_width/height/
 framerate`` at construction; a peer that declines video leaves a
@@ -162,14 +161,14 @@ _RESAMPLER_QUALITY = "QQ"
 
 
 def _get_cv2():
-    """Import OpenCV at point of use; video needs the sip-video extra."""
+    """Import OpenCV at point of use, so audio-only calls never load it."""
     try:
         import cv2
 
         return cv2
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
-        logger.error('In order to use SIP video, you need to `uv add "pipecat-ai[sip-video]"`.')
+        logger.error('In order to use SIP video, you need to `uv add "pipecat-ai[sip]"`.')
         raise ImportError(f"Missing module: {e}") from e
 
 
