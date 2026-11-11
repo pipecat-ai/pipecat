@@ -2602,13 +2602,13 @@ wheels = [
 
 [[package]]
 name = "google-genai"
-version = "2.34.0"
+version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "distro" },
     { name = "google-auth", extra = ["requests"] },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "pydantic" },
     { name = "requests" },
     { name = "sniffio" },
@@ -2616,9 +2616,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/89/4621aee9cb183efa5b8a187f0e315c49fddcfb8cd7f238b4a3bf4946dcd0/google_genai-2.34.0.tar.gz", hash = "sha256:8e182cf3f73384167b96861cf0aef5102b5070f2db1ea11002879e913806ef37", size = 791853, upload-time = "2026-10-29T06:43:23.706Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/fa/041ef12c71d6e150d8fb99049847388aa0d349d98a7c67614746a7b6ef65/google_genai-3.2.0.tar.gz", hash = "sha256:b848937937b7b72594e75c57f01618ca201275afaedbfd717c004434ebf592f5", size = 826292, upload-time = "2026-11-11T17:49:09.168Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/42/c24db865d9231b1c672ea26242a4dcf340e200bb1a9823dce4aa9c4c07a4/google_genai-2.34.0-py3-none-any.whl", hash = "sha256:a4cb02aebc4c357f863d2938132f0e3f7967fc5e00b8a4078673f68aad340665", size = 1258155, upload-time = "2026-10-29T06:43:21.121Z" },
+    { url = "https://files.pythonhosted.org/packages/72/23/28319604be07dfce63a2ed84453fb6528011fe20ed1fc2b14514c88ce285/google_genai-3.2.0-py3-none-any.whl", hash = "sha256:4d7289b050ae2fec5cf1e2b4775f59de1730a9bacd714b4b33a11075f929f0da", size = 1363836, upload-time = "2026-11-11T17:49:07.352Z" },
 ]
 
 [[package]]
@@ -6182,6 +6182,10 @@ evals = [
     { name = "ruff" },
     { name = "typer" },
 ]
+expressivity = [
+    { name = "huggingface-hub" },
+    { name = "tokenizers" },
+]
 fish = [
     { name = "ormsgpack" },
 ]
@@ -6193,6 +6197,7 @@ google = [
     { name = "google-cloud-speech" },
     { name = "google-cloud-texttospeech" },
     { name = "google-genai" },
+    { name = "httpx", extra = ["http2"] },
 ]
 groq = [
     { name = "groq" },
@@ -6345,9 +6350,6 @@ tracing = [
 typesafe = [
     { name = "httpx", extra = ["http2"] },
 ]
-voice-reader = [
-    { name = "huggingface-hub" },
-]
 vonage-video-connector = [
     { name = "vonage-video-connector", marker = "sys_platform == 'linux'" },
 ]
@@ -6421,16 +6423,15 @@ requires-dist = [
     { name = "funasr", extras = ["knf"], marker = "extra == 'funasr'", specifier = ">=1.4.5" },
     { name = "google-cloud-speech", marker = "extra == 'google'", specifier = ">=2.33.0,<3" },
     { name = "google-cloud-texttospeech", marker = "extra == 'google'", specifier = ">=2.31.0,<3" },
-    { name = "google-genai", marker = "(python_full_version != '3.13.*' and extra == 'google') or (sys_platform != 'linux' and extra == 'google')", specifier = ">=2.25.0,<3" },
-    { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.68.0,<3" },
+    { name = "google-genai", marker = "extra == 'google'", specifier = ">=3.2.0,<4" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.23.0,<2" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'cloudflare'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["http2"], marker = "extra == 'google'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'hume'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'openai'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'typesafe'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'zoom-ai'", specifier = ">=0.27,<1" },
-    { name = "huggingface-hub", marker = "extra == 'tone'", specifier = ">=0.30,<2" },
-    { name = "huggingface-hub", marker = "extra == 'voice-reader'", specifier = ">=0.30,<2" },
+    { name = "huggingface-hub", marker = "extra == 'expressivity'", specifier = ">=0.30,<2" },
     { name = "hume", marker = "extra == 'hume'", specifier = ">=0.11.2,<1" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.0,<4" },
     { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.5.0,<1" },
@@ -6466,6 +6467,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["cli"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'lemonslice'" },
     { name = "pipecat-ai", extras = ["daily"], marker = "extra == 'tavus'" },
+    { name = "pipecat-ai", extras = ["expressivity"], marker = "extra == 'tone'" },
     { name = "pipecat-ai", extras = ["kokoro"], marker = "extra == 'evals'" },
     { name = "pipecat-ai", extras = ["mcp"], marker = "extra == 'keenable'" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'evals'" },
@@ -6507,7 +6509,7 @@ requires-dist = [
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = ">=1.0.13,<2" },
-    { name = "tokenizers", marker = "extra == 'tone'", specifier = ">=0.23,<1" },
+    { name = "tokenizers", marker = "extra == 'expressivity'", specifier = ">=0.23,<1" },
     { name = "torch", marker = "extra == 'funasr'", specifier = ">=2.5.0,<3" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
     { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=5.10.0,<6" },
@@ -6519,7 +6521,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resampy", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "sip", "smallest", "soniox", "soundfile", "soxr", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "voice-reader", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "baseten", "bland", "cartesia", "camb", "cerebras", "cloudflare", "crusoe", "daily", "deepgram", "deepseek", "elevenlabs", "evals", "expressivity", "fal", "fireworks", "fish", "funasr", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "jev", "keenable", "koala", "kokoro", "langchain", "lemonslice", "livekit", "local", "local-smart-turn", "mcp", "mem0", "meta", "minimax", "mistral", "mlx-whisper", "moondream", "moonshine", "moq", "nebius", "neuphonic", "novita", "nvidia", "ollama", "openai", "openclaw", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "pocket-tts", "qwen", "redis", "resampy", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "sip", "smallest", "soniox", "soundfile", "soxr", "speechify", "speechmatics", "strands", "tavus", "together", "tone", "tracing", "typesafe", "ultravox", "vonage-video-connector", "webrtc", "webrtc-video", "websocket", "whisper", "xai", "xtts", "zoom-ai", "cli"]
 
 [package.metadata.requires-dev]
 dev = [
