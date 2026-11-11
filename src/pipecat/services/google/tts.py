@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.google.utils import gemini_api_http_options
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -1470,7 +1471,9 @@ class GeminiTTSService(GoogleBaseTTSService):
         self, credentials: str | None, credentials_path: str | None
     ) -> "texttospeech_v1.TextToSpeechAsyncClient | genai.Client":
         if self._use_genai:
-            return genai.Client(api_key=self._api_key, http_options=self._http_options)
+            return genai.Client(
+                api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+            )
         else:
             return super()._create_client(credentials, credentials_path)
 

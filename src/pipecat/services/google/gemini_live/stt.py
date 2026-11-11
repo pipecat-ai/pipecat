@@ -32,7 +32,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.google.stt import language_to_google_stt_language
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    gemini_api_http_options,
+    update_google_client_http_options,
+)
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GEMINI_TTFS_P99
 from pipecat.services.stt_service import STTService
@@ -200,7 +203,9 @@ class GeminiSTTService(STTService):
         Subclasses (e.g. a Vertex AI variant) can override this to customize
         client construction and authentication.
         """
-        self._client = Client(api_key=self._api_key, http_options=self._http_options)
+        self._client = Client(
+            api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

@@ -70,7 +70,10 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    gemini_api_http_options,
+    update_google_client_http_options,
+)
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language, resolve_language
@@ -863,7 +866,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
     def create_client(self):
         """Create the Gemini API client instance. Subclasses can override this."""
-        self._client = Client(api_key=self._api_key, http_options=self._http_options)
+        self._client = Client(
+            api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+        )
 
     @property
     def file_api(self) -> GeminiFileAPI:

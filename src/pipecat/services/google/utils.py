@@ -175,6 +175,34 @@ def update_google_client_http_options(http_options: dict[str, Any] | Any | None)
     return http_options
 
 
+#: The Gemini Developer API version clients use unless their http_options name one.
+#: google-genai 3 defaults to v1, which doesn't serve the Gemini Live models or
+#: preview models such as the default TTS model.
+GEMINI_API_VERSION = "v1beta"
+
+
+def gemini_api_http_options(http_options: dict[str, Any] | Any | None) -> Any:
+    """The http_options for a Gemini Developer API client, on v1beta unless they name a version.
+
+    Args:
+        http_options: The client's http_options: None, a dictionary, or an
+            object with an ``api_version`` attribute, which is set in place.
+
+    Returns:
+        The http_options with an API version.
+    """
+    if http_options is None:
+        return {"api_version": GEMINI_API_VERSION}
+    if isinstance(http_options, dict):
+        return {
+            **http_options,
+            "api_version": http_options.get("api_version") or GEMINI_API_VERSION,
+        }
+    if not getattr(http_options, "api_version", None):
+        http_options.api_version = GEMINI_API_VERSION
+    return http_options
+
+
 async def stream_with_retry(
     open_stream: Callable[[], Awaitable[AsyncIterator[T]]],
     *,
