@@ -72,10 +72,12 @@ class StripMarkdown:
         codes: list[str] = []
 
         def _hold(m: re.Match) -> str:
-            codes.append(m.group(1))
+            codes.append(m.group(2))
             return f"{_CODE_OPEN}{len(codes) - 1}{_CODE_CLOSE}"
 
-        text = re.sub(r"`([^`]+)`", _hold, text)
+        # Match whole runs of one or two backticks, with an equally long closer.
+        # A different-length run inside the span is literal code content.
+        text = re.sub(r"(?<!`)(`{1,2})(?!`)(.+?)(?<!`)\1(?!`)", _hold, text, flags=re.DOTALL)
         # Images and links, keeping the alt text or label. The label may hold one
         # level of brackets and the URL one of parentheses (``wiki/Python_(language)``);
         # a URL with an unbalanced parenthesis ends at the first ``)``.

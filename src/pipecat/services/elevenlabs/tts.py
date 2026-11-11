@@ -198,7 +198,9 @@ class ElevenLabsTTSSettings(ElevenLabsTTSSettingsBase):
     )
 
     #: Fields in the WS URL — changing any of these requires a reconnect.
-    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"voice", "model", "language"})
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"voice", "model", "language", "apply_text_normalization"}
+    )
 
     #: Fields affecting voice character — changing these requires closing the
     #: current audio context so the next one picks up new settings.

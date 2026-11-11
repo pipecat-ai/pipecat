@@ -66,7 +66,7 @@ import time
 from collections.abc import Callable
 
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
+from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE, EvalFunctionCallCancelFrame
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -74,7 +74,6 @@ from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
@@ -505,7 +504,7 @@ class EvalEventStream:
             frame,
             (
                 FunctionCallResultFrame,
-                FunctionCallCancelFrame,
+                EvalFunctionCallCancelFrame,
                 ExternalFunctionCallResultFrame,
                 ExternalFunctionCallCancelFrame,
             ),
@@ -519,7 +518,7 @@ class EvalEventStream:
                 "args": {
                     "tool_call_id": frame.tool_call_id,
                     "cancelled": isinstance(
-                        frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
+                        frame, (EvalFunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
                     ),
                 },
             }

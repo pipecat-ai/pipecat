@@ -202,6 +202,8 @@ class ScriptedMarkerLLM(LLMService):
         self._replies = list(replies)
         self._delays = list(delays or [])
         self.inferences = 0
+        # The messages each inference ran against.
+        self.requests: list[list] = []
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -210,6 +212,7 @@ class ScriptedMarkerLLM(LLMService):
             return
 
         self.inferences += 1
+        self.requests.append(list(frame.context.get_messages()))
         reply = self._replies.pop(0)
         await asyncio.sleep(self._delays.pop(0) if self._delays else 0)
         await self.push_frame(LLMFullResponseStartFrame())
@@ -441,6 +444,29 @@ class TestFilteringIncompleteTurnsWithEagerEndOfTurn(unittest.IsolatedAsyncioTes
         )
 
         self._assert_answered_once(recorder, context)
+
+    async def test_a_turn_held_open_speculates_on_what_the_context_lacks(self):
+        # The first transcript was answered ◐ and written with its answer, so
+        # the speculation for the rest of the turn carries only the rest.
+        recorder, context = await self._run(
+            ["◐", "◐", "● Sure, Boston it is."],
+            self._turn("Book a flight") + self._turn("to Boston"),
+        )
+
+        self.assertEqual(recorder.spoken, ["Sure, Boston it is."])
+        self.assertEqual(
+            [(m["role"], m["content"]) for m in self.llm.requests[-1]],
+            [("user", "Book a flight"), ("assistant", "◐"), ("user", "to Boston")],
+        )
+        self.assertEqual(
+            [(m["role"], m["content"]) for m in context.get_messages()],
+            [
+                ("user", "Book a flight"),
+                ("assistant", "◐"),
+                ("user", "to Boston"),
+                ("assistant", "● Sure, Boston it is."),
+            ],
+        )
 
 
 if __name__ == "__main__":

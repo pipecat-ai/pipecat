@@ -45,7 +45,9 @@ def _ordinal(n: int) -> str:
 
 
 def _date_to_spoken(dt: datetime) -> str:
-    year_words = num2words(dt.year, lang="en")
+    # Read the year the way a date is said aloud ("nineteen ninety-nine"), not as
+    # a cardinal quantity ("one thousand, nine hundred and ninety-nine").
+    year_words = num2words(dt.year, lang="en", to="year")
     month = _MONTH_NAMES[dt.month - 1]
     day = _ordinal(dt.day)
     return f"{month} {day}, {year_words}"
@@ -82,7 +84,7 @@ async def normalize_dates(text: str, text_type: str | TextType) -> str:
     Example::
 
         result = await normalize_dates("Meeting on 2023-05-10", "*")
-        # "Meeting on May 10th, two thousand and twenty three"
+        # "Meeting on May 10th, twenty twenty-three"
     """
     text = _ISO_DATE_RE.sub(_iso_replace, text)
     text = _US_DATE_RE.sub(_us_replace, text)

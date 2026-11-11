@@ -422,6 +422,42 @@ class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
         assert [s.text for s in triggered] == ["book a flight"]
 
 
+class TestSpeculationAfterACommittedTranscript(unittest.IsolatedAsyncioTestCase):
+    async def test_an_unwritten_transcript_goes_ahead_of_the_prediction(self):
+        # A transcript committed earlier in the turn, while the user is still
+        # speaking, isn't in the context yet, so the speculated turn carries it.
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                final("I want to go to Paris"),
+                SleepFrame(),
+                eager("next Tuesday"),
+                SleepFrame(),
+                final("next Tuesday"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        assert [c.speculation for c in contexts] == [True]
+        assert contexts[0].context.messages[-1] == {
+            "role": "user",
+            "content": "I want to go to Paris next Tuesday",
+        }
+        # The prediction is checked against what was committed after it, so the
+        # turn confirms it.
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in down)
+        assert context.messages == [
+            {"role": "user", "content": "I want to go to Paris next Tuesday"}
+        ]
+
+
 class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):
     async def test_formatting_differences_withdraw_the_speculation(self):
         # Opting into ExactMatch requires the committed transcript to be

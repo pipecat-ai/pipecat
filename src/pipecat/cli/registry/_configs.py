@@ -501,6 +501,14 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "heygen_tts": (
+        "HeyGenTTSService(\n"
+        '        api_key=os.getenv("HEYGEN_API_KEY"),\n'
+        "        settings=HeyGenTTSService.Settings(\n"
+        '            voice=os.getenv("HEYGEN_VOICE_ID", "83548de556df48ba8c09c42a57c51d85"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "inworld_tts": (
         "InworldTTSService(\n"
         '        api_key=os.getenv("INWORLD_API_KEY"),\n'

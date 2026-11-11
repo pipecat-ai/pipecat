@@ -143,6 +143,13 @@ class XAITTSSettings(TTSSettings):
         replace: Map of phrases to spoken substitutions applied before
             synthesis, e.g. ``{"Acme Mobile": "Acme Mobull"}``. Values are
             respellings or IPA phonetics in forward slashes. Up to 200 entries.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

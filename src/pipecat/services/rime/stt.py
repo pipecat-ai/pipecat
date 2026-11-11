@@ -19,7 +19,6 @@ from typing import Any, Literal, cast
 from loguru import logger
 
 from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -213,7 +212,6 @@ class RimeSTTService(STTService):
         self._client: Rime | None = None
         # Never started, so it keeps only the audio from just before speech.
         self._pre_speech = SpeechSegmentBuffer()
-        self._resampler = create_stream_resampler()
         self._segment: _Segment | None = None
         self._last_segment: _Segment | None = None
         self._segment_count = 0
@@ -237,6 +235,17 @@ class RimeSTTService(STTService):
             The BCP-47 tag of ``language``.
         """
         return language.value
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at: the input rate, or 16 kHz if Rime doesn't take it.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        if self.sample_rate in _SUPPORTED_SAMPLE_RATES:
+            return self.sample_rate
+        return _FALLBACK_SAMPLE_RATE
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta, used by segments that start afterwards.
@@ -277,7 +286,7 @@ class RimeSTTService(STTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._pre_speech.set_sample_rate(self.sample_rate)
+        self._pre_speech.set_sample_rate(self.send_sample_rate)
 
     async def start(self, frame: StartFrame):
         """Start the service and create the Rime client.
@@ -335,6 +344,9 @@ class RimeSTTService(STTService):
     async def process_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
         """Stream audio within a speech segment, and keep the audio just before one.
 
+        The audio kept goes through the same resampler as the audio streamed,
+        so a segment's audio stays continuous where its pre-speech ends.
+
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
@@ -342,19 +354,19 @@ class RimeSTTService(STTService):
         if self._segment is not None:
             await super().process_audio_frame(frame, direction)
         elif not self.is_muted:
-            self._pre_speech.append(frame.audio)
+            self._pre_speech.append(await self._resample_audio_frame(frame))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio to the current segment's stream.
 
         Args:
-            audio: Raw 16-bit mono PCM audio at the service's sample rate.
+            audio: Raw 16-bit mono PCM audio at the send sample rate.
 
         Yields:
             None, as transcripts arrive from the segment's stream.
         """
         if self._segment is not None:
-            await self._send_audio(self._segment, audio)
+            self._send_audio(self._segment, audio)
         yield None
 
     @traced_stt
@@ -364,15 +376,7 @@ class RimeSTTService(STTService):
         """Handle a transcription result with tracing."""
         pass
 
-    @property
-    def _send_sample_rate(self) -> int:
-        """The rate audio is sent at, resampled when Rime doesn't take the input rate."""
-        if self.sample_rate in _SUPPORTED_SAMPLE_RATES:
-            return self.sample_rate
-        return _FALLBACK_SAMPLE_RATE
-
-    async def _send_audio(self, segment: _Segment, audio: bytes):
-        audio = await self._resampler.resample(audio, self.sample_rate, self._send_sample_rate)
+    def _send_audio(self, segment: _Segment, audio: bytes):
         segment.audio.put_nowait(audio)
 
     async def _ensure_client(self) -> bool:
@@ -401,12 +405,10 @@ class RimeSTTService(STTService):
             previous=self._last_segment,
         )
         self._segment = self._last_segment = segment
-        # Each segment is its own stream on Rime's side.
-        await self._resampler.reset()
         pre_speech = self._pre_speech.stop()
         if pre_speech:
             self._record_stt_audio_usage(pre_speech)
-            await self._send_audio(segment, pre_speech)
+            self._send_audio(segment, pre_speech)
         task = self.create_task(self._transcribe(segment), name=f"rime_stt_{segment.number}")
         self._segment_tasks.add(task)
         task.add_done_callback(self._segment_tasks.discard)
@@ -435,7 +437,7 @@ class RimeSTTService(STTService):
                 context_terms=tuple(cast(Sequence[str], settings.context_terms)),
                 output_contract=TranscriptionOutputContract(settings.output_contract),
                 input_format=PCMFormat(
-                    sample_rate=cast(Literal[8000, 16000, 24000, 48000], self._send_sample_rate),
+                    sample_rate=cast(Literal[8000, 16000, 24000, 48000], self.send_sample_rate),
                     channels=1,
                 ),
             )
