@@ -180,7 +180,7 @@ def language_to_assemblyai_language(language: Language) -> str:
 
 
 def _prepare_language_codes(
-    language_codes: list[Language], *, max_codes: int | None = MAX_LANGUAGE_CODES
+    language_codes: list[Language] | None, *, max_codes: int | None = MAX_LANGUAGE_CODES
 ) -> list[str]:
     """Resolve declared languages to the AssemblyAI codes sent on the wire.
 
@@ -188,7 +188,7 @@ def _prepare_language_codes(
     code — while preserving order, which the steering prompt follows.
 
     Args:
-        language_codes: Declared languages.
+        language_codes: Declared languages, or None / empty list for no codes.
         max_codes: Most distinct codes the endpoint accepts, or None for an
             endpoint that sets no limit.
 
@@ -199,6 +199,8 @@ def _prepare_language_codes(
         ValueError: If more than ``max_codes`` distinct languages remain after
             resolution.
     """
+    if not language_codes:
+        return []
     prepared = [language_to_assemblyai_language(lang) for lang in language_codes]
     deduped = list(dict.fromkeys(prepared))
     if max_codes is not None and len(deduped) > max_codes:
@@ -761,13 +763,13 @@ class AssemblyAISTTService(WebsocketSTTService):
         if "agent_context" in changed and isinstance(self._settings.agent_context, str):
             # update_agent_context() guards on model and clips.
             await self.update_agent_context(self._settings.agent_context)
-        if "language_codes" in changed and isinstance(self._settings.language_codes, list):
-            # _update_language_codes() guards on model.
+        if "language_codes" in changed:
+            # _update_language_codes() guards on model and clears steering on [] or None.
             await self._update_language_codes(self._settings.language_codes)
 
         return changed
 
-    async def _update_language_codes(self, language_codes: list[Language]):
+    async def _update_language_codes(self, language_codes: list[Language] | None):
         """Re-steer the live session toward a new set of declared languages.
 
         Steering is prompt-based and therefore U3 Pro-only; AssemblyAI discards a
@@ -775,7 +777,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         Reconnecting wouldn't help either — those models aren't steered at all.
 
         Args:
-            language_codes: Declared languages, or an empty list to clear steering
+            language_codes: Declared languages, or an empty list (or None) to clear steering
                 back to the model default.
         """
         if not is_u3_pro_model(self._settings.model):

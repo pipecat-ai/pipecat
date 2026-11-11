@@ -933,6 +933,41 @@ def test_update_settings_language_codes_empty_list_clears_steering():
     assert reconnects == []
 
 
+def test_update_settings_language_codes_none_clears_steering():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
+    )
+    sent, reconnects = _stub_connection(service)
+
+    delta = AssemblyAISTTService.Settings(language_codes=None)
+    asyncio.run(service._update_settings(delta))
+
+    # None clears steering back to the model default, same as an empty list.
+    assert sent == [{"language_codes": []}]
+    assert reconnects == []
+
+
+def test_prepare_language_codes_none_and_empty():
+    from pipecat.services.assemblyai.stt import _prepare_language_codes
+
+    assert _prepare_language_codes(None) == []
+    assert _prepare_language_codes([]) == []
+
+
+def test_update_language_codes_none_sends_empty_list():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(language_codes=[Language.ES]),
+    )
+    sent, reconnects = _stub_connection(service)
+
+    asyncio.run(service._update_language_codes(None))
+
+    assert sent == [{"language_codes": []}]
+    assert reconnects == []
+
+
 @pytest.mark.parametrize(
     "model", ["universal-streaming-english", "universal-streaming-multilingual"]
 )
