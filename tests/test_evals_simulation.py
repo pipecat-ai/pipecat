@@ -590,6 +590,53 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
         )
 
+    async def test_a_required_measurement_without_a_value_fails_a_successful_goal(self):
+        for measure in ("latency", "words"):
+            for bounds in ({"min_value": 0}, {"max_value": 3}, {"min_value": 0, "max_value": 3}):
+                with self.subTest(measure=measure, bounds=bounds):
+                    driver, stream, llm, _ = _driver(
+                        _simulation(
+                            metrics=[EvalSimulationMetric(measure, measure=measure, **bounds)]
+                        ),
+                        _FakeConversationJudge(["yes"]),
+                    )
+                    end_call = asyncio.create_task(_end_call(llm, success=True, reason="done"))
+                    failures = await driver.run()
+                    await end_call
+                    result = driver.result(
+                        failures=failures,
+                        duration_ms=0,
+                        events_seen=stream.events_seen,
+                        debug_log=[],
+                    )
+                    metric = result.metrics[0]
+                    self.assertTrue(result.succeeded)
+                    self.assertIsNone(result.error)
+                    self.assertIsNone(metric.value)
+                    self.assertIsNone(metric.score)
+                    self.assertFalse(metric.passed)
+                    self.assertEqual(metric.failure_kind, "error")
+                    self.assertFalse(result.passed)
+                    self.assertIn("no reply", result.failure or "")
+
+    async def test_a_measured_zero_can_pass_its_bounds(self):
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=[EvalSimulationMetric("turns", measure="turns", max_value=0)]),
+            _FakeConversationJudge(["yes"]),
+        )
+        end_call = asyncio.create_task(_end_call(llm, success=True, reason="done"))
+        failures = await driver.run()
+        await end_call
+        result = driver.result(
+            failures=failures, duration_ms=0, events_seen=stream.events_seen, debug_log=[]
+        )
+        metric = result.metrics[0]
+        self.assertEqual(metric.value, 0.0)
+        self.assertEqual(metric.score, 1.0)
+        self.assertTrue(metric.passed)
+        self.assertIsNone(metric.failure_kind)
+        self.assertTrue(result.passed)
+
     async def test_words_measure_counts_each_cjk_character(self):
         chinese = "这是一个比较长的中文回复用来测量字数"
         metrics = [EvalSimulationMetric("words", measure="words", max_value=10)]
