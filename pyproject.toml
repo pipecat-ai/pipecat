@@ -90,7 +90,7 @@ evals = [ "pipecat-ai[cli]", "pipecat-ai[kokoro]", "pipecat-ai[moonshine]" ]
 fal = []
 fireworks = []
 fish = [ "ormsgpack>=1.7.0,<2" ]
-funasr = [ "funasr>=1.1.0" ]
+funasr = [ "funasr[knf]>=1.4.5", "torch>=2.5.0,<3" ]
 gladia = []
 # The google-genai 2.25 floor skips 3.13/Linux — the one environment where
 # vonage-video-connector installs and pins pydantic<2.12
