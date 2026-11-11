@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
-from pipecat.evals.events import EvalBotEndedError, EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream, EvalHarnessError
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.results import (
@@ -218,6 +218,8 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         except EvalBotEndedError:
             reason = f"the bot ended the call before {send_after.event!r} fired"
             return await self._send_after_failure(send_after, turn_idx, reason, "bot_ended")
+        except EvalHarnessError as e:
+            return await self._send_after_failure(send_after, turn_idx, str(e), "error")
         return None
 
     async def _send_after_failure(
@@ -250,6 +252,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         Raises:
             TimeoutError: If the event never arrives.
             EvalBotEndedError: If the bot ends the call before the event arrives.
+            EvalHarnessError: If the harness's own pipeline fails first.
         """
         target_delay_s = send_after.delay_ms / 1000.0
 
@@ -270,6 +273,9 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
             if self._stream.bot_has_ended:
                 raise EvalBotEndedError()
+
+            if self._stream.harness_error is not None:
+                raise EvalHarnessError(self._stream.harness_error)
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
@@ -320,6 +326,11 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                 reason = f"the bot ended the call before a matching {expectation.event!r} event"
                 failures.append(
                     await self._unmatched(turn_idx, exp_idx, expectation, reason, "bot_ended")
+                )
+                break
+            except EvalHarnessError as e:
+                failures.append(
+                    await self._unmatched(turn_idx, exp_idx, expectation, str(e), "error")
                 )
                 break
 
