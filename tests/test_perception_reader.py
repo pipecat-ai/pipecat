@@ -22,7 +22,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.expressive.perception import PerceptionSignal
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
 from pipecat.expressive.processors import perception_reader as reader_module
 from pipecat.expressive.processors.perception_reader import (
     PerceptionQuestion,
@@ -32,8 +32,10 @@ from pipecat.expressive.processors.perception_reader import (
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EagerTranscriptionFrame,
     ErrorFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     MetricsFrame,
@@ -1464,3 +1466,152 @@ def test_a_sources_name_that_cant_be_written_in_a_reading_is_refused():
         PerceptionSource(
             classifier=FakeClassifier(), questions={"speech rate": QUESTIONS["energy"]}
         )
+
+
+SPEECH_RATE = PerceptionSignal("speech_rate", value=4.1)
+STT_SIGNALS = PerceptionCapabilities([PerceptionTerm("speech_rate", "Words per second.")])
+
+
+def _read_by_the_stt(frame):
+    """The frame, carrying the STT service's reading."""
+    frame.perception = [SPEECH_RATE]
+    return frame
+
+
+def _declared(frames) -> list:
+    return [
+        [term.name for term in f.perception.signals]
+        for f in frames
+        if isinstance(f, PerceptionMetadataFrame)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_reading_is_added_to_the_one_the_transcription_carries():
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(FakeClassifier(), "hesitation")]),
+        frames_to_send=[_read_by_the_stt(_transcription("Hello."))],
+    )
+
+    assert _perception(down) == [[SPEECH_RATE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_signal_read_before_the_reader_too_keeps_the_higher_of_each_label():
+    frame = _transcription("Hello.")
+    frame.perception = [PerceptionSignal("tone", labels=[("calm", 0.9), ("frustrated", 0.1)])]
+
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(FakeClassifier(), "tone")]),
+        frames_to_send=[frame],
+    )
+
+    assert _perception(down) == [
+        [PerceptionSignal("tone", labels=[("calm", 0.9), ("frustrated", 0.7), ("confused", 0.2)])]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_transcription_the_reader_doesnt_read_keeps_the_reading_it_carries():
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(FakeClassifier(delay=1.0), "hesitation", timeout=0.05)]),
+        frames_to_send=[_read_by_the_stt(_transcription("Hello."))],
+    )
+
+    assert _perception(down) == [[SPEECH_RATE]]
+
+
+@pytest.mark.asyncio
+async def test_a_held_transcription_gets_the_heard_reading_added_to_its_own():
+    *speech, transcription = _speech("Hello.")
+
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(FakeAudioClassifier(), "hesitation")]),
+        frames_to_send=[*speech, _read_by_the_stt(transcription)],
+    )
+
+    assert _perception(down) == [[SPEECH_RATE, HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_provisional_readings_and_readings_made_before_the_reader_pass_on():
+    down, _ = await run_test(
+        PerceptionReader(sources=[_source(FakeClassifier(), "hesitation")]),
+        frames_to_send=[
+            PerceptionFrame(perception=[SPEECH_RATE]),
+            _read_by_the_stt(InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now")),
+            _read_by_the_stt(EagerTranscriptionFrame(text="Hello.", user_id="", timestamp="now")),
+        ],
+    )
+
+    assert [f.perception for f in down if isinstance(f, PerceptionFrame)] == [[SPEECH_RATE]]
+    provisional = [
+        f for f in down if isinstance(f, (InterimTranscriptionFrame, EagerTranscriptionFrame))
+    ]
+    assert [f.perception for f in provisional] == [[SPEECH_RATE], [SPEECH_RATE]]
+
+
+@pytest.mark.asyncio
+async def test_the_signals_declared_before_the_reader_are_declared_with_its_own():
+    reader = PerceptionReader(sources=[_source(FakeClassifier(), "hesitation")])
+
+    down, _ = await run_test(
+        reader,
+        frames_to_send=[PerceptionMetadataFrame(service_name="stt", perception=STT_SIGNALS)],
+    )
+
+    assert _declared(down) == [["hesitation"], ["speech_rate", "hesitation"]]
+    assert {f.service_name for f in down if isinstance(f, PerceptionMetadataFrame)} == {reader.name}
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_reader_declares_the_signals_declared_before_it():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[_source(FakeClassifier(setup_error=ClassifierError("no model")), "tone")]
+        ),
+        frames_to_send=[
+            PerceptionMetadataFrame(service_name="stt", perception=STT_SIGNALS),
+            _read_by_the_stt(_transcription("Hello.")),
+        ],
+    )
+
+    assert _declared(down) == [["speech_rate"]]
+    assert _perception(down) == [[SPEECH_RATE]]
+
+
+@pytest.mark.asyncio
+async def test_a_replacing_reader_drops_what_was_perceived_before_it():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[_source(FakeClassifier(), "hesitation")], replace_perception=True
+        ),
+        frames_to_send=[
+            PerceptionMetadataFrame(service_name="stt", perception=STT_SIGNALS),
+            PerceptionFrame(perception=[SPEECH_RATE]),
+            _read_by_the_stt(InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now")),
+            _read_by_the_stt(EagerTranscriptionFrame(text="Hello.", user_id="", timestamp="now")),
+            _read_by_the_stt(_transcription("Hello.")),
+        ],
+    )
+
+    assert _declared(down) == [["hesitation"]]
+    assert [f.perception for f in down if isinstance(f, PerceptionFrame)] == [[HESITATION]]
+    provisional = [
+        f for f in down if isinstance(f, (InterimTranscriptionFrame, EagerTranscriptionFrame))
+    ]
+    assert [f.perception for f in provisional] == [None, None]
+    assert _perception(down) == [[HESITATION]]
+
+
+@pytest.mark.asyncio
+async def test_a_replacing_reader_leaves_a_turn_it_doesnt_read_unread():
+    down, _ = await run_test(
+        PerceptionReader(
+            sources=[_source(FakeClassifier(delay=1.0), "hesitation", timeout=0.05)],
+            replace_perception=True,
+        ),
+        frames_to_send=[_read_by_the_stt(_transcription("Hello."))],
+    )
+
+    assert _perception(down) == [None]

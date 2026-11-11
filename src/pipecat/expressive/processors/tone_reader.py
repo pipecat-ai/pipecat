@@ -91,7 +91,7 @@ class PipecatToneReader(PerceptionReader):
 
     Goes between the STT service and the user aggregator. Each final
     transcription is read, with the bot's reply before it, and the reading is
-    set as its ``perception``: the turn's ``emotion``, its two likeliest labels
+    added to its ``perception``: the turn's ``emotion``, its two likeliest labels
     with their confidences, and its ``sarcasm``, the chance it's sarcastic.
     The read runs off the event loop, and the transcription waits for it, a
     few milliseconds. It's a :class:`PerceptionReader` whose one source is a

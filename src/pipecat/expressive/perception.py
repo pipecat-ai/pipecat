@@ -15,7 +15,10 @@ declares the signals it reports with :class:`PerceptionCapabilities`, and
 broadcasts them at start in a
 :class:`~pipecat.frames.frames.PerceptionMetadataFrame`, so the LLM can be told
 how to read them. A turn read more than once is merged with
-:func:`merge_perception`, keeping the higher of each signal.
+:func:`merge_perception`, keeping the higher of each signal. A producer after
+another adds its reading to the one the transcription carries and declares
+both producers' signals together, so the latest declaration names every signal
+a transcription can carry.
 
 **Alpha.** These types are likely to change between releases.
 """
@@ -69,6 +72,30 @@ class PerceptionCapabilities:
     """
 
     signals: list[PerceptionTerm] = field(default_factory=list)
+
+    def merge(self, other: "PerceptionCapabilities") -> "PerceptionCapabilities":
+        """Merge another producer's signals into these.
+
+        A signal both report keeps every label either can report and the first
+        description that isn't empty.
+
+        Args:
+            other: The other producer's signals.
+
+        Returns:
+            The signals of both, these first.
+        """
+
+        def merged_term(earlier: PerceptionTerm, term: PerceptionTerm) -> PerceptionTerm:
+            added = [label for label in term.labels if label not in earlier.labels]
+            labels = [*earlier.labels, *added]
+            return PerceptionTerm(term.name, earlier.description or term.description, labels)
+
+        terms = {term.name: term for term in self.signals}
+        for term in other.signals:
+            earlier = terms.get(term.name)
+            terms[term.name] = merged_term(earlier, term) if earlier else term
+        return PerceptionCapabilities(list(terms.values()))
 
 
 def format_perception(signals: list[PerceptionSignal]) -> str:
