@@ -163,7 +163,7 @@ def test_interruption_delay_out_of_range_raises(value):
         ("universal-3-5-pro", True),
         ("universal-3-6-pro", True),
         ("assemblyai-stt-3-7-realtime-agent", True),
-        # The 3.7 note-taking model is not a voice-agent model.
+        # Not intended for voice-agent use cases.
         ("assemblyai-stt-3-7-realtime", False),
         # The Sync/async name is not a streaming model.
         ("assemblyai-stt-3-7", False),
@@ -380,8 +380,8 @@ def test_deprecated_connection_params_accept_assemblyai_stt_3_7_realtime_agent()
 
 
 def test_assemblyai_stt_3_7_realtime_is_not_a_voice_agent_model():
-    # The 3.7 note-taking model doesn't get the voice-agent feature set, so
-    # AssemblyAI's built-in turn detection is rejected for it.
+    # Not intended for voice-agent use cases, so AssemblyAI's built-in turn
+    # detection is rejected for it.
     with pytest.raises(ValueError, match="requires a U3 Pro model"):
         AssemblyAISTTService(
             api_key="test-key",

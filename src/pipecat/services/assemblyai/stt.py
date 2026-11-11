@@ -66,11 +66,8 @@ MAX_AGENT_CONTEXT_CHARS = 1500
 # Model-name prefixes shared by every Universal-3 Pro streaming variant, all of
 # which expose the full U3 Pro feature set: built-in turn detection, prompting,
 # continuous partials, interruption_delay, context carryover, and voice focus.
-# universal-3-6-pro and universal-3-5-pro share that feature set; 3.6 covers 32
-# declared languages against 3.5's 19. assemblyai-stt-3-7-realtime-agent is the
-# Universal-3.7 voice-agent model. Its sibling assemblyai-stt-3-7-realtime is the
-# note-taking model, built for ambient transcription rather than voice agents, so
-# it is deliberately left out of the family.
+# universal-3-5-pro, universal-3-6-pro and assemblyai-stt-3-7-realtime-agent share
+# that feature set; 3.6 and 3.7 cover 32 declared languages against 3.5's 19.
 U3_PRO_MODEL_PREFIXES = (
     "u3-rt-pro",
     "universal-3-5-pro",
@@ -102,10 +99,9 @@ def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
     any ``u3-rt-pro-*`` variant), the ``universal-3-5-pro`` /
     ``universal-3-6-pro`` releases (and any ``universal-3-5-pro-*`` /
-    ``universal-3-6-pro-*`` variant), and the ``assemblyai-stt-3-7-realtime-agent``
-    voice-agent model, so U3 Pro-only features are gated on the whole family
-    rather than a single exact string. The note-taking model
-    ``assemblyai-stt-3-7-realtime`` is not part of the family.
+    ``universal-3-6-pro-*`` variant), and ``assemblyai-stt-3-7-realtime-agent``,
+    so U3 Pro-only features are gated on the whole family rather than a single
+    exact string.
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
@@ -1376,9 +1372,8 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
     suits dictation, scribe, and voice-agent turns where the client detects
     speech locally and transcribes each turn on demand.
 
-    The model is chosen with ``Settings(model=...)`` and sent as the
-    ``X-AAI-Model`` header, which routes the request: ``universal-3-6-pro`` (the
-    default) or ``assemblyai-stt-3-7`` for Universal-3.7.
+    The model is set with ``Settings(model=...)`` and sent as the ``X-AAI-Model``
+    header.
 
     When pre-warming is enabled (the default), the service opens the connection
     as soon as the user starts speaking, so the transcription request skips the
