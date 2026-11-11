@@ -67,8 +67,16 @@ MAX_AGENT_CONTEXT_CHARS = 1500
 # which expose the full U3 Pro feature set: built-in turn detection, prompting,
 # continuous partials, interruption_delay, context carryover, and voice focus.
 # universal-3-6-pro and universal-3-5-pro share that feature set; 3.6 covers 32
-# declared languages against 3.5's 19.
-U3_PRO_MODEL_PREFIXES = ("u3-rt-pro", "universal-3-5-pro", "universal-3-6-pro")
+# declared languages against 3.5's 19. assemblyai-stt-3-7-realtime-agent is the
+# Universal-3.7 voice-agent model. Its sibling assemblyai-stt-3-7-realtime is the
+# note-taking model, built for ambient transcription rather than voice agents, so
+# it is deliberately left out of the family.
+U3_PRO_MODEL_PREFIXES = (
+    "u3-rt-pro",
+    "universal-3-5-pro",
+    "universal-3-6-pro",
+    "assemblyai-stt-3-7-realtime-agent",
+)
 
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
@@ -92,10 +100,12 @@ def is_u3_pro_model(model: str | None | NotGiven) -> bool:
     """Return whether a model name is a Universal-3 Pro streaming variant.
 
     Matches the ``u3-rt-pro`` family (``u3-rt-pro``, ``u3-rt-pro-beta-1``, and
-    any ``u3-rt-pro-*`` variant) and the ``universal-3-5-pro`` /
+    any ``u3-rt-pro-*`` variant), the ``universal-3-5-pro`` /
     ``universal-3-6-pro`` releases (and any ``universal-3-5-pro-*`` /
-    ``universal-3-6-pro-*`` variant) so U3 Pro-only features are gated on the
-    whole family rather than a single exact string.
+    ``universal-3-6-pro-*`` variant), and the ``assemblyai-stt-3-7-realtime-agent``
+    voice-agent model, so U3 Pro-only features are gated on the whole family
+    rather than a single exact string. The note-taking model
+    ``assemblyai-stt-3-7-realtime`` is not part of the family.
 
     Args:
         model: The model identifier. Accepts the ``Settings.model`` union
@@ -1365,6 +1375,10 @@ class AssemblyAISyncSTTService(SegmentedSTTService):
     Audio segments must be at most 120 seconds; the API rejects longer ones. This
     suits dictation, scribe, and voice-agent turns where the client detects
     speech locally and transcribes each turn on demand.
+
+    The model is chosen with ``Settings(model=...)`` and sent as the
+    ``X-AAI-Model`` header, which routes the request: ``universal-3-6-pro`` (the
+    default) or ``assemblyai-stt-3-7`` for Universal-3.7.
 
     When pre-warming is enabled (the default), the service opens the connection
     as soon as the user starts speaking, so the transcription request skips the
