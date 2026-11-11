@@ -461,7 +461,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
         payload = await self._params.serializer.serialize(frame)
         if payload:
-            await self._session.send(payload)
+            return await self._session.send(payload)
 
         return True
 

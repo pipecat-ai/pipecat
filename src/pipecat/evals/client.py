@@ -900,7 +900,11 @@ class EvalClient:
         if self._record_path and self._params.bot_audio:
             self._recorder = EvalClientRecorder(self._user_audio_rate or EVAL_STT_SAMPLE_RATE)
         transport = EvalClientTransport(
-            self._connect_url(), params, flags=self._connection_flags(), recorder=self._recorder
+            self._connect_url(),
+            params,
+            flags=self._connection_flags(),
+            recorder=self._recorder,
+            timing=self._stream.transport_timing,
         )
 
         @transport.event_handler("on_bot_ready")

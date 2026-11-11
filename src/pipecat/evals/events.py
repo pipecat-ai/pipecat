@@ -88,6 +88,11 @@ from pipecat.frames.frames import (
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 
+# Client-observed wire boundaries used by simulation latency measurements.
+USER_TEXT_SENT_EVENT = "user_text_sent"
+USER_AUDIO_SENT_EVENT = "user_audio_sent"
+BOT_AUDIO_RECEIVED_EVENT = "bot_audio_received"
+
 
 class EvalBotEndedError(Exception):
     """The bot ended the call before the awaited event arrived, so it never will."""
@@ -297,6 +302,15 @@ class EvalEventStream:
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
+    async def transport_timing(self, kind: str, observed_at: float) -> None:
+        """Append a transport observation using its original monotonic timestamp.
+
+        Args:
+            kind: The completed input delivery or received audio event type.
+            observed_at: Monotonic time when the transport observed the boundary.
+        """
+        await self.append({"type": kind, "at": observed_at - self._t0})
+
     async def next_any(self, deadline: float) -> dict:
         """Pop the next queued event, whatever its type.
 
@@ -417,8 +431,8 @@ class EvalEventStream:
             self._trace.log(f"discard: dropped {dropped} queued event(s) {why}")
 
     def elapsed(self) -> float:
-        """Seconds since the stream began, the clock the events' ``at`` is on."""
-        return round(time.monotonic() - self._t0, 3)
+        """Seconds since the stream began, preserving precision for event ordering."""
+        return time.monotonic() - self._t0
 
     def touch(self) -> None:
         """Note activity that makes no event, so a lull is measured from it."""
