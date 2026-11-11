@@ -8,11 +8,13 @@
 
 import asyncio
 import hashlib
+import io
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import numpy as np
+from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
@@ -727,6 +729,40 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bot_frames, [])
         finally:
             await transport.cancel(CancelFrame())
+
+    async def test_resampling_is_logged_once(self):
+        """The resample log line shows up once, never for a match."""
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="DEBUG", format="{message}")
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            frames = self._tts_frames(sample_count=3200)
+            matching = [
+                TTSAudioRawFrame(
+                    audio=frame.audio,
+                    sample_rate=self.OUT_RATE,
+                    num_channels=1,
+                    context_id="ctx1",
+                )
+                for frame in frames
+            ]
+            for frame in frames + matching + frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            output = sink.getvalue()
+            self.assertEqual(
+                output.count(
+                    f"resampling output audio from {self.TTS_RATE} Hz to {self.OUT_RATE} Hz"
+                ),
+                1,
+            )
+            self.assertNotIn(f"resampling output audio from {self.OUT_RATE} Hz", output)
+            self.assertIn(
+                f"output audio sample rate {self.OUT_RATE} Hz (from transport params)", output
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+            logger.remove(handler_id)
 
 
 class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):

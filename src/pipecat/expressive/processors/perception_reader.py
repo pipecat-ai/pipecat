@@ -9,12 +9,13 @@
 import asyncio
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ChoiceQuestion,
@@ -25,8 +26,14 @@ from pipecat.classifiers.base_classifier import (
     ClassifierResult,
     ScoreResult,
 )
-from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
+from pipecat.expressive.perception import (
+    PerceptionCapabilities,
+    PerceptionSignal,
+    PerceptionTerm,
+    merge_perception,
+)
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -163,10 +170,12 @@ class PerceptionReader(FrameProcessor):
 
     A text classifier reads each final transcription, with the bot's reply
     before it. A classifier that can hear, as its ``supports_audio`` says,
-    hears the user's audio each time they stop speaking: their speech, and the
-    audio heard just before it when that's shorter than the classifier takes.
-    The transcriptions of that speech wait for its answers, up to its source's
-    ``timeout`` after the user stopped.
+    hears the user's speech each time they stop: the latest, topped up with
+    the end of what they said before it since the bot last spoke when that's
+    shorter than the classifier answers best. It
+    hears one clip at a time, and of the clips that come while it's busy, only
+    the newest. The transcriptions of that speech wait for its answers, up to
+    its source's ``timeout`` after the user stopped.
 
     A reader asks each of its ``sources``, a classifier with its own questions,
     about the same turn, all at once, and their signals go in the turn's one
@@ -174,6 +183,11 @@ class PerceptionReader(FrameProcessor):
     has read it or run out of time. A source that's late or whose classifier
     fails leaves its signals out, and a transcription none of them read passes
     unread. A classifier that can't be set up leaves the reader unusable.
+
+    A transcription that already carries a reading, such as the STT service's,
+    gets the reader's added to it, and the reader declares the signals declared
+    before it together with its own. With ``replace_perception``, the reader's
+    reading replaces the one the transcription carries instead.
 
     Part of expressive conversation (alpha): turn it on with
     ``PipelineParams(enable_expressive_conversation=True)`` for the LLM to read
@@ -215,12 +229,21 @@ class PerceptionReader(FrameProcessor):
         )
     """
 
-    def __init__(self, *, sources: Sequence[PerceptionSource], **kwargs):
+    def __init__(
+        self,
+        *,
+        sources: Sequence[PerceptionSource],
+        replace_perception: bool = False,
+        **kwargs,
+    ):
         """Initialize the processor.
 
         Args:
             sources: The classifiers to ask, each with its questions and its
                 timeout.
+            replace_perception: Whether the reader's reading replaces the one
+                a transcription carries, such as the STT service's, instead of
+                being added to it.
             **kwargs: Additional arguments passed to the parent.
 
         Raises:
@@ -241,12 +264,19 @@ class PerceptionReader(FrameProcessor):
         self._sources = list(sources)
         self._text_sources = [s for s in self._sources if not s.classifier.supports_audio]
         self._audio_sources = [s for s in self._sources if s.classifier.supports_audio]
+        # Whether the reader's reading replaces the one a transcription
+        # carries, and the signals declared before the reader, which its
+        # transcriptions can carry too.
+        self._replace_perception = replace_perception
+        self._declared_before: PerceptionCapabilities | None = None
         # The bot's last reply, which the user's turn is read against.
         self._previous: str | None = None
-        # For the sources that hear: the user's recent audio, and their reads
-        # of the clips that end with the user's latest speech.
-        self._audio = _RecentAudio([source.classifier for source in self._audio_sources])
+        # For the sources that hear: the user's recent speech, their reads of
+        # the clips that end with the user's latest speech, and each one's
+        # latest read, which its next one waits for.
+        self._audio = _RecentSpeech([source.classifier for source in self._audio_sources])
         self._clip_reads: _Reads | None = None
+        self._clip_tasks: dict[PerceptionSource, asyncio.Task] = {}
         # Transcriptions held until their speech is read, and the task that
         # pushes them on once the STT's latency has passed.
         self._held: list[_HeldTranscription] = []
@@ -315,6 +345,10 @@ class PerceptionReader(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, PerceptionMetadataFrame) and direction == FrameDirection.DOWNSTREAM:
+            # Declared again with the reader's signals, which its transcriptions carry too.
+            await self._handle_perception_metadata(frame)
+            await self._declare_signals()
         elif isinstance(frame, STTMetadataFrame):
             await self._handle_stt_metadata(frame)
             await self.push_frame(frame, direction)
@@ -326,6 +360,9 @@ class PerceptionReader(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame)
@@ -349,7 +386,11 @@ class PerceptionReader(FrameProcessor):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         if frame.text.strip() and self.is_usable:
-            frame.perception = self._reading(await self._wait(self._read_text(frame.text)))
+            reading = self._reading(await self._wait(self._read_text(frame.text)))
+            self._set_reading(frame, reading)
+
+    async def _handle_perception_metadata(self, frame: PerceptionMetadataFrame):
+        self._declared_before = frame.perception
 
     async def _handle_stt_metadata(self, frame: STTMetadataFrame):
         self._stt_latency = frame.ttfs_p99_latency
@@ -360,7 +401,7 @@ class PerceptionReader(FrameProcessor):
             frame.ttfs_p99_latency += max(source.timeout for source in self._sources)
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._audio.start(frame.start_secs)
+        self._audio.start()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._audio.stop(frame.stop_secs)
@@ -373,25 +414,30 @@ class PerceptionReader(FrameProcessor):
         if muted:
             await self._cancel_clip_reads()
 
+    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        self._audio.bot_stopped_speaking()
+
     async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
 
     async def _declare_signals(self):
-        """Push the signals the reader reports, if it can report them."""
-        if self.is_usable:
+        """Push the signals the reader's transcriptions can carry, if any."""
+        capabilities = self._capabilities()
+        if capabilities.signals:
             await self.push_frame(
-                PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
+                PerceptionMetadataFrame(service_name=self.name, perception=capabilities)
             )
 
     def _capabilities(self) -> PerceptionCapabilities:
-        """The signals the reader reports, from its sources' questions."""
-        return PerceptionCapabilities(
-            signals=[
+        """The signals declared before the reader, and its sources' when it can report them."""
+        own = PerceptionCapabilities()
+        if self.is_usable:
+            own.signals = [
                 PerceptionTerm(name, question.description, labels=self._labels(question.question))
                 for source in self._sources
                 for name, question in source.questions.items()
             ]
-        )
+        return self._declared_before.merge(own) if self._declared_before else own
 
     def _labels(self, question: ClassifierQuestion) -> list[str]:
         """The labels a signal can report: a choice's options, or none."""
@@ -400,7 +446,9 @@ class PerceptionReader(FrameProcessor):
     def _read_text(self, text: str) -> "_Reads":
         """Start each text source's read of a transcription, with the bot's reply before it."""
         state = {"assistant": self._previous, "user": text} if self._previous else {"user": text}
-        reads = {source: self._start_read(source, state) for source in self._text_sources}
+        reads = {
+            source: self._start_read(self._read(source, state)) for source in self._text_sources
+        }
         return _Reads(time.monotonic(), reads)
 
     def _read_speech(self):
@@ -419,24 +467,52 @@ class PerceptionReader(FrameProcessor):
                     f"{self}: {source.classifier} is reading {clip.duration_secs:.1f}s "
                     "of the user's audio"
                 )
-                reads[source] = self._start_read(source, state, [clip])
+                reads[source] = self._read_clip(source, state, clip)
         if reads:
             self._clip_reads = _Reads(ended_at, reads)
 
-    def _start_read(
+    def _read_clip(
+        self, source: PerceptionSource, state: dict[str, Any], clip: ClassifierAudio
+    ) -> asyncio.Task:
+        """Start a source's read of a clip, which asks once the source's earlier read is done."""
+        read = self._start_read(
+            self._read_in_turn(self._clip_tasks.get(source), source, state, clip)
+        )
+        self._clip_tasks[source] = read
+        return read
+
+    async def _read_in_turn(
         self,
+        earlier: asyncio.Task | None,
         source: PerceptionSource,
         state: dict[str, Any],
-        inputs: Sequence[ClassifierAudio] = (),
-    ) -> asyncio.Task:
-        """Start a source's read in a task of its own, kept until it's done so cleanup can stop it."""
-        task = self.create_task(self._read(source, state, inputs))
+        clip: ClassifierAudio,
+    ) -> list[PerceptionSignal] | None:
+        """A source's reading of a clip after its earlier read, or None if a newer clip came first.
+
+        A classifier that hears is asked about one clip at a time, as Hume's
+        Audio Decisions asks of live audio, and of the clips that came while it
+        was busy, only about the newest.
+        """
+        if earlier:
+            # A wait that doesn't cancel the earlier read, nor fails when a
+            # mute cancels it.
+            await asyncio.wait({earlier})
+        superseded = earlier is not None and self._clip_tasks[source] is not asyncio.current_task()
+        return None if superseded else await self._read(source, state, [clip])
+
+    def _start_read(self, read: Coroutine[Any, Any, list[PerceptionSignal] | None]) -> asyncio.Task:
+        """Run a read in a task of its own, kept until it's done so cleanup can stop it."""
+        task = self.create_task(read)
         self._reads.add(task)
         task.add_done_callback(self._reads.discard)
         return task
 
     async def _read(
-        self, source: PerceptionSource, state: dict[str, Any], inputs: Sequence[ClassifierAudio]
+        self,
+        source: PerceptionSource,
+        state: dict[str, Any],
+        inputs: Sequence[ClassifierAudio] = (),
     ) -> list[PerceptionSignal] | None:
         """A source's reading, broadcast once made, late or not, or None when its classifier fails."""
         questions = source.questions
@@ -474,7 +550,7 @@ class PerceptionReader(FrameProcessor):
         over = speech_end is not None and self._audio.ended_at == speech_end
         for transcription, reading in zip(held, readings):
             frame = transcription.frame
-            frame.perception = reading
+            self._set_reading(frame, reading)
             frame.finalized = over and transcription is held[-1]
             await self.push_frame(frame)
 
@@ -522,6 +598,15 @@ class PerceptionReader(FrameProcessor):
             signals for source in self._sources if (signals := readings.get(source)) is not None
         ]
         return [signal for signals in read for signal in signals] if read else None
+
+    def _set_reading(self, frame: TranscriptionFrame, reading: list[PerceptionSignal] | None):
+        """Set the reading on a transcription, replacing or added to the one it carries."""
+        if not reading:
+            return
+        if self._replace_perception:
+            frame.perception = reading
+        else:
+            frame.perception = merge_perception(frame.perception, reading)
 
     async def _cancel_clip_reads(self):
         """Stop the reads of the latest clips still running, if any."""
@@ -585,31 +670,32 @@ class _HeldTranscription(NamedTuple):
     reads: _Reads
 
 
-class _RecentAudio:
-    """The user's recent audio as it was heard, cut into clips each time they stop speaking.
+class _RecentSpeech:
+    """The user's recent speech, kept to cut a clip from each time they stop speaking.
 
-    A clip is cut for a classifier. It ends where the user stopped and holds
-    their speech, and the audio heard before it when that's shorter than the
-    classifier's ``min_audio_secs``, so a short reply is heard with what came
-    just before it. At the start of a call there's less audio than that, and
-    the clip starts with silence. Audio heard while the user is muted is kept
-    as silence.
+    Each stretch of speech is kept with the silence around it: up to a second
+    of the audio heard before the VAD reported it, and the silence the VAD
+    waited for after it. A classifier's clip is the latest stretch whole,
+    topped up from the end of the speech before it until it's as long as the
+    classifier answers best. Speech from before the bot stopped speaking or
+    before a mute is never joined to speech after it, so a reply is heard on
+    its own: speech from before or during the bot's turn says how the user
+    sounded then, not how they reply. Audio heard while the user is muted isn't
+    kept.
     """
 
     def __init__(self, classifiers: Sequence[BaseClassifier]):
-        # How far back the classifiers' clips reach between them, and the
-        # audio's sample rate.
+        # How much speech the classifiers' clips reach back for between them,
+        # and the longest a stretch of speech is kept.
+        preferred = [classifier.preferred_audio_secs for classifier in classifiers]
         longest = [classifier.max_audio_secs for classifier in classifiers]
         bounded = [secs for secs in longest if secs is not None]
-        self._min_secs = max((classifier.min_audio_secs for classifier in classifiers), default=0.0)
-        self._max_secs = max(bounded) if bounded and len(bounded) == len(longest) else None
+        self._reach_secs = max(preferred, default=0.0)
+        max_secs = max(bounded) if bounded and len(bounded) == len(longest) else None
+        self._segment = SpeechSegmentBuffer(max_secs=max_secs)
         self._sample_rate = 0
-        # The recent audio, the bytes heard before it, and where the latest
-        # speech starts and ends, counted in bytes heard.
-        self._audio = bytearray()
-        self._dropped = 0
-        self._speech_start = 0
-        self._speech_end = 0
+        # The user's recent stretches of speech, the latest last.
+        self._stretches: list[bytes] = []
         self._muted = False
         # Set while the user is silent, and when they stopped speaking.
         self._ended = asyncio.Event()
@@ -629,43 +715,51 @@ class _RecentAudio:
     def set_sample_rate(self, sample_rate: int):
         """Set the sample rate of the user's audio."""
         self._sample_rate = sample_rate
+        self._segment.set_sample_rate(sample_rate)
 
     def append(self, audio: bytes):
-        """Add the user's audio, as silence while they're muted."""
-        self._audio += bytes(len(audio)) if self._muted else audio
-        self._trim()
+        """Add the user's audio, unless they're muted."""
+        if not self._muted:
+            self._segment.append(audio)
 
-    def start(self, start_secs: float):
-        """Mark the start of the user's speech, start_secs before the VAD said so."""
-        self._speech_start = max(self._dropped, self._heard - self._bytes(start_secs))
+    def start(self):
+        """Mark the start of the user's speech."""
+        self._segment.start()
         self._ended.clear()
         self._ended_at = None
 
     def stop(self, stop_secs: float):
-        """Mark the end of the user's speech, stop_secs before the VAD said so."""
-        self._speech_end = max(self._speech_start, self._heard - self._bytes(stop_secs))
+        """Keep the user's speech, which ended stop_secs before the VAD said so."""
+        if self.speaking:
+            self._keep(self._segment.stop())
         # The stop strategies count from when the user stopped, too.
         self._ended_at = time.monotonic() - stop_secs
         self._ended.set()
 
     def clip(self, classifier: BaseClassifier) -> ClassifierAudio | None:
-        """A classifier's clip of the user's latest speech, or None when none was heard unmuted."""
-        if self._muted or self._speech_end <= self._speech_start:
-            return None
-        start = min(self._speech_start, self._speech_end - self._bytes(classifier.min_audio_secs))
+        """A classifier's clip of the user's latest speech, or None if it's too short for it."""
+        audio = self._latest(classifier.preferred_audio_secs)
         if classifier.max_audio_secs is not None:
-            start = max(start, self._speech_end - self._bytes(classifier.max_audio_secs))
-        silence = bytes(max(0, self._dropped - start))
-        audio = self._audio[max(0, start - self._dropped) : self._speech_end - self._dropped]
-        return ClassifierAudio(audio=silence + bytes(audio), sample_rate=self._sample_rate)
+            audio = audio[-self._bytes(classifier.max_audio_secs) :]
+        long_enough = audio and len(audio) >= self._bytes(classifier.min_audio_secs)
+        return ClassifierAudio(audio=audio, sample_rate=self._sample_rate) if long_enough else None
+
+    def bot_stopped_speaking(self):
+        """Keep the speech from before and during the bot's turn out of the clips after it.
+
+        Speech the user is in the middle of is kept whole.
+        """
+        self._stretches.clear()
 
     def mute(self, muted: bool):
-        """Keep the user's audio as silence while they're muted, ending any speech when they are."""
+        """Drop the speech kept when the user is muted, and end any speech they're in."""
         self._muted = muted
-        if muted and self.speaking:
-            self._speech_end = self._heard
-            self._ended_at = time.monotonic()
-            self._ended.set()
+        if muted:
+            self._segment.stop()
+            self._stretches.clear()
+            if self.speaking:
+                self._ended_at = time.monotonic()
+                self._ended.set()
 
     async def wait_for_end(self, timeout: float) -> float | None:
         """When the user stopped speaking, waiting up to timeout for it; None if they still speak."""
@@ -676,21 +770,22 @@ class _RecentAudio:
                 pass
         return self._ended_at
 
-    @property
-    def _heard(self) -> int:
-        """The bytes of audio heard so far."""
-        return self._dropped + len(self._audio)
+    def _keep(self, stretch: bytes):
+        """Keep a stretch of speech, and the ones before it a clip can still reach."""
+        if stretch:
+            self._stretches.append(stretch)
+        reach = self._bytes(self._reach_secs)
+        while len(self._stretches) > 1 and sum(map(len, self._stretches[1:])) >= reach:
+            del self._stretches[0]
 
-    def _trim(self):
-        """Drop the audio no clip can reach: what's before the latest speech and a clip before it."""
-        reach = self._bytes(self._min_secs + 1.0)
-        start = self._speech_start if self.speaking else self._heard
-        keep_from = start - reach
-        if self._max_secs is not None:
-            keep_from = max(keep_from, self._heard - self._bytes(self._max_secs) - reach)
-        if keep_from > self._dropped:
-            del self._audio[: keep_from - self._dropped]
-            self._dropped = keep_from
+    def _latest(self, secs: float) -> bytes:
+        """The latest stretch of speech, topped up from the end of the ones before it to last secs."""
+        if not self._stretches:
+            return b""
+        *earlier, latest = self._stretches
+        missing = max(0, self._bytes(secs) - len(latest))
+        top_up = b"".join(earlier)[-missing:] if missing else b""
+        return top_up + latest
 
     def _bytes(self, secs: float) -> int:
         """How many bytes of 16-bit mono audio make secs seconds."""

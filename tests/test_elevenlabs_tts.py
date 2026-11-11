@@ -463,6 +463,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@pytest.mark.asyncio
+async def test_text_normalization_change_reconnects():
+    """apply_text_normalization is a query parameter of the websocket URL."""
+    service = _make_service()
+    with (
+        unittest.mock.patch.object(service, "_disconnect") as disconnect,
+        unittest.mock.patch.object(service, "_connect") as connect,
+    ):
+        await service._update_settings(ElevenLabsTTSService.Settings(apply_text_normalization="on"))
+    disconnect.assert_awaited_once()
+    connect.assert_awaited_once()
+
+
 def test_v3_language_set_extends_the_v2_5_set():
     """Eleven v3 adds languages; it never drops one Flash and Turbo support."""
     assert ELEVENLABS_V2_5_LANGUAGES < ELEVENLABS_V3_LANGUAGES

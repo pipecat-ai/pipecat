@@ -21,11 +21,24 @@ _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
     "₹": ("rupee", "rupees", "paisa", "paise"),
 }
 
-# An amount may be followed by a scale word ("$2.5 billion"), which multiplies the
-# whole amount, so the fraction is part of the number rather than a subunit.
+# Abbreviated scales written directly after an amount ("$5k", "$2.5m", "$1.5bn").
+_SCALE_ABBREVIATIONS: dict[str, str] = {
+    "k": "thousand",
+    "m": "million",
+    "mn": "million",
+    "b": "billion",
+    "bn": "billion",
+    "t": "trillion",
+    "tn": "trillion",
+}
+
+# An amount may be followed by a scale word ("$2.5 billion") or its abbreviation
+# ("$2.5bn"), which multiplies the whole amount, so the fraction is part of the
+# number rather than a subunit. The amount must end at a word boundary, so an
+# unrecognised suffix ("$1.5x") is left alone instead of being read as cents.
 _CURRENCY_RE = re.compile(
-    r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)\b(?:\.(\d+))?"
-    r"(?:\s+(thousand|million|billion|trillion)\b)?",
+    r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)(?!\d)(?:\.(\d+))?(?!\.\d)"
+    r"(?:\s+(thousand|million|billion|trillion)\b|(k|mn|m|bn|b|tn|t)\b)?(?!\w)",
     re.IGNORECASE,
 )
 
@@ -47,12 +60,17 @@ def _currency_match(match: re.Match) -> str:
     whole = int(whole_str)
 
     scale = match.group(4)
+    if not scale and match.group(5):
+        scale = _SCALE_ABBREVIATIONS[match.group(5).lower()]
     if scale:
-        # "$2.5 billion" reads "two point five billion dollars": the fraction
+        # "$2.5 billion" and "$2.5bn" read "two point five billion dollars": the fraction
         # belongs to the scaled number, and the unit is always plural.
         number = num2words(whole, lang="en")
-        if frac_str:
-            number += " point " + " ".join(num2words(int(d), lang="en") for d in frac_str)
+        fraction = frac_str.rstrip("0") if frac_str else ""
+        if fraction:
+            # "$2.50 million" is two and a half million, so a trailing zero in
+            # the written fraction is not a digit to read out.
+            number += " point " + " ".join(num2words(int(d), lang="en") for d in fraction)
         return f"{number} {scale.lower()} {plural}"
 
     result = _amount_to_words(whole, singular, plural)
@@ -63,6 +81,18 @@ def _currency_match(match: re.Match) -> str:
             result += " and " + _amount_to_words(frac, c_singular, c_plural)
 
     return result
+
+
+def _keep_code_apart(match: re.Match) -> str:
+    """Expand *match*, keeping a currency code written directly before the symbol separate.
+
+    ``US$5`` otherwise becomes ``USfive dollars``: the substitution replaces the
+    symbol, so the code and the spoken amount end up glued together.
+    """
+    spoken = _currency_match(match)
+    if match.start() and match.string[match.start() - 1].isalpha():
+        return " " + spoken
+    return spoken
 
 
 async def expand_currency(text: str, text_type: str | TextType) -> str:
@@ -80,4 +110,4 @@ async def expand_currency(text: str, text_type: str | TextType) -> str:
         result = await expand_currency("Your balance is $42.50", "*")
         # "Your balance is forty-two dollars and fifty cents"
     """
-    return _CURRENCY_RE.sub(_currency_match, text)
+    return _CURRENCY_RE.sub(_keep_code_apart, text)

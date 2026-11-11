@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 
 import numpy as np
 import pytest
+from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -223,3 +224,25 @@ async def test_audio_back_at_the_service_rate_follows_the_held_audio():
     audio = _audio(await _run(service))
 
     assert b"".join(f.audio for f in audio) == await _resampled(first, 16000) + second
+
+
+@pytest.mark.asyncio
+async def test_each_context_logs_its_resampling_once():
+    service = MockTTSService(
+        [
+            (_tone(16000, 2000), 16000),
+            (_tone(16000, 2000), 16000),
+            (_tone(_SERVICE_RATE, 2000), _SERVICE_RATE),
+        ]
+    )
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="DEBUG", format="{message}")
+    try:
+        await _run(service, TTSSpeakFrame(text="Again."))
+    finally:
+        logger.remove(handler_id)
+
+    output = sink.getvalue()
+    assert f"TTS sample rate {_SERVICE_RATE} Hz (from service)" in output
+    assert output.count(f"resampling TTS audio from 16000 Hz to {_SERVICE_RATE} Hz") == 2
+    assert f"resampling TTS audio from {_SERVICE_RATE} Hz" not in output

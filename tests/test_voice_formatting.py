@@ -43,6 +43,40 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_delimiter_lengths(self):
+        cases = {
+            "Use ``__init__`` here.": "Use __init__ here.",
+            "Use ``a ` b`` here.": "Use a ` b here.",
+            "Use `a `` b` here.": "Use a `` b here.",
+            "``one ` two`` and `three`": "one ` two and three",
+            "**bold ``a ` b``** end": "bold a ` b end",
+            "``first\nsecond``": "first\nsecond",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
+    async def test_double_backtick_code_keeps_link_markup(self):
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in (
+                ("``[label](url)``", "[label](url)"),
+                ("``![alt](image.png)``", "![alt](image.png)"),
+            ):
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_unmatched_code_delimiters(self):
+        for text in ("Use ``unclosed` here.", "Use `unclosed`` here.", "Use ``unclosed here."):
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), text)
+
+    async def test_fenced_code_with_backticks_removed(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                text = f"Before {fence}python\nvalue = `code`\n{fence} after ``shown``."
+                self.assertEqual(await strip_markdown(text, "*"), "Before  after shown.")
+
     async def test_inline_code_content_kept(self):
         cases = {
             "call `__init__` please": "call __init__ please",
@@ -569,6 +603,53 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_scaled_amount_drops_trailing_zeros(self):
+        # "$2.50 million" is two and a half million, so the zero is not read out.
+        self.assertEqual(
+            await expand_currency("We raised $2.50 million", "*"),
+            "We raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("$1.50 billion", "*"), "one point five billion dollars"
+        )
+        self.assertEqual(await expand_currency("$1.0 million", "*"), "one million dollars")
+        # A zero inside the fraction is content and stays read.
+        self.assertEqual(
+            await expand_currency("$2.05 million", "*"), "two point zero five million dollars"
+        )
+
+    async def test_abbreviated_scale_after_amount(self):
+        # "$2.5m" used to read "two dollars and fifty centsm", and "$5m" was left
+        # for expand_units to turn into "$5 meters" in the full formatter.
+        self.assertEqual(
+            await expand_currency("They raised $2.5m", "*"),
+            "They raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("a $1.5bn deal", "*"), "a one point five billion dollars deal"
+        )
+        self.assertEqual(await expand_currency("$5m", "*"), "five million dollars")
+        self.assertEqual(await expand_currency("$500k", "*"), "five hundred thousand dollars")
+        self.assertEqual(await expand_currency("$3B", "*"), "three billion dollars")
+        self.assertEqual(await expand_currency("£3.5mn", "*"), "three point five million pounds")
+        self.assertEqual(await expand_currency("$1T", "*"), "one trillion dollars")
+        self.assertEqual(
+            await VoiceFormatter()("raised $5m last year", "*"),
+            "raised five million dollars last year",
+        )
+
+    async def test_amount_followed_by_other_letters_is_left_alone(self):
+        # An unrecognised suffix is not a scale, and the amount is not read as cents.
+        self.assertEqual(await expand_currency("$1.5x", "*"), "$1.5x")
+        self.assertEqual(await expand_currency("$5mo", "*"), "$5mo")
+
+    async def test_currency_code_stays_apart_from_the_amount(self):
+        # "US$5" used to expand to "USfive dollars".
+        self.assertEqual(await expand_currency("US$5", "*"), "US five dollars")
+        self.assertEqual(await expand_currency("CAD$10", "*"), "CAD ten dollars")
+        # A symbol with no code before it is unchanged.
+        self.assertEqual(await expand_currency(" pay $5", "*"), " pay five dollars")
+
     async def test_scale_word_after_amount(self):
         # "$2.5 billion" is two and a half billion dollars, not two dollars and
         # fifty cents followed by a stray "billion".
@@ -622,6 +703,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("21st", await normalize_dates("2023-05-21", "*"))
         self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
         self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
+
+    async def test_year_is_read_as_a_year(self):
+        # A year is spoken the way a date is said aloud, not as a cardinal
+        # quantity ("one thousand, nine hundred and ninety-nine").
+        self.assertEqual(
+            await normalize_dates("Born on 1999-03-05", "*"),
+            "Born on March 5th, nineteen ninety-nine",
+        )
+        self.assertEqual(
+            await normalize_dates("Due 07/04/1905", "*"),
+            "Due July 4th, nineteen oh-five",
+        )
+        self.assertEqual(
+            await normalize_dates("Meeting on 2023-05-10", "*"),
+            "Meeting on May 10th, twenty twenty-three",
+        )
+        self.assertEqual(
+            await normalize_dates("Launch on 2005-01-02", "*"),
+            "Launch on January 2nd, two thousand and five",
+        )
 
     async def test_month_is_english_under_non_english_locale(self):
         # The month must stay English even when LC_TIME is a non-English locale,

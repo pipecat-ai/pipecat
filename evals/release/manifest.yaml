@@ -60,6 +60,8 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-deepgram-flux.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-deepgram-flux-eager.py
+    scenarios: [scripted/capital_question, scripted/filter_incomplete_turns]
   - bot: voice/voice-deepgram-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-elevenlabs.py
@@ -91,6 +93,10 @@ suite:
   - bot: voice/voice-gradium.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-heygen.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-heygen-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-inworld.py
     scenarios: [scripted/capital_question]
@@ -440,6 +446,62 @@ suite:
     scenarios: [scripted/dtmf_menu]
 
   #
+  # Speaker diarization: a recorded call between two people plays to the bot,
+  # whose STT labels each transcript with its speaker. One bot covers every
+  # streaming STT service that diarizes; the runner body picks the service.
+  #
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/assemblyai
+    runner_body:
+      data: {stt: assemblyai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/aws
+    runner_body:
+      data: {stt: aws}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/deepgram
+    runner_body:
+      data: {stt: deepgram}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/meta
+    runner_body:
+      data: {stt: meta}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/nvidia
+    runner_body:
+      data: {stt: nvidia}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/smallest
+    runner_body:
+      data: {stt: smallest}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/soniox
+    runner_body:
+      data: {stt: soniox}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/speechmatics
+    runner_body:
+      data: {stt: speechmatics}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/xai
+    runner_body:
+      data: {stt: xai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/zoom_ai
+    runner_body:
+      data: {stt: zoom_ai}
+    scenarios: [scripted/speaker_diarization]
+
+  #
   # Voicemail detection: the bot holds its speech until a classifier decides
   # whether a person or a voicemail answered the outbound call.
   #
@@ -476,6 +538,8 @@ suite:
   - bot: expressive-conversation/expressive-conversation-tone-tagger.py
     scenarios: [scripted/expression_tagger, scripted/perception]
   - bot: expressive-conversation/expressive-conversation-hume-audio-decisions.py
+    scenarios: [scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-voice-reader.py
     scenarios: [scripted/perception]
 
   #

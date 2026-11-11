@@ -180,11 +180,20 @@ class ElevenLabsSTTSettings(STTSettings):
         keyterms: List of key terms or phrases to bias transcription towards.
         no_verbatim: Whether to drop filler words, false starts and non-speech
             sounds from the transcript. Supported by ``scribe_v2`` only.
+        diarize: Whether to annotate which speaker is talking. Each contiguous
+            speaker run of a segment is emitted as its own frame with ElevenLabs'
+            speaker id (e.g. ``"speaker_0"``) as ``speaker.label``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
     """
 
     tag_audio_events: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     no_verbatim: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -290,6 +299,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
             tag_audio_events=None,
             keyterms=None,
             no_verbatim=None,
+            diarize=None,
+            speaker_format=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -376,6 +387,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
         no_verbatim = self._settings.no_verbatim
         if is_given(no_verbatim) and no_verbatim is not None:
             data.add_field("no_verbatim", str(no_verbatim).lower())
+        diarize = self._settings.diarize
+        if is_given(diarize) and diarize is not None:
+            data.add_field("diarize", str(diarize).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -421,16 +435,31 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 await self._handle_transcription(text, True, detected_language)
                 logger.debug(f"Transcription: [{text}]")
 
-                yield TranscriptionFrame(
-                    text,
-                    self._user_id,
-                    time_now_iso8601(),
-                    detected_language,
-                    result=result,
-                )
+                words = None
+                if self._settings.diarize:
+                    # Spacing and audio events carry no speaker of their own.
+                    words = [
+                        (word.get("text", ""), word.get("speaker_id"))
+                        for word in result.get("words") or []
+                        if word.get("type") == "word"
+                    ]
+                timestamp = time_now_iso8601()
+                for speaker, run_text in self._diarized_runs(text, words):
+                    yield TranscriptionFrame(
+                        run_text,
+                        self._user_id,
+                        timestamp,
+                        detected_language,
+                        result=result,
+                        speaker=speaker,
+                    )
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
+
+
+# PCM sample rates the Realtime API takes.
+_PCM_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
 
 
 def audio_format_from_sample_rate(sample_rate: int) -> str:
@@ -442,19 +471,8 @@ def audio_format_from_sample_rate(sample_rate: int) -> str:
     Returns:
         The ElevenLabs audio format string.
     """
-    match sample_rate:
-        case 8000:
-            return "pcm_8000"
-        case 16000:
-            return "pcm_16000"
-        case 22050:
-            return "pcm_22050"
-        case 24000:
-            return "pcm_24000"
-        case 44100:
-            return "pcm_44100"
-        case 48000:
-            return "pcm_48000"
+    if sample_rate in _PCM_SAMPLE_RATES:
+        return f"pcm_{sample_rate}"
     logger.warning(
         f"ElevenLabsRealtimeSTTService: No audio format available for {sample_rate} sample rate, using pcm_16000"
     )
@@ -636,6 +654,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return language_to_elevenlabs_language(language)
 
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at: the input rate, or 16 kHz if ElevenLabs doesn't take it.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        if self.sample_rate in _PCM_SAMPLE_RATES:
+            return self.sample_rate
+        return 16000
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed.
 
@@ -663,7 +692,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._audio_format = audio_format_from_sample_rate(self.sample_rate)
+        self._audio_format = audio_format_from_sample_rate(self.send_sample_rate)
         await self._connect()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -684,7 +713,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                             "message_type": "input_audio_chunk",
                             "audio_base_64": "",
                             "commit": True,
-                            "sample_rate": self.sample_rate,
+                            "sample_rate": self.send_sample_rate,
                         }
                         await self._websocket.send(json.dumps(commit_message))
                         logger.trace("Sent manual commit to ElevenLabs")
@@ -712,7 +741,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                     "message_type": "input_audio_chunk",
                     "audio_base_64": audio_base64,
                     "commit": False,
-                    "sample_rate": self.sample_rate,
+                    "sample_rate": self.send_sample_rate,
                 }
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
@@ -756,7 +785,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             "message_type": "input_audio_chunk",
             "audio_base_64": audio_base64,
             "commit": False,
-            "sample_rate": self.sample_rate,
+            "sample_rate": self.send_sample_rate,
         }
         await self._websocket.send(json.dumps(message))
 

@@ -297,7 +297,9 @@ class BaseClassifier(BaseObject):
     :attr:`supports_audio` and :attr:`file_types`, and refuses the rest. One
     that hears declares the clips it accepts: from :attr:`min_audio_secs` to
     :attr:`max_audio_secs` long, resampled to :attr:`audio_sample_rate`
-    before :meth:`_ask` gets them. A clip of another length is refused.
+    before :meth:`_ask` gets them. A clip of another length is refused. It
+    also says how long a clip it answers best, in
+    :attr:`preferred_audio_secs`.
 
     An owner that runs inside a worker calls :meth:`setup` with its task
     manager before the first question, and :meth:`cleanup` when it is done.
@@ -353,6 +355,11 @@ class BaseClassifier(BaseObject):
     def max_audio_secs(self) -> float | None:
         """The longest clip the classifier accepts, in seconds, or None for no limit."""
         return None
+
+    @property
+    def preferred_audio_secs(self) -> float:
+        """How long a clip the classifier answers best, in seconds: its shortest by default."""
+        return self.min_audio_secs
 
     @property
     def audio_sample_rate(self) -> int | None:

@@ -1578,19 +1578,26 @@ class LLMUserAggregator(LLMContextAggregator):
         inference, it passes the LLM before the response is held, while the
         turn written once it ends waits for the inference to finish.
 
+        The speculated turn is whatever of the turn the context doesn't hold
+        yet: transcripts committed earlier in the turn but not written, then the
+        predicted text. Transcripts an earlier inference in the turn wrote are
+        already in the context.
+
         Args:
             speculation: The speculation to run, from the stop strategy that
                 started it.
         """
-        perception = speculation.perception if self._expressive else None
-        content = (
-            f"{format_perception(perception)} {speculation.text}"
-            if perception
-            else speculation.text
+        text = concatenate_aggregated_text(
+            [
+                *self._aggregation,
+                TextPartForConcatenation(speculation.text, includes_inter_part_spaces=False),
+            ]
         )
+        perception = speculation.perception if self._expressive else None
+        content = f"{format_perception(perception)} {text}" if perception else text
         await self.broadcast_frame(
             LLMContextUserTurnFrame,
-            text=speculation.text,
+            text=text,
             timestamp=self._user_turn_start_timestamp,
             perception=perception,
             speculation=True,
@@ -1838,8 +1845,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
-        # Markers seen on LLMMarkerFrames, so a service configured with markers
-        # other than the defaults still gets them stripped from transcripts.
+        # Markers seen on LLMMarkerFrames: the only text stripped from
+        # transcripts, whatever marker set the service is configured with.
         self._seen_turn_markers: set[str] = set()
         self._context_updated_tasks: set[asyncio.Task] = set()
 
@@ -2786,22 +2793,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Strip turn completion markers from assistant transcript.
 
         Turn completion markers are used internally for turn completion
-        detection and shouldn't appear in the final transcript. Both the
-        default markers and any seen on this turn's marker frames are removed,
-        so a custom marker set is stripped too.
+        detection and shouldn't appear in the final transcript. Every marker
+        seen so far on a marker frame is removed, wherever it appears in the
+        text.
         """
-        from pipecat.turns.user_turn_completion_mixin import (
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-        )
-
         marker_found = False
-        for marker in {
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-        } | self._seen_turn_markers:
+        for marker in self._seen_turn_markers:
             if marker in text:
                 text = text.replace(marker, "")
                 marker_found = True
