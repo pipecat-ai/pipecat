@@ -670,20 +670,15 @@ async def test_pipecat_mode_finalizes_only_the_last_speaker_run(monkeypatch):
             ),
         ]
     )
-    pending = []
-    monkeypatch.setattr(
-        service,
-        "push_frame",
-        AsyncMock(
-            side_effect=lambda f: pending.append((f.speaker.label, service._finalize_pending))
-        ),
-    )
-    monkeypatch.setattr(service, "emit_stt_usage_metrics", AsyncMock())
+    frames = _record_frames(monkeypatch, service)
     service.request_finalize()  # as the VAD stop's commit does
 
     await service._receive_messages()
 
-    assert pending == [("Speaker 1", False), ("Speaker 2", True)]
+    assert [(f.speaker.label, f.finalized) for f in frames] == [
+        ("Speaker 1", False),
+        ("Speaker 2", True),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1099,7 +1094,7 @@ async def test_pipecat_mode_pushes_the_committed_final_without_turn_frames(monke
 
     assert [type(f) for f in frames] == [TranscriptionFrame]
     assert frames[0].text == "What is the capital of France?"
-    assert service._finalize_pending  # the frame is marked finalized when pushed
+    assert frames[0].finalized
     assert service._can_reconnect  # Scribe's turn events don't hold reconnects
 
 
