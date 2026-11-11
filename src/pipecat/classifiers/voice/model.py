@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        'In order to use Pipecat Voice Reader, you need to `uv add "pipecat-ai[voice-reader]"`.'
+        'In order to use Pipecat Voice Reader, you need to `uv add "pipecat-ai[expressivity]"`.'
     )
     raise ImportError(f"Missing module: {e}") from e
 
