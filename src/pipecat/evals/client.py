@@ -282,6 +282,7 @@ class _BotFrameSink(FrameProcessor):
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
         self._answer_enabled = answer_enabled
+        # Keep one answer trigger; the latest context contains all earlier messages.
         self._pending_answer: LLMContextFrame | None = None
 
     async def allow_answers(self) -> None:
