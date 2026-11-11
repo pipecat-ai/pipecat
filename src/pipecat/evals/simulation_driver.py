@@ -6,6 +6,7 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
@@ -17,7 +18,7 @@ from pipecat.evals.client import (
     EvalClient,
 )
 from pipecat.evals.conversation import EvalConversation
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalEventStream, EvalHarnessError
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import (
@@ -111,8 +112,44 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._observed = 0
 
     async def run(self) -> list[EvalAssertionFailure]:
-        """Watch the conversation until it ends, then judge it."""
+        """Converse and judge until completion or a failure in the harness pipeline."""
+        started = time.monotonic()
         self._persona.on_end_call(self._on_end_call)
+        driving = asyncio.create_task(self._watch_and_judge())
+        failed = asyncio.create_task(self._stream.wait_harness_error())
+        try:
+            done, _ = await asyncio.wait((driving, failed), return_when=asyncio.FIRST_COMPLETED)
+            # The operation checks for an error before committing its verdict.
+            # A later error must not overwrite that completed result.
+            if driving in done:
+                return driving.result()
+            driving.cancel()
+            try:
+                await driving
+            except asyncio.CancelledError:
+                pass
+            raise EvalHarnessError(failed.result())
+        except EvalHarnessError as error:
+            self._ended_by = "error"
+            self._succeeded = False
+            self._metrics = []
+            self._goal_confidence = None
+            self._goal_probabilities = {}
+            await self._client.hang_up()
+            self._duration_s = round(time.monotonic() - started, 3)
+            self._observe_new_events()
+            self._conversation.end_bot_turn()
+            return [self._harness_failure(str(error))]
+        finally:
+            for task in (driving, failed):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(driving, failed, return_exceptions=True)
+
+    async def _watch_and_judge(self) -> list[EvalAssertionFailure]:
+        """Watch the conversation until it ends, then commit the judge's verdict."""
+        if self._stream.harness_error is not None:
+            raise EvalHarnessError(self._stream.harness_error)
         simulation = self._simulation
         # The bot's finished response: in audio mode the harness's transcription
         # of what it said, in text mode its LLM text.
@@ -122,7 +159,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # a spoken sentence refreshes without making an event, so a reply in
         # progress on either side is never silence, only nothing happening is.
         self._stream.touch()
-        failures: list[EvalAssertionFailure] = []
         self._trace.log(
             f"persona: listening (up to {simulation.max_turns} turn(s), "
             f"{simulation.max_duration_s:g}s, {simulation.max_silence_s:g}s of silence)"
@@ -149,6 +185,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     continue
                 self._ended_by = "silence"
                 break
+            if self._stream.harness_error is not None:
+                raise EvalHarnessError(self._stream.harness_error)
             self._observe_new_events()
             if event["type"] == END_CALL_EVENT:
                 # The bot still gets its turn if the persona hung up on its own
@@ -161,8 +199,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             elif event["type"] == BOT_ENDED_EVENT:
                 self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
-                self._ended_by = "error"
-                failures.append(self._harness_failure(event.get("text", "")))
+                raise EvalHarnessError(event.get("text", ""))
             elif event["type"] == PERSONA_TURN_EVENT:
                 self._turns += 1
                 await self._report("user", event.get("text", ""))
@@ -183,9 +220,12 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._observe_new_events()
         self._conversation.end_bot_turn()
         await self._report("ended", self._ended_by)
-        if failures:
-            return failures
-        return await self._judge_conversation()
+        if self._stream.harness_error is not None:
+            raise EvalHarnessError(self._stream.harness_error)
+        failures = await self._judge_conversation()
+        if self._stream.harness_error is not None:
+            raise EvalHarnessError(self._stream.harness_error)
+        return failures
 
     def result(
         self,
