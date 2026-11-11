@@ -156,6 +156,10 @@ class EvalScriptResult:
         skipped: When set, the scenario was not run (e.g. a ``tts_response``
             assertion without audio mode); the string is the reason. Such a result
             is neither passed nor failed.
+        conversation: Submitted user inputs and observed bot output, with tool
+            calls in place, when ``capture_conversation`` is enabled (see
+            :mod:`pipecat.evals.conversation`). An ended or failed run retains
+            only the observed prefix, not any unobserved reply.
     """
 
     scenario_name: str
@@ -166,6 +170,7 @@ class EvalScriptResult:
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
+    conversation: list[dict] = field(default_factory=list)
 
 
 @deprecated(

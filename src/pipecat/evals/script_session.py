@@ -84,10 +84,12 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             judge: The :class:`~pipecat.evals.judge.EvalJudge` for ``eval:``
                 assertions, or ``None`` if the scenario has none.
             user_tts: The user-audio TTS, or ``None`` for text mode.
-            bot_stt: The bot-audio STT for the ``response`` transcription, or
-                ``None`` when the scenario has none.
+            bot_stt: The bot-audio STT for ``response`` assertions or conversation
+                capture, or ``None`` when neither needs it.
         """
         super().__init__(kind=EvalKind.SCRIPT, name=scenario.name, bot_url=bot_url, params=params)
+        if self._params.capture_conversation and scenario.bot_audio and bot_stt is None:
+            raise ValueError("Scripted audio conversation capture requires a bot STT service")
         self._scenario = scenario
         # The bot's output as events: fed by the client's pipeline, read by the driver.
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
@@ -99,9 +101,12 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 bot_audio=scenario.bot_audio,
                 user_audio=scenario.user_audio,
                 user_speech=scenario.user_speech,
-                capture_bot_audio=scenario.wants_response(),
+                capture_bot_audio=scenario.wants_response()
+                or (self._params.capture_conversation and scenario.bot_audio),
                 capture_bot_images=scenario.needs_bot_images(),
-                report_level=scenario.required_report_level(),
+                report_level="full"
+                if self._params.capture_conversation
+                else scenario.required_report_level(),
                 vad_events=scenario.needs_vad_events(),
                 marker_events=scenario.needs_marker_events(),
                 context=list(scenario.context or []),
@@ -123,6 +128,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             judge=judge,
             trace=self._trace,
             progress=self._progress,
+            capture_conversation=self._params.capture_conversation,
         )
         if on_progress is not None:
             self._add_legacy_progress_callback(on_progress)
@@ -169,7 +175,8 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             user_tts: Override the user-audio TTS (default: built from
                 ``scenario.user_speech`` in audio mode).
             bot_stt: Override the bot-audio STT (default: built from
-                ``scenario.transcriber`` when the scenario asserts ``response``).
+                ``scenario.transcriber`` for audio conversation capture or
+                ``response`` assertions).
             connect_timeout_s: The ``params`` field of the same name.
 
                 .. deprecated:: 1.9.0
@@ -230,7 +237,11 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                     scenario.user_speech, cache_dir=params.cache_dir, use_cache=params.use_cache
                 )
 
-        if bot_stt is None and scenario.wants_response() and scenario.bot_audio:
+        if (
+            bot_stt is None
+            and (scenario.wants_response() or params.capture_conversation)
+            and scenario.bot_audio
+        ):
             with logger.contextualize(eval_pipeline="transcription"):
                 bot_stt = stt_service_from_config(scenario.transcriber)
 

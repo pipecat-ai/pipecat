@@ -384,6 +384,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         skipped=data.get("skipped"),
+        conversation=data.get("conversation", []),
     )
 
 

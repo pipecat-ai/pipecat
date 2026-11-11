@@ -84,6 +84,12 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
+        capture_conversation: Scripted scenarios only: include submitted user
+            inputs, observed bot text or recognized speech, and tool calls in
+            the result. Audio-mode capture constructs STT even without a
+            transcription assertion. With streaming STT, speech must be fully
+            transcribed before another input; interrupting speech needs a
+            segmented STT that preserves its source time. Defaults to False.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -106,6 +112,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    capture_conversation: bool = False
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

@@ -58,6 +58,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         judge: EvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
+        capture_conversation: bool = False,
     ):
         """Initialize the driver.
 
@@ -71,6 +72,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             trace: The run's trace.
             progress: Awaited with an :class:`~pipecat.evals.results.EvalProgress` as turns and
                 expectations resolve.
+            capture_conversation: Whether a successful run requires completed conversation capture.
         """
         super().__init__(
             client=client,
@@ -81,6 +83,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         )
         self._scenario = scenario
         self._default_timeout_ms = default_timeout_ms
+        self._capture_conversation = capture_conversation
         self._matcher = ExpectationMatcher(stream=stream, judge=judge, trace=trace)
         # One record per turn, filled in as the driver runs. They start as
         # not_run and stay that way on every path that ends the run early, so
@@ -123,6 +126,22 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         skipped: str | None = None,
     ) -> EvalScriptResult:
         """The scenario's result: passed only if nothing failed and nothing was skipped."""
+        # Required capture can fail while the client drains after the last assertion.
+        if (
+            self._capture_conversation
+            and not failures
+            and skipped is None
+            and self._stream.harness_error is not None
+        ):
+            failures = [
+                EvalAssertionFailure(
+                    turn_index=-1,
+                    expectation_index=-1,
+                    event_name="conversation",
+                    reason=self._stream.harness_error,
+                    kind="error",
+                )
+            ]
         return EvalScriptResult(
             scenario_name=self._scenario.name,
             passed=not failures and skipped is None,
@@ -132,6 +151,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             events_seen=events_seen,
             debug_log=debug_log,
             skipped=skipped,
+            conversation=self._client.conversation,
         )
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:
