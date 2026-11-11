@@ -20,6 +20,7 @@ from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.utils.types import is_given
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
@@ -56,12 +57,35 @@ def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
     return not isinstance(value, AnthropicNotGiven)
 
 
+def anthropic_from_llm_context_tool_choice(tool_choice: Any) -> dict[str, str] | AnthropicNotGiven:
+    """Convert an LLMContext tool_choice to Anthropic's format.
+
+    LLMContext uses OpenAI-style tool_choice values (``"auto"``, ``"none"``,
+    ``"required"``, or ``{"type": "function", "function": {"name": ...}}``).
+    Anthropic uses ``{"type": "auto"}``, ``{"type": "any"}``,
+    ``{"type": "none"}``, or ``{"type": "tool", "name": ...}``.
+    """
+    if not is_given(tool_choice):
+        return ANTHROPIC_NOT_GIVEN
+    if isinstance(tool_choice, str):
+        mapping = {"auto": "auto", "none": "none", "required": "any"}
+        anthropic_type = mapping.get(tool_choice)
+        if anthropic_type:
+            return {"type": anthropic_type}
+    elif isinstance(tool_choice, dict):
+        func = tool_choice.get("function", {})
+        if isinstance(func, dict) and "name" in func:
+            return {"type": "tool", "name": func["name"]}
+    return ANTHROPIC_NOT_GIVEN
+
+
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
     system: str | list[TextBlockParam] | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
+    tool_choice: dict[str, str] | AnthropicNotGiven
 
 
 class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
@@ -129,6 +153,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
+            "tool_choice": anthropic_from_llm_context_tool_choice(context.tool_choice),
         }
 
     def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
