@@ -16,7 +16,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from loguru import logger
 from websockets.protocol import State
@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
@@ -113,13 +114,20 @@ class MetaSTTSettings(STTSettings):
             bias. Leave both unset to let the model detect the language.
         mode: Segmentation mode. ``"ENDPOINTING"`` has the model mark turn
             boundaries; ``"PUSH_TO_TALK"`` leaves them to the client;
-            ``"DIARIZATION"`` attributes turns to speakers.
+            ``"DIARIZATION"`` attributes turns to speakers: each final transcript
+            carries Meta's label for its turn's speaker (e.g. ``"A"``) in
+            ``speaker``. Interim transcripts are not labelled.
         keywords: Terms to bias recognition toward. Biasing raises the odds a
             term is recognized but doesn't guarantee its spelling.
         emit_audio_progress: Whether the server reports progress for every
             processed audio chunk.
         zdr_override: Forces metadata-only logging when True, or allows content
             retention when False. Leave unset to use the account's setting.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     language_bias: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -127,6 +135,10 @@ class MetaSTTSettings(STTSettings):
     keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emit_audio_progress: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     zdr_override: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class MetaSTTService(WebsocketSTTService):
@@ -184,6 +196,7 @@ class MetaSTTService(WebsocketSTTService):
             keywords=None,
             emit_audio_progress=False,
             zdr_override=None,
+            speaker_format=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -202,6 +215,12 @@ class MetaSTTService(WebsocketSTTService):
         self._session_ready = asyncio.Event()
         self._session_id: str | None = None
         self._turn_id: int | None = None
+        # The turn the latest speechStart opened, which speaker events belong to:
+        # they carry no turnId, and a turn can open before the previous one's
+        # speechComplete arrives.
+        self._speaking_turn_id: int | None = None
+        # Speaker labels Meta reported for each turn not yet completed.
+        self._turn_speakers: dict[int | None, list[str]] = {}
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -230,10 +249,11 @@ class MetaSTTService(WebsocketSTTService):
         """Apply a settings delta and reconnect to apply changes.
 
         Meta fixes a session's configuration when it accepts the handshake, so
-        any change needs a fresh connection.
+        any change needs a fresh connection, except to ``speaker_format``, which
+        is applied locally.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not changed.keys() - self.Settings.LOCAL_FIELDS:
             return changed
         await self._request_reconnect()
         return changed
@@ -398,6 +418,8 @@ class MetaSTTService(WebsocketSTTService):
             self._session_ready.clear()
             self._session_id = None
             self._turn_id = None
+            self._speaking_turn_id = None
+            self._turn_speakers.clear()
             await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
@@ -425,11 +447,16 @@ class MetaSTTService(WebsocketSTTService):
             await self._push_final_transcript(message)
         elif msg_type in ("speechStart", "speechEnd"):
             self._turn_id = message.get("turnId")
+            if msg_type == "speechStart":
+                self._speaking_turn_id = self._turn_id
             logger.trace(f"{self} Meta STT {msg_type} (turn {self._turn_id})")
         elif msg_type == "speaker":
-            # Diarization marks a possible new speaker mid-turn rather than a
-            # boundary, so the label only rides along on the transcript result.
-            logger.trace(f"{self} Meta STT speaker {message.get('label')}")
+            # Labels the speech since the previous speechStart or speaker event,
+            # without marking a boundary, so it is kept for the turn's final.
+            label = message.get("label")
+            logger.trace(f"{self} Meta STT speaker {label}")
+            if label is not None:
+                self._turn_speakers.setdefault(self._speaking_turn_id, []).append(str(label))
         elif msg_type == "audioProgress":
             # Only arrives when emit_audio_progress is on, and says nothing the
             # transcript events don't already carry.
@@ -467,7 +494,9 @@ class MetaSTTService(WebsocketSTTService):
 
     async def _push_final_transcript(self, message: dict[str, Any], *, text: str | None = None):
         """Push the transcript that closes a turn."""
-        text = text if text is not None else message.get("transcript", "")
+        # Meta pads the transcript with spaces.
+        text = (text if text is not None else message.get("transcript", "")).strip()
+        speaker = self._turn_speaker(message.get("turnId", self._speaking_turn_id))
         if not text:
             return
 
@@ -477,15 +506,29 @@ class MetaSTTService(WebsocketSTTService):
         language = self._language_for_frame()
         await self.push_frame(
             TranscriptionFrame(
-                text,
+                self._apply_speaker_format(text, speaker),
                 self._user_id,
                 time_now_iso8601(),
                 language,
                 result=message,
                 finalized=True,
+                speaker=speaker,
             )
         )
         await self._trace_transcription(text, True, language)
+
+    def _turn_speaker(self, turn_id: int | None) -> TranscriptionSpeaker | None:
+        """Take the speaker Meta reported for a turn, if it reported one.
+
+        Meta attributes a whole turn to one speaker. A turn with more than one
+        label is left unlabelled, since speaker events don't say where each
+        label's part of the final transcript lies.
+        """
+        labels = set(self._turn_speakers.pop(turn_id, []))
+        if len(labels) > 1:
+            logger.debug(f"{self} turn {turn_id} has several speakers {labels}, not labelling it")
+            return None
+        return self._speaker(labels.pop()) if labels else None
 
     def _language_for_frame(self) -> Language | None:
         """Return a Language enum suitable for transcription frames.
