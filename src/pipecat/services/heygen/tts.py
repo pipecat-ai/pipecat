@@ -33,7 +33,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import TTSService, WebsocketTTSService
+from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -46,18 +46,14 @@ _HTTP_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
 
 _WEBSOCKET_SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48000)
 
-# HeyGen synthesizes at this rate when it does not offer the pipeline rate. The
-# service then resamples the audio.
+# HeyGen synthesizes at this rate when it does not offer the pipeline rate, and
+# its audio is resampled to the pipeline's rate.
 _FALLBACK_SAMPLE_RATE = 24000
 
 _KEEPALIVE_INTERVAL_S = 10
 
 # The service never opens this context. Idle keepalives close it.
 _KEEPALIVE_CONTEXT_ID = "pipecat-keepalive"
-
-# HeyGen can queue a context for 45 seconds at full capacity. The base class ends
-# a quiet context and drops its late audio, which HeyGen still bills.
-_AUDIO_CONTEXT_TIMEOUT_S = 50.0
 
 _ERROR_CATEGORIES: dict[str, ErrorCategory] = {
     "rate_limit_exceeded": ErrorCategory.RATE_LIMIT,
@@ -121,14 +117,27 @@ def language_to_heygen_language(language: Language) -> str:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding HeyGen language code.
+        The corresponding HeyGen language code. A code HeyGen Voice doesn't
+        support is logged, and the services don't send it.
     """
-    return resolve_language(language, _LANGUAGE_MAP, use_base_code=True)
+    code = resolve_language(language, _LANGUAGE_MAP, use_base_code=True)
+    if code not in _LANGUAGES:
+        logger.warning(
+            f"Language code [{code}] not applied. HeyGen Voice doesn't support it, "
+            "so HeyGen detects the language."
+        )
+    return code
 
 
 def _synthesis_rate(sample_rate: int, supported: tuple[int, ...]) -> int:
     """Return the PCM rate to request from HeyGen for the pipeline's rate."""
-    return sample_rate if sample_rate in supported else _FALLBACK_SAMPLE_RATE
+    if sample_rate in supported:
+        return sample_rate
+    logger.warning(
+        f"HeyGen cannot synthesize {sample_rate} Hz (supports {list(supported)}); "
+        f"synthesizing at {_FALLBACK_SAMPLE_RATE} Hz and resampling on output"
+    )
+    return _FALLBACK_SAMPLE_RATE
 
 
 def _error_detail(body: str | bytes) -> str:
@@ -156,7 +165,8 @@ class HeyGenHttpTTSSettings(TTSSettings):
         model: HeyGen Voice model: ``heygen-voice-1``, ``heygen-voice-1-turbo``,
             or ``heygen-voice-1-turbo-free``.
         voice: HeyGen voice ID: a public voice, or an instant or professional
-            clone in your workspace.
+            clone in your workspace. A professional clone needs the
+            ``heygen-voice-1`` model; the Turbo models refuse it.
         language: Language of the text. If ``None``, HeyGen detects it.
     """
 
@@ -170,7 +180,7 @@ class HeyGenHttpTTSService(TTSService):
     PCM audio as it arrives.
 
     Defaults to ``heygen-voice-1-turbo``, the lowest-latency model, and the
-    public voice Nadine.
+    public voice Nadine. Professional voice clones need ``heygen-voice-1``.
     """
 
     Settings = HeyGenHttpTTSSettings
@@ -217,6 +227,17 @@ class HeyGenHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._url = f"{base_url.rstrip('/')}/v3/models/audio/tts/stream"
+        # HeyGen's synthesis rate, resolved in setup().
+        self._synthesis_sample_rate = _FALLBACK_SAMPLE_RATE
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._synthesis_sample_rate = _synthesis_rate(self.sample_rate, _HTTP_SAMPLE_RATES)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -248,7 +269,6 @@ class HeyGenHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        synthesis_sample_rate = _synthesis_rate(self.sample_rate, _HTTP_SAMPLE_RATES)
         headers = {"x-api-key": self._api_key, "Content-Type": "application/json"}
         payload: dict[str, Any] = {
             "text": text,
@@ -256,7 +276,7 @@ class HeyGenHttpTTSService(TTSService):
             "model": assert_given(self._settings.model),
             "output_format": {
                 "encoding": "pcm",
-                "sample_rate_hertz": synthesis_sample_rate,
+                "sample_rate_hertz": self._synthesis_sample_rate,
             },
         }
         # HeyGen refuses a language it does not speak, and detects one left out.
@@ -273,11 +293,10 @@ class HeyGenHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                # A chunk can split a sample. The helper keeps frames sample-aligned
-                # and resamples them.
+                # A chunk can split a sample. The helper keeps frames sample-aligned.
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_chunked(self.chunk_size),
-                    in_sample_rate=synthesis_sample_rate,
+                    in_sample_rate=self._synthesis_sample_rate,
                     context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
@@ -371,6 +390,7 @@ class HeyGenTTSService(WebsocketTTSService):
         enable_logging: bool | None = None,
         end_user_id: str | None = None,
         settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         **kwargs,
     ):
         """Initialize the HeyGen WebSocket TTS service.
@@ -387,6 +407,9 @@ class HeyGenTTSService(WebsocketTTSService):
             end_user_id: Your identifier for the end user, recorded with HeyGen's
                 usage for attribution.
             settings: Runtime-updatable settings.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+                ``TextAggregationMode.TOKEN`` streams LLM tokens as they arrive, and
+                HeyGen generates at each sentence end.
             **kwargs: Additional arguments passed to ``WebsocketTTSService``.
         """
         default_settings = self.Settings(
@@ -401,9 +424,9 @@ class HeyGenTTSService(WebsocketTTSService):
             default_settings.apply_update(settings)
 
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,
             push_start_frame=True,
-            stop_frame_timeout_s=_AUDIO_CONTEXT_TIMEOUT_S,
             # HeyGen closes the socket at more than 5 running contexts. So a turn
             # plays its audio before the next turn opens a context.
             pause_frame_processing=True,
@@ -421,7 +444,7 @@ class HeyGenTTSService(WebsocketTTSService):
         self._end_user_id = end_user_id
 
         self._receive_task = None
-        # HeyGen's synthesis rate. The URL builder sets it.
+        # HeyGen's synthesis rate, resolved in setup().
         self._synthesis_sample_rate = _FALLBACK_SAMPLE_RATE
         # The monotonic time before which a refused handshake asked for no other.
         self._connect_not_before = 0.0
@@ -455,6 +478,7 @@ class HeyGenTTSService(WebsocketTTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._synthesis_sample_rate = _synthesis_rate(self.sample_rate, _WEBSOCKET_SAMPLE_RATES)
         await self._connect()
 
     async def _connect(self):
@@ -490,7 +514,6 @@ class HeyGenTTSService(WebsocketTTSService):
         return changed
 
     def _build_websocket_url(self) -> str:
-        self._synthesis_sample_rate = _synthesis_rate(self.sample_rate, _WEBSOCKET_SAMPLE_RATES)
         params = {
             "voice_id": assert_given(self._settings.voice),
             "model": assert_given(self._settings.model),
@@ -662,11 +685,7 @@ class HeyGenTTSService(WebsocketTTSService):
 
         audio = base64.b64decode(msg["audio"])
         seconds = len(audio) / 2 / self._synthesis_sample_rate
-        if self._synthesis_sample_rate != self.sample_rate:
-            audio = await self._resampler.resample(
-                audio, self._synthesis_sample_rate, self.sample_rate
-            )
-        frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+        frame = TTSAudioRawFrame(audio, self._synthesis_sample_rate, 1, context_id=context_id)
         await self.append_to_audio_context(context_id, frame)
 
         clock = self._word_clocks.setdefault(context_id, _WordClock())
@@ -685,7 +704,7 @@ class HeyGenTTSService(WebsocketTTSService):
             await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
             await self.remove_audio_context(context_id)
         self._forget_context(context_id)
-        # A final context takes no more text. The next sentence needs a new context.
+        # The turn's next sentence opens a new context.
         if context_id and context_id == self._turn_context_id:
             self._turn_context_id = None
             self._turn_context_id = self.create_context_id()
@@ -722,16 +741,16 @@ class HeyGenTTSService(WebsocketTTSService):
                 and time.monotonic() >= self._connect_not_before
             ):
                 await self._connect()
-            if not self._is_connected:
-                # No audio can arrive. An open context holds frames until it times out.
-                await self.remove_audio_context(context_id)
-                yield ErrorFrame(error="HeyGen TTS WebSocket is not connected")
+            try:
+                await self._get_websocket().send(
+                    json.dumps({"context_id": context_id, "text": text})
+                )
+                self._open_contexts.add(context_id)
+                await self.start_tts_usage_metrics(text)
+            except Exception as e:
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield TTSStoppedFrame(context_id=context_id)
                 return
-
-            self._open_contexts.add(context_id)
-            await self._send(context_id, text=text)
-            await self.start_tts_usage_metrics(text)
-
             yield None
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

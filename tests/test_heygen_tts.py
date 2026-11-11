@@ -17,6 +17,7 @@ import aiohttp
 import pytest
 import websockets
 from aiohttp import web
+from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import serve
 
 from pipecat.frames.frames import (
@@ -142,14 +143,19 @@ async def test_heygen_tts_settings_in_body(aiohttp_client):
 
 @pytest.mark.asyncio
 async def test_heygen_tts_unsupported_sample_rate_is_resampled(aiohttp_client):
-    """A pipeline rate HeyGen doesn't offer requests 24 kHz and resamples to the pipeline rate."""
+    """A pipeline rate HeyGen doesn't offer requests 24 kHz, warns once and resamples."""
     requests = []
     client = await aiohttp_client(_make_app(requests, b"\x00\x00" * 24000))
 
     async with _http_tts(client, sample_rate=32000) as tts:
-        down_frames, _ = await run_test(tts, frames_to_send=[TTSSpeakFrame(text="Hi.")])
+        with patch("pipecat.services.heygen.tts.logger") as log:
+            down_frames, _ = await run_test(
+                tts, frames_to_send=[TTSSpeakFrame(text="Hi."), TTSSpeakFrame(text="Again.")]
+            )
 
-    assert requests[0]["body"]["output_format"]["sample_rate_hertz"] == 24000
+    assert [r["body"]["output_format"]["sample_rate_hertz"] for r in requests] == [24000, 24000]
+    warnings = [c.args[0] for c in log.warning.call_args_list]
+    assert sum("32000 Hz" in w for w in warnings) == 1
     audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
     assert audio_frames
     assert all(f.sample_rate == 32000 for f in audio_frames)
@@ -177,6 +183,16 @@ def test_language_mapping():
     assert language_to_heygen_language(Language.EN_GB) == "en"
     assert language_to_heygen_language(Language.ZH_HK) == "zh"
     assert language_to_heygen_language(Language.PT_BR) == "pt"
+
+
+def test_unsupported_language_is_logged():
+    """A language HeyGen doesn't support logs that it isn't applied."""
+    with patch("pipecat.services.heygen.tts.logger") as log:
+        language_to_heygen_language(Language.EN)
+        log.warning.assert_not_called()
+        language_to_heygen_language(Language.NO)
+    log.warning.assert_called_once()
+    assert "[no] not applied" in log.warning.call_args.args[0]
 
 
 # --- HeyGenTTSService (WebSocket) ---
@@ -209,8 +225,6 @@ class _FakeHeyGen:
             at their first text instead of speaking.
         close_code: The close code of a refused socket.
         final_delay: How long each isFinal is held back, as real synthesis takes time.
-        first_audio_delay: How long a socket holds its first audio, as HeyGen does
-            while it queues a context.
         final_after_text: Whether a context ends itself after its first text, as
             HeyGen ends one left silent mid-turn.
         trim_alignment: Whether alignment leaves out trailing spaces.
@@ -221,14 +235,12 @@ class _FakeHeyGen:
         refused_sockets: int = 0,
         close_code: int = 1013,
         final_delay: float = 0.0,
-        first_audio_delay: float = 0.0,
         final_after_text: bool = False,
         trim_alignment: bool = False,
     ):
         self.refused_sockets = refused_sockets
         self.close_code = close_code
         self.final_delay = final_delay
-        self.first_audio_delay = first_audio_delay
         self.final_after_text = final_after_text
         self.trim_alignment = trim_alignment
         self.audio = b"\x00\x01" * 2400
@@ -288,8 +300,6 @@ class _FakeHeyGen:
                     await ws.close(self.close_code, "Free Turbo capacity is full")
                     return
                 if text.strip():
-                    await asyncio.sleep(self.first_audio_delay)
-                    self.first_audio_delay = 0.0
                     await self._speak(ws, context_id, text)
                     if self.final_after_text:
                         await self._final(ws, context_id)
@@ -437,7 +447,11 @@ async def test_heygen_websocket_reconnect_waits_as_long_as_a_refused_handshake_a
 
 @pytest.mark.asyncio
 async def test_heygen_websocket_on_demand_connect_waits_as_long_as_a_refused_handshake_asks():
-    """After a refused first connect, turns make no handshake until the wait ends."""
+    """After a refused first connect, turns make no handshake until the wait ends.
+
+    A turn refused during the wait reports that the socket is not connected, and
+    its context still ends with a stop frame.
+    """
     heygen = _FakeHeyGen()
     handshakes = []
 
@@ -452,11 +466,12 @@ async def test_heygen_websocket_on_demand_connect_waits_as_long_as_a_refused_han
         heygen, "127.0.0.1", 0, process_request=rate_limit_the_first_handshake
     ) as server:
         tts = _service(server)
-        down_frames, _ = await run_test(
+        down_frames, up_frames = await run_test(
             tts,
             frames_to_send=[
                 TTSSpeakFrame(text="Too soon."),
-                SleepFrame(sleep=1.2),
+                # Past the refused turn's audio context timeout.
+                SleepFrame(sleep=3.5),
                 TTSSpeakFrame(text="Spoken."),
                 SleepFrame(sleep=0.5),
             ],
@@ -465,21 +480,32 @@ async def test_heygen_websocket_on_demand_connect_waits_as_long_as_a_refused_han
     assert len(handshakes) == 2
     assert handshakes[1] - handshakes[0] >= 1.0
     assert [f.text for f in down_frames if isinstance(f, TTSTextFrame)] == ["Spoken."]
+    errors = [f.error for f in up_frames if isinstance(f, ErrorFrame)]
+    assert any("not connected" in error for error in errors)
+    started = [f for f in down_frames if isinstance(f, TTSStartedFrame)]
+    stopped = [f for f in down_frames if isinstance(f, TTSStoppedFrame)]
+    assert len(started) == len(stopped) == 2
 
 
 @pytest.mark.asyncio
-async def test_heygen_websocket_plays_audio_that_a_full_queue_delayed():
-    """Audio HeyGen holds back while it queues a context is played, not dropped."""
-    heygen = _FakeHeyGen(first_audio_delay=3.2)
+async def test_heygen_websocket_unsent_text_ends_its_context():
+    """Text the socket fails to send reports an error and ends its context with a stop frame."""
+    heygen = _FakeHeyGen()
 
     async with serve(heygen, "127.0.0.1", 0) as server:
-        down_frames, _ = await run_test(
-            _service(server),
-            frames_to_send=[TTSSpeakFrame(text="Worth the wait."), SleepFrame(sleep=3.6)],
-        )
+        with patch.object(
+            ClientConnection, "send", side_effect=websockets.ConnectionClosed(None, None)
+        ):
+            down_frames, up_frames = await run_test(
+                _service(server),
+                frames_to_send=[TTSSpeakFrame(text="Never sent."), SleepFrame(sleep=0.5)],
+            )
 
-    audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
-    assert b"".join(f.audio for f in audio_frames) == heygen.audio
+    errors = [f.error for f in up_frames if isinstance(f, ErrorFrame)]
+    assert any("Unknown error occurred" in error for error in errors)
+    started = [f for f in down_frames if isinstance(f, TTSStartedFrame)]
+    stopped = [f for f in down_frames if isinstance(f, TTSStoppedFrame)]
+    assert len(started) == len(stopped) == 1
 
 
 def _scripted_heygen(*parts: tuple[float, str | None]):
@@ -653,16 +679,19 @@ async def test_heygen_websocket_flush_names_only_an_open_context():
 
 @pytest.mark.asyncio
 async def test_heygen_websocket_unsupported_sample_rate_is_resampled():
-    """At a rate HeyGen doesn't offer, the socket asks for 24 kHz and frames carry the pipeline rate."""
+    """At a rate HeyGen doesn't offer, the socket asks for 24 kHz, warns once and resamples."""
     heygen = _FakeHeyGen()
 
     async with serve(heygen, "127.0.0.1", 0) as server:
-        down_frames, _ = await run_test(
-            _service(server, sample_rate=11025),
-            frames_to_send=[TTSSpeakFrame(text="Hello."), SleepFrame(sleep=0.5)],
-        )
+        with patch("pipecat.services.heygen.tts.logger") as log:
+            down_frames, _ = await run_test(
+                _service(server, sample_rate=11025),
+                frames_to_send=[TTSSpeakFrame(text="Hello."), SleepFrame(sleep=0.5)],
+            )
 
     assert parse_qs(urlparse(heygen.request.path).query)["output_format"] == ["pcm_24000"]
+    warnings = [c.args[0] for c in log.warning.call_args_list]
+    assert sum("11025 Hz" in w for w in warnings) == 1
     audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
     assert audio_frames
     assert all(f.sample_rate == 11025 for f in audio_frames)
