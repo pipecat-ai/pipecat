@@ -78,7 +78,9 @@ class PipecatVoiceSource(PerceptionSource):
         Args:
             variant: The model's size: ``"base"`` reads tone and sadness best,
                 and ``"tiny"`` costs about half the CPU.
-            revision: The model's release on Hugging Face, such as ``"rc6"``.
+            revision: The model's release on Hugging Face, such as ``"rc6"``. By
+                default the one this version of Pipecat was tested with.
+                ``"main"`` follows the latest.
             model_dir: A folder to load the model from instead of downloading one,
                 laid out as one of a release's variants. ``variant`` and
                 ``revision`` are then unused.
@@ -159,7 +161,9 @@ class PipecatVoiceReader(PerceptionReader):
         Args:
             variant: The model's size: ``"base"`` reads tone and sadness best,
                 and ``"tiny"`` costs about half the CPU.
-            revision: The model's release on Hugging Face, such as ``"rc6"``.
+            revision: The model's release on Hugging Face, such as ``"rc6"``. By
+                default the one this version of Pipecat was tested with.
+                ``"main"`` follows the latest.
             model_dir: A folder to load the model from instead of downloading one,
                 laid out as one of a release's variants. ``variant`` and
                 ``revision`` are then unused.
