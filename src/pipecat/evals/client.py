@@ -21,6 +21,7 @@ import mimetypes
 import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -33,9 +34,10 @@ from websockets.exceptions import InvalidHandshake
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.evals._script_conversation import _ScriptConversation
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client_transport import EvalClientRecorder, EvalClientTransport
-from pipecat.evals.events import EvalEventStream
+from pipecat.evals.events import EvalEventStream, EvalHarnessError
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.serializer import (
@@ -203,12 +205,20 @@ class _BotSpeechGate(FrameProcessor):
     folded into it. A turn that sends nothing drops the same way what the bot
     says before it starts speaking again.
 
-    Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    Segment attribution needs an STT that transcribes one segment at a time.
+    After an interrupting send, an untagged streaming transcript has no known
+    audio origin. The gate drops it and reports a harness error so it cannot
+    become evidence for the new reply.
     """
 
-    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
+    def __init__(
+        self,
+        stream: EvalEventStream,
+        trace: EvalTrace,
+        starts: "deque[float] | None",
+        *,
+        conversation: _ScriptConversation | None = None,
+    ):
         """Initialize the gate.
 
         Args:
@@ -216,17 +226,46 @@ class _BotSpeechGate(FrameProcessor):
             trace: The run's trace, for what the gate drops.
             starts: Where the start of each ended segment goes, for the STT's
                 tagging; ``None`` with an STT that is not segmented.
+            conversation: Optional scripted conversation, separate from matching.
         """
         super().__init__()
         self._stream = stream
         self._trace = trace
         self._starts = starts
+        self._conversation = conversation
         self._segment_started_at: float | None = None
+        # A missing audio origin invalidates the run; emit one error per session.
+        self._reported_ambiguous_transcript = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._starts is None:
-            pass
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and self._conversation is not None
+            and isinstance(frame, TranscriptionFrame)
+        ):
+            if isinstance(frame, _BotSegmentTranscriptionFrame):
+                self._conversation.speech(frame.text, started_at=frame.segment_started_at)
+            elif not self._stream.speech_attribution_required:
+                self._conversation.speech(frame.text)
+        if isinstance(frame, _BotSegmentTranscriptionFrame):
+            talked_over_until = self._stream.talked_over_until
+            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
+                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
+                return
+        elif self._starts is None:
+            if (
+                direction == FrameDirection.DOWNSTREAM
+                and isinstance(frame, TranscriptionFrame)
+                and frame.text.strip()
+                and self._stream.speech_attribution_required
+            ):
+                if not self._reported_ambiguous_transcript:
+                    self._reported_ambiguous_transcript = True
+                    await self.push_error(
+                        "Cannot attribute streaming transcription after interrupted speech"
+                    )
+                return
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
@@ -236,11 +275,6 @@ class _BotSpeechGate(FrameProcessor):
             self._starts.append(self._segment_started_at or time.monotonic())
             self._segment_started_at = None
             self._stream.bot_segment_ended()
-        elif isinstance(frame, _BotSegmentTranscriptionFrame):
-            talked_over_until = self._stream.talked_over_until
-            if talked_over_until is not None and frame.segment_started_at < talked_over_until:
-                self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
-                return
         await self.push_frame(frame, direction)
 
 
@@ -265,6 +299,7 @@ class _BotFrameSink(FrameProcessor):
         *,
         persona: EvalPersona | None = None,
         persona_hears: bool = False,
+        conversation: _ScriptConversation | None = None,
     ):
         """Initialize the sink.
 
@@ -273,9 +308,11 @@ class _BotFrameSink(FrameProcessor):
             persona: The simulated caller, else ``None``.
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
+            conversation: Optional scripted conversation, separate from matching.
         """
         super().__init__()
         self._stream = stream
+        self._conversation = conversation
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
 
@@ -296,6 +333,8 @@ class _BotFrameSink(FrameProcessor):
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return
+        if self._conversation is not None:
+            self._conversation.observe(frame)
         event = self._stream.frame_to_event(frame)
         if event is not None:
             await self._stream.append(event)
@@ -533,6 +572,11 @@ class EvalClient:
         self._user_tts = user_tts
         self._bot_stt = bot_stt
         self._persona = persona
+        self._conversation = (
+            _ScriptConversation(bot_audio=self._params.bot_audio)
+            if self._session_params.capture_conversation and persona is None
+            else None
+        )
         # The aggregator that turns the bot's transcribed speech into turns
         # (audio mode), kept so a send that talks over the bot can drop what
         # it holds of the bot's speech from before the send.
@@ -564,6 +608,25 @@ class EvalClient:
     def has_user_tts(self) -> bool:
         """Whether text user turns are spoken to the bot rather than sent as text."""
         return self._user_tts is not None
+
+    @property
+    def conversation(self) -> list[dict]:
+        """The captured script's observed prefix, or an empty list when disabled."""
+        return self._conversation.snapshot() if self._conversation is not None else []
+
+    def _submitting_input(self, text: str | None) -> AbstractContextManager[None]:
+        """Reserve a submitted input's place while its frames are enqueued."""
+        if (
+            self._conversation is not None
+            and self._params.bot_audio
+            and not isinstance(self._bot_stt, SegmentedSTTService)
+            and (self._stream.bot_speaking or not self._stream.bot_transcribed)
+        ):
+            raise EvalHarnessError(
+                "Cannot capture conversation: streaming bot speech must be fully transcribed "
+                "before the next input"
+            )
+        return self._conversation.submitting(text) if self._conversation else nullcontext()
 
     @property
     def sends_user_audio(self) -> bool:
@@ -756,7 +819,8 @@ class EvalClient:
             text: The user's turn.
         """
         await self._drop_bot_speech_if_talking_over()
-        await self.send(RTVI.Message(**self._text_turn_message(text)))
+        with self._submitting_input(text):
+            await self.send(RTVI.Message(**self._text_turn_message(text)))
 
     async def send_dtmf(self, keys: str) -> None:
         """Send a DTMF keypress turn as one RTVI ``dtmf`` message.
@@ -767,7 +831,8 @@ class EvalClient:
             keys: The keys to press, in order.
         """
         await self._drop_bot_speech_if_talking_over()
-        await self.send(self._message("dtmf", {"buttons": list(keys)}))
+        with self._submitting_input(f"(DTMF keypad input: {keys})"):
+            await self.send(self._message("dtmf", {"buttons": list(keys)}))
 
     async def send_image(self, image_path: str) -> None:
         """Register an image for the current turn.
@@ -795,9 +860,12 @@ class EvalClient:
         """
         assert self._sink is not None  # pipeline built before any send
         await self._drop_bot_speech_if_talking_over()
-        await self._sink.inject(TTSSpeakFrame(text))
+        with self._submitting_input(text):
+            await self._sink.inject(TTSSpeakFrame(text))
 
-    async def say_with_pauses(self, parts: list[str | int]) -> None:
+    async def say_with_pauses(
+        self, parts: list[str | int], *, transcript_text: str | None = None
+    ) -> None:
         """Speak the user's text with real silence between its parts.
 
         Each text is synthesized by the user TTS (cached), and the turn goes out
@@ -805,6 +873,7 @@ class EvalClient:
 
         Args:
             parts: Text to speak, or the milliseconds of silence between texts.
+            transcript_text: Submitted wording to record; defaults to the text parts.
 
         Raises:
             ValueError: If a pause is invalid or the assembled PCM exceeds
@@ -829,14 +898,20 @@ class EvalClient:
                 if maximum is not None and samples * 2 > maximum - len(pcm):
                     raise ValueError("The eval caller exceeded its PCM buffer limit")
                 pcm.extend(b"\x00\x00" * samples)
-        for frame in (
-            TTSStartedFrame(),
-            TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
-            TTSStoppedFrame(),
-        ):
-            await self._sink.inject(frame)
+        text = (
+            transcript_text
+            if transcript_text is not None
+            else " ".join(part for part in parts if isinstance(part, str))
+        )
+        with self._submitting_input(text):
+            for frame in (
+                TTSStartedFrame(),
+                TTSAudioRawFrame(audio=bytes(pcm), sample_rate=sample_rate, num_channels=1),
+                TTSStoppedFrame(),
+            ):
+                await self._sink.inject(frame)
 
-    async def play(self, path: str) -> None:
+    async def play(self, path: str, *, transcript_text: str | None = None) -> None:
         """Play a recording to the bot as the user's turn, instead of synthesizing one.
 
         It goes out like a spoken turn: resampled to the user audio rate, paced
@@ -844,16 +919,18 @@ class EvalClient:
 
         Args:
             path: Path to the audio file.
+            transcript_text: Submitted wording to record, if known.
         """
         assert self._sink is not None  # pipeline built before any send
         await self._drop_bot_speech_if_talking_over()
         pcm, sample_rate = await load_user_audio(path)
-        for frame in (
-            TTSStartedFrame(),
-            TTSAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
-            TTSStoppedFrame(),
-        ):
-            await self._sink.inject(frame)
+        with self._submitting_input(transcript_text):
+            for frame in (
+                TTSStartedFrame(),
+                TTSAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
+                TTSStoppedFrame(),
+            ):
+                await self._sink.inject(frame)
 
     async def _drop_bot_speech_if_talking_over(self) -> None:
         """Before a send that talks over the bot, drop its speech held in an open turn.
@@ -1039,7 +1116,12 @@ class EvalClient:
         context = persona.context if persona is not None else LLMContext()
         # With no STT there is no aggregator to hand the persona the bot's turns;
         # it hears them through the sink instead.
-        self._sink = _BotFrameSink(self._stream, persona=persona, persona_hears=bot_stt is None)
+        self._sink = _BotFrameSink(
+            self._stream,
+            persona=persona,
+            persona_hears=bot_stt is None,
+            conversation=self._conversation,
+        )
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
@@ -1048,7 +1130,11 @@ class EvalClient:
                 starts = deque()
                 _tag_bot_segments(bot_stt, starts)
             self._bot_turns = self._bot_turn_aggregator(context)
-            inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
+            inbound += [
+                bot_stt,
+                _BotSpeechGate(self._stream, self._trace, starts, conversation=self._conversation),
+                self._bot_turns,
+            ]
 
         speech = [user_tts] if user_tts is not None else []
         if persona is None:

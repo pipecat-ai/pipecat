@@ -117,9 +117,9 @@ class BaseEvalDriver(ABC, Generic[R]):
         how = audio_file or ("audio" if self._client.has_user_tts else "text")
         self._trace.log(f"send: {text!r} ({how})")
         if audio_file is not None:
-            await self._client.play(audio_file)
+            await self._client.play(audio_file, transcript_text=text)
         elif parts is not None and self._client.has_user_tts:
-            await self._client.say_with_pauses(parts)
+            await self._client.say_with_pauses(parts, transcript_text=text)
         elif self._client.has_user_tts:
             await self._client.say(text)
         else:

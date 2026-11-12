@@ -92,6 +92,12 @@ class EvalSessionParams(BaseModel):
             target PCM admitted and paced PCM emitted into the harness, including
             gap-fill silence. Requires a positive even integer. ``None`` leaves
             audio unrestricted. Consumption and interruption do not refund quota.
+        capture_conversation: Scripted scenarios only: include submitted user
+            inputs, observed bot text or recognized speech, and tool calls in
+            the result. Audio-mode capture constructs STT even without a
+            transcription assertion. With streaming STT, speech must be fully
+            transcribed before another input; interrupting speech needs a
+            segmented STT that preserves its source time. Defaults to False.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -116,6 +122,7 @@ class EvalSessionParams(BaseModel):
     use_cache: bool = True
     max_user_audio_buffer_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     max_bot_audio_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
+    capture_conversation: bool = False
     stop_bot: bool = False
     trigger_disconnect: bool = False
 
