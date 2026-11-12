@@ -249,6 +249,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
         "passed": bool(result and result.passed and not result.skipped),
         "skipped": result.skipped if result else None,
         "error": run.error,
+        "audio_support": result.audio_support if result else None,
         "duration_ms": run.duration_ms,
         "failures": [
             {
@@ -301,6 +302,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "confidence": result.confidence if result else None,
         "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
+        "audio_support": result.audio_support if result else None,
         "turns": result.turns if result else 0,
         "metrics": [
             {
@@ -363,6 +365,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         success=data.get("success", ""),
+        audio_support=data.get("audio_support"),
     )
 
 
@@ -387,6 +390,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
         debug_log=data.get("debug_log", []),
         skipped=data.get("skipped"),
         conversation=data.get("conversation", []),
+        audio_support=data.get("audio_support"),
     )
 
 
