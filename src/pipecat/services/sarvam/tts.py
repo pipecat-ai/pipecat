@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.sarvam._utils import reject_settings_kwargs
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -464,6 +465,8 @@ class SarvamHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
+        reject_settings_kwargs(self, kwargs)
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="bulbul:v3",
@@ -882,6 +885,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
         See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream
         """
+        reject_settings_kwargs(self, kwargs)
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="bulbul:v3",

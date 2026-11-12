@@ -23,7 +23,7 @@ import io
 import json
 import wave
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 from urllib.parse import urlencode
 
@@ -47,6 +47,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.sarvam._utils import reject_settings_kwargs
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import (
     SARVAM_HTTP_TTFS_P99,
@@ -385,6 +386,8 @@ class SarvamSTTService(STTService):
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
+        reject_settings_kwargs(self, kwargs)
+
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
             model="saaras:v4",
@@ -1145,14 +1148,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
         """
-        settings_fields = {setting.name for setting in fields(self.Settings)}
-        direct_settings = sorted(settings_fields.intersection(kwargs))
-        if direct_settings:
-            names = ", ".join(direct_settings)
-            raise TypeError(
-                f"{names} must be passed via "
-                "settings=SarvamRealtimeSTTService.Settings(...), not as constructor kwargs"
-            )
+        reject_settings_kwargs(self, kwargs)
         if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
             allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
             raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
@@ -1887,6 +1883,7 @@ class SarvamHttpSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        reject_settings_kwargs(self, kwargs)
         default_settings = self.Settings(
             model="saaras:v4",
             language=None,
