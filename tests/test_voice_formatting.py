@@ -354,6 +354,13 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         # A long number without a separator is still read whole.
         self.assertEqual(await expand_percentages("1000%", "*"), "one thousand percent")
 
+    async def test_fraction_read_digit_by_digit(self):
+        # Fractional digits are read one at a time, as expand_numbers does, so a
+        # trailing zero is spoken instead of dropped.
+        self.assertEqual(await expand_percentages("1.10%", "*"), "one point one zero percent")
+        self.assertEqual(await expand_percentages("1.0%", "*"), "one point zero percent")
+        self.assertEqual(await expand_percentages("0.25%", "*"), "zero point two five percent")
+
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
     async def test_km(self):
