@@ -1155,6 +1155,9 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         If the session hasn't received its first context yet, the messages
         aren't sent. The assistant aggregator adds them to the context, and the
         session starts from that context, so the model gets them then.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if self._context is None or self._disconnecting or not self._session:
             return

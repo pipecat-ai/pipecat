@@ -679,6 +679,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         If the session isn't set up yet, the messages aren't sent. The
         assistant aggregator adds them to the context, and the session is set
         up from that context, so the model gets them then.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if not self._audio_input_started:
             return

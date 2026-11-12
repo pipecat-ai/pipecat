@@ -1323,6 +1323,36 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._realtime_handoff_flush_task)
         self._realtime_handoff_flush_task = None
 
+    async def _realtime_handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Pass appended messages on to the realtime service and the assistant aggregator.
+
+        In a cascade pipeline, the user aggregator handles an appended message:
+        it adds it to the context and triggers an LLM run. In a realtime
+        pipeline, it passes the append on. The realtime service takes the
+        messages into its session straight away, and the assistant aggregator
+        adds them to the context and decides when the model should answer
+        them, waiting for the bot and the user to stop talking. (The paths
+        differ because a cascade LLM only reads new messages when it runs,
+        while a realtime service takes them in without answering, so they're
+        already in its session for whatever it answers next.)
+
+        Why the service takes the messages from the frame, not from the
+        context:
+
+        - Timing. A realtime service doesn't wait for a context frame before it
+          answers the user. It answers as soon as the user stops talking, using
+          only what's already in its session. The assistant aggregator may send
+          the context much later (after the bot finishes speaking, for
+          example), or not at all (when the append doesn't ask the model to
+          answer). Messages that only arrived with the context could miss the
+          model's next answer.
+        - Telling messages apart. The user's own speech also ends up in the
+          context, sometimes late. The service has already heard that speech,
+          so it mustn't send it again, but in the context it looks just like an
+          appended message.
+        """
+        await self.push_frame(frame)
+
     async def _start_controllers(self):
         if self._vad_controller:
             await self._vad_controller.start()
@@ -1390,6 +1420,9 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.push_context_frame()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
+        if self._realtime_service_mode:
+            await self._realtime_handle_messages_append(frame)
+            return
         self.add_messages(frame.messages)
         if frame.run_llm:
             await self.push_context_frame()
@@ -2858,7 +2891,11 @@ class LLMContextAggregatorPair:
                 (speech-to-speech) LLM service. When enabled, context writes
                 become trailing — driven by the content stream itself
                 (transcripts, ``LLMFullResponseStartFrame``) rather than turn
-                frames — and turn-end strategies stop waiting for transcripts.
+                frames — turn-end strategies stop waiting for transcripts, and
+                an ``LLMMessagesAppendFrame`` goes on to the service, which
+                takes its messages into its session, and to the assistant
+                aggregator, which adds them to the context and decides when
+                the model answers them.
                 ``None`` (the default) auto-configures: the mode turns on when a
                 realtime service announces itself via service metadata, and
                 stays off otherwise. ``True`` / ``False`` force it on or off
