@@ -11,7 +11,12 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from websockets.protocol import State
 
-from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamTTSService
+from pipecat.services.sarvam.tts import (
+    TTS_MODEL_CONFIGS,
+    SarvamHttpTTSService,
+    SarvamTTSService,
+    get_speakers_for_model,
+)
 
 V4_FLASH = "bulbul:v4-flash"
 
@@ -95,6 +100,27 @@ def test_v4_flash_defaults():
     assert service._settings.voice == "shubh_en_narration_gentle"
     assert service._init_sample_rate == 24000
     assert service._settings.enable_preprocessing is True
+
+
+def test_v4_flash_lists_its_own_speakers():
+    """v4-flash has its own catalogue, which shares no name with bulbul:v3."""
+    speakers = get_speakers_for_model(V4_FLASH)
+
+    assert len(speakers) == 224
+    assert len(set(speakers)) == len(speakers)
+    assert not set(speakers) & set(get_speakers_for_model("bulbul:v3"))
+
+
+@pytest.mark.parametrize("model", list(TTS_MODEL_CONFIGS))
+def test_each_models_default_speaker_is_in_its_list(model):
+    config = TTS_MODEL_CONFIGS[model]
+
+    assert config.default_speaker in get_speakers_for_model(model)
+
+
+def test_an_unknown_model_lists_no_speakers():
+    """Another model's speakers would be voices this one rejects."""
+    assert get_speakers_for_model("bulbul:unknown") == []
 
 
 @pytest.mark.asyncio
