@@ -81,10 +81,12 @@ Fields:
     turns, ``duration`` the conversation's seconds from its first line to the
     hang-up, ``words`` the longest bot reply in words (each Chinese or Japanese
     character counts as one), and ``latency`` the slowest
-    reply in seconds: from the persona's send to the reply's first token in
-    text mode, from the bot noticing the persona stop to its first spoken
-    sentence in audio mode, which a failure's reason spells out, since the two
-    are not comparable. The per-reply measures bound every reply.
+    reply in seconds. Input is anchored at the client's successful text write
+    or final paced PCM write for spoken input. Output is the first LLM token
+    for a text judge or first received bot PCM for an audio judge, before gap
+    filling and transcription. These are client wire boundaries rather than
+    remote acoustic playback times. The per-reply measures bound every reply;
+    a reply whose timing is unavailable cannot pass a required latency bound.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and

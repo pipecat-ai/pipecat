@@ -554,6 +554,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
             await stream.append(
                 {"type": PERSONA_TURN_EVENT, "text": "Capital of Germany?", "at": 1.0}
             )
+            await stream.append({"type": "user_text_sent", "at": 1.0})
             await stream.append({"type": "bot_interrupted", "at": 1.1})
             await stream.append(
                 {
@@ -564,6 +565,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 }
             )
             await stream.append({"type": PERSONA_TURN_EVENT, "text": "Thanks", "at": 3.5})
+            await stream.append({"type": "user_text_sent", "at": 3.5})
             await stream.append(
                 {"type": "llm_response", "text": "Bye!", "at": 3.9, "started_at": 3.8}
             )

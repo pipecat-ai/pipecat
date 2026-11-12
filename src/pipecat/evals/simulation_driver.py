@@ -18,7 +18,13 @@ from pipecat.evals.client import (
     EvalClient,
 )
 from pipecat.evals.conversation import EvalConversation
-from pipecat.evals.events import EvalEventStream, EvalHarnessError
+from pipecat.evals.events import (
+    BOT_AUDIO_RECEIVED_EVENT,
+    USER_AUDIO_SENT_EVENT,
+    USER_TEXT_SENT_EVENT,
+    EvalEventStream,
+    EvalHarnessError,
+)
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import (
@@ -466,36 +472,53 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 return None, "no reply to measure"
             return float(longest), f"longest reply {longest} words"
         if measure == "latency":
-            slowest = max(self._reply_latencies(), default=None)
-            if slowest is None:
+            latencies = self._reply_latencies()
+            if not latencies:
                 return None, "no reply to time"
+            if any(value is None for value in latencies):
+                return None, "one or more replies could not be timed"
+            slowest = max(value for value in latencies if value is not None)
             timed = (
-                "from the persona stopping to the first spoken sentence"
+                "to the first received audio"
                 if self._simulation.bot_audio
                 else "to the first token"
             )
             return slowest, f"slowest reply {slowest:.2f} s {timed}"
         raise ValueError(f"unknown measure {measure!r}")
 
-    def _reply_latencies(self) -> list[float]:
-        """Seconds from each persona turn to the bot's first word of the reply.
+    def _reply_latencies(self) -> list[float | None]:
+        """Seconds from completed input delivery to the first received reply.
 
-        In text mode, from the send to the first LLM token; in audio mode, from
-        the bot noticing the persona stop to its first spoken sentence.
+        Audio input is anchored at the final paced PCM send, not synthesis or
+        the bot's VAD. Audio output ends at raw PCM arrival before gap filling
+        or transcription. Both boundaries are observed by the client transport.
         """
-        if self._simulation.bot_audio:
-            sent, replied = "user_stopped_speaking", "tts_response"
-        else:
-            sent, replied = PERSONA_TURN_EVENT, "llm_response"
-        latencies: list[float] = []
+        sent = USER_AUDIO_SENT_EVENT if self._simulation.user_audio else USER_TEXT_SENT_EVENT
+        replied = "response" if self._simulation.bot_audio else "llm_response"
+        latencies: list[float | None] = []
         sent_at: float | None = None
-        for event in self._stream.events_seen:
+        audio_at: float | None = None
+        # A paced send's completion can be reported by the media sender after
+        # incoming audio was processed. Use observation times, not queue order.
+        for event in sorted(self._stream.events_seen, key=lambda item: item.get("at", 0.0)):
             if event["type"] == sent:
                 sent_at = event.get("at")
+                audio_at = None
+            elif (
+                event["type"] == BOT_AUDIO_RECEIVED_EVENT
+                and sent_at is not None
+                and audio_at is None
+            ):
+                audio_at = event.get("at")
             elif event["type"] == replied and sent_at is not None:
-                first_word = event.get("started_at", event.get("at"))
-                if first_word is not None:
-                    latencies.append(round(max(0.0, first_word - sent_at), 3))
+                first_word = audio_at if self._simulation.bot_audio else event.get("started_at")
+                # Retain unavailable evidence: measuring only the other replies
+                # would silently certify a required bound on a subset of them.
+                latencies.append(
+                    round(first_word - sent_at, 3)
+                    if first_word is not None and first_word >= sent_at
+                    else None
+                )
                 sent_at = None
         return latencies
 

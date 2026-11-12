@@ -1124,6 +1124,7 @@ class EvalClient:
             recorder=self._recorder,
             max_bot_audio_bytes=self._session_params.max_bot_audio_bytes,
             audio_failure=self._audio_failure,
+            timing=self._stream.transport_timing,
         )
 
         @transport.event_handler("on_bot_ready")

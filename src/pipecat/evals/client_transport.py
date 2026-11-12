@@ -29,6 +29,11 @@ from typing import cast
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import create_file_resampler, mix_audio
+from pipecat.evals.events import (
+    BOT_AUDIO_RECEIVED_EVENT,
+    USER_AUDIO_SENT_EVENT,
+    USER_TEXT_SENT_EVENT,
+)
 from pipecat.evals.serializer import (
     EVAL_CAPABILITIES_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
@@ -41,6 +46,8 @@ from pipecat.evals.serializer import (
     parse_eval_capabilities,
 )
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -48,6 +55,8 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -64,6 +73,7 @@ from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 FRAME_S = 0.04
 
 AudioFailure = Callable[[str], Awaitable[None]]
+TransportTiming = Callable[[str, float], Awaitable[None]]
 
 
 async def _sleep_to_next_tick(next_send: float) -> float:
@@ -215,12 +225,24 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
     the silence they need to end a turn. Runs only when audio output is on.
     """
 
-    def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        recorder: "EvalClientRecorder | None" = None,
+        timing: TransportTiming | None = None,
+        **kwargs,
+    ):
         """Initialize the transport and its (lazily started) send stream."""
         super().__init__(*args, **kwargs)
         self._pending = bytearray()
         self._send_task = None
         self._recorder = recorder
+        self._timing = timing
+        self._queued_bytes = 0
+        self._consumed_bytes = 0
+        self._consumed = asyncio.Event()
+        self._audio_generation = 0
+        self._utterance_last_sent_at: float | None = None
 
     async def start(self, frame: StartFrame):
         """Start the transport and, in audio mode, the real-time send stream."""
@@ -240,17 +262,52 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Pass a frame on; an interruption drops the user audio not yet sent, and the recorder drops the same bytes."""
-        if isinstance(frame, InterruptionFrame) and self._pending:
-            if self._recorder is not None:
+        if isinstance(frame, InterruptionFrame):
+            if self._recorder is not None and self._pending:
                 self._recorder.drop_user_tail(len(self._pending))
-            self._pending.clear()
+            self._drop_pending()
+            self._utterance_last_sent_at = None
         await super().process_frame(frame, direction)
 
+    async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM):
+        """Time completed caller utterances after the paced audio drained."""
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._utterance_last_sent_at = None
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                generation = self._audio_generation
+                sent_by = self._queued_bytes
+                while (
+                    self._send_task is not None
+                    and self._consumed_bytes < sent_by
+                    and generation == self._audio_generation
+                ):
+                    self._consumed.clear()
+                    await self._consumed.wait()
+                if generation == self._audio_generation:
+                    observed_at = self._utterance_last_sent_at
+                    self._utterance_last_sent_at = None
+                    if self._timing is not None and observed_at is not None:
+                        await self._timing(USER_AUDIO_SENT_EVENT, observed_at)
+        await super().push_frame(frame, direction)
+
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
+        """Time a text input only after the transport accepts its send."""
+        sent = await self._write_frame(frame)
+        if isinstance(frame.message, dict) and frame.message.get("type") == "send-text":
+            if not sent:
+                await self.push_error("The eval transport could not send text")
+            elif self._timing is not None:
+                await self._timing(USER_TEXT_SENT_EVENT, time.monotonic())
+
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Queue the user audio for the send task.
+        """Queue user audio immediately so smaller media frames can be combined.
 
         Returns False so the media sender does not push this un-paced frame
-        downstream; the send task pushes the paced frames instead.
+        downstream; the send task pushes the paced frames instead. The utterance
+        end marker waits for delivery of the assembled audio.
         """
         if self._session.is_closing or not self._session.is_connected:
             return False
@@ -259,14 +316,27 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
         if self._recorder is not None:
             self._recorder.add_user(frame.audio, frame.sample_rate)
         self._pending.extend(frame.audio)
+        self._queued_bytes += len(frame.audio)
         return False
 
     async def _send_task_handler(self):
+        """Run the paced sender, releasing utterance acknowledgments when it stops."""
+        try:
+            await self._send_audio()
+        except Exception as exc:
+            await self.push_error(f"The eval audio send stream failed ({type(exc).__name__})")
+        finally:
+            self._send_task = None
+            self._drop_pending()
+            self._utterance_last_sent_at = None
+
+    async def _send_audio(self):
         """Send one ~40ms frame every tick: queued audio, or silence when idle."""
         chunk = int(self.sample_rate * FRAME_S) * 2  # 16-bit mono
         silence = b"\x00" * chunk
         next_send = time.monotonic()
         while True:
+            generation = self._audio_generation
             if len(self._pending) >= chunk:
                 pcm = bytes(self._pending[:chunk])
                 del self._pending[:chunk]
@@ -281,7 +351,16 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
                 sample_rate=self.sample_rate,
                 num_channels=self._params.audio_out_channels,
             )
-            await self._send_frame(frame)
+            sent = await self._send_frame(frame)
+            if sent is False:
+                self._drop_pending()
+                self._utterance_last_sent_at = None
+                await self.push_error("The eval transport could not send audio")
+                return
+            if pcm is not silence and generation == self._audio_generation:
+                self._utterance_last_sent_at = time.monotonic()
+                self._consumed_bytes = self._queued_bytes - len(self._pending)
+                self._consumed.set()
             # Push every frame (audio and silence) downstream at this paced cadence:
             # the harness recorder aligns tracks by wall-clock, so a continuous
             # stream keeps the user turn at the right time (pushing only audio would
@@ -289,16 +368,25 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
             await self.push_frame(frame)
             next_send = await _sleep_to_next_tick(next_send)
 
-    async def _send_frame(self, frame: OutputAudioRawFrame):
+    async def _send_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Serialize and send one frame (raw PCM, via the RTVI serializer)."""
         if self._session.is_closing or not self._session.is_connected:
-            return
-        await self._write_frame(frame)
+            return False
+        return await self._write_frame(frame)
+
+    def _drop_pending(self) -> None:
+        """Release utterance acknowledgments whose queued audio was discarded."""
+        self._audio_generation += 1
+        self._pending.clear()
+        self._consumed_bytes = self._queued_bytes
+        self._consumed.set()
 
     async def _cancel_send_task(self):
         if self._send_task is not None:
             await self.cancel_task(self._send_task)
             self._send_task = None
+        self._drop_pending()
+        self._utterance_last_sent_at = None
 
 
 class EvalClientInputTransport(WebsocketClientInputTransport):
@@ -316,6 +404,7 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         recorder: "EvalClientRecorder | None" = None,
         max_bot_audio_bytes: int | None = None,
         audio_failure: AudioFailure | None = None,
+        timing: TransportTiming | None = None,
         **kwargs,
     ):
         """Initialize the transport and its (lazily started) fill stream."""
@@ -329,6 +418,8 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         self._audio_failure = audio_failure
         self._audio_failed = False
         self._audio_closed = False
+        self._timing = timing
+        self._bot_audio_received = False
 
     async def start(self, frame: StartFrame):
         """Start the transport and, when audio is enabled, the gap-fill stream."""
@@ -357,6 +448,9 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
             if self._recorder is not None:
                 self._recorder.drop_bot_tail(len(self._bot_pcm))
             self._bot_pcm.clear()
+            self._bot_audio_received = False
+        elif direction == FrameDirection.DOWNSTREAM and isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_audio_received = False
         await super().push_frame(frame, direction)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
@@ -377,11 +471,17 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
                 await self.fail_audio("The eval target exceeded its PCM admission limit")
                 return
             self._raw_audio_bytes += len(frame.audio)
+        observed_at: float | None = None
+        if frame.audio and not self._bot_audio_received:
+            self._bot_audio_received = True
+            observed_at = time.monotonic()
         # Record the raw bot audio here (gapless within a turn), not the gap-filled
         # frames the fill task emits: those underruns would stutter the recording.
         if self._recorder is not None:
             self._recorder.add_bot(frame.audio, frame.sample_rate)
         self._bot_pcm.extend(frame.audio)
+        if self._timing is not None and observed_at is not None:
+            await self._timing(BOT_AUDIO_RECEIVED_EVENT, observed_at)
 
     async def fail_audio(self, reason: str) -> None:
         """Invalidate the run without waiting behind downstream audio queues."""
@@ -459,6 +559,7 @@ class EvalClientTransport(RTVIClientTransport):
         recorder: "EvalClientRecorder | None" = None,
         max_bot_audio_bytes: int | None = None,
         audio_failure: AudioFailure | None = None,
+        timing: TransportTiming | None = None,
         **kwargs,
     ):
         """Initialize the transport, optionally wiring a recorder to both edges.
@@ -470,6 +571,7 @@ class EvalClientTransport(RTVIClientTransport):
                 edges; ``None`` disables recording.
             max_bot_audio_bytes: Optional independent raw and paced PCM quotas.
             audio_failure: Receives static failure reasons independently of audio queues.
+            timing: Observes completed input delivery and raw bot audio receipt.
             *args: Forwarded to :class:`~pipecat.transports.websocket.rtvi_client.RTVIClientTransport`.
             **kwargs: Forwarded to the parent transport.
         """
@@ -478,6 +580,7 @@ class EvalClientTransport(RTVIClientTransport):
         self._recorder = recorder
         self._max_bot_audio_bytes = _checked_audio_limit(max_bot_audio_bytes)
         self._audio_failure = audio_failure
+        self._timing = timing
         self._audio_capabilities: EvalAudioCapabilities | None = None
 
     @property
@@ -537,6 +640,7 @@ class EvalClientTransport(RTVIClientTransport):
                 recorder=self._recorder,
                 max_bot_audio_bytes=self._max_bot_audio_bytes,
                 audio_failure=self._audio_failure,
+                timing=self._timing,
             )
         return cast(EvalClientInputTransport, self._input)
 
@@ -544,6 +648,6 @@ class EvalClientTransport(RTVIClientTransport):
         """Return the stream-shaping output transport."""
         if not self._output:
             self._output = EvalClientOutputTransport(
-                self, self._session, self._params, recorder=self._recorder
+                self, self._session, self._params, recorder=self._recorder, timing=self._timing
             )
         return self._output
