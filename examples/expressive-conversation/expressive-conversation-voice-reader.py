@@ -14,7 +14,11 @@ from pipecat.evals.transport import EvalTransportParams
 from pipecat.expressive.expression import ExpressionDelivery, ExpressionSound
 from pipecat.expressive.perception import format_perception
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
-from pipecat.expressive.processors.perception_reader import PerceptionReader
+from pipecat.expressive.processors.perception_reader import (
+    PerceptionQuestion,
+    PerceptionReader,
+    PerceptionSource,
+)
 from pipecat.expressive.processors.tone_reader import PipecatToneSource
 from pipecat.expressive.processors.voice_reader import PipecatVoiceSource
 from pipecat.frames.frames import LLMRunFrame
@@ -72,11 +76,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Pipecat Voice Reader hears how each turn sounded: the user's tone of
     # voice, how activated it is, whether they laugh, how fast they speak and
-    # whether the delivery sounds sarcastic. Pipecat Tone reads the turn's
-    # words beside it: the user's emotion and whether they're sarcastic. The
-    # LLM reads both at the head of the user's message. The models download
-    # from Hugging Face at start.
-    reader = PerceptionReader(sources=[PipecatToneSource(), PipecatVoiceSource()])
+    # whether the turn sounds sarcastic. Pipecat Tone reads the turn's words
+    # beside it: the user's emotion and whether they're sarcastic. The LLM
+    # reads both at the head of the user's message. The models download from
+    # Hugging Face at start.
+    #
+    # Both report a `sarcasm`, and a reading has one signal of a name, so the
+    # voice's is asked here as `sarcasm_voice`.
+    voice = PipecatVoiceSource()
+    voice_questions = dict(voice.questions)
+    voice_questions["sarcasm_voice"] = PerceptionQuestion(
+        question=voice_questions.pop("sarcasm").question,
+        description=(
+            "The chance the delivery alone sounds sarcastic, from 0 to 1. Weak on its own: weigh "
+            "it with sarcasm from the words, and act when both point the same way or the words "
+            "are plainly positive while the voice is flat or frustrated."
+        ),
+    )
+    reader = PerceptionReader(
+        sources=[
+            PipecatToneSource(),
+            PerceptionSource(classifier=voice.classifier, questions=voice_questions),
+        ]
+    )
 
     # Eleven v3 and v4 perform audio tags, which the Text-to-Dialogue service
     # serves.

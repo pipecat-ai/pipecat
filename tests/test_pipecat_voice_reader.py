@@ -11,7 +11,7 @@ import pytest
 from pipecat.classifiers.tone.model import PipecatToneReaderModel
 from pipecat.classifiers.voice.model import VOICE_REVISION, PipecatVoiceReaderModel
 from pipecat.expressive.perception import PerceptionSignal
-from pipecat.expressive.processors.perception_reader import PerceptionReader
+from pipecat.expressive.processors.perception_reader import PerceptionReader, PerceptionSource
 from pipecat.expressive.processors.tone_reader import PipecatToneSource
 from pipecat.expressive.processors.voice_reader import PipecatVoiceReader, PipecatVoiceSource
 from pipecat.frames.frames import (
@@ -44,7 +44,7 @@ HEARD = [
     PerceptionSignal("arousal", value=0.43),
     PerceptionSignal("laughter", value=0.05),
     PerceptionSignal("speech_rate", value=3.14),
-    PerceptionSignal("sarcasm_voice", value=0.3),
+    PerceptionSignal("sarcasm", value=0.3),
 ]
 
 
@@ -120,7 +120,7 @@ async def test_the_signals_are_declared_at_start(monkeypatch):
         ("arousal", []),
         ("laughter", []),
         ("speech_rate", []),
-        ("sarcasm_voice", []),
+        ("sarcasm", []),
     ]
     assert all(term.description for term in metadata[0].perception.signals)
 
@@ -158,7 +158,16 @@ async def test_speech_too_short_for_the_model_isnt_read(monkeypatch):
 async def test_the_voice_is_heard_beside_a_reading_of_the_words(monkeypatch):
     monkeypatch.setattr(PipecatToneReaderModel, "download", lambda **kwargs: FakeToneModel())
     monkeypatch.setattr(PipecatVoiceReaderModel, "download", lambda **kwargs: FakeVoiceModel())
-    reader = PerceptionReader(sources=[PipecatToneSource(), PipecatVoiceSource()])
+    # Both report a ``sarcasm``, so the voice's is asked under a name of its own.
+    voice = PipecatVoiceSource()
+    questions = dict(voice.questions)
+    questions["sarcasm_voice"] = questions.pop("sarcasm")
+    reader = PerceptionReader(
+        sources=[
+            PipecatToneSource(),
+            PerceptionSource(classifier=voice.classifier, questions=questions),
+        ]
+    )
 
     down, _ = await run_test(reader, frames_to_send=_speech("Oh, great."))
 
@@ -166,9 +175,15 @@ async def test_the_voice_is_heard_beside_a_reading_of_the_words(monkeypatch):
         [
             PerceptionSignal("emotion", labels=[("angry", 0.71), ("neutral", 0.2)]),
             PerceptionSignal("sarcasm", value=0.99),
-            *HEARD,
+            *HEARD[:-1],
+            PerceptionSignal("sarcasm_voice", value=0.3),
         ]
     ]
+
+
+def test_the_voice_and_the_words_cant_both_report_sarcasm_in_one_reader():
+    with pytest.raises(ValueError, match="sarcasm"):
+        PerceptionReader(sources=[PipecatToneSource(), PipecatVoiceSource()])
 
 
 @pytest.mark.asyncio

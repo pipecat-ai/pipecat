@@ -28,11 +28,10 @@ _SPEECH_RATE = (
     "Speaking rate in syllables per second; relaxed conversation is about 4, slow deliberate "
     "speech under 3."
 )
-_SARCASM_VOICE = (
-    "The chance the delivery alone sounds sarcastic, from 0 to 1: flat or drawn-out while the "
-    "words are bright, or a mock-cheerful lift. Weak on its own: weigh it with sarcasm from the "
-    "words, and act when both point the same way or the words are plainly positive while the "
-    "voice is flat or frustrated."
+_SARCASM = (
+    "The chance the turn sounds sarcastic, from 0 to 1: flat or drawn-out while the words are "
+    "bright, or a mock-cheerful lift. Weak on its own: weigh it with the words, and act when "
+    "they are plainly positive while the voice is flat or frustrated."
 )
 _SAD = (
     "How many listeners would hear sadness in the delivery, from 0 to 1, from the audio alone: "
@@ -47,19 +46,34 @@ class PipecatVoiceSource(PerceptionSource):
     Hears the user's speech each time they stop and reports how it sounded:
     their ``tone`` of voice, its two likeliest labels with their confidences,
     the voice's ``arousal``, the chance of ``laughter``, their ``speech_rate``
-    in syllables per second and ``sarcasm_voice``, the chance the delivery
-    sounds sarcastic. The model's sarcasm is reported as ``sarcasm_voice`` so
-    it can go beside a source that reads the words, such as
-    :class:`~pipecat.expressive.processors.tone_reader.PipecatToneSource`,
-    which reports a ``sarcasm`` of its own. Another source's signal needs a
-    name other than these.
+    in syllables per second and ``sarcasm``, the chance the turn sounds
+    sarcastic.
+
+    A reading has one signal of a name. Beside a source that reports one of
+    these, such as
+    :class:`~pipecat.expressive.processors.tone_reader.PipecatToneSource` and
+    its ``sarcasm`` from the words, ask the source's classifier its questions
+    under names of your own.
 
     The reader needs the user's audio and the VAD's frames, so the pipeline
     needs a VAD.
 
     Example::
 
-        reader = PerceptionReader(sources=[PipecatToneSource(), PipecatVoiceSource()])
+        reader = PerceptionReader(sources=[PipecatVoiceSource()])
+
+    Beside Pipecat Tone, with the voice's sarcasm as ``sarcasm_voice``::
+
+        voice = PipecatVoiceSource()
+        questions = dict(voice.questions)
+        questions["sarcasm_voice"] = questions.pop("sarcasm")
+
+        reader = PerceptionReader(
+            sources=[
+                PipecatToneSource(),
+                PerceptionSource(classifier=voice.classifier, questions=questions),
+            ]
+        )
     """
 
     def __init__(
@@ -106,9 +120,7 @@ class PipecatVoiceSource(PerceptionSource):
             "speech_rate": PerceptionQuestion(
                 question=asked["speech_rate"], description=_SPEECH_RATE
             ),
-            "sarcasm_voice": PerceptionQuestion(
-                question=asked["sarcasm"], description=_SARCASM_VOICE
-            ),
+            "sarcasm": PerceptionQuestion(question=asked["sarcasm"], description=_SARCASM),
         }
         if sad:
             questions["sad"] = PerceptionQuestion(question=asked["sad"], description=_SAD)
@@ -123,8 +135,8 @@ class PipecatVoiceReader(PerceptionReader):
     last 8 seconds, and the reading goes in the ``perception`` of its
     transcriptions: the user's ``tone`` of voice, its two likeliest labels
     with their confidences, the voice's ``arousal``, the chance of
-    ``laughter``, their ``speech_rate`` and ``sarcasm_voice``, the chance the
-    delivery sounds sarcastic. The read runs off the event loop, and the
+    ``laughter``, their ``speech_rate`` and ``sarcasm``, the chance the turn
+    sounds sarcastic. The read runs off the event loop, and the
     transcriptions wait for it, about a tenth of a second. Speech shorter than
     0.8 seconds isn't read. It's a :class:`PerceptionReader` whose one source
     is a :class:`PipecatVoiceSource`.
