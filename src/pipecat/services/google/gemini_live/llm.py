@@ -1150,14 +1150,13 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         model reads them without answering. Whether it answers is the
         aggregator's call: an append that asks to run comes back to this
         service as the context frame the assistant aggregator pushes upstream,
-        which completes the turn (see :meth:`_handle_context`). Without a
-        context aggregator, the append starts a conversation on its own, which
-        is how a pipeline with no aggregators kicks one off.
+        which completes the turn (see :meth:`_handle_context`).
+
+        If the session hasn't received its first context yet, the messages
+        aren't sent. The assistant aggregator adds them to the context, and the
+        session starts from that context, so the model gets them then.
         """
-        if self._context is None:
-            await self._create_single_response(frame.messages)
-            return
-        if self._disconnecting or not self._session:
+        if self._context is None or self._disconnecting or not self._session:
             return
         turns = cast(
             "list[Content | ContentDict]",
@@ -2104,40 +2103,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             self._needs_initial_turn_complete_message = True
 
         self._ready_for_realtime_input = True
-
-    async def _create_single_response(self, messages_list):
-        """Create a single response from a list of messages.
-
-        This is only here to support the very specific 'legacy' scenario of
-        kicking off a conversation using LLMMessagesAppendFrame when there's no
-        context aggregators in the pipeline (see process_frame for more details).
-        """
-        if self._disconnecting or not self._session:
-            return
-
-        # Create a throwaway context just for the purpose of getting messages
-        # in the right format
-        context = LLMContext(messages=messages_list)
-        adapter = self.get_llm_adapter()
-        messages = cast(
-            "list[Content | ContentDict]",
-            (await adapter.get_llm_invocation_params(context)).get("messages", []),
-        )
-
-        if not messages:
-            return
-
-        logger.debug(f"Creating response: {messages}")
-
-        await self.start_ttfb_metrics()
-
-        try:
-            await self._session.send_client_content(turns=messages, turn_complete=True)
-            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
-            if self._is_gemini_3:
-                await self._session.send_realtime_input(text=" ")
-        except Exception as e:
-            await self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
