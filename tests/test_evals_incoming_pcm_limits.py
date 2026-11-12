@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+import sys
 import time
 import types
 import wave
@@ -27,7 +28,13 @@ from pipecat.evals.events import EvalEventStream
 from pipecat.evals.fastapi_transport import EvalFastAPIWebsocketTransport
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.scenario import EvalExpectation, EvalScriptScenario, EvalScriptTurn
-from pipecat.evals.serializer import EvalClientSerializer, EvalSerializer, parse_eval_connect
+from pipecat.evals.serializer import (
+    EvalAudioLimitError,
+    EvalClientSerializer,
+    EvalSerializer,
+    _bounded_json,
+    parse_eval_connect,
+)
 from pipecat.evals.session import EvalSession, EvalSessionParams
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (
@@ -334,6 +341,33 @@ async def test_deeply_nested_audio_message_is_a_static_unscored_failure(path):
         reason = failures[0]
     assert reason == "The eval target sent an invalid message"
     assert "PRIVATE-CANARY" not in reason
+
+
+def _nested(depth: int) -> str:
+    """An RTVI message whose arrays and objects nest ``depth`` deep."""
+    return (
+        '{"label":"rtvi-ai","type":"server-message","data":'
+        + "[" * (depth - 1)
+        + "1"
+        + "]" * (depth - 1)
+        + "}"
+    )
+
+
+@pytest.mark.parametrize("depth,accepted", [(128, True), (129, False), (2000, False)])
+def test_message_nesting_is_bounded_whatever_the_interpreter_parses(depth, accepted):
+    # A recursion limit this high lets the parser itself go deeper on every Python,
+    # as 3.14's stack-based limit does, so only the explicit bound refuses.
+    previous = sys.getrecursionlimit()
+    sys.setrecursionlimit(10000)
+    try:
+        if accepted:
+            assert _bounded_json(_nested(depth))["type"] == "server-message"
+        else:
+            with pytest.raises(EvalAudioLimitError, match="sent an invalid message"):
+                _bounded_json(_nested(depth))
+    finally:
+        sys.setrecursionlimit(previous)
 
 
 @pytest.mark.asyncio
