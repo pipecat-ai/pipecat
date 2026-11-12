@@ -5481,6 +5481,17 @@
       "location": "pipecat/transports/whatsapp/client.py"
     },
     {
+      "subject": "EagerEndOfTurnSTTServiceMixin.recommended_user_turn_strategies",
+      "module": "pipecat.turns.eager_end_of_turn_mixin",
+      "kind": "method",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EagerEndOfTurnSTTServiceMixin.eager_user_turn_strategies",
+      "message": "`EagerEndOfTurnSTTServiceMixin.recommended_user_turn_strategies` is deprecated since 1.17.0 and will be removed in 2.0.0. Use `EagerEndOfTurnSTTServiceMixin.eager_user_turn_strategies` instead.",
+      "location": "pipecat/turns/eager_end_of_turn_mixin.py"
+    },
+    {
       "subject": "ProcessFrameResult",
       "module": "pipecat.turns.types",
       "kind": "class",
