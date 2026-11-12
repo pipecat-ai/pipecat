@@ -1439,15 +1439,20 @@ class LLMUserAggregator(LLMContextAggregator):
 
         Queues the frame so it flows through `process_frame` and is handled
         internally (e.g. by the `UserTurnController`). The upstream frame is
-        pushed directly.
+        pushed directly. The two frames are marked as broadcast siblings, as
+        `broadcast_frame` marks them, so observers report the moment once.
 
         Args:
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
 
         """
-        await self.queue_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        downstream_frame = frame_cls(**kwargs)
+        upstream_frame = frame_cls(**kwargs)
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+        await self.queue_frame(downstream_frame)
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
