@@ -1,0 +1,1 @@
+- Added a `speculative` option to `LLMService.register_function()` and `register_client_function()`. A speculative tool may run during an inference started from an eager end of turn, before the user's turn is confirmed, instead of withdrawing the speculation; it is cancelled if the eager end of turn is withdrawn. Use it for tools that are safe to run on a guess, such as lookups.

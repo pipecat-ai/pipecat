@@ -1,0 +1,1 @@
+- `CartesiaHttpTTSService` now sends the keys of its settings' `extra` dict as request fields, as other services do, for request fields it has no setting for.

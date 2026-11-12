@@ -306,6 +306,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._register_event_handler("on_end_of_turn")
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
+        self._register_event_handler("on_configure_success")
+        self._register_event_handler("on_configure_failure")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -504,6 +506,19 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
                 self._last_stt_time = time.monotonic()
             # check every 100ms
             await asyncio.sleep(0.1)
+
+    async def force_end_turn(self):
+        """End the user's turn now, without waiting for Flux to detect it.
+
+        Sends Flux a ``ForceEndTurn`` message. Flux ends the turn in progress
+        as usual, with an ``EndOfTurn`` whose ``trigger`` is ``manual``; with
+        no turn in progress it ignores the request.
+        """
+        if not self._transport_is_active():
+            logger.warning(f"{self}: not connected, can't force the end of the turn")
+            return
+        logger.debug(f"{self}: forcing the end of the turn")
+        await self._transport_send_json({"type": "ForceEndTurn"})
 
     async def _send_close_stream(self) -> None:
         """Sends a CloseStream control message to Deepgram Flux.
@@ -752,12 +767,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             case FluxMessageType.CONFIGURE_SUCCESS:
                 logger.info(f"{self}: Configure accepted: {data}")
                 await self._on_configure_acked()
+                await self._call_event_handler("on_configure_success", data)
             case FluxMessageType.CONFIGURE_FAILURE:
                 error_code = data.get("error_code", "unknown")
                 description = data.get("description", "no description")
                 error_msg = f"Configure rejected: [{error_code}] {description}"
                 logger.warning(f"{self}: {error_msg}")
                 await self._on_configure_acked()
+                await self._call_event_handler("on_configure_failure", data)
                 await self.push_error(error_msg=error_msg)
 
     async def _handle_connection_established(self, data: dict[str, Any]):

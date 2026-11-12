@@ -1,0 +1,1 @@
+- Fixed `DeepgramSTTService` never firing its `on_connected` event. It now fires whenever a connection to Deepgram opens, including after a reconnect for a settings change.
