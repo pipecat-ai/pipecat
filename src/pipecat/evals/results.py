@@ -36,6 +36,8 @@ FAILURE_KINDS = (
     "connect_failed",  # never connected to the bot's eval transport
     "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready
+    "audio_unsupported",  # the bot advertised an audio direction the run uses as off
+    "audio_unverified",  # the run required advertised audio support and the bot advertised none
     "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
@@ -44,6 +46,14 @@ FAILURE_KINDS = (
 # a run that stops at the first failure leaves its later turns undriven, and
 # counting those as passes would inflate any rate computed from the result.
 TURN_STATUSES = ("passed", "failed", "not_run")
+
+# What an audio run's check of the target's advertised audio support established,
+# for a result's ``audio_support``.
+AUDIO_SUPPORT_OUTCOMES = (
+    "verified",  # the target advertised every audio direction the run uses
+    "unverified",  # the target advertised nothing readable
+    "unsupported",  # the target advertised a direction the run uses as off
+)
 
 
 @dataclass
@@ -156,6 +166,9 @@ class EvalScriptResult:
         skipped: When set, the scenario was not run (e.g. a ``tts_response``
             assertion without audio mode); the string is the reason. Such a result
             is neither passed nor failed.
+        audio_support: What the check of the target's advertised audio support
+            established (see ``EvalSessionParams.audio_support_check``), one of
+            ``AUDIO_SUPPORT_OUTCOMES``; ``None`` when nothing was checked.
     """
 
     scenario_name: str
@@ -166,6 +179,7 @@ class EvalScriptResult:
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
+    audio_support: str | None = None
 
 
 @deprecated(
@@ -289,6 +303,8 @@ class EvalSimulationResult:
             empty when the judge gave none.
         success: The goal the conversation was judged on, the simulation's
             ``success`` as it was worded.
+        audio_support: What the target's audio advertisement established, as
+            for :attr:`EvalScriptResult.audio_support`.
     """
 
     simulation_name: str
@@ -307,6 +323,7 @@ class EvalSimulationResult:
     confidence: float | None = None
     probabilities: dict[str, float] = field(default_factory=dict)
     success: str = ""
+    audio_support: str | None = None
 
     @property
     def passed(self) -> bool:

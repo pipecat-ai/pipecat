@@ -26,7 +26,7 @@ import time
 import traceback
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
@@ -84,9 +84,17 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
-        require_audio_support: Refuse audio runs unless the target advertises
-            the requested transport directions before ``bot-ready``. False
-            preserves compatibility with targets that predate this metadata.
+        audio_support_check: How an audio run treats the audio directions the
+            target's eval transport advertises before ``bot-ready``:
+
+            - ``off``: run without checking.
+            - ``when_advertised``: refuse a target that advertises a direction
+              the run uses as off; a target that advertises nothing readable,
+              such as one built on an older Pipecat, runs unverified.
+            - ``required``: refuse unless the target advertises every
+              direction the run uses.
+
+            The result's ``audio_support`` records what the check established.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -109,7 +117,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
-    require_audio_support: bool = False
+    audio_support_check: Literal["off", "when_advertised", "required"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
 
@@ -475,6 +483,8 @@ class EvalSession(BaseObject, Generic[R]):
             self._trace.log("handshake: failed (bot-ready not received)")
             return [self._failure("<bot-ready>", str(e), "handshake_timeout")]
         self._trace.log("handshake: ok (bot-ready)")
+        if self._client.audio_support is not None:
+            self._trace.log(f"handshake: audio support {self._client.audio_support}")
         return await self._driver.run()
 
     def _result(
@@ -487,6 +497,7 @@ class EvalSession(BaseObject, Generic[R]):
             events_seen=self._stream.events_seen,
             debug_log=self._trace.lines,
             skipped=skipped,
+            audio_support=self._client.audio_support,
         )
 
     @abstractmethod

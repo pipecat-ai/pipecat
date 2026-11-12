@@ -121,6 +121,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
+        audio_support: str | None = None,
     ) -> EvalScriptResult:
         """The scenario's result: passed only if nothing failed and nothing was skipped."""
         return EvalScriptResult(
@@ -132,6 +133,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             events_seen=events_seen,
             debug_log=debug_log,
             skipped=skipped,
+            audio_support=audio_support,
         )
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:

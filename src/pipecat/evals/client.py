@@ -476,7 +476,7 @@ class EvalClientParams(BaseModel):
 
 
 class EvalBotUnavailableError(Exception):
-    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
+    """The bot refused the connection, closed it before ``bot-ready``, or can't carry the run's audio."""
 
     def __init__(self, kind: str, reason: str):
         """Initialize the error.
@@ -484,7 +484,9 @@ class EvalBotUnavailableError(Exception):
         Args:
             kind: The failure kind the run records: ``connect_failed`` when the
                 bot refused the connection, ``closed_before_ready`` when it
-                closed the connection before ``bot-ready``.
+                closed the connection before ``bot-ready``, ``audio_unsupported``
+                or ``audio_unverified`` when its advertised audio support failed
+                the run's check.
             reason: What happened, with the close code and reason when there
                 was one.
         """
@@ -576,7 +578,27 @@ class EvalClient:
         self._handshake_over = asyncio.Event()
         self._refusal: EvalBotUnavailableError | None = None
         self._audio_capabilities: EvalAudioCapabilities | None = None
+        self._audio_support: str | None = None
         self._next_id = 0
+
+    @property
+    def audio_support(self) -> str | None:
+        """What the handshake established about the target's audio support.
+
+        ``verified`` when the target advertised every audio direction the run
+        uses, ``unsupported`` when it advertised one of them as off, and
+        ``unverified`` when it advertised nothing readable. ``None`` when the
+        run uses no audio, its check is ``off``, or the handshake has not
+        reached the check.
+        """
+        return self._audio_support
+
+    @property
+    def _checks_audio_support(self) -> bool:
+        """Whether this run checks the target's advertised audio support."""
+        return self._session_params.audio_support_check != "off" and (
+            self.sends_user_audio or self._params.bot_audio
+        )
 
     @property
     def has_user_tts(self) -> bool:
@@ -654,8 +676,9 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
-            EvalBotUnavailableError: If the bot refuses the connection or closes
-                it before sending ``bot-ready``.
+            EvalBotUnavailableError: If the bot refuses the connection, closes
+                it before sending ``bot-ready``, or fails the run's audio
+                support check.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
@@ -668,17 +691,8 @@ class EvalClient:
         if self._refusal is not None:
             raise self._refusal
 
-        if self._session_params.require_audio_support:
-            capabilities = self._audio_capabilities
-            needs_input = self.sends_user_audio
-            needs_output = self._params.bot_audio
-            if (needs_input and (capabilities is None or not capabilities.audio_input)) or (
-                needs_output and (capabilities is None or not capabilities.audio_output)
-            ):
-                raise EvalBotUnavailableError(
-                    "error",
-                    "The target has not advertised the audio transport support this run requires",
-                )
+        if self._checks_audio_support:
+            self._admit_audio()
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -703,6 +717,38 @@ class EvalClient:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
         if self._sink is not None:
             await self._sink.allow_answers()
+
+    def _admit_audio(self) -> None:
+        """Record what the target advertised, and refuse a run its transport can't carry.
+
+        Raises:
+            EvalBotUnavailableError: If the target advertised a direction the run
+                uses as off, or advertised nothing readable and the check is
+                ``required``.
+        """
+        capabilities = self._audio_capabilities
+        if capabilities is None:
+            self._audio_support = "unverified"
+            if self._session_params.audio_support_check == "required":
+                raise EvalBotUnavailableError(
+                    "audio_unverified",
+                    "The target did not advertise readable audio support for its eval "
+                    "transport, which this run requires",
+                )
+            return
+
+        missing = []
+        if self.sends_user_audio and not capabilities.audio_input:
+            missing.append("accept caller audio (audio_in_enabled)")
+        if self._params.bot_audio and not capabilities.audio_output:
+            missing.append("send bot audio (audio_out_enabled)")
+        if missing:
+            self._audio_support = "unsupported"
+            raise EvalBotUnavailableError(
+                "audio_unsupported",
+                f"The target's eval transport is not configured to {' or '.join(missing)}",
+            )
+        self._audio_support = "verified"
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -973,10 +1019,7 @@ class EvalClient:
             self._stream,
             persona=persona,
             persona_hears=bot_stt is None,
-            answer_enabled=not (
-                self._session_params.require_audio_support
-                and (self.sends_user_audio or self._params.bot_audio)
-            ),
+            answer_enabled=not self._checks_audio_support,
         )
 
         inbound: list = [transport.input()]
