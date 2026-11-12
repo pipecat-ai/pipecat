@@ -34,6 +34,7 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
@@ -263,9 +264,9 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = self.recommended_user_turn_strategies(
+        frame.user_turn_strategies = self.eager_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
-        )
+        ) or ExternalUserTurnStrategies(enable_interruptions=self._should_interrupt)
         return frame
 
     # ------------------------------------------------------------------
