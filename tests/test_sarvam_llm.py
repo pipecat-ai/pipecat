@@ -134,7 +134,7 @@ def test_sarvam_llm_create_client_injects_required_headers():
     assert headers["User-Agent"] == sdk_headers()["User-Agent"]
 
 
-@pytest.mark.parametrize("reasoning_effort", ["low", "medium", "high"])
+@pytest.mark.parametrize("reasoning_effort", ["none", "low", "medium", "high", "max"])
 def test_sarvam_llm_reasoning_effort_passed_to_request(reasoning_effort):
     with patch.object(SarvamLLMService, "create_client"):
         settings = SarvamLLMService.Settings(
@@ -210,6 +210,8 @@ def test_sarvam_llm_omits_optional_sarvam_fields_when_unset():
 
     assert "wiki_grounding" not in built_params
     assert "reasoning_effort" not in built_params
+    # Only the low-latency reasoning default goes out, in extra_body.
+    assert built_params["extra_body"] == {"reasoning_effort": "none"}
 
 
 def test_sarvam_llm_wiki_grounding_passed_via_extra_body():
@@ -1009,3 +1011,93 @@ async def test_sarvam_llm_stream_closed_on_cancellation():
             await service._process_context(context)
 
     assert stream_closed
+
+
+def _thinking_params(service: SarvamLLMService) -> dict:
+    return service.build_chat_completion_params(
+        OpenAILLMInvocationParams(
+            messages=[{"role": "user", "content": "Hello"}],
+            tools=OPENAI_NOT_GIVEN,
+            tool_choice=OPENAI_NOT_GIVEN,
+        )
+    )
+
+
+def _thinking_service(base_url: str | None = None, **settings) -> SarvamLLMService:
+    with patch.object(SarvamLLMService, "create_client"):
+        return SarvamLLMService(
+            api_key="test-key", base_url=base_url, settings=SarvamLLMService.Settings(**settings)
+        )
+
+
+@pytest.mark.parametrize(
+    "model,effort",
+    [
+        ("sarvam-105b", "none"),
+        ("gemma4", "none"),
+        ("deepseekv4.1-flash", "none"),
+        ("glm5.3", "low"),
+    ],
+)
+def test_sarvam_llm_sends_the_lowest_reasoning_setting_by_default(model, effort):
+    """A voice agent needs a fast first reply, so reasoning is off unless configured."""
+    service = _thinking_service(model=model)
+    with patch("pipecat.services.llm_service.logger") as mock_logger:
+        params = _thinking_params(service)
+        _thinking_params(service)
+    assert params["extra_body"]["reasoning_effort"] == effort
+    assert "reasoning_effort" not in params
+    mock_logger.info.assert_called_once()
+    message = mock_logger.info.call_args.args[0]
+    assert f"sending extra_body={{'reasoning_effort': '{effort}'}} to {model}" in message
+    assert "set `reasoning_effort` in SarvamLLMService.Settings" in message
+    mock_logger.warning.assert_not_called()
+
+
+def test_sarvam_llm_configured_reasoning_effort_wins_over_the_default():
+    service = _thinking_service(model="sarvam-105b", reasoning_effort="high")
+    with patch("pipecat.services.llm_service.logger") as mock_logger:
+        params = _thinking_params(service)
+    assert params["reasoning_effort"] == "high"
+    assert "reasoning_effort" not in params.get("extra_body", {})
+    mock_logger.info.assert_not_called()
+    mock_logger.warning.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"reasoning_effort": "low"}, {"extra_body": {"reasoning_effort": "low"}}],
+)
+def test_sarvam_llm_reasoning_effort_in_extra_wins_over_the_default(extra):
+    service = _thinking_service(model="sarvam-105b", extra=extra)
+    params = _thinking_params(service)
+    sent = params.get("reasoning_effort") or params["extra_body"]["reasoning_effort"]
+    assert sent == "low"
+
+
+def test_sarvam_llm_use_provider_thinking_default_sends_no_default():
+    service = _thinking_service(model="sarvam-105b", use_provider_thinking_default=True)
+    with patch("pipecat.services.llm_service.logger") as mock_logger:
+        params = _thinking_params(service)
+    assert "reasoning_effort" not in params.get("extra_body", {})
+    mock_logger.debug.assert_called_once()
+    assert "runs at Sarvam's default" in mock_logger.debug.call_args.args[0]
+
+
+def test_sarvam_llm_v1_api_gets_no_default():
+    """Sarvam's /v1 API rejects "none", so the /v2 defaults aren't sent there."""
+    service = _thinking_service(base_url="https://api.sarvam.ai/v1", model="sarvam-105b")
+    with patch("pipecat.services.llm_service.logger") as mock_logger:
+        params = _thinking_params(service)
+    assert "reasoning_effort" not in params.get("extra_body", {})
+    mock_logger.warning.assert_called_once()
+    assert "no thinking default for sarvam-105b" in mock_logger.warning.call_args.args[0]
+
+
+def test_sarvam_llm_model_without_reasoning_gets_no_default_and_no_log():
+    service = _thinking_service(model="sarvam-105b-conversations")
+    with patch("pipecat.services.llm_service.logger") as mock_logger:
+        params = _thinking_params(service)
+    assert "reasoning_effort" not in params.get("extra_body", {})
+    mock_logger.info.assert_not_called()
+    mock_logger.warning.assert_not_called()
