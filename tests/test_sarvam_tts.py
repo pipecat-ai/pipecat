@@ -254,3 +254,40 @@ async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
     payload = await _synthesize(service)
 
     assert payload["speaker"] == "priya"
+
+
+def _error_msg(message: str, request_id: str | None) -> str:
+    data = {"message": message}
+    if request_id:
+        data["request_id"] = request_id
+    return json.dumps({"type": "error", "data": data})
+
+
+async def _receive(service: SarvamTTSService, messages: list[str]):
+    """Run `_receive_messages` over one connection carrying `messages`."""
+
+    async def connection():
+        for message in messages:
+            yield message
+
+    service.append_to_audio_context = AsyncMock()
+    service.push_error = AsyncMock()
+    service.get_active_audio_context_id = lambda: "ctx"
+    service._get_websocket = connection
+
+    await service._receive_messages()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_id, expected",
+    [("req-a", "TTS Error: bad text (request ID: req-a)"), (None, "TTS Error: bad text")],
+)
+async def test_an_error_carries_its_request_id(request_id, expected):
+    service = _service()
+
+    await _receive(service, [_error_msg("bad text", request_id)])
+
+    service.push_error.assert_awaited_once_with(error_msg=expected)
+    error_frame = service.append_to_audio_context.await_args.args[1]
+    assert error_frame.error == expected
