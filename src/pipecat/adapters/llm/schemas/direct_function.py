@@ -81,6 +81,22 @@ class BaseDirectFunctionWrapper:
         """
         raise NotImplementedError("Subclasses must define the special first parameter name.")
 
+    @staticmethod
+    def function_name(function: Callable) -> str:
+        """Return the name to report for *function*, which may not carry one of its own.
+
+        A callable object has no ``__name__``, and a ``functools.partial`` only has the
+        one carried by its ``func``: ``partial(tool)`` is the direct function ``tool``
+        with arguments bound, so it reports that name.
+        """
+        name = getattr(function, "__name__", None)
+        if name:
+            return name
+        inner = getattr(function, "func", None)
+        if inner is not None:
+            return BaseDirectFunctionWrapper.function_name(inner)
+        return type(function).__name__
+
     @classmethod
     def validate_function(cls, function: Callable) -> None:
         """Validate that the function meets direct function requirements.
@@ -93,17 +109,19 @@ class BaseDirectFunctionWrapper:
                 parameters, incorrect first parameter name).
         """
         if not inspect.iscoroutinefunction(function):
-            raise Exception(f"Direct function {function.__name__} must be async")
+            raise Exception(f"Direct function {cls.function_name(function)} must be async")
         params = list(inspect.signature(function).parameters.items())
         special_first_param_name = cls.special_first_param_name()
         if len(params) == 0:
             raise Exception(
-                f"Direct function {function.__name__} must have at least one parameter ({special_first_param_name})"
+                f"Direct function {cls.function_name(function)} must have at least one parameter "
+                f"({special_first_param_name})"
             )
         first_param_name = params[0][0]
         if first_param_name != special_first_param_name:
             raise Exception(
-                f"Direct function {function.__name__} first parameter must be named '{special_first_param_name}'"
+                f"Direct function {cls.function_name(function)} first parameter must be named "
+                f"'{special_first_param_name}'"
             )
 
     def to_function_schema(self) -> FunctionSchema:
@@ -122,7 +140,7 @@ class BaseDirectFunctionWrapper:
     def _initialize_metadata(self):
         """Initialize metadata from function signature and docstring."""
         # Get function name
-        self.name = self.function.__name__
+        self.name = self.function_name(self.function)
 
         # Parse docstring for description and parameters
         docstring = docstring_parser.parse(inspect.getdoc(self.function) or "")
