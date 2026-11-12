@@ -26,7 +26,7 @@ Actions are used to perform side effects during conversations, such as:
 import asyncio
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -57,13 +57,14 @@ class FunctionActionFrame(ControlFrame):
 
     action: dict
     function: FlowActionHandler
+    interruptible: bool = field(default=False, init=False)
 
 
 @dataclass
 class ActionFinishedFrame(ControlFrame):
     """Frame indicating that an action has completed execution."""
 
-    pass
+    interruptible: bool = field(default=False, init=False)
 
 
 class ActionManager:
@@ -114,8 +115,10 @@ class ActionManager:
         async def on_frame_reached_downstream(worker, frame):
             if isinstance(frame, FunctionActionFrame):
                 # Run function action
-                await frame.function(frame.action, flow_manager)
-                self._decrement_ongoing_actions_count()
+                try:
+                    await frame.function(frame.action, flow_manager)
+                finally:
+                    self._decrement_ongoing_actions_count()
             elif isinstance(frame, BotStoppedSpeakingFrame):
                 # Execute deferred post-actions if the bot's turn is over.
                 # A BotStoppedSpeakingFrame only indicates that the bot's turn is over if there are
