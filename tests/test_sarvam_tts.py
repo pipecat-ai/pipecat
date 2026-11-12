@@ -254,3 +254,42 @@ async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
     payload = await _synthesize(service)
 
     assert payload["speaker"] == "priya"
+
+
+def _construct(service_cls, **kwargs):
+    if service_cls is SarvamHttpTTSService:
+        kwargs["aiohttp_session"] = _FakeSession()
+    return service_cls(api_key="test-key", **kwargs)
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("voice", "anushka"),
+        ("language", "hi-IN"),
+        ("pace", 1.5),
+    ],
+)
+def test_settings_fields_cannot_be_constructor_kwargs(service_cls, field, value):
+    """``BaseObject`` drops unknown kwargs, so these would be ignored silently."""
+    with pytest.raises(TypeError, match=rf"{field} must be passed via settings="):
+        _construct(service_cls, **{field: value})
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+def test_base_class_kwargs_are_still_accepted(service_cls):
+    service = _construct(service_cls, name="my-tts", append_trailing_space=True)
+
+    assert service.name == "my-tts"
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+def test_deprecated_voice_id_and_model_still_apply(service_cls):
+    with pytest.warns(DeprecationWarning) as record:
+        service = _construct(service_cls, voice_id="priya", model=V4_FLASH)
+
+    messages = " ".join(str(warning.message) for warning in record)
+    assert "voice_id" in messages and "model" in messages
+    assert service._settings.voice == "priya"
+    assert service._settings.model == V4_FLASH
