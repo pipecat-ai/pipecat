@@ -155,6 +155,8 @@ class TTSModelConfig:
         default_sample_rate: Default audio sample rate in Hz.
         default_speaker: Default speaker voice ID.
         pace_range: Valid range for pace parameter (min, max).
+        pitch_range: Valid range for pitch parameter (min, max), where supported.
+        loudness_range: Valid range for loudness parameter (min, max), where supported.
         preprocessing_always_enabled: Whether preprocessing is always enabled.
         speakers: Tuple of available speaker names for this model.
     """
@@ -165,6 +167,8 @@ class TTSModelConfig:
     default_sample_rate: int
     default_speaker: str
     pace_range: tuple[float, float]
+    pitch_range: tuple[float, float]
+    loudness_range: tuple[float, float]
     preprocessing_always_enabled: bool
     speakers: tuple[str, ...]
 
@@ -177,6 +181,8 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         default_sample_rate=22050,
         default_speaker="anushka",
         pace_range=(0.3, 3.0),
+        pitch_range=(-0.75, 0.75),
+        loudness_range=(0.3, 3.0),
         preprocessing_always_enabled=False,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV2),
     ),
@@ -187,6 +193,8 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         default_sample_rate=24000,
         default_speaker="shubh",
         pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
         preprocessing_always_enabled=True,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
@@ -197,6 +205,8 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         default_sample_rate=24000,
         default_speaker="shubh",
         pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
         preprocessing_always_enabled=True,
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
@@ -207,12 +217,19 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         default_sample_rate=24000,
         default_speaker="shubh_en_narration_gentle",
         pace_range=(0.5, 2.0),
+        pitch_range=(-0.5, 0.5),
+        loudness_range=(0.1, 2.5),
         preprocessing_always_enabled=True,
         # Empty rather than a catalogue: this model's speakers come from Sarvam's
         # docs, and its API rejects an unknown one with the list it accepts.
         speakers=(),
     ),
 }
+
+# Bounds Sarvam's WebSocket API enforces on the buffering settings; it rejects the
+# config, and sends no audio, for a value outside them.
+_MIN_BUFFER_SIZE_RANGE = (30, 200)
+_MAX_CHUNK_LENGTH_RANGE = (50, 500)
 
 
 def get_speakers_for_model(model: str) -> list[str]:
@@ -269,6 +286,24 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def _clamp_to_range(name: str, value: Any, value_range: tuple[Any, Any]) -> Any:
+    """Clamp a setting to the range Sarvam accepts, warning if it had to change."""
+    low, high = value_range
+    if value is None or not is_given(value) or low <= value <= high:
+        return value
+    logger.warning(f"{name} {value} is outside the range Sarvam accepts ({low}-{high}). Clamping.")
+    return max(low, min(high, value))
+
+
+def _clamp_to_model_ranges(settings: "SarvamHttpTTSSettings", config: TTSModelConfig):
+    """Clamp pace, and the pitch and loudness the model takes, to the model's ranges."""
+    settings.pace = _clamp_to_range("pace", settings.pace, config.pace_range)
+    if config.supports_pitch:
+        settings.pitch = _clamp_to_range("pitch", settings.pitch, config.pitch_range)
+    if config.supports_loudness:
+        settings.loudness = _clamp_to_range("loudness", settings.loudness, config.loudness_range)
+
+
 @dataclass
 class SarvamHttpTTSSettings(TTSSettings):
     """Settings for SarvamHttpTTSService.
@@ -277,9 +312,9 @@ class SarvamHttpTTSSettings(TTSSettings):
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3 and bulbul:v4-flash (cannot be disabled).
         pace: Speech pace multiplier, 0.5 to 2.0. Defaults to 1.0.
-        pitch: Voice pitch adjustment. Defaults to 0.0.
+        pitch: Voice pitch adjustment, -0.5 to 0.5. Defaults to 0.0.
             **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
-        loudness: Volume multiplier. Defaults to 1.0.
+        loudness: Volume multiplier, 0.1 to 2.5. Defaults to 1.0.
             **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
         temperature: Controls output randomness (0.01 to 1.0). Lower values = more
             deterministic, higher = more random. Defaults to 0.6.
@@ -306,9 +341,9 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
     Extends :class:`SarvamHttpTTSService.Settings` with WebSocket-specific buffering parameters.
 
     Parameters:
-        min_buffer_size: Minimum characters to buffer before generating audio.
+        min_buffer_size: Minimum characters to buffer before generating audio, 30 to 200.
             Lower values reduce latency but may affect quality. Defaults to 50.
-        max_chunk_length: Maximum characters processed in a single chunk.
+        max_chunk_length: Maximum characters processed in a single chunk, 50 to 500.
             Controls memory usage and processing efficiency. Defaults to 150.
     """
 
@@ -528,12 +563,8 @@ class SarvamHttpTTSService(TTSService):
         if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
-        # Validate and clamp pace to model's valid range
-        pace = assert_given(default_settings.pace)
-        pace_min, pace_max = self._config.pace_range
-        if pace is not None and (pace < pace_min or pace > pace_max):
-            logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            default_settings.pace = max(pace_min, min(pace_max, pace))
+        # Clamp pace, pitch and loudness to the ranges Sarvam accepts for the model
+        _clamp_to_model_ranges(default_settings, self._config)
 
         # Force preprocessing for models that require it
         if self._config.preprocessing_always_enabled:
@@ -598,6 +629,8 @@ class SarvamHttpTTSService(TTSService):
                 self._config = config
                 if "voice" not in changed:
                     self._settings.voice = config.default_speaker
+
+        _clamp_to_model_ranges(self._settings, self._config)
 
         return changed
 
@@ -960,12 +993,8 @@ class SarvamTTSService(InterruptibleTTSService):
         if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
-        # Validate and clamp pace to model's valid range
-        pace = assert_given(default_settings.pace)
-        pace_min, pace_max = self._config.pace_range
-        if pace is not None and (pace < pace_min or pace > pace_max):
-            logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            default_settings.pace = max(pace_min, min(pace_max, pace))
+        # Clamp settings to the ranges Sarvam accepts, which rejects the whole config otherwise
+        self._clamp_to_ranges(default_settings)
 
         # Force preprocessing for models that require it
         if self._config.preprocessing_always_enabled:
@@ -1069,14 +1098,26 @@ class SarvamTTSService(InterruptibleTTSService):
                 self._websocket_url = (
                     f"{self._url}?model={self._settings.model}&send_completion_event=true"
                 )
+                self._clamp_to_ranges(self._settings)
                 await self._disconnect()
                 await self._connect()
                 return changed
 
         if changed:
+            self._clamp_to_ranges(self._settings)
             await self._send_config()
 
         return changed
+
+    def _clamp_to_ranges(self, settings: SarvamTTSSettings):
+        """Clamp settings to the ranges Sarvam's WebSocket API accepts."""
+        _clamp_to_model_ranges(settings, self._config)
+        settings.min_buffer_size = _clamp_to_range(
+            "min_buffer_size", settings.min_buffer_size, _MIN_BUFFER_SIZE_RANGE
+        )
+        settings.max_chunk_length = _clamp_to_range(
+            "max_chunk_length", settings.max_chunk_length, _MAX_CHUNK_LENGTH_RANGE
+        )
 
     async def _connect(self):
         """Connect to Sarvam WebSocket and start background tasks."""

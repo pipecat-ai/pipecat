@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from loguru import logger
 from websockets.protocol import State
 
 from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamTTSService
@@ -254,3 +255,85 @@ async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
     payload = await _synthesize(service)
 
     assert payload["speaker"] == "priya"
+
+
+@pytest.mark.asyncio
+async def test_buffering_settings_are_clamped_to_the_range_sarvam_accepts():
+    """Sarvam rejects the whole config, and sends no audio, for a value outside it."""
+    warnings = []
+    sink = logger.add(lambda m: warnings.append(m.record["message"]), level="WARNING")
+    try:
+        service = _service(model="bulbul:v3", min_buffer_size=20, max_chunk_length=1000)
+    finally:
+        logger.remove(sink)
+    service._websocket = _FakeWebsocket()
+
+    await service._send_config()
+    config = _sent_config(service)
+
+    assert config["min_buffer_size"] == 30
+    assert config["max_chunk_length"] == 500
+    assert any("min_buffer_size 20" in w for w in warnings)
+
+
+@pytest.mark.asyncio
+async def test_v4_flash_pitch_and_loudness_are_clamped_to_its_range():
+    service = _service(pitch=5.0, loudness=9.0)
+    service._websocket = _FakeWebsocket()
+
+    await service._send_config()
+    config = _sent_config(service)
+
+    assert config["pitch"] == 0.5
+    assert config["loudness"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_update_is_clamped_before_it_is_sent():
+    service = _service()
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(
+        SarvamTTSService.Settings(min_buffer_size=10, pace=5.0, pitch=-1.0, loudness=0.0)
+    )
+    config = _sent_config(service)
+
+    assert config["min_buffer_size"] == 30
+    assert config["pace"] == 2.0
+    assert config["pitch"] == -0.5
+    assert config["loudness"] == 0.1
+
+
+@pytest.mark.asyncio
+async def test_a_model_switch_clamps_to_the_new_models_ranges(monkeypatch):
+    service = _service(model="bulbul:v3", voice=None)
+    monkeypatch.setattr(service, "_disconnect", AsyncMock())
+    monkeypatch.setattr(service, "_connect", AsyncMock())
+
+    await service._update_settings(SarvamTTSService.Settings(model=V4_FLASH, pitch=0.9))
+
+    assert service._settings.pitch == 0.5
+
+
+@pytest.mark.asyncio
+async def test_http_payload_is_clamped_to_v4_flash_ranges():
+    session = _FakeSession()
+    service = _http_service(session, pitch=5.0, loudness=9.0, pace=0.1)
+
+    payload = await _synthesize(service)
+
+    assert payload["pitch"] == 0.5
+    assert payload["loudness"] == 2.5
+    assert payload["pace"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_an_http_runtime_update_is_clamped():
+    session = _FakeSession()
+    service = _http_service(session)
+
+    await service._update_settings(SarvamHttpTTSService.Settings(pitch=-3.0, pace=3.0))
+    payload = await _synthesize(service)
+
+    assert payload["pitch"] == -0.5
+    assert payload["pace"] == 2.0
