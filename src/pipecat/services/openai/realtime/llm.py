@@ -770,7 +770,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 continue
             role = message.get("role") if isinstance(message, dict) else None
             await self._send_message_item(
-                text, role="assistant" if role == "assistant" else "system"
+                text, role=role if role in ("user", "assistant") else "system"
             )
         self._results_awaiting_response = True
 

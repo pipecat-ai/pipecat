@@ -236,6 +236,12 @@ class TestOpenAIRealtimeIntermediateResults(
     def _build_service(self):
         return OpenAIRealtimeLLMService(api_key="test")
 
+    async def test_an_appended_user_message_goes_in_as_a_user_item(self):
+        await self.service._handle_messages_append(_append("Hello?", role="user"))
+
+        (item,) = self._items()
+        self.assertEqual(item.role, "user")
+
 
 class TestGrokRealtimeIntermediateResults(
     OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
