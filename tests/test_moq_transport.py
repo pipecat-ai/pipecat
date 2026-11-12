@@ -47,9 +47,12 @@ Areas covered:
 
 import argparse
 import asyncio
+import functools
 import itertools
 import time
 import unittest
+import warnings
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1605,6 +1608,68 @@ class TestOutputTransportInterruption(unittest.IsolatedAsyncioTestCase):
 # ----------------------------------------------------------------------
 
 
+class _LegacySyncCallable:
+    """Hashable synchronous callable object with the legacy ``(transport)`` arity."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, transport):
+        self.calls.append(transport)
+
+
+class _UnhashableLegacySyncCallable(_LegacySyncCallable):
+    __hash__ = None
+
+
+class _NewSyncCallable:
+    """Hashable synchronous callable object with the ``(transport, client)`` arity."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, transport, client):
+        self.calls.append((transport, client))
+
+
+class _UnhashableNewSyncCallable(_NewSyncCallable):
+    __hash__ = None
+
+
+class _EqualTaggedCallable:
+    """Distinct callable objects that all compare equal to each other."""
+
+    def __init__(self, calls, tag):
+        self.calls = calls
+        self.tag = tag
+
+    def __call__(self, transport):
+        self.calls.append(self.tag)
+
+    def __eq__(self, other):
+        return isinstance(other, _EqualTaggedCallable)
+
+
+class _HandlerMethods:
+    """Bound-method handlers of every arity."""
+
+    def __init__(self):
+        self.legacy_calls = []
+        self.new_calls = []
+
+    def legacy_sync(self, transport):
+        self.legacy_calls.append(transport)
+
+    async def legacy_async(self, transport):
+        self.legacy_calls.append(transport)
+
+    def new_sync(self, transport, client):
+        self.new_calls.append((transport, client))
+
+    async def new_async(self, transport, client):
+        self.new_calls.append((transport, client))
+
+
 class TestClientEventHandlerSignatures(unittest.IsolatedAsyncioTestCase):
     """``on_client_connected`` / ``on_client_disconnected`` handlers take
     ``(transport, client)``; a legacy ``(transport)``-only handler keeps
@@ -1775,6 +1840,275 @@ class TestClientEventHandlerSignatures(unittest.IsolatedAsyncioTestCase):
         for event_name, fire in self._client_events():
             with self.subTest(event=event_name):
                 await self._assert_two_argument_removal(event_name, fire)
+
+    def _add_legacy(self, transport, event_name, handler):
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning, match=event_name):
+            transport.add_event_handler(event_name, handler)
+
+    async def _settle_len(self, seen, n):
+        for _ in range(100):
+            if len(seen) >= n:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+
+    def _expected_client(self, transport):
+        return {"id": transport._params.peer_id}
+
+    def _legacy_handler_cases(self):
+        sync_partial_calls = []
+
+        def sync_target(tag, transport):
+            sync_partial_calls.append(transport)
+
+        async_partial_calls = []
+
+        async def async_target(tag, transport):
+            async_partial_calls.append(transport)
+
+        sync_methods = _HandlerMethods()
+        async_methods = _HandlerMethods()
+        hashable_obj = _LegacySyncCallable()
+        unhashable_obj = _UnhashableLegacySyncCallable()
+        return [
+            ("sync bound method", sync_methods.legacy_sync, sync_methods.legacy_calls),
+            ("async bound method", async_methods.legacy_async, async_methods.legacy_calls),
+            ("hashable callable object", hashable_obj, hashable_obj.calls),
+            ("unhashable callable object", unhashable_obj, unhashable_obj.calls),
+            ("sync partial", functools.partial(sync_target, "tag"), sync_partial_calls),
+            ("async partial", functools.partial(async_target, "tag"), async_partial_calls),
+        ]
+
+    async def test_legacy_arity_variants_fire_with_the_transport_alone(self):
+        for event_name, fire in self._client_events():
+            for label, handler, calls in self._legacy_handler_cases():
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    self._add_legacy(transport, event_name, handler)
+                    await fire(transport)
+                    await self._settle_len(calls, 1)
+                    self.assertEqual(calls, [transport])
+
+    def _new_handler_cases(self):
+        sync_fn_calls = []
+
+        def sync_fn(transport, client):
+            sync_fn_calls.append((transport, client))
+
+        async_fn_calls = []
+
+        async def async_fn(transport, client):
+            async_fn_calls.append((transport, client))
+
+        sync_partial_calls = []
+
+        def sync_target(tag, transport, client):
+            sync_partial_calls.append((transport, client))
+
+        async_partial_calls = []
+
+        async def async_target(tag, transport, client):
+            async_partial_calls.append((transport, client))
+
+        sync_methods = _HandlerMethods()
+        async_methods = _HandlerMethods()
+        hashable_obj = _NewSyncCallable()
+        unhashable_obj = _UnhashableNewSyncCallable()
+        return [
+            ("sync function", sync_fn, sync_fn_calls),
+            ("async function", async_fn, async_fn_calls),
+            ("sync bound method", sync_methods.new_sync, sync_methods.new_calls),
+            ("async bound method", async_methods.new_async, async_methods.new_calls),
+            ("hashable callable object", hashable_obj, hashable_obj.calls),
+            ("unhashable callable object", unhashable_obj, unhashable_obj.calls),
+            ("sync partial", functools.partial(sync_target, "tag"), sync_partial_calls),
+            ("async partial", functools.partial(async_target, "tag"), async_partial_calls),
+        ]
+
+    async def test_new_arity_variants_receive_the_client(self):
+        for event_name, fire in self._client_events():
+            for label, handler, calls in self._new_handler_cases():
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("error", DeprecationWarning)
+                        transport.add_event_handler(event_name, handler)
+                    await fire(transport)
+                    await self._settle_len(calls, 1)
+                    self.assertEqual(calls, [(transport, self._expected_client(transport))])
+
+    async def test_an_opaque_builtin_handler_gets_the_legacy_call_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name, handler="deque.append"):
+                transport = self._make_transport()
+                d = deque()
+                self._add_legacy(transport, event_name, d.append)
+                await fire(transport)
+                await self._settle_len(d, 1)
+                self.assertEqual(list(d), [transport])
+            with self.subTest(event=event_name, handler="set.add"):
+                transport = self._make_transport()
+                s = set()
+                self._add_legacy(transport, event_name, s.add)
+                await fire(transport)
+                await self._settle_len(s, 1)
+                self.assertEqual(s, {transport})
+
+    async def test_an_explicit_wrapper_delivers_the_client_to_an_opaque_callable(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                d = deque()
+
+                def wrapper(transport, client, _d=d):
+                    _d.append((transport, client))
+
+                transport.add_event_handler(event_name, wrapper)
+                await fire(transport)
+                await self._settle_len(d, 1)
+                self.assertEqual(list(d), [(transport, self._expected_client(transport))])
+
+    async def test_an_unhashable_handler_is_removed_by_the_original(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                handler = _UnhashableLegacySyncCallable()
+                self._add_legacy(transport, event_name, handler)
+                transport.remove_event_handler(event_name, handler)
+                self.assertEqual(transport._event_handlers[event_name].handlers, [])
+                await fire(transport)
+                await asyncio.sleep(0.05)
+                self.assertEqual(handler.calls, [])
+
+    async def test_unrelated_removals_with_an_unhashable_handler_are_no_ops(self):
+        transport = self._make_transport()
+        transport.remove_event_handler("on_connected", _UnhashableLegacySyncCallable())
+        transport.remove_event_handler("on_unknown_event", _UnhashableLegacySyncCallable())
+
+    async def test_removing_a_never_added_handler_is_a_no_op(self):
+        transport = self._make_transport()
+        for event_name, _ in self._client_events():
+            transport.remove_event_handler(event_name, _UnhashableLegacySyncCallable())
+            transport.remove_event_handler(event_name, lambda t: None)
+
+    async def test_unknown_event_addition_does_not_register(self):
+        transport = self._make_transport()
+        transport.add_event_handler("on_unknown_event", _UnhashableLegacySyncCallable())
+        self.assertNotIn("on_unknown_event", transport._event_handlers)
+
+    async def test_a_fresh_bound_method_removes_the_registration(self):
+        for event_name, fire in self._client_events():
+            for label in ("legacy", "new"):
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    methods = _HandlerMethods()
+                    if label == "legacy":
+                        self._add_legacy(transport, event_name, methods.legacy_sync)
+                        transport.remove_event_handler(event_name, methods.legacy_sync)
+                    else:
+                        transport.add_event_handler(event_name, methods.new_sync)
+                        transport.remove_event_handler(event_name, methods.new_sync)
+                    self.assertEqual(transport._event_handlers[event_name].handlers, [])
+                    await fire(transport)
+                    await asyncio.sleep(0.05)
+                    self.assertEqual(methods.legacy_calls, [])
+                    self.assertEqual(methods.new_calls, [])
+
+    async def test_equal_distinct_callables_remove_the_first_registration(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                calls = []
+                first = _EqualTaggedCallable(calls, "first")
+                second = _EqualTaggedCallable(calls, "second")
+                self._add_legacy(transport, event_name, first)
+                self._add_legacy(transport, event_name, second)
+                transport.remove_event_handler(event_name, second)
+                await fire(transport)
+                await self._settle_len(calls, 1)
+                self.assertEqual(calls, ["second"])
+
+    async def _assert_aba_removal_order(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler_a(transport):
+            calls.append("a")
+
+        def handler_b(transport):
+            calls.append("b")
+
+        self._add_legacy(transport, event_name, handler_a)
+        self._add_legacy(transport, event_name, handler_b)
+        self._add_legacy(transport, event_name, handler_a)
+        transport.remove_event_handler(event_name, handler_a)
+        await fire(transport)
+        await self._settle_len(calls, 2)
+        self.assertEqual(calls, ["b", "a"])
+
+    async def test_aba_removal_runs_the_remaining_handlers_in_base_order(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_aba_removal_order(event_name, fire)
+
+    async def _assert_dispatch_snapshot_spares_a_removed_handler(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler_b(transport):
+            calls.append("b")
+
+        def handler_a(transport):
+            calls.append("a")
+            transport.remove_event_handler(event_name, handler_b)
+
+        self._add_legacy(transport, event_name, handler_a)
+        self._add_legacy(transport, event_name, handler_b)
+        await fire(transport)
+        await self._settle_len(calls, 2)
+        self.assertEqual(calls, ["a", "b"])
+        await fire(transport)
+        await self._settle_len(calls, 3)
+        self.assertEqual(calls, ["a", "b", "a"])
+
+    async def test_removing_another_handler_during_dispatch_spares_the_current_round(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_dispatch_snapshot_spares_a_removed_handler(event_name, fire)
+
+    async def test_removing_one_events_registration_leaves_the_other(self):
+        transport = self._make_transport()
+        calls = []
+
+        def handler(transport):
+            calls.append("x")
+
+        self._add_legacy(transport, "on_client_connected", handler)
+        self._add_legacy(transport, "on_client_disconnected", handler)
+        transport.remove_event_handler("on_client_connected", handler)
+        await transport._on_client_connected()
+        await transport._on_client_disconnected()
+        await self._settle_len(calls, 1)
+        self.assertEqual(calls, ["x"])
+
+    async def _assert_type_error_invokes_once(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler(transport):
+            calls.append("x")
+            raise TypeError("boom")
+
+        self._add_legacy(transport, event_name, handler)
+        await fire(transport)
+        await self._settle_len(calls, 1)
+        self.assertEqual(calls, ["x"])
+
+    async def test_a_handlers_own_type_error_invokes_it_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_type_error_invokes_once(event_name, fire)
 
 
 # ----------------------------------------------------------------------

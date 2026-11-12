@@ -2191,16 +2191,38 @@ class MOQOutputTransport(BaseOutputTransport):
             return False
 
 
+def _wrap_legacy_client_handler(handler):
+    """Wrap a ``(transport)``-only client-event handler to accept the client arg."""
+    if inspect.iscoroutinefunction(handler):
+
+        async def adapted_async(transport, client):
+            await handler(transport)
+
+        return adapted_async
+
+    def adapted(transport, client):
+        handler(transport)
+
+    return adapted
+
+
 def _adapt_legacy_client_handler(event_name: str, handler):
     """Wrap a ``(transport)``-only client-event handler to accept the client arg.
 
-    A handler already taking ``(transport, client)`` — or whose signature
-    can't be inspected — is returned unchanged.
+    A handler already taking ``(transport, client)`` is returned unchanged.
+    A handler whose signature can't be inspected keeps the legacy
+    one-argument call; wrap such a callable in an explicit
+    ``(transport, client)`` function to receive the client.
     """
     try:
         sig = inspect.signature(handler)
     except (TypeError, ValueError):
-        return handler
+        warn_deprecated(
+            f"`{event_name}(transport)` is deprecated since 1.8.0 and will be removed in "
+            f"2.0.0. Use `{event_name}(transport, client)` instead.",
+            stacklevel=4,
+        )
+        return _wrap_legacy_client_handler(handler)
     params = list(sig.parameters.values())
     if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
         return handler
@@ -2216,17 +2238,7 @@ def _adapt_legacy_client_handler(event_name: str, handler):
         f"2.0.0. Use `{event_name}(transport, client)` instead.",
         stacklevel=4,
     )
-    if inspect.iscoroutinefunction(handler):
-
-        async def adapted_async(transport, client):
-            await handler(transport)
-
-        return adapted_async
-
-    def adapted(transport, client):
-        handler(transport)
-
-    return adapted
+    return _wrap_legacy_client_handler(handler)
 
 
 class MOQTransport(BaseTransport):
@@ -2317,9 +2329,10 @@ class MOQTransport(BaseTransport):
         self._input: MOQInputTransport | None = None
         self._output: MOQOutputTransport | None = None
 
-        # Wrappers adapting legacy client handlers, keyed by
-        # (event_name, original handler); one wrapper per registration.
-        self._legacy_handler_wrappers: dict[tuple, list] = {}
+        # Client-event registrations in order, one (event_name, original,
+        # adapted) entry per add_event_handler() call, so removal by the
+        # original callback matches BaseObject's first-equal semantics.
+        self._client_handler_registrations: list[tuple] = []
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -2363,7 +2376,11 @@ class MOQTransport(BaseTransport):
         ``on_client_connected`` and ``on_client_disconnected`` handlers
         take ``(transport, client)``, matching the other transports; a
         legacy handler written as ``(transport)`` alone is adapted, with
-        a deprecation warning.
+        a deprecation warning. A handler whose signature can't be
+        inspected (e.g. a builtin like ``deque.append``) is called with
+        the legacy ``(transport)`` argument alone; wrap such a callable
+        in an explicit ``(transport, client)`` function to receive the
+        client.
 
         Args:
             event_name: The name of the event to handle.
@@ -2371,28 +2388,26 @@ class MOQTransport(BaseTransport):
         """
         if event_name in ("on_client_connected", "on_client_disconnected"):
             adapted = _adapt_legacy_client_handler(event_name, handler)
-            if adapted is not handler:
-                self._legacy_handler_wrappers.setdefault((event_name, handler), []).append(adapted)
-                handler = adapted
+            self._client_handler_registrations.append((event_name, handler, adapted))
+            handler = adapted
         super().add_event_handler(event_name, handler)
 
     def remove_event_handler(self, event_name: str, handler):
         """Remove a previously added event handler.
 
-        A legacy ``(transport)``-only client handler is removed by the
-        callback originally passed to :meth:`add_event_handler`, as any
-        other handler.
+        A client-event handler is removed by the callback originally
+        passed to :meth:`add_event_handler`; the first matching
+        registration is removed, as :class:`BaseObject` does.
 
         Args:
             event_name: The name of the event the handler was added for.
             handler: The handler to remove.
         """
-        key = (event_name, handler)
-        wrappers = self._legacy_handler_wrappers.get(key)
-        if wrappers:
-            handler = wrappers.pop()
-            if not wrappers:
-                del self._legacy_handler_wrappers[key]
+        for i, (event, original, adapted) in enumerate(self._client_handler_registrations):
+            if event == event_name and (original is handler or original == handler):
+                del self._client_handler_registrations[i]
+                super().remove_event_handler(event_name, adapted)
+                return
         super().remove_event_handler(event_name, handler)
 
     # ------------------------------------------------------------------
