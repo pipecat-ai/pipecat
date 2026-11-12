@@ -155,10 +155,12 @@ class TTSModelConfig:
         default_sample_rate: Default audio sample rate in Hz.
         default_speaker: Default speaker voice ID.
         pace_range: Valid range for pace parameter (min, max).
-        pitch_range: Valid range for pitch parameter (min, max), where supported.
-        loudness_range: Valid range for loudness parameter (min, max), where supported.
         preprocessing_always_enabled: Whether preprocessing is always enabled.
         speakers: Tuple of available speaker names for this model.
+        pitch_range: Valid range for pitch parameter (min, max), where supported.
+            None leaves pitch unchecked.
+        loudness_range: Valid range for loudness parameter (min, max), where
+            supported. None leaves loudness unchecked.
     """
 
     supports_pitch: bool
@@ -167,10 +169,10 @@ class TTSModelConfig:
     default_sample_rate: int
     default_speaker: str
     pace_range: tuple[float, float]
-    pitch_range: tuple[float, float]
-    loudness_range: tuple[float, float]
     preprocessing_always_enabled: bool
     speakers: tuple[str, ...]
+    pitch_range: tuple[float, float] | None = None
+    loudness_range: tuple[float, float] | None = None
 
 
 TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
@@ -298,9 +300,9 @@ def _clamp_to_range(name: str, value: Any, value_range: tuple[Any, Any]) -> Any:
 def _clamp_to_model_ranges(settings: "SarvamHttpTTSSettings", config: TTSModelConfig):
     """Clamp pace, and the pitch and loudness the model takes, to the model's ranges."""
     settings.pace = _clamp_to_range("pace", settings.pace, config.pace_range)
-    if config.supports_pitch:
+    if config.supports_pitch and config.pitch_range is not None:
         settings.pitch = _clamp_to_range("pitch", settings.pitch, config.pitch_range)
-    if config.supports_loudness:
+    if config.supports_loudness and config.loudness_range is not None:
         settings.loudness = _clamp_to_range("loudness", settings.loudness, config.loudness_range)
 
 
