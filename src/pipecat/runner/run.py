@@ -82,7 +82,8 @@ To run locally:
 
 - All transports (default): ``python bot.py``
 - Daily only: ``python bot.py -t daily``
-- Daily (direct, testing only): ``python bot.py -d``
+- Daily (no server, single session, testing only): ``python bot.py -d`` (``-d``
+  defaults transport to daily)
 - ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - WebRTC with custom STUN/TURN: ``python bot.py -t webrtc --ice-servers
   stun:stun.l.google.com:19302 '{"urls": "turn:turn.example.com:3478", "username":
@@ -95,7 +96,7 @@ To run locally:
   https://cdn.moq.dev/anon``
 - SIP (server: ``/start`` with transport ``sip`` and the Daily SIP-trunk webhook at
   ``/daily-sip-trunk-webhook``): ``python bot.py -t sip``
-- SIP (direct, one bot registers at once, no server): ``python bot.py -t sip -d``
+- SIP (no server, one bot registers at once): ``python bot.py -t sip -d``
 - Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
 - WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
