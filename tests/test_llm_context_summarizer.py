@@ -381,6 +381,50 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_manual_summarization_applies_config_override(self):
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=100000,
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=4),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        for i in range(6):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+
+        custom_config = LLMContextSummaryConfig(
+            min_messages_after_summary=1,
+            summary_message_template="<summary>{summary}</summary>",
+        )
+        await summarizer.process_frame(LLMSummarizeContextFrame(config=custom_config))
+
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Manual summary.",
+                last_summarized_index=5,
+            )
+        )
+
+        self.assertEqual(
+            self.context.messages,
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "<summary>Manual summary.</summary>"},
+                {"role": "user", "content": "Message 5"},
+            ],
+        )
+
+        await summarizer.cleanup()
+
     async def test_manual_summarization_blocked_when_in_progress(self):
         """Test that a second LLMSummarizeContextFrame is ignored while one is in progress."""
         config = LLMAutoContextSummarizationConfig(max_context_tokens=100000)
