@@ -17,6 +17,7 @@ harness asks for them.
 
 import asyncio
 import base64
+import binascii
 import io
 import json
 from dataclasses import dataclass, field
@@ -93,6 +94,34 @@ EVAL_BOT_IMAGE_TYPE = "eval-bot-image"
 # it. 16 kHz is what Silero and the local STT models (Whisper/Moonshine) expect;
 # the harness configures its input transport at this rate to match.
 EVAL_STT_SAMPLE_RATE = 16000
+
+
+# Matches the WebSocket client's message-size ceiling, including direct serializer use.
+_MAX_BOT_AUDIO_MESSAGE_BYTES = 1 << 20
+
+
+class EvalAudioLimitError(ValueError):
+    """A fixed, content-free reason that invalidates bounded eval audio."""
+
+
+def _check_audio_message_size(data: str | bytes) -> None:
+    if len(data) > _MAX_BOT_AUDIO_MESSAGE_BYTES:
+        raise EvalAudioLimitError("The eval target audio message exceeded its byte limit")
+    if isinstance(data, str) and not data.isascii():
+        # The character ceiling bounds this temporary to at most four times
+        # the wire allowance; ASCII and bytes require no encoded copy.
+        try:
+            size = len(data.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise EvalAudioLimitError("The eval target sent an invalid message") from None
+        if size > _MAX_BOT_AUDIO_MESSAGE_BYTES:
+            raise EvalAudioLimitError("The eval target audio message exceeded its byte limit")
+
+
+def _checked_audio_limit(value: int | None) -> int | None:
+    if value is not None and (type(value) is not int or value <= 0 or value % 2):
+        raise ValueError("Audio byte limits require positive even integers")
+    return value
 
 
 class EvalConnectionFlags(BaseModel):
@@ -413,16 +442,20 @@ class EvalClientSerializer(RTVIClientSerializer):
     transcriptions.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, max_bot_audio_bytes: int | None = None, **kwargs):
         """Initialize the serializer.
 
         Args:
+            max_bot_audio_bytes: Optional cumulative normalized mono PCM quota.
+                Requires a positive even integer. ``None`` preserves unrestricted audio.
             **kwargs: Additional arguments passed to ``RTVIClientSerializer``.
         """
         super().__init__(**kwargs)
         # Lazily created on the first bot-audio chunk; resamples the bot's audio to
         # EVAL_STT_SAMPLE_RATE for the pipeline's VAD/STT.
         self._resampler = None
+        self._max_bot_audio_bytes = _checked_audio_limit(max_bot_audio_bytes)
+        self._bot_audio_bytes = 0
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserialize an RTVI server message, handling the eval-specific types.
@@ -433,15 +466,24 @@ class EvalClientSerializer(RTVIClientSerializer):
         Returns:
             The corresponding frame, or ``None`` to drop the message.
         """
+        if self._max_bot_audio_bytes is not None:
+            _check_audio_message_size(data)
         try:
             message = json.loads(data)
-        except (json.JSONDecodeError, TypeError):
+        except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
+            if self._max_bot_audio_bytes is not None:
+                raise EvalAudioLimitError("The eval target sent an invalid message") from None
             return await super().deserialize(data)
 
         if isinstance(message, dict) and message.get("label") == RTVI.MESSAGE_LABEL:
             msg_type = message.get("type")
             if msg_type == EVAL_BOT_AUDIO_TYPE:
                 payload = message.get("data") or {}
+                if self._max_bot_audio_bytes is not None:
+                    audio = await self._bounded_audio(payload)
+                    return InputAudioRawFrame(
+                        audio=audio, sample_rate=EVAL_STT_SAMPLE_RATE, num_channels=1
+                    )
                 audio = base64.b64decode(payload.get("audio", ""))
                 sample_rate = int(payload.get("sampleRate", 0))
                 if sample_rate and sample_rate != EVAL_STT_SAMPLE_RATE and audio:
@@ -467,6 +509,47 @@ class EvalClientSerializer(RTVIClientSerializer):
                 return InputTransportMessageFrame(message=message)
 
         return await super().deserialize(data)
+
+    async def _bounded_audio(self, payload: Any) -> bytes:
+        """Validate and bound both input and normalized output before allocation."""
+        assert self._max_bot_audio_bytes is not None
+        if not isinstance(payload, dict):
+            raise EvalAudioLimitError("The eval target sent invalid PCM audio")
+        encoded = payload.get("audio")
+        rate = payload.get("sampleRate")
+        if (
+            not isinstance(encoded, str)
+            or not encoded
+            or not encoded.isascii()
+            or len(encoded) % 4
+            or type(rate) is not int
+            or not 0 < rate <= 2**31 - 1
+            or any(
+                type(payload.get(key, 1)) is not int or payload.get(key, 1) != 1
+                for key in ("channels", "numChannels")
+            )
+        ):
+            raise EvalAudioLimitError("The eval target sent invalid PCM audio")
+        padding = 2 if encoded.endswith("==") else int(encoded.endswith("="))
+        size = len(encoded) // 4 * 3 - padding
+        if size <= 0 or size % 2:
+            raise EvalAudioLimitError("The eval target sent invalid PCM audio")
+        # Streaming resampling carries less than one output sample into the
+        # next call. Ceil(input_samples * ratio) bounds this call's output.
+        predicted = ((size // 2 * EVAL_STT_SAMPLE_RATE + rate - 1) // rate) * 2
+        remaining = self._max_bot_audio_bytes - self._bot_audio_bytes
+        if predicted > remaining:
+            raise EvalAudioLimitError("The eval target exceeded its PCM admission limit")
+        try:
+            audio = base64.b64decode(encoded, validate=True)
+            if rate != EVAL_STT_SAMPLE_RATE:
+                audio = await self._resample(audio, rate)
+        except (binascii.Error, ValueError, OverflowError, TypeError):
+            raise EvalAudioLimitError("The eval target sent invalid PCM audio") from None
+        if len(audio) > remaining or len(audio) % 2:
+            raise EvalAudioLimitError("The eval target exceeded its PCM admission limit")
+        self._bot_audio_bytes += len(audio)
+        return audio
 
     async def _resample(self, audio: bytes, in_rate: int) -> bytes:
         """Resample the bot's audio to the STT rate, with a stream resampler so chunk boundaries do not garble it."""

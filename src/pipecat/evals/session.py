@@ -88,6 +88,10 @@ class EvalSessionParams(BaseModel):
             assembled by ``say_with_pauses``, including synthesized text and
             silence. Requires a positive, even integer. ``None`` leaves the
             buffer unrestricted.
+        max_bot_audio_bytes: Optional independent cumulative limits on normalized
+            target PCM admitted and paced PCM emitted into the harness, including
+            gap-fill silence. Requires a positive even integer. ``None`` leaves
+            audio unrestricted. Consumption and interruption do not refund quota.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -111,6 +115,7 @@ class EvalSessionParams(BaseModel):
     cache_dir: str | None = None
     use_cache: bool = True
     max_user_audio_buffer_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
+    max_bot_audio_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     stop_bot: bool = False
     trigger_disconnect: bool = False
 
