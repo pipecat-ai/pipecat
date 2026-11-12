@@ -751,7 +751,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             ProposedUserStartedSpeakingFrame(),
-            TranscriptionFrame(text="Ja.", user_id="", timestamp="now", finalized=True),
+            TranscriptionFrame(text="Ja.", user_id="", timestamp="now", finalized=False),
             ProposedUserStoppedSpeakingFrame(),
             SleepFrame(sleep=0.3),
         ]
@@ -759,6 +759,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             ProposedUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InterruptionFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
             UserStoppedSpeakingFrame,
         ]
@@ -786,14 +787,15 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             SlowFrame(),
-            TranscriptionFrame(text="Ja.", user_id="", timestamp="now", finalized=True),
-            TranscriptionFrame(text="Tack.", user_id="", timestamp="now", finalized=True),
+            TranscriptionFrame(text="Ja.", user_id="", timestamp="now", finalized=False),
+            TranscriptionFrame(text="Tack.", user_id="", timestamp="now", finalized=False),
             SleepFrame(sleep=0.8),
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
             InterruptionFrame,
             UserStoppedSpeakingFrame,
+            LLMContextUserTurnFrame,
             LLMContextFrame,
         ]
         await run_test(
