@@ -120,6 +120,7 @@ class FluxMessageType(StrEnum):
     TURN_INFO = "TurnInfo"
     CONFIGURE_SUCCESS = "ConfigureSuccess"
     CONFIGURE_FAILURE = "ConfigureFailure"
+    WARNING = "Warning"
 
 
 class FluxEventType(StrEnum):
@@ -145,6 +146,7 @@ class DeepgramFluxSTTSettings(STTSettings):
             Lower values = more aggressive (faster response, more LLM calls).
             Higher values = more conservative (slower response, fewer LLM calls).
         eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
+            At 1.0 Flux ends a turn only on ``eot_timeout_ms`` or ``ForceEndTurn``.
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
@@ -519,6 +521,22 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             await self.push_error(error_msg=f"Error sending CloseStream: {e}", exception=e)
 
     # ------------------------------------------------------------------
+    # Turn control
+    # ------------------------------------------------------------------
+
+    async def force_end_turn(self) -> None:
+        """Ask Flux to finalize the audio sent so far, e.g. on a push-to-talk release.
+
+        Does nothing while no turn is in progress.
+        """
+        if not self._transport_is_active() or not self._user_is_speaking:
+            return
+
+        self.request_finalize()
+        logger.trace(f"{self}: sending ForceEndTurn")
+        await self._transport_send_json({"type": "ForceEndTurn"})
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
@@ -760,6 +778,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
                 logger.warning(f"{self}: {error_msg}")
                 await self._on_configure_acked()
                 await self.push_error(error_msg=error_msg)
+            case FluxMessageType.WARNING:
+                await self._handle_warning(data)
 
     async def _handle_connection_established(self, data: dict[str, Any]):
         """Handle successful connection establishment to Deepgram Flux.
@@ -771,6 +791,22 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         logger.info(f"{self}: Connected to Flux - ready to stream audio ({request_id=})")
         # Notify connection is established
         self._connection_established_event.set()
+
+    async def _handle_warning(self, data: dict[str, Any]):
+        """Log non-fatal Warning messages from Deepgram Flux.
+
+        ``FORCE_END_TURN_NO_ACTIVE_TURN`` means Flux had already ended the turn,
+        so it is logged at trace.
+
+        Args:
+            data: The Warning message data.
+        """
+        code = data.get("code", "unknown")
+        description = data.get("description", "no description")
+        if code == "FORCE_END_TURN_NO_ACTIVE_TURN":
+            logger.trace(f"{self}: ForceEndTurn arrived with no active turn")
+        else:
+            logger.warning(f"{self}: Flux warning: [{code}] {description}")
 
     async def _handle_fatal_error(self, data: dict[str, Any]):
         """Handle fatal error messages from Deepgram Flux.
@@ -912,11 +948,16 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             transcript: The final transcript text for the completed turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.debug("User stopped speaking")
+        trigger = data.get("trigger")
+        logger.debug(f"User stopped speaking ({trigger=})")
         self._user_is_speaking = False
         self._turn_transcript = ""
         # The turn is committed, so any eager prediction it followed is resolved.
         self._clear_eager_end_of_turn()
+
+        # Only a "manual" trigger answers our ForceEndTurn.
+        if trigger == "manual":
+            self.confirm_finalize()
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
