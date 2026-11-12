@@ -762,8 +762,10 @@ class SarvamTTSService(InterruptibleTTSService):
                 Lower values reduce latency but may affect quality. Defaults to 50.
             max_chunk_length: Maximum characters processed in a single chunk.
                 Controls memory usage and processing efficiency. Defaults to 150.
-            output_audio_codec: Audio codec format. Options: linear16, mulaw, alaw,
-                opus, flac, aac, wav, mp3. Defaults to "linear16".
+            output_audio_codec: Audio codec format. Only "linear16" (the default) is
+                supported, because Pipecat audio frames carry raw PCM. Any other
+                value logs a warning and "linear16" is used instead. Transport
+                serializers handle telephony encodings such as mulaw.
             output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
                 Defaults to "128k".
             language: Target language for synthesis. Supports Indian languages.
@@ -815,7 +817,7 @@ class SarvamTTSService(InterruptibleTTSService):
         )
         output_audio_codec: str | None = Field(
             default="linear16",
-            description="Audio codec: linear16, mulaw, alaw, opus, flac, aac, wav, mp3.",
+            description="Audio codec. Only linear16 is supported; other values fall back to it.",
         )
         output_audio_bitrate: str | None = Field(
             default="128k",
@@ -932,6 +934,15 @@ class SarvamTTSService(InterruptibleTTSService):
                     default_settings.loudness = params.loudness
                 if params.temperature is not None:
                     default_settings.temperature = params.temperature
+
+        # Audio frames carry raw PCM, so any other codec would be played as noise.
+        if output_audio_codec != "linear16":
+            logger.warning(
+                f"output_audio_codec '{output_audio_codec}' is not supported, using 'linear16'. "
+                "Pipecat audio frames carry raw PCM; transport serializers handle telephony "
+                "encodings such as mulaw."
+            )
+            output_audio_codec = "linear16"
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

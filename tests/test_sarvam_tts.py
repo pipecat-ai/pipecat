@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from loguru import logger
 from websockets.protocol import State
 
 from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamTTSService
@@ -254,3 +255,41 @@ async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
     payload = await _synthesize(service)
 
     assert payload["speaker"] == "priya"
+
+
+def _service_with_codec(codec: str) -> tuple[SarvamTTSService, list[str]]:
+    warnings = []
+    sink_id = logger.add(lambda m: warnings.append(m.record["message"]), level="WARNING")
+    try:
+        with pytest.warns(DeprecationWarning):
+            service = SarvamTTSService(
+                api_key="test-key",
+                params=SarvamTTSService.InputParams(output_audio_codec=codec),
+            )
+    finally:
+        logger.remove(sink_id)
+    return service, warnings
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("codec", ["mulaw", "alaw", "mp3", "opus", "aac", "flac", "wav"])
+async def test_a_non_pcm_codec_falls_back_to_linear16(codec):
+    """Audio frames are labelled raw PCM, so encoded bytes would play as noise."""
+    service, warnings = _service_with_codec(codec)
+    service._websocket = _FakeWebsocket()
+
+    await service._send_config()
+
+    assert _sent_config(service)["output_audio_codec"] == "linear16"
+    assert any(codec in w and "linear16" in w for w in warnings)
+
+
+@pytest.mark.asyncio
+async def test_linear16_is_sent_without_a_warning():
+    service, warnings = _service_with_codec("linear16")
+    service._websocket = _FakeWebsocket()
+
+    await service._send_config()
+
+    assert _sent_config(service)["output_audio_codec"] == "linear16"
+    assert not any("output_audio_codec" in w for w in warnings)
