@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -12,7 +11,9 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
+from pipecat.expressive.expression import ExpressionDelivery, ExpressionSound
+from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -23,7 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.hume.tts import HumeTTSService
+from pipecat.services.mistral.tts import MistralTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -33,6 +34,8 @@ from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
@@ -62,16 +65,48 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-    tts = HumeTTSService(
-        api_key=os.getenv("HUME_API_KEY"),
-        settings=HumeTTSService.Settings(voice="f898a92e-685f-43fa-985b-a46920f0650b"),
+    # Voxtral 3 performs emotion and pace tags, and sounds written in the text.
+    tts = MistralTTSService(
+        api_key=os.environ["MISTRAL_API_KEY"],
+        settings=MistralTTSService.Settings(model="voxtral-mini-tts-3-0", voice="voice_478"),
+    )
+
+    # With expressive conversation on, the LLM is taught the expression tags the TTS
+    # performs. Voxtral 3's emotions are a fixed list, so the policy offers the ones
+    # this conversation calls for.
+    system_instruction = "You are a warm, expressive assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep your responses brief."
+
+    expression_policy = ExpressionPolicy(
+        guidance=[
+            ExpressionGuidance.MATCH_STYLE,
+            ExpressionGuidance.SLOW_FOR_DETAILS,
+            ExpressionGuidance.BREATHE,
+        ],
+        delivery=[
+            ExpressionDelivery.SLOW,
+            ExpressionDelivery.HAPPY,
+            ExpressionDelivery.EXCITED,
+            ExpressionDelivery.CURIOUS,
+            ExpressionDelivery.WARM,
+            ExpressionDelivery.SYMPATHETIC,
+            ExpressionDelivery.CALM,
+            ExpressionDelivery.SAD,
+            ExpressionDelivery.AMUSED,
+            ExpressionDelivery.PLAYFUL,
+            ExpressionDelivery.SARCASTIC,
+        ],
+        sounds=[
+            ExpressionSound.LAUGH,
+            ExpressionSound.CHUCKLE,
+            ExpressionSound.SIGH,
+            ExpressionSound.LIGHT_BREATH,
+            ExpressionSound.CLEAR_THROAT,
+        ],
     )
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
-        ),
+        settings=OpenAILLMService.Settings(system_instruction=system_instruction),
     )
 
     context = LLMContext()
@@ -82,13 +117,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport.input(),  # Transport user input
             stt,
-            user_aggregator,
-            llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -97,6 +132,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
+            # The LLM writes expression tags into its responses, and the TTS
+            # performs them.
+            enable_expressive_conversation=True,
+            expression_policy=expression_policy,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
@@ -109,18 +148,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
+        # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
-
-        await asyncio.sleep(10)
-        logger.info('Updating Hume TTS settings: speed=2.0, description="Speak with excitement"')
-        await worker.queue_frame(
-            TTSUpdateSettingsFrame(
-                delta=HumeTTSService.Settings(speed=2.0, description="Speak with excitement")
-            )
-        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

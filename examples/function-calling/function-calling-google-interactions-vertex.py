@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 import os
 
 from dotenv import load_dotenv
@@ -11,8 +12,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.frames.frames import LLMRunFrame, TTSTextFrame
-from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -23,9 +23,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.hume.tts import HUME_SAMPLE_RATE, HumeTTSService
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.google.interactions.vertex.llm import GoogleInteractionsVertexLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -33,6 +33,25 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+
+async def get_current_weather(params: FunctionCallParams, location: str, format: str):
+    """Get the current weather.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+        format: The temperature unit to use. Must be either "celsius" or "fahrenheit". Infer this from the user's location.
+    """
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """Get a restaurant recommendation.
+
+    Args:
+        location: The city and state, e.g. "San Francisco, CA".
+    """
+    await params.result_callback({"name": "The Golden Dragon"})
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -66,22 +85,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-    tts = HumeTTSService(
-        api_key=os.getenv("HUME_API_KEY"),
-        # Replace with your Hume voice ID
-        settings=HumeTTSService.Settings(
-            voice="f898a92e-685f-43fa-985b-a46920f0650b",
+    tts = ElevenLabsTTSService(
+        api_key=os.environ["ELEVENLABS_API_KEY"],
+        settings=ElevenLabsTTSService.Settings(
+            voice=os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2"),
         ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    llm = GoogleInteractionsVertexLLMService(
+        credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        settings=GoogleInteractionsVertexLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
+    # You can also register a function_name of None to get all functions
+    # sent to the same callback with an additional function_name parameter.
 
-    context = LLMContext()
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+
+    context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -89,13 +114,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
+            transport.input(),
             stt,
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS (HumeTTSService with word timestamps)
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -104,16 +129,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
-            audio_out_sample_rate=HUME_SAMPLE_RATE,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[
-            DebugLogObserver(
-                frame_types={
-                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
-                }
-            ),
-        ],
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
 
@@ -124,12 +141,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        logger.info(
-            "💡 Word timestamps are enabled! Watch the console for TTSTextFrame logs showing each word with its PTS."
-        )
         # Kick off the conversation.
         context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
+            {
+                "role": "developer",
+                "content": "Please introduce yourself to the user.",
+            }
         )
         await worker.queue_frames([LLMRunFrame()])
 

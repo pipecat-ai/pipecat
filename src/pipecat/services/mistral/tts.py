@@ -17,6 +17,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.mistral_adapter import MistralExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -99,6 +101,18 @@ class MistralTTSService(TTSService):
         )
 
         self._client = Mistral(api_key=api_key)
+        self._voxtral_3_expression_adapter = MistralExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: emotion tags on Voxtral 3 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("voxtral-mini-tts-3"):
+            return self._voxtral_3_expression_adapter
+        return super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -147,12 +161,9 @@ class MistralTTSService(TTSService):
                     if isinstance(event.data, SpeechStreamAudioDelta):
                         audio_bytes = base64.b64decode(event.data.audio_data)
                         audio_int16 = self._float32_to_int16(audio_bytes)
-                        audio_data = await self._resampler.resample(
-                            audio_int16, self.MISTRAL_SAMPLE_RATE, self.sample_rate
-                        )
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(
-                            audio_data, self.sample_rate, 1, context_id=context_id
+                            audio_int16, self.MISTRAL_SAMPLE_RATE, 1, context_id=context_id
                         )
                     elif isinstance(event.data, SpeechStreamDone):
                         logger.debug(f"{self}: Usage info: {event.data.usage}")

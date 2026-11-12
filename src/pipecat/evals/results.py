@@ -27,6 +27,7 @@ FAILURE_KINDS = (
     "no_content",  # the matched event carried no text to judge
     "text_mismatch",  # `text_contains` not present in the event's text
     "text_present",  # `text_excludes` found in the event's text
+    "text_unmatched",  # a `text_matches` pattern did not match the event's text
     "missing_function_call",  # an expected function call never arrived
     "function_args_mismatch",  # the call arrived with unexpected arguments
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
@@ -240,8 +241,9 @@ class EvalSimulationMetricScore:
         failure_kind: How the metric failed, for grouping across runs: ``judge_no``
             when the judge rejected a turn, ``judge_no_verdict`` when it only
             left turns unanswered, ``out_of_range`` for a measure outside its
-            bounds, ``function_calls`` for a call list that did not match;
-            ``None`` when it passed.
+            bounds, ``function_calls`` for a call list that did not match,
+            ``error`` when a required measurement was unavailable; ``None``
+            when it passed.
         criterion: The criterion each bot turn was judged on, as the
             simulation worded it; ``None`` for a measured metric.
     """

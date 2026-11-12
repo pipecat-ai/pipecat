@@ -7,14 +7,16 @@
 """Ask a classifier about an image, such as a frame from the user's camera.
 
 By default the questions go to Jev; with ``--clef`` they go to Cloudflare's
-Clef, with ``--openai`` to OpenAI's Decisions API, and with ``--llm`` to an
-OpenAI vision model through ``LLMClassifier``.
+Clef, with ``--openai`` to OpenAI's Decisions API, with ``--google`` to
+Google's Decisions API, and with ``--llm`` to an OpenAI vision model through
+``LLMClassifier``.
 
 Usage::
 
     TYPESAFE_API_KEY=... python features-classifiers-images.py
     CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py --clef
     OPENAI_API_KEY=... python features-classifiers-images.py --openai
+    GOOGLE_API_KEY=... python features-classifiers-images.py --google
     OPENAI_API_KEY=... python features-classifiers-images.py --llm gpt-4.1-mini
 """
 
@@ -34,6 +36,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
 )
 from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
+from pipecat.classifiers.google.decisions.classifier import GoogleDecisionsClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
@@ -57,7 +60,7 @@ async def main(classifier: BaseClassifier):
         results = await classifier.yes_no(
             "A frame from the user's camera.",
             {"person": YesNoQuestion(instructions="Is there a person in the frame?")},
-            images=[image],
+            inputs=[image],
         )
         print(f"person: {results['person'].probability:.2f}")
 
@@ -74,7 +77,7 @@ async def main(classifier: BaseClassifier):
                     },
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         subject = results["subject"]
         print(f"subject: {subject.choice} ({subject.confidence:.2f})")
@@ -87,7 +90,7 @@ async def main(classifier: BaseClassifier):
                     levels=["far away", "a few steps away", "close-up"],
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         print(f"distance: {results['distance'].score:.2f} on a scale of 3")
     finally:
@@ -110,6 +113,13 @@ if __name__ == "__main__":
         const="gpt-6-luna",
         help="use OpenAI's Decisions API instead of Jev",
     )
+    parser.add_argument(
+        "--google",
+        metavar="MODEL",
+        nargs="?",
+        const="gemini-decision-1",
+        help="use Google's Decisions API instead of Jev",
+    )
     parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Jev")
     args = parser.parse_args()
 
@@ -123,6 +133,11 @@ if __name__ == "__main__":
     elif args.openai:
         classifier = OpenAIDecisionsClassifier(
             api_key=os.environ["OPENAI_API_KEY"], model=args.openai
+        )
+        asyncio.run(main(classifier))
+    elif args.google:
+        classifier = GoogleDecisionsClassifier(
+            api_key=os.environ["GOOGLE_API_KEY"], model=args.google
         )
         asyncio.run(main(classifier))
     elif args.llm:

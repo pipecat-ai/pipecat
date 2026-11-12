@@ -154,6 +154,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
         )
 
         # Apply settings delta

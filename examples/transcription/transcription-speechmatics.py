@@ -62,7 +62,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     each individual speaker and wrap them with XML tags.
 
     If you do not wish to use diarization, then set the `enable_diarization` parameter
-    to `False` or omit it altogether. The `speaker_active_format` is only used when
+    to `False` or omit it altogether. The `speaker_format` is only used when
     diarization is enabled.
 
     The transcription model defaults to `linden-1`; set the `model` parameter to choose a
@@ -77,7 +77,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["SPEECHMATICS_API_KEY"],
         settings=SpeechmaticsSTTService.Settings(
             language=Language.EN,
-            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+            enable_diarization=True,
+            speaker_format="<{speaker}>{text}</{speaker}>",
         ),
     )
 

@@ -46,6 +46,7 @@ from pipecat.evals.serializer import (
     EVAL_STT_SAMPLE_RATE,
     EvalClientSerializer,
     EvalConnectionFlags,
+    EvalFunctionCallCancelFrame,
 )
 from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
@@ -55,7 +56,6 @@ from pipecat.frames.frames import (
     DataFrame,
     EndFrame,
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
@@ -109,7 +109,7 @@ _BOT_FRAMES = (
     BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallCancelFrame,
+    EvalFunctionCallCancelFrame,
     InputTransportMessageFrame,
 )
 
@@ -615,6 +615,7 @@ class EvalClient:
             # HTTP 403 for a spent token, nothing listening) surfaces here.
             if isinstance(frame.exception, (InvalidHandshake, OSError)):
                 self._refuse("connect_failed", str(frame.exception))
+            self._stream.harness_failed(str(frame.error))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
         # Before the pipeline runs, so the persona is configured before it can

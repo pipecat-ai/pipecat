@@ -1489,11 +1489,15 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.script[:] = [first] + [_FakeSession(closed=True) for _ in range(1000)]
         client = self._make_client(connection_timeout=0.05)
         self._peer_never_returns(client)
+        # The window runs on a clock that moves 10 ms a dial, so it closes
+        # after a fixed number of dials however slowly the test runs.
+        clock = SimpleNamespace(monotonic=lambda: len(self.dials) * 0.01)
 
-        run = asyncio.create_task(client._run())
-        await self._wait_for_dials(1)
-        first.drop()
-        await asyncio.wait_for(run, timeout=2)
+        with patch.object(moq_transport, "time", clock):
+            run = asyncio.create_task(client._run())
+            await self._wait_for_dials(1)
+            first.drop()
+            await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
         self.assertGreater(len(self.dials), 2)
@@ -2049,7 +2053,12 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     async def test_any_other_subscribe_error_still_propagates(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
-        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=moq.Error.Protocol("boom"))
+        boom = moq.Error.Protocol(
+            moq.ProtocolError(
+                scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="boom"
+            )
+        )
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=boom)
         with self.assertRaises(moq.Error.Protocol):
             await client._forward_peer_audio(peer_broadcast)
 

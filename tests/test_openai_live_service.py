@@ -1414,3 +1414,21 @@ def test_chunk_text_keeps_cjk_within_the_token_budget():
     chunks = live_llm._chunk_text(text, 100)
     assert all(live_llm._estimated_tokens(c) <= 100 for c in chunks)
     assert "".join(chunks).count("天気") == 200
+
+
+def test_chunk_text_breaks_cjk_at_full_width_sentence_endings():
+    # Chinese and Japanese put no space after 。！？, so chunks used to be cut
+    # mid-sentence wherever the token budget ran out.
+    sentences = ["天気はどうですか。", "今日は晴れです！", "明日は雨ですか？", "这是一个测试句子。"]
+    text = "".join(sentences * 50)
+    chunks = live_llm._chunk_text(text, 100)
+    assert len(chunks) > 1
+    assert all(live_llm._estimated_tokens(c) <= 100 for c in chunks)
+    assert all(c.endswith(("。", "！", "？")) for c in chunks)
+    assert "".join(chunks) == text
+
+
+def test_chunk_text_keeps_spaces_between_latin_sentences_next_to_cjk():
+    text = "First sentence. 第二句话。Third sentence."
+    assert live_llm._chunk_text(text, 100) == [text]
+    assert live_llm._chunk_text(text, 6) == ["First sentence.", "第二句话。", "Third sentence."]

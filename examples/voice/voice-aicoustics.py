@@ -43,7 +43,7 @@ def _create_aic_filter() -> AICFilter:
 
     return AICFilter(
         license_key=license_key,
-        model_id="quail-vf-2.2-l-16khz",
+        model_id="quail-vf-2.3-l-16khz",
         enhancement_level=0.8,
     )
 

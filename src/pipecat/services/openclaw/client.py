@@ -271,10 +271,12 @@ class OpenClawGatewayClient(BaseObject, WebsocketService):
             max_message_size: Largest websocket frame to accept. Agent output
                 can be large.
             reconnect_on_error: Whether to reconnect after the socket fails.
-            **kwargs: Additional arguments passed to :class:`BaseObject`.
+            **kwargs: Additional arguments passed to :class:`BaseObject` and
+                :class:`WebsocketService`, such as the reconnect backoff and
+                the websocket timeouts.
         """
         BaseObject.__init__(self, **kwargs)
-        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
 
         self._url = url
         self._token = token

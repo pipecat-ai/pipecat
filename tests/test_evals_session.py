@@ -37,6 +37,7 @@ import websockets
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.audio import load_user_audio
 from pipecat.evals.client import (
+    HARNESS_ERROR_EVENT,
     EvalClient,
     _BotFrameSink,
     _BotSegmentTranscribedFrame,
@@ -45,7 +46,7 @@ from pipecat.evals.client import (
     _PersonaTurnRelay,
     _tag_bot_segments,
 )
-from pipecat.evals.events import EvalBotEndedError, EvalEventStream
+from pipecat.evals.events import EvalBotEndedError, EvalEventStream, EvalHarnessError
 from pipecat.evals.matcher import ExpectationMatcher
 from pipecat.evals.persona import EvalPersona
 from pipecat.evals.results import EvalTrace
@@ -58,9 +59,11 @@ from pipecat.evals.scenario import (
 )
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
+from pipecat.evals.tts import CachingTTSService
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ErrorFrame,
     ExternalFunctionCallCancelFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
@@ -85,7 +88,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _rtvi(msg_type: str, data: dict | None = None) -> str:
@@ -267,6 +273,63 @@ class TestFramesToEvents(unittest.TestCase):
         self.assertIsNone(
             s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
         )
+
+    def test_expression_from_messages(self):
+        # Expressive conversation reports what the TTS performed: where the delivery
+        # of the spoken text change, and each event and pause.
+        s = _stream(bot_audio=True)
+
+        def bot_output(
+            segment_id, text_type="sentence", text="words", delivery=None, status="in-progress"
+        ):
+            data = {
+                "text": text,
+                "text_type": text_type,
+                "segment_id": segment_id,
+                "will_be_spoken": True,
+                "spoken_status": status,
+            }
+            if delivery is not None:
+                data["delivery"] = delivery
+            return InputTransportMessageFrame(
+                message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
+            )
+
+        def expression(frame):
+            event = s.frame_to_event(frame)
+            return event and event["text"]
+
+        s.frame_to_event(LLMFullResponseStartFrame())
+        # Spoken text counts as it is spoken, not when it is announced.
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
+        self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="completed")))
+        self.assertEqual(
+            expression(bot_output(2, delivery=["excited", "emphasis"])), "<<excited, emphasis>>"
+        )
+        # Delivery can change within a segment, word by word.
+        self.assertEqual(expression(bot_output(2, delivery=["calm"])), "<<calm>>")
+        # An event counts when it is heard, once.
+        self.assertIsNone(expression(bot_output(3, "expression_sound", "laughter", status="new")))
+        self.assertEqual(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed")),
+            "[[laughter]]",
+        )
+        self.assertIsNone(
+            expression(bot_output(3, "expression_sound", "laughter", status="completed"))
+        )
+        self.assertEqual(
+            expression(bot_output(4, "expression_pause", "600", status="completed")),
+            "[[pause 600]]",
+        )
+        self.assertEqual(expression(bot_output(5, delivery=["excited"])), "<<excited>>")
+        self.assertIsNone(expression(bot_output(6, delivery=["excited"])))
+        self.assertEqual(expression(bot_output(7, delivery=[])), "<<neutral>>")
+        # Without expressive conversation, spoken text carries no delivery.
+        self.assertIsNone(expression(bot_output(8)))
+        # Each response starts from the baseline.
+        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertIsNone(expression(bot_output(9, delivery=[])))
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
         # The user aggregator consumes the STT's TranscriptionFrames to build the
@@ -921,6 +984,76 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(progress[-1].status, "failed")
 
 
+class _RepliesClient:
+    """A client whose bot answers each line sent with the events listed for it."""
+
+    has_user_tts = False
+
+    def __init__(self, stream: EvalEventStream, replies: dict[str, list[dict]]):
+        self._stream = stream
+        self._replies = replies
+
+    async def send_text(self, text: str):
+        for event in self._replies.get(text, []):
+            # As the client reports its own pipeline's errors.
+            if event["type"] == HARNESS_ERROR_EVENT:
+                self._stream.harness_failed(event["text"])
+            await self._stream.append(event)
+
+
+class TestHarnessError(unittest.IsolatedAsyncioTestCase):
+    """A failure in the harness's own pipeline fails the run as an error, not the bot."""
+
+    @staticmethod
+    def _driver(turns: list[EvalScriptTurn], replies: dict[str, list[dict]]) -> EvalScriptDriver:
+        async def on_progress(_):
+            pass
+
+        stream = _stream()
+        return EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=turns),
+            default_timeout_ms=5000,
+            client=_RepliesClient(stream, replies),  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+
+    async def test_a_harness_error_fails_the_turn_at_once_as_an_error(self):
+        turn = EvalScriptTurn(
+            user="hi", expect=[EvalExpectation(event="llm_response", within_ms=5000)]
+        )
+        error = {"type": HARNESS_ERROR_EVENT, "text": "TTS failed"}
+        driver = self._driver([turn], {"hi": [error]})
+
+        started = time.monotonic()
+        failures = await driver.run()
+
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual([(f.kind, f.reason) for f in failures], [("error", "TTS failed")])
+
+    async def test_dropping_the_queued_harness_error_keeps_the_run_failed(self):
+        # A send drops the bot's queued output, a queued harness_error with it.
+        s = _stream()
+        s.harness_failed("STT failed")
+        await s.append({"type": HARNESS_ERROR_EVENT, "text": "STT failed"})
+        s.drop_pending_bot_output("before send")
+        with self.assertRaises(EvalHarnessError):
+            await s.next_event("llm_response", time.monotonic() + 5)
+
+    async def test_a_send_after_wait_fails_at_once_as_an_error(self):
+        send_after = EvalSendAfter(event="bot_started_speaking", delay_ms=0)
+        driver = self._driver([EvalScriptTurn(user="hi", send_after=send_after)], {})
+        driver._stream.harness_failed("TTS failed")
+
+        started = time.monotonic()
+        failure = await driver._await_send_after(send_after, 0)
+
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual((failure.kind, failure.reason), ("error", "TTS failed"))
+
+
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
     """An ``absent: true`` expectation passes on a quiet window, fails on arrival."""
 
@@ -1097,6 +1230,17 @@ class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
         failure = await s.match(exp, time.monotonic(), 100, 0, 0)
         self.assertEqual(failure.kind, "text_present")
         self.assertIn("'Berlin.●'", failure.reason)
+
+    async def test_text_matches_checks_the_accumulated_reply(self):
+        import time
+
+        exp = EvalExpectation(event="llm_response", text_contains="Germany", text_matches=[r"^●"])
+        for first, kind in (("● Berlin.", None), ("Berlin. ●", "text_unmatched")):
+            s = _matcher(bot_audio=False)
+            s._stream._queue.put_nowait({"type": "llm_response", "text": first})
+            s._stream._queue.put_nowait({"type": "llm_response", "text": "The capital of Germany."})
+            failure = await s.match(exp, time.monotonic(), 100, 0, 0)
+            self.assertEqual(failure.kind if failure else None, kind)
 
     async def test_eval_yes_passes(self):
         s = _matcher()
@@ -1362,6 +1506,20 @@ class TestTextContainsResolution(unittest.TestCase):
         exp = EvalExpectation(event="llm_response", text_excludes="not sure")
         self.assertIsNotNone(self._check({"type": "llm_response", "text": "I'm not  sure."}, exp))
 
+    def test_text_matches(self):
+        exp = EvalExpectation(
+            event="llm_response", text_matches=[r"^\[\[voice:[^\]]*\]\]", r"\]\]\s*\S"]
+        )
+        ok = {"type": "llm_response", "text": "[[voice: emotion=warm]] Sure thing."}
+        self.assertIsNone(self._check(ok, exp))
+        failure = self._check({"type": "llm_response", "text": "Sure. [[voice: x]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn("does not match '^", failure.reason)
+        # Each pattern must match; the failure names the first that did not.
+        failure = self._check({"type": "llm_response", "text": "[[voice: emotion=warm]]"}, exp)
+        self.assertEqual(failure.kind, "text_unmatched")
+        self.assertIn(repr(r"\]\]\s*\S"), failure.reason)
+
 
 class TestMarkerCheck(unittest.TestCase):
     """``marker:`` matches the kind the bot stamped on the marker, not its text."""
@@ -1463,8 +1621,10 @@ def _persona() -> EvalPersona:
 class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     """The sink is the boundary between the bot's side of the pipeline and the user's."""
 
-    def _sink(self, **kwargs) -> tuple[_BotFrameSink, _Collector]:
+    async def _sink(self, **kwargs) -> tuple[_BotFrameSink, _Collector]:
         sink = _BotFrameSink(_stream(bot_audio=True), **kwargs)
+        await sink.setup(frame_processor_setup(TaskManager()))
+        self.addAsyncCleanup(sink.cleanup)
         nxt = _Collector()
         sink.link(nxt)
         return sink, nxt
@@ -1478,13 +1638,13 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             await sink.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def test_inject_pushes_downstream(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         frame = TTSSpeakFrame("hello")
         await sink.inject(frame)
         self.assertEqual(nxt.frames, [frame])
 
     async def test_the_bots_frames_stop_at_the_sink(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         await self._push(
             sink,
             *_bot_response("Hello"),
@@ -1496,14 +1656,14 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(nxt.frames, [])
 
     async def test_a_scripted_run_swallows_the_computed_interruption(self):
-        sink, nxt = self._sink()
+        sink, nxt = await self._sink()
         await self._push(sink, InterruptionFrame(), LLMContextFrame(LLMContext()))
         self.assertEqual(nxt.frames, [])  # no persona: nothing to interrupt or run
 
     async def test_a_persona_is_interrupted_and_runs_per_context_frame(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona)
+        sink, nxt = await self._sink(persona=persona)
         interruption = InterruptionFrame()
         run = LLMContextFrame(context)
         await self._push(sink, interruption, run)
@@ -1512,7 +1672,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_hang_up_silences_the_persona(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         persona.hang_up()
         await self._push(sink, LLMContextFrame(context), *_bot_response("Anything else?"))
         self.assertEqual(nxt.frames, [])
@@ -1521,7 +1681,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_hands_the_bots_response_to_the_persona(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response("Hello ", "there"))
         self.assertEqual(context.get_messages(), [{"role": "user", "content": "Hello there"}])
         self.assertEqual(len(nxt.frames), 1)
@@ -1531,7 +1691,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_waits_for_the_bots_function_call(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(
             sink,
             LLMFullResponseStartFrame(),
@@ -1553,7 +1713,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_upstream_frames_are_not_the_bots(self):
         # The persona's own function call travels upstream through the sink; it
         # is neither an event nor held back.
-        sink, _ = self._sink()
+        sink, _ = await self._sink()
         prev = _Collector()
         prev.link(sink)
         call = FunctionCallInProgressFrame(function_name="end_call", tool_call_id="c", arguments={})
@@ -1564,7 +1724,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def test_text_feed_ignores_an_empty_response(self):
         persona = _persona()
         context = persona.context
-        sink, nxt = self._sink(persona=persona, persona_hears=True)
+        sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(sink, *_bot_response())
         self.assertEqual(context.get_messages(), [])
         self.assertEqual(nxt.frames, [])
@@ -1578,16 +1738,18 @@ def _untimed(events: list[dict]) -> list[dict]:
 class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
     """The persona's text-mode responses become one send-text each."""
 
-    def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
+    async def _relay(self) -> tuple[_PersonaTurnRelay, _Collector, EvalTrace]:
         trace = EvalTrace()
         stream = _stream(bot_audio=True)
         relay = _PersonaTurnRelay(lambda text: {"type": "send-text", "text": text}, trace, stream)
+        await relay.setup(frame_processor_setup(TaskManager()))
+        self.addAsyncCleanup(relay.cleanup)
         nxt = _Collector()
         relay.link(nxt)
         return relay, nxt, trace
 
     async def test_skip_tts_response_is_sent_as_one_text_turn(self):
-        relay, nxt, trace = self._relay()
+        relay, nxt, trace = await self._relay()
         frames = _bot_response("Hi ", "there.", skip_tts=True)
         for frame in frames:
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -1603,7 +1765,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_spoken_response_is_only_traced(self):
-        relay, nxt, trace = self._relay()
+        relay, nxt, trace = await self._relay()
         # In audio mode the TTS speaks the text and forwards the end frame after it.
         for frame in (
             LLMFullResponseStartFrame(),
@@ -1620,7 +1782,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_response_without_words_is_not_a_turn(self):
         # An end_call-only response, or one cut off before any word went out.
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         for frame in (
@@ -1634,7 +1796,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
     async def test_an_end_call_made_while_the_response_is_spoken_follows_its_turn(self):
         # In audio mode the persona calls end_call before the TTS has spoken
         # the response it came with.
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
         await relay.end_call({"type": "end_call", "text": "done"})
         self.assertEqual(relay._stream.events_seen, [])
@@ -1652,7 +1814,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_an_end_call_with_no_response_going_out_is_appended_at_once(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         # The response already went out.
         for frame in (LLMFullResponseStartFrame(), LLMFullResponseEndFrame()):
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -1667,7 +1829,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_a_response_interrupted_before_a_word_went_out_is_not_a_turn(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         for frame in (
             LLMFullResponseStartFrame(),
             LLMTextFrame(text="Could you"),
@@ -1677,7 +1839,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relay._stream.events_seen, [])
 
     async def test_an_interrupted_response_is_a_turn_of_the_words_that_went_out(self):
-        relay, _, _ = self._relay()
+        relay, _, _ = await self._relay()
         await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
         await relay.end_call({"type": "end_call", "text": "done"})
         for frame in (
@@ -1929,6 +2091,19 @@ def _capture_deadlines(session: EvalScriptSession) -> list[float]:
     return deadlines
 
 
+class _FailingTTS(TTSService):
+    """A user voice whose synthesis fails, reporting it as a service does."""
+
+    def __init__(self):
+        super().__init__(sample_rate=16000)
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str):
+        yield ErrorFrame(error=f"{self} error: synthesis failed")
+
+
 class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.server = _FakeRTVIServer(_free_port())
@@ -1961,6 +2136,27 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         )
         result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_a_user_voice_that_fails_is_the_runs_error(self):
+        scenario = EvalScriptScenario(
+            name="voice",
+            bot_audio=False,
+            user_audio=True,
+            turns=[
+                EvalScriptTurn(
+                    user="a table for two",
+                    expect=[EvalExpectation(event="llm_response", within_ms=5000)],
+                )
+            ],
+        )
+        user_tts = CachingTTSService(_FailingTTS(), cache_key="failing", use_cache=False)
+
+        result = await EvalScriptSession.from_scenario(
+            scenario, self.server.url, user_tts=user_tts
+        ).run()
+
+        self.assertEqual([f.kind for f in result.failures], ["error"])
+        self.assertIn("synthesis failed", result.failures[0].reason)
 
     async def test_one_event_aggregates_past_filler(self):
         # First bot response is filler; the answer arrives in a second segment.
@@ -2215,6 +2411,52 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
         self.assertFalse(result.passed)
         self.assertEqual(result.failures[0].kind, "missing_function_call")
+
+    async def test_cancelled_call_stops_after_the_cancel_tool_starts(self):
+        # The bot reports the cancel tool running, then the call it cancelled
+        # stopping, back to back. The events keep that order, so a scenario can
+        # expect the cancel tool first and the cancelled call after it.
+        self.server.on_text(
+            "never mind that one",
+            _rtvi(
+                "llm-function-call-in-progress",
+                {
+                    "function_name": "cancel_write_report",
+                    "arguments": {"tool_call_id": "call_turtles"},
+                    "tool_call_id": "call_cancel",
+                },
+            ),
+            _rtvi(
+                "llm-function-call-stopped",
+                {
+                    "function_name": "write_report",
+                    "tool_call_id": "call_turtles",
+                    "cancelled": True,
+                },
+            ),
+        )
+        scenario = EvalScriptScenario(
+            name="cancel_then_stopped",
+            turns=[
+                EvalScriptTurn(
+                    user="never mind that one",
+                    expect=[
+                        EvalExpectation(
+                            event="function_call",
+                            within_ms=2000,
+                            calls=[EvalFunctionCall(name="cancel_write_report")],
+                        ),
+                        EvalExpectation(
+                            event="function_call_stopped",
+                            within_ms=2000,
+                            calls=[EvalFunctionCall(name="write_report", args={"cancelled": True})],
+                        ),
+                    ],
+                )
+            ],
+        )
+        result = await EvalScriptSession.from_scenario(scenario, self.server.url).run()
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
     async def test_text_mismatch_fails_clearly(self):
         self.server.on_text(

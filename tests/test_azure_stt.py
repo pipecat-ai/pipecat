@@ -94,6 +94,40 @@ class TestAzureSTTSegmentationSilenceTimeout(unittest.TestCase):
             self.assertEqual(self._segmentation_calls(mock_set), [])
 
 
+class TestAzureSTTPostProcessingOption(unittest.TestCase):
+    """The ``post_processing_option`` setting surfaces Azure's
+    ``SpeechServiceResponse_PostProcessingOption`` property, which selects
+    display formatting (``TrueText``) or post-stream refinement
+    (``PostRefinement``) of final results."""
+
+    def _post_processing_calls(self, mock_set):
+        from azure.cognitiveservices.speech import PropertyId
+
+        # SpeechConfig itself sets the recognition language through
+        # ``set_property``, so look only at the post-processing property.
+        return [
+            call
+            for call in mock_set.call_args_list
+            if call.args[0] == PropertyId.SpeechServiceResponse_PostProcessingOption
+        ]
+
+    def test_option_sets_speech_config_property(self):
+        with patch("pipecat.services.azure.stt.SpeechConfig.set_property") as mock_set:
+            AzureSTTService(
+                api_key="fake",
+                region="eastus",
+                settings=AzureSTTService.Settings(post_processing_option="PostRefinement"),
+            )
+            calls = self._post_processing_calls(mock_set)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0].args[1], "PostRefinement")
+
+    def test_option_omitted_is_no_op(self):
+        with patch("pipecat.services.azure.stt.SpeechConfig.set_property") as mock_set:
+            AzureSTTService(api_key="fake", region="eastus")
+            self.assertEqual(self._post_processing_calls(mock_set), [])
+
+
 class TestAzureSTTFinalizedFlag(unittest.IsolatedAsyncioTestCase):
     """Azure's ``RecognizedSpeech`` event is the final recognition for an
     utterance — the emitted ``TranscriptionFrame`` must carry

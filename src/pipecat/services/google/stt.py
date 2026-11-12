@@ -707,7 +707,7 @@ class GoogleSTTService(STTService):
             self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_info(json_account_info)
         elif credentials_path:
-            with open(credentials_path) as f:
+            with open(credentials_path, encoding="utf-8") as f:
                 json_account_info = json.load(f)
                 self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_file(credentials_path)
@@ -1114,11 +1114,6 @@ class GoogleSTTService(STTService):
         """Process streaming recognition responses."""
         try:
             async for response in streaming_recognize:
-                # Check streaming limit
-                if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
-                    logger.debug("Stream timeout reached in response processing")
-                    break
-
                 if not response.results:
                     continue
 

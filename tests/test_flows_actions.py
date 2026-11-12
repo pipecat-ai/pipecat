@@ -215,6 +215,34 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         self.action_manager._register_action("modern", modern_handler)
         await self.action_manager.execute_actions([{"type": "modern", "data": "modern"}])
 
+    async def test_callable_instance_handler_is_awaited(self):
+        """An object with an async __call__ runs, instead of its coroutine being dropped."""
+        calls = []
+
+        class Handler:
+            async def __call__(self, action: dict, flow_manager: Any) -> None:
+                calls.append(action)
+
+        self.action_manager._register_action("instance", Handler())
+        await self.action_manager.execute_actions([{"type": "instance", "data": "instance"}])
+
+        self.assertEqual(calls, [{"type": "instance", "data": "instance"}])
+
+    async def test_sync_wrapper_returning_coroutine_is_awaited(self):
+        """A sync wrapper that returns a coroutine runs, instead of returning it unawaited."""
+        calls = []
+
+        async def handler(action: dict, flow_manager: Any) -> None:
+            calls.append(action)
+
+        def wrapper(*args: Any, **kwargs: Any):
+            return handler(*args, **kwargs)
+
+        self.action_manager._register_action("wrapped", wrapper)
+        await self.action_manager.execute_actions([{"type": "wrapped", "data": "wrapped"}])
+
+        self.assertEqual(calls, [{"type": "wrapped", "data": "wrapped"}])
+
     async def test_invalid_action(self):
         """Test handling invalid actions."""
         # Test missing type

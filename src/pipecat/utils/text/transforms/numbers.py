@@ -24,7 +24,7 @@ def expand_numbers(
 
     When *digit_cutoff* is set, numbers above it are read digit-by-digit
     (e.g. ``"2026"`` → ``"2 0 2 6"``). Numbers at or below the cutoff are
-    expanded as quantities (e.g. ``"42"`` → ``"forty two"``). Pass ``None``
+    expanded as quantities (e.g. ``"42"`` → ``"forty-two"``). Pass ``None``
     to expand all numbers as words regardless of magnitude.
 
     Decimals are read as the whole part followed by their fractional digits, one at a
@@ -41,7 +41,7 @@ def expand_numbers(
 
         transform = expand_numbers(digit_cutoff=2025)
         result = await transform("Room 42 has 1234 seats and opens in 2026", "*")
-        # "Room forty two has one thousand two hundred thirty four seats and opens in 2 0 2 6"
+        # "Room forty-two has one thousand, two hundred and thirty-four seats and opens in 2 0 2 6"
     """
 
     def _num_to_words(match: re.Match) -> str:

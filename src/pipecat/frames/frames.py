@@ -39,6 +39,8 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.expressive.expression import ExpressionCapabilities
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal
 from pipecat.metrics.metrics import MetricsData
 from pipecat.services.settings import LLMSettings, ServiceSettings, STTSettings, TTSSettings
 from pipecat.transcriptions.language import Language
@@ -522,9 +524,16 @@ class TTSTextFrame(AggregatedTextFrame):
         segment_id: ID of the AggregatedTextFrame this text is part of, when the
             TTS service built it from one. A word reported by the TTS carries the
             ID of the sentence or other segment it was spoken in.
+        delivery: The delivery this text is spoken in, such as ``["warm"]``, and
+            ``"emphasis"`` for stressed words; empty for the voice's baseline.
+            None when the text carries no delivery. Each name is as written in
+            its tag, so a universal name such as ``warm`` stays universal
+            whatever the service calls it. Part of expressive conversation
+            (alpha).
     """
 
     segment_id: int | None = None
+    delivery: list[str] | None = field(default=None, kw_only=True)
 
 
 @renamed_init_field(
@@ -549,6 +558,8 @@ class AggregatedTextProgressFrame(DataFrame):
         text_type: Text type of the source AggregatedTextFrame.
         accumulated_text: Text already spoken in this slot (including the current word).
         remaining_text: Text not yet spoken in this slot.
+        delivery: The delivery of the word just spoken, which changes within the
+            text where its delivery does. Part of expressive conversation (alpha).
     """
 
     segment_id: int
@@ -557,6 +568,7 @@ class AggregatedTextProgressFrame(DataFrame):
     text_type: TextType | str
     accumulated_text: str
     remaining_text: str
+    delivery: list[str] | None = field(default=None, kw_only=True)
 
     @property
     @deprecated(
@@ -582,6 +594,31 @@ class AggregatedTextProgressFrame(DataFrame):
         self.text_type = value
 
 
+@dataclass(frozen=True)
+class TranscriptionSpeaker:
+    """A speaker an STT service's diarization told apart in a transcription stream.
+
+    Labels are opaque and provider-specific. Numbers count speakers in the order
+    they first appeared in the STT service's session, so they read the same
+    whatever labels the provider uses. Both only hold within that session: a
+    provider that restarts its labels (e.g. after a reconnect) may give a known
+    label, and so its number, to a different person, and services that diarize
+    each speech segment separately don't keep labels across segments.
+
+    Parameters:
+        label: The provider's label for the speaker (e.g. ``"A"``, ``"S1"``,
+            ``"2"``).
+        number: The speaker's place in the order speakers first appeared,
+            starting at ``1``.
+    """
+
+    label: str
+    number: int
+
+    def __str__(self):
+        return f"{self.number} ({self.label})"
+
+
 @dataclass
 class TranscriptionFrame(TextFrame):
     """Text frame containing speech transcription data.
@@ -590,12 +627,22 @@ class TranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
+        perception: How the user said these words, as a perception producer
+            read them, or None. Set by an STT service that perceives, or by a
+            processor after it. Part of expressive conversation (alpha).
     """
 
     user_id: str
@@ -603,9 +650,11 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
     result: Any | None = None
     finalized: bool = False
+    speaker: TranscriptionSpeaker | None = None
+    perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -617,19 +666,30 @@ class InterimTranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the interim transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
+        perception: A provisional reading of how the user said these words, or
+            None. Part of expressive conversation (alpha).
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker: TranscriptionSpeaker | None = None
+    perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -638,25 +698,37 @@ class EagerTranscriptionFrame(TextFrame):
 
     Some STT services emit a provisional end of turn ahead of the real one, so a
     response can be generated during the gap. The prediction may be withdrawn
-    (:class:`EagerEndOfTurnCancelFrame`) and the committed transcript may differ
+    (:class:`UserTurnResponseCancelFrame`) and the committed transcript may differ
     from this one, so nothing produced from it may reach the user or the context
     until it is confirmed. See
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the eager end of turn occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
+        perception: How the user said the turn, as a perception producer read
+            it at the predicted end of turn, or None. A speculative inference
+            answers the turn with it. Part of expressive conversation (alpha).
     """
 
     user_id: str
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker: TranscriptionSpeaker | None = None
+    perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -719,9 +791,11 @@ class LLMContextAssistantTurnFrame(DataFrame):
     """The aggregated text of a completed assistant turn.
 
     Broadcast by the LLM assistant aggregator when a turn ends, carrying the
-    same text that is stored in the LLM context. Processors upstream and
-    downstream (e.g. STT services) can handle this frame to react to each
-    completed bot reply without needing a separate observer.
+    text stored in the LLM context. With expressive conversation on, it is the
+    words alone, while the context keeps the expression tags the LLM wrote.
+    Processors upstream and downstream (e.g. STT services) can handle this
+    frame to react to each completed bot reply without needing a separate
+    observer.
 
     Parameters:
         text: The assistant's aggregated spoken text for this turn.
@@ -740,13 +814,28 @@ class LLMContextUserTurnFrame(DataFrame):
     to the context, so it holds what the bot heard: a transcription the
     aggregator leaves out, such as one while the user is muted, is not in it.
 
+    A turn answered from an eager end of turn is also broadcast as a
+    speculation, ahead of the inference that answers it, so processors after
+    the LLM learn the turn before its held response is released. A
+    :class:`UserTurnResponseCancelFrame` withdraws it, and the turn written to
+    the context once it ends can differ from it.
+
     Parameters:
         text: The user's aggregated transcript for this turn.
         timestamp: ISO-8601 timestamp of when the user turn started.
+        perception: The reading of how the user spoke that is written at the
+            head of the user message, with expressive conversation on and a
+            perception producer in the pipeline, or None. Part of expressive
+            conversation (alpha).
+        speculation: Whether this is the turn a speculative inference answers,
+            written only to a provisional context and not yet part of the
+            conversation.
     """
 
     text: str
     timestamp: str
+    perception: list[PerceptionSignal] | None = None
+    speculation: bool = False
 
 
 @dataclass
@@ -1419,17 +1508,34 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EagerEndOfTurnCancelFrame(SystemFrame):
-    """Frame withdrawing an eager end of turn.
+class UserTurnResponseCancelFrame(SystemFrame):
+    """Frame cancelling the speculative response for the current user turn.
 
-    Emitted when a service reports the user resumed speaking after an eager end
-    of turn, or when the committed transcript doesn't match the eager one. The
-    LLM service stops generating, and its
-    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards what it
-    was holding — which is everything the response produced, so nothing further
-    down the pipeline has anything to undo.
+    Emitted when an eager end of turn is withdrawn (the user resumed speaking,
+    or the committed transcript doesn't match the eager one). The LLM service
+    stops generating, and its
+    :class:`~pipecat.turns.speculation_gate.SpeculationGate` discards
+    what it was holding — which is everything the response produced, so nothing
+    further down the pipeline has anything to undo. A response the gate has
+    already released is left alone; stopping it is what
+    :class:`InterruptionFrame` does.
 
     A system frame so it overtakes the speculative output it cancels.
+    """
+
+    pass
+
+
+@deprecated(
+    "`EagerEndOfTurnCancelFrame` is deprecated since 1.15.0 and will be removed in 2.0.0. "
+    "Use `UserTurnResponseCancelFrame` instead."
+)
+@dataclass
+class EagerEndOfTurnCancelFrame(UserTurnResponseCancelFrame):
+    """Deprecated alias for :class:`UserTurnResponseCancelFrame`.
+
+    .. deprecated:: 1.15.0
+        Use :class:`UserTurnResponseCancelFrame` instead. Will be removed in 2.0.0.
     """
 
     pass
@@ -1458,6 +1564,22 @@ class UserMuteStoppedFrame(SystemFrame):
 
 
 @dataclass
+class PerceptionFrame(SystemFrame):
+    """A reading of how the user spoke, broadcast as soon as a producer has one.
+
+    A perception producer broadcasts every reading it makes, whether or not a
+    transcription is there to carry it yet, so processors and clients can act
+    on it right away. The LLM is given the reading a transcription carries in
+    its ``perception``. Part of expressive conversation (alpha).
+
+    Parameters:
+        perception: The reading.
+    """
+
+    perception: list[PerceptionSignal]
+
+
+@dataclass
 class UserSpeakingFrame(SystemFrame):
     """Frame indicating the user is speaking.
 
@@ -1483,6 +1605,30 @@ class UserTurnInferenceCompletedFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class UserTurnCompletionFrame(SystemFrame):
+    """The LLM's judgment of whether the user's turn is complete.
+
+    Pushed upstream by an LLM service that uses turn-completion markers, once
+    per inference and as soon as the judgment is known: when the response's
+    marker is read, when the response calls a tool before writing a marker
+    (``"complete"``), or when the response ends without one (``None``). The
+    marker itself reaches the context as an :class:`LLMMarkerFrame`.
+
+    Parameters:
+        kind: ``"complete"``, ``"short"`` (the user will continue shortly) or
+            ``"long"`` (the user needs more time), or ``None`` when the
+            response carried no marker.
+        marker: The marker read, or ``None`` for a tool call or no marker.
+        context_frame_id: The id of the :class:`LLMContextFrame` that started
+            the inference, or ``None`` when it isn't known.
+    """
+
+    kind: str | None
+    marker: str | None = None
+    context_frame_id: int | None = None
 
 
 @dataclass
@@ -2087,6 +2233,45 @@ class LLMServiceMetadataFrame(ServiceMetadataFrame):
     """
 
     is_realtime_service: bool = False
+
+
+@dataclass
+class TTSMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a TTS service at pipeline start.
+
+    Parameters:
+        expression: The expression tags the service can perform, or None when
+            it performs none. Part of expressive conversation (alpha).
+    """
+
+    expression: ExpressionCapabilities | None = None
+
+
+@dataclass
+class PerceptionMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast at start by a processor that perceives how the user spoke.
+
+    The processor may be an STT service or a processor of its own, so the
+    signals it reports have a frame of their own. Part of expressive
+    conversation (alpha).
+
+    Parameters:
+        perception: The signals the processor reports.
+    """
+
+    perception: PerceptionCapabilities
+
+
+@dataclass
+class ExpressionMetadataFrame(ServiceMetadataFrame):
+    """Metadata broadcast by a processor that tags the LLM's replies, once it can.
+
+    A tagger sits between the LLM and the TTS service and writes the
+    expression tags itself. Upstream, the LLM is then taught no tags, so it
+    writes plain words; downstream, the assistant aggregator writes each reply
+    to the context as its words alone, keeping the tags out of what the LLM
+    reads. Part of expressive conversation (alpha).
+    """
 
 
 @dataclass

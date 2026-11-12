@@ -582,7 +582,7 @@ def _runner_body(args: argparse.Namespace) -> Any:
     """
     if not args.runner_body:
         return None
-    return yaml.safe_load(Path(args.runner_body).read_text())
+    return yaml.safe_load(Path(args.runner_body).read_text(encoding="utf-8"))
 
 
 async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):

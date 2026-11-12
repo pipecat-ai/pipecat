@@ -40,6 +40,7 @@ from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.sarvam.stt import (
     MODEL_CONFIGS,
+    SarvamHttpSTTService,
     SarvamRealtimeSTTService,
     SarvamRealtimeSTTSettings,
     SarvamSTTService,
@@ -1263,11 +1264,12 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
 
 
 async def _run_against_local_sarvam(*, close_first):
-    """Stream 1 s of audio to a local stand-in for the realtime endpoint.
+    """Stream 2 s of audio to a local stand-in for the realtime endpoint.
 
     Each connection answers 500 ms of audio with one final transcript. The
     first connection is then closed with ``close_first`` (a close code and
-    reason).
+    reason). The extra audio gives the second connection time to answer after
+    the reconnect.
     """
     handshakes = 0
 
@@ -1295,7 +1297,7 @@ async def _run_against_local_sarvam(*, close_first):
             api_key="test-key", base_url=f"ws://127.0.0.1:{port}/ws", sample_rate=8000
         )
         frames = []
-        for _ in range(50):
+        for _ in range(100):
             frames += [
                 InputAudioRawFrame(audio=b"\0\0" * 160, sample_rate=8000, num_channels=1),
                 SleepFrame(sleep=0.02),
@@ -1752,3 +1754,339 @@ async def test_keyterms_cannot_be_updated_mid_stream():
     service = SarvamRealtimeSTTService(api_key="test-key")
     with pytest.raises(ValueError, match="keyterms"):
         await service.update_config(keyterms=["Sarvam"])
+
+
+# ---------------------------------------------------------------------------
+# SarvamHttpSTTService (REST)
+# ---------------------------------------------------------------------------
+
+
+def _http_service(**kwargs) -> SarvamHttpSTTService:
+    return SarvamHttpSTTService(api_key="test-key", **kwargs)
+
+
+def _mock_rest_client(
+    service: SarvamHttpSTTService, response=None, error=None, responses=None
+) -> AsyncMock:
+    """Replace the service's SDK client with a stub REST transcribe call.
+
+    ``responses`` returns one response per call, in order; ``response`` is
+    returned for every call.
+    """
+    from types import SimpleNamespace
+
+    if error is not None:
+        transcribe = AsyncMock(side_effect=error)
+    elif responses is not None:
+        transcribe = AsyncMock(side_effect=responses)
+    else:
+        transcribe = AsyncMock(return_value=response)
+    service._sarvam_client = SimpleNamespace(speech_to_text=SimpleNamespace(transcribe=transcribe))
+    return transcribe
+
+
+def _rest_response(transcript: str, language_code: str | None = None):
+    from sarvamai.types.speech_to_text_response import SpeechToTextResponse
+
+    return SpeechToTextResponse(transcript=transcript, language_code=language_code)
+
+
+async def _run_stt(service: SarvamHttpSTTService, audio: bytes = b"RIFF-fake-wav"):
+    return [frame async for frame in service.run_stt(audio)]
+
+
+def _wav(seconds: float, sample_rate: int = 8000) -> bytes:
+    """A WAV file of ``seconds`` of 16-bit mono audio."""
+    from pipecat.audio.utils import pcm_to_wav
+
+    return pcm_to_wav(b"\x01\x02" * int(sample_rate * seconds), sample_rate)
+
+
+def _wav_seconds(audio: bytes) -> float:
+    import io
+    import wave
+
+    with wave.open(io.BytesIO(audio)) as wav:
+        return wav.getnframes() / wav.getframerate()
+
+
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_accepts_websocket_models(model):
+    """The REST endpoint offers the same models as the WebSocket one."""
+    service = _http_service(settings=SarvamHttpSTTService.Settings(model=model))
+    assert service._settings.model == model
+
+
+def test_http_default_model():
+    """Constructing without a model picks up the latest one, like the WS sibling."""
+    service = _http_service()
+    assert service._settings.model == "saaras:v4"
+
+
+def test_http_unsupported_model_raises():
+    """A model the REST service doesn't offer reports the allowed ones."""
+    with pytest.raises(ValueError, match="saaras:v3, saaras:v4"):
+        _http_service(settings=SarvamHttpSTTService.Settings(model="saarika:v2.5"))
+
+
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_mode_accepted_by_each_model(model):
+    service = _http_service(mode="codemix", settings=SarvamHttpSTTService.Settings(model=model))
+    assert service._mode == "codemix"
+
+
+@pytest.mark.parametrize("model", sorted(MODEL_CONFIGS))
+def test_http_mode_defaults_to_transcribe(model):
+    service = _http_service(settings=SarvamHttpSTTService.Settings(model=model))
+    assert service._mode == "transcribe"
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_yields_transcription_inline():
+    """run_stt() transcribes the buffer and yields the frame itself, unlike the
+    WebSocket services, whose run_stt() yields nothing."""
+    service = _http_service(settings=SarvamHttpSTTService.Settings(model="saaras:v3"))
+    transcribe = _mock_rest_client(service, _rest_response("मेरा ऑर्डर कहाँ है", language_code="hi-IN"))
+
+    frames = await _run_stt(service, b"RIFF-fake-wav")
+
+    assert len(frames) == 1
+    frame = frames[0]
+    assert isinstance(frame, TranscriptionFrame)
+    assert frame.text == "मेरा ऑर्डर कहाँ है"
+    assert frame.language == Language.HI_IN
+
+    kwargs = transcribe.await_args.kwargs
+    filename, audio, content_type = kwargs["file"]
+    assert filename.endswith(".wav")
+    assert audio == b"RIFF-fake-wav"
+    assert content_type == "audio/wav"
+    assert kwargs["model"] == "saaras:v3"
+    assert kwargs["mode"] == "transcribe"
+    # No language configured: auto-detect via Sarvam's "unknown".
+    assert kwargs["language_code"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_configured_language_and_mode_for_v4():
+    service = _http_service(
+        mode="translate",
+        settings=SarvamHttpSTTService.Settings(language=Language.EN_IN),
+    )
+    transcribe = _mock_rest_client(service, _rest_response("hello", language_code="en-IN"))
+
+    frames = await _run_stt(service)
+
+    kwargs = transcribe.await_args.kwargs
+    assert kwargs["model"] == "saaras:v4"
+    assert kwargs["language_code"] == "en-IN"
+    assert kwargs["mode"] == "translate"
+    assert "request_options" not in kwargs  # no keyterms configured
+    assert frames[0].language == Language.EN_IN
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_odia_code_without_warning():
+    """A configured language is sent as the Sarvam code the base class stored,
+    without resolving it again (Odia's Sarvam code differs from its Language)."""
+    import io
+
+    from loguru import logger
+
+    service = _http_service(settings=SarvamHttpSTTService.Settings(language=Language.OR_IN))
+    transcribe = _mock_rest_client(service, _rest_response("ନମସ୍କାର", language_code="od-IN"))
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        frames = await _run_stt(service)
+    finally:
+        logger.remove(handler_id)
+
+    assert transcribe.await_args.kwargs["language_code"] == "od-IN"
+    assert frames[0].language == Language.OR_IN
+    assert sink.getvalue() == ""
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_keyterms_as_json_form_field():
+    service = _http_service(keyterms=["Sarvam", "New Delhi"])
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await _run_stt(service)
+
+    request_options = transcribe.await_args.kwargs["request_options"]
+    assert json.loads(request_options["additional_body_parameters"]["keyterms"]) == [
+        "Sarvam",
+        "New Delhi",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_short_segment_unchanged():
+    service = _http_service()
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+    audio = _wav(30)
+
+    await _run_stt(service, audio)
+
+    assert transcribe.await_count == 1
+    assert transcribe.await_args.kwargs["file"][1] == audio
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_splits_segment_over_30_seconds():
+    """The REST endpoint rejects audio over 30 seconds, so a longer segment is
+    sent in pieces and the transcripts are joined into one frame."""
+    service = _http_service()
+    transcribe = _mock_rest_client(
+        service,
+        responses=[
+            _rest_response("first part", language_code="hi-IN"),
+            _rest_response("second part", language_code="hi-IN"),
+            _rest_response("end"),
+        ],
+    )
+
+    frames = await _run_stt(service, _wav(65))
+
+    pieces = [call.kwargs["file"][1] for call in transcribe.await_args_list]
+    assert [_wav_seconds(p) for p in pieces] == [30, 30, 5]
+    assert len(frames) == 1
+    assert frames[0].text == "first part second part end"
+    assert frames[0].language == Language.HI_IN
+    assert len(frames[0].result) == 3
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_split_failure_yields_error_frame():
+    service = _http_service()
+    _mock_rest_client(
+        service, responses=[_rest_response("first part"), RuntimeError("piece failed")]
+    )
+
+    frames = await _run_stt(service, _wav(45))
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert "piece failed" in frames[0].error
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_prefers_detected_language():
+    """The language Sarvam detected wins over the configured one."""
+    service = _http_service(settings=SarvamHttpSTTService.Settings(language=Language.EN_IN))
+    _mock_rest_client(service, _rest_response("नमस्ते", language_code="hi-IN"))
+
+    frames = await _run_stt(service)
+
+    assert frames[0].language == Language.HI_IN
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_leaves_language_unset_when_undetected():
+    """With auto-detect configured and no code on the response, the frame
+    carries no language rather than a guessed one."""
+    service = _http_service()
+    _mock_rest_client(service, _rest_response("नमस्ते"))
+
+    frames = await _run_stt(service)
+
+    assert frames[0].language is None
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_unrecognized_language_code_warns_once():
+    """A code the shared table lacks leaves the language unset and is warned
+    about once per service, like the WebSocket sibling."""
+    service = _http_service()
+    _mock_rest_client(service, _rest_response("text", language_code="xx-IN"))
+
+    first = await _run_stt(service)
+    second = await _run_stt(service)
+
+    assert first[0].language is None
+    assert second[0].language is None
+    assert service._unmapped_language_codes_warned == {"xx-IN"}
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_skips_empty_transcript():
+    service = _http_service()
+    _mock_rest_client(service, _rest_response("   "))
+
+    frames = await _run_stt(service)
+
+    assert frames == []
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_yields_error_frame_on_failure():
+    service = _http_service()
+    _mock_rest_client(service, error=RuntimeError("boom"))
+
+    frames = await _run_stt(service)
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert "boom" in frames[0].error
+
+
+@pytest.mark.asyncio
+async def test_http_update_settings_rejects_unsupported_model():
+    service = _http_service()
+    with pytest.raises(ValueError, match="saaras:v3, saaras:v4"):
+        await service._update_settings(STTSettings(model="saarika:v2.5"))
+    # The store is untouched by the rejected delta.
+    assert service._settings.model == "saaras:v4"
+
+
+@pytest.mark.asyncio
+async def test_http_update_settings_model_change_keeps_mode():
+    service = _http_service(
+        mode="codemix", settings=SarvamHttpSTTService.Settings(model="saaras:v3")
+    )
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await service._update_settings(STTSettings(model="saaras:v4"))
+    await _run_stt(service)
+
+    assert transcribe.await_args.kwargs["model"] == "saaras:v4"
+    assert transcribe.await_args.kwargs["mode"] == "codemix"
+
+
+@pytest.mark.asyncio
+async def test_http_segment_pipeline_emits_finalized_transcription():
+    """Driven by VAD frames in a pipeline, a segment comes back as one
+    finalized TranscriptionFrame with usage metrics ahead of it."""
+    from pipecat.frames.frames import InputAudioRawFrame
+    from pipecat.pipeline.worker import PipelineParams
+    from pipecat.tests.utils import run_test
+
+    sample_rate = 16000
+    service = _http_service(sample_rate=sample_rate)
+    _mock_rest_client(service, _rest_response("chai aur samosa", language_code="hi-IN"))
+
+    pcm = b"\x01\x02" * sample_rate  # 1s of 16-bit mono audio
+    received_down, _ = await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=pcm, sample_rate=sample_rate, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(enable_usage_metrics=True),
+    )
+
+    transcripts = [f for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert len(transcripts) == 1
+    assert transcripts[0].text == "chai aur samosa"
+    assert transcripts[0].finalized is True
+
+    usage_indexes = [
+        i
+        for i, f in enumerate(received_down)
+        if isinstance(f, MetricsFrame) and any(isinstance(d, STTUsageMetricsData) for d in f.data)
+    ]
+    assert len(usage_indexes) == 1
+    assert usage_indexes[0] < received_down.index(transcripts[0])

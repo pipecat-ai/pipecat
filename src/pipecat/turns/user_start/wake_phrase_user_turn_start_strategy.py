@@ -15,13 +15,16 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
     UserSpeakingFrame,
+    UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.utils.string import compile_phrase_pattern
 
 
 class _WakeState(enum.Enum):
@@ -34,12 +37,28 @@ class _WakeState(enum.Enum):
 class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     """User turn start strategy that requires a wake phrase before interaction.
 
-    Blocks subsequent strategies until a wake phrase is detected in a final
-    transcription. After detection, allows interaction for a configurable
-    timeout period before requiring the wake phrase again. Use
+    Starts a turn when it hears a wake phrase in a final transcription,
+    and then, until a configurable timeout, whenever the user starts speaking
+    or a final transcription arrives, which covers speech VAD missed. Use
     ``single_activation=True`` to require the wake phrase before every turn.
+    Speech before the wake phrase is dropped from the aggregation.
 
-    This strategy should be placed first in the start strategies list.
+    It starts turns on its own, so use it as the only start strategy::
+
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])],
+            ),
+        )
+
+    To combine it with other start strategies, such as
+    ``MinWordsUserTurnStartStrategy``, put them in a ``StrategyMode.ALL`` list,
+    where it's one more condition a turn needs. In a ``StrategyMode.FIRST``
+    list next to other start strategies it has to come first: until it hears
+    the wake phrase, it keeps the strategies after it from seeing frames, and
+    once awake it starts turns itself, so the strategies after it no longer
+    decide. That is deprecated, along with
+    :class:`~pipecat.turns.types.ProcessFrameResult`.
 
     Event handlers available:
 
@@ -70,7 +89,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             ...
 
     Args:
-        phrases: List of wake phrases to detect.
+        phrases: List of wake phrases to detect. Entries that are blank after
+            stripping punctuation are ignored.
         timeout: Inactivity timeout in seconds before returning to IDLE.
             In timeout mode, the timer resets on activity (user, bot speech).
             In single activation mode, acts as a keepalive window — the strategy
@@ -92,7 +112,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Initialize the wake phrase user turn start strategy.
 
         Args:
-            phrases: List of wake phrases to detect.
+            phrases: List of wake phrases to detect. Entries that are blank after
+                stripping punctuation are ignored.
             timeout: Inactivity timeout in seconds before returning to IDLE.
                 In timeout mode, the timer resets on activity. In single activation
                 mode, acts as a keepalive window after wake phrase detection.
@@ -101,17 +122,15 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             **kwargs: Additional keyword arguments passed to parent.
         """
         super().__init__(**kwargs)
-        self._phrases = phrases
         self._timeout = timeout
         self._single_activation = single_activation
 
-        self._patterns: list[re.Pattern] = []
+        # The transcript is matched with its punctuation stripped, so the phrases are too.
+        self._patterns: list[tuple[str, re.Pattern]] = []
         for phrase in phrases:
-            pattern = re.compile(
-                r"\b" + r"\s*".join(re.escape(word) for word in phrase.split()) + r"\b",
-                re.IGNORECASE,
-            )
-            self._patterns.append(pattern)
+            normalized = self._strip_punctuation(phrase).strip()
+            if normalized:
+                self._patterns.append((phrase, compile_phrase_pattern(normalized)))
 
         self._state = _WakeState.IDLE
         self._accumulated_text = ""
@@ -159,23 +178,23 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             if not self._single_activation:
                 self._refresh_timeout()
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame for wake phrase detection or passthrough.
 
         Args:
             frame: The frame to be processed.
 
         Returns:
-            STOP when the wake phrase is detected or when in IDLE state
-            (blocks subsequent strategies), CONTINUE when in AWAKE state
-            (allows subsequent strategies to proceed).
+            ``ProcessFrameResult.STOP`` until the wake phrase is heard, which
+            keeps the strategies after this one in a ``StrategyMode.FIRST``
+            list from seeing the frame. That gating is deprecated.
         """
         await super().process_frame(frame)
 
         if self._state == _WakeState.IDLE:
             return await self._process_idle(frame)
-        else:
-            return await self._process_awake(frame)
+        await self._process_awake(frame)
+        return None
 
     async def _process_idle(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in IDLE state.
@@ -184,22 +203,33 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         matches. When a match is found, a user turn start is triggered.
         Transcription frames that don't match have their text cleared so that
         pre-wake-phrase speech is not added to the LLM context. All frames
-        return STOP to block subsequent strategies.
+        return STOP, for a ``StrategyMode.FIRST`` list.
         """
         if isinstance(frame, TranscriptionFrame):
             if self._check_wake_phrase(frame.text):
-                await self.trigger_user_turn_started()
+                await self.report_user_turn_started()
                 return ProcessFrameResult.STOP
             await self.trigger_reset_aggregation()
 
         return ProcessFrameResult.STOP
 
-    async def _process_awake(self, frame: Frame) -> ProcessFrameResult:
+    async def _process_awake(self, frame: Frame):
         """Process a frame while in AWAKE state.
 
-        Refreshes the timeout on activity frames (timeout mode only). Returns
-        CONTINUE so subsequent strategies can process the frame.
+        Starts a turn when the user starts speaking or a final
+        transcription arrives, and refreshes the timeout on activity frames
+        (timeout mode only).
         """
+        if isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                TranscriptionFrame,
+            ),
+        ):
+            await self.report_user_turn_started()
         if not self._single_activation:
             if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
                 self._refresh_timeout()
@@ -207,8 +237,6 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 self._refresh_timeout()
             elif isinstance(frame, VADUserStartedSpeakingFrame):
                 self._refresh_timeout()
-
-        return ProcessFrameResult.CONTINUE
 
     @staticmethod
     def _strip_punctuation(text: str) -> str:
@@ -232,9 +260,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         if len(self._accumulated_text) > 250:
             self._accumulated_text = self._accumulated_text[-250:]
 
-        for i, pattern in enumerate(self._patterns):
+        for phrase, pattern in self._patterns:
             if pattern.search(self._accumulated_text):
-                phrase = self._phrases[i]
                 logger.debug(f"{self} wake phrase detected: {phrase!r}")
                 self._transition_to_awake(phrase)
                 return True

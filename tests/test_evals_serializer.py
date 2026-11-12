@@ -22,11 +22,13 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EvalClientSerializer,
     EvalConnectionFlags,
+    EvalFunctionCallCancelFrame,
     EvalSerializer,
     eval_connect_message,
     parse_eval_connect,
 )
 from pipecat.frames.frames import (
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     LLMFullResponseStartFrame,
@@ -34,6 +36,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
+    SystemFrame,
     TranscriptionFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -286,6 +289,30 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
             frame = await self.serializer.deserialize(self._server(msg_type, {"text": "mhm"}))
             self.assertIsInstance(frame, InputTransportMessageFrame)
             self.assertEqual(frame.message["type"], msg_type)
+
+    async def test_cancelled_function_call_is_not_a_system_frame(self):
+        # Queued like the in-progress and result frames, so it can't overtake
+        # the bot's earlier function-call reports.
+        frame = await self.serializer.deserialize(
+            self._server(
+                "llm-function-call-stopped",
+                {"function_name": "write_report", "tool_call_id": "call_1", "cancelled": True},
+            )
+        )
+        self.assertIsInstance(frame, EvalFunctionCallCancelFrame)
+        self.assertNotIsInstance(frame, SystemFrame)
+        self.assertFalse(frame.interruptible)
+        self.assertEqual(frame.function_name, "write_report")
+        self.assertEqual(frame.tool_call_id, "call_1")
+
+    async def test_finished_function_call_is_a_result(self):
+        frame = await self.serializer.deserialize(
+            self._server(
+                "llm-function-call-stopped",
+                {"function_name": "write_report", "tool_call_id": "call_1", "cancelled": False},
+            )
+        )
+        self.assertIsInstance(frame, FunctionCallResultFrame)
 
     async def test_generic_messages_delegate_to_base(self):
         # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.

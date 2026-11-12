@@ -497,6 +497,25 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tts_frames), 1)
         self.assertEqual(tts_frames[0].text, "hello world")
 
+    async def test_drops_remaining_text_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
+
+        result = seq.force_complete("ctx1", last_word_pts=0, emit_remaining=False)
+        self.assertEqual(result, [])
+        # The slot is complete, so a word arriving afterwards emits nothing.
+        self.assertEqual(seq.process_word("hello", pts=10, context_id="ctx1"), [])
+
+    async def test_flushes_skipped_frames_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        skipped = _skipped_frame("code")
+        await seq.register_skipped(skipped, "ctx2", None)
+
+        result = seq.force_complete("ctx1", last_word_pts=20, emit_remaining=False)
+        self.assertEqual(result, [skipped])
+        self.assertTrue(skipped.append_to_context)
+
     async def test_already_complete_slot_emits_nothing(self):
         seq = _seq()
         await seq.register_spoken(_spoken_frame("hi"), "ctx1", "hi", True)
@@ -1628,6 +1647,18 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(word_frames[0].will_be_spoken)
         self.assertTrue(word_frames[0].append_to_context)
 
+    async def test_no_tracker_sentence_text_is_trimmed_for_the_context(self):
+        # The context joins its parts with a space, so a second sentence that
+        # keeps its token's leading space would be joined with two.
+        seq = _seq(streaming=True)
+        result = []
+        for t in ("Hi.", " Bye", " now", ".", " Ok"):
+            result += await seq.register_spoken(
+                _spoken_frame(t), "ctx1", t, append_to_context=True, build_tracker=False
+            )
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([(f.text, f.raw_text) for f in word_frames][-1], ("Bye now.", "Bye now."))
+
 
 # ---------------------------------------------------------------------------
 # register_spoken — streaming: words buffered until a pending sentence promotes
@@ -1993,6 +2024,13 @@ class TestParallelSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.tts_text, " How are you?")
 
+    async def test_numbered_list_marker_stays_with_item(self):
+        agg = _ParallelSentenceAggregator()
+        out = await _agg_feed(agg, "1", ".", " Take", " a", " walk", ".", "\n", "2", ".", " Read")
+        self.assertEqual([e[0] for e in out], ["1. Take a walk."])
+        f = await agg.flush()
+        self.assertEqual(f.tts_text, "\n2. Read")
+
     async def test_flush_emits_trailing_partial_sentence(self):
         agg = _ParallelSentenceAggregator()
         await _agg_feed(agg, "Just", " a", " fragment")
@@ -2257,7 +2295,19 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
         seq = await self._seq_past_the_tag()
         self.assertEqual(seq.process_word("whenx", pts=20, context_id="ctx1"), [])
 
-    async def test_resync_carries_the_closing_delimiter_into_context(self):
+    async def test_the_closing_delimiter_goes_into_context_with_the_word_it_touches(self):
+        seq = _seq()
+        frame = _spoken_frame(self.USER_FACING, raw_text=self.LLM)
+        await seq.register_spoken(frame, "ctx1", self.TTS, append_to_context=True)
+        seq.process_word("Call", pts=10, context_id="ctx1")
+        words = [
+            f
+            for f in seq.process_word("4111", pts=20, context_id="ctx1")
+            if isinstance(f, TTSTextFrame)
+        ]
+        self.assertEqual(words[0].raw_text, "<card>4111</card>")
+
+    async def test_resync_carries_the_skipped_words_into_context(self):
         seq = await self._seq_past_the_tag()
         seq.process_word("whenx", pts=20, context_id="ctx1")
         words = [
@@ -2266,7 +2316,7 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
             if isinstance(f, TTSTextFrame)
         ]
         self.assertEqual([f.text for f in words], ["when it is"])
-        self.assertEqual(words[0].raw_text, "</card> when it is")
+        self.assertEqual(words[0].raw_text, "when it is")
 
     async def test_slot_completes_after_the_resync(self):
         seq = await self._seq_past_the_tag()

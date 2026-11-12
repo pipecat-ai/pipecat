@@ -11,13 +11,18 @@ import asyncio
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     Frame,
+    ProposedUserStartedSpeakingFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserTurnResponseCancelFrame,
+    VADUserStartedSpeakingFrame,
 )
-from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
+from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
 class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
@@ -28,14 +33,21 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     strategy starts generating a response on that prediction, so the gap between
     it and the committed end of turn is spent generating rather than waiting.
 
+    A prediction covers the speech since the service last committed a
+    transcript, and is checked against the transcript committed after it. A turn
+    held open across several commits, such as by
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
+    predicts each in turn, and the user aggregator puts any earlier transcripts
+    the context doesn't hold yet ahead of it.
+
     The prediction can be wrong in three ways, and each withdraws the response:
 
     - the user resumes speaking, and the service withdraws the eager end of turn
     - the committed transcript differs from the eager one, per ``match_policy``
     - the turn never commits within ``speculation_timeout``
 
-    Every one of those leaves as an
-    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` from here, so a
+    Every one of those leaves as a
+    :class:`~pipecat.frames.frames.UserTurnResponseCancelFrame` from here, so a
     response is never dropped somewhere the rest of the pipeline cannot see.
 
     Nothing the speculation produces reaches the user or the context. The
@@ -78,52 +90,88 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         self._speculation_timeout = speculation_timeout
         self._speculation_timeout_task: asyncio.Task | None = None
         self._speculation: UserTurnSpeculation | None = None
+        # The speculation this turn's end confirmed. Other stop strategies
+        # may still be deciding, and a stop asked for again confirms it again.
+        self._confirmed: UserTurnSpeculation | None = None
+        # Transcripts committed since the last eager end of turn, which its
+        # prediction is checked against.
+        self._committed_parts: list[TextPartForConcatenation] = []
 
     @property
     def match_policy(self) -> EagerMatchPolicy:
         """The policy deciding whether a speculative response still applies."""
         return self._match_policy
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
-        """Start a speculation on an eager end of turn, or withdraw one.
+    async def cleanup(self):
+        """Cleanup the strategy, stopping the timer of a speculation in flight."""
+        await super().cleanup()
+        await self._take_speculation()
+
+    async def process_frame(self, frame: Frame):
+        """Start a speculation on an eager end of turn, withdraw one, or forget one.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always CONTINUE, so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, EagerTranscriptionFrame):
             await self._speculate(frame)
-        elif isinstance(frame, EagerEndOfTurnCancelFrame):
+        elif isinstance(frame, UserTurnResponseCancelFrame):
             # The service withdrew its prediction, and its frame reaches every
             # consumer on its own. Only our own state is left to clear.
             await self._forget()
+        elif isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+            ),
+        ):
+            # Speech voids the turn's answer, and with it the confirmation of
+            # the speculation that gave it.
+            self._confirmed = None
+        elif isinstance(frame, TranscriptionFrame):
+            self._committed_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
 
-        return await super().process_frame(frame)
+        await super().process_frame(frame)
 
-    async def trigger_user_turn_stopped(self, *, enable_user_speaking_frames: bool | None = None):
-        """End the turn, keeping the speculative response only if it still applies.
+    async def report_user_turn_stopped(
+        self,
+        *,
+        enable_user_speaking_frames: bool | None = None,
+        confirms_speculation: bool = False,
+    ):
+        """Report that the user is done, keeping the speculative response only if it applies.
 
         Args:
             enable_user_speaking_frames: Whether to emit
                 :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` for this
                 turn.
+            confirms_speculation: Whether a response generated ahead of this
+                turn ending already answers it. The strategy decides this
+                itself for its own speculation.
         """
-        speculation = await self._take_speculation()
+        speculation = await self._take_speculation() or self._confirmed
         if not speculation:
-            await super().trigger_user_turn_stopped(
-                enable_user_speaking_frames=enable_user_speaking_frames
+            await super().report_user_turn_stopped(
+                enable_user_speaking_frames=enable_user_speaking_frames,
+                confirms_speculation=confirms_speculation,
             )
             return
 
-        if self._match_policy.matches(speculation.text, self._text):
+        committed = concatenate_aggregated_text(self._committed_parts)
+        if self._match_policy.matches(speculation.text, committed):
             logger.debug(f"{self}: eager end of turn held, keeping the speculative response")
-            # Inference already ran, on the eager transcript. Only finalize:
-            # the UserStoppedSpeakingFrame it emits is what releases the
+            self._confirmed = speculation
+            # Inference already ran, on the eager transcript. The
+            # UserStoppedSpeakingFrame the turn end emits is what releases the
             # response, and the flag stops a second inference answering the
             # same turn.
-            await self.trigger_user_turn_finalized(
+            await super().report_user_turn_stopped(
                 enable_user_speaking_frames=enable_user_speaking_frames,
                 confirms_speculation=True,
             )
@@ -131,38 +179,41 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         logger.debug(
             f"{self}: eager end of turn missed, discarding the speculative response "
-            f"(eager: [{speculation.text}], committed: [{self._text}])"
+            f"(eager: [{speculation.text}], committed: [{committed}])"
         )
-        await self.trigger_user_turn_speculation_cancelled()
-        # Inference has to run again, on the committed transcript, so fire both
-        # events rather than just finalizing.
-        await super().trigger_user_turn_stopped(
+        self._confirmed = None
+        await self.cancel_user_turn_speculation()
+        # The committed transcript needs an inference of its own, which the
+        # controller runs for this decision.
+        await super().report_user_turn_stopped(
             enable_user_speaking_frames=enable_user_speaking_frames
         )
 
     async def _reset(self):
         """Clear per-turn state. Runs at both turn boundaries."""
         speculation = await self._take_speculation()
+        self._confirmed = None
+        self._committed_parts = []
         await super()._reset()
         if speculation:
             # The turn ended without resolving the speculation — the stop
             # watchdog, an interruption, session end. Nothing else will withdraw
             # it, so the response would be held until the gate times out.
             logger.debug(f"{self}: turn ended unresolved, discarding the speculative response")
-            await self.trigger_user_turn_speculation_cancelled()
+            await self.cancel_user_turn_speculation()
 
     async def _speculate(self, frame: EagerTranscriptionFrame):
         """Answer an eager end of turn, leaving the turn open."""
-        # Segments committed earlier in this turn are part of what the LLM will
-        # see, so they're part of what the committed transcript is compared to.
-        speculation = UserTurnSpeculation(text=self._text + frame.text)
+        speculation = UserTurnSpeculation(text=frame.text, perception=frame.perception)
         self._speculation = speculation
+        self._confirmed = None
+        self._committed_parts = []
         self._speculation_timeout_task = self.task_manager.create_task(
             self._speculation_timeout_handler(speculation),
             f"{self}::_speculation_timeout_handler",
         )
         logger.debug(f"{self}: speculating on eager end of turn: [{speculation.text}]")
-        await self.trigger_user_turn_inference_triggered(speculation=speculation)
+        await self.start_user_turn_speculation(speculation)
 
     async def _speculation_timeout_handler(self, speculation: UserTurnSpeculation):
         """Withdraw a prediction the turn never resolved."""
@@ -178,7 +229,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             "discarding the speculative response"
         )
         self._speculation = None
-        await self.trigger_user_turn_speculation_cancelled()
+        await self.cancel_user_turn_speculation()
 
     async def _take_speculation(self) -> UserTurnSpeculation | None:
         """Take the speculation in flight, stopping the clock on it.
@@ -195,3 +246,4 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     async def _forget(self):
         """Drop a speculation the service withdrew."""
         await self._take_speculation()
+        self._confirmed = None

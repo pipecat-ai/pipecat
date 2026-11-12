@@ -50,6 +50,7 @@ from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
+    from pipecat.expressive.policy import ExpressionPolicy
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
     from pipecat.workers.runner import WorkerRunner
@@ -78,9 +79,15 @@ class FrameProcessorSetup:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         clock: The clock instance for timing operations.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.enable_expressive_conversation`.
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.expression_policy`.
         pipeline_worker: The :class:`~pipecat.pipeline.worker.PipelineWorker` running this pipeline. Stored
             on each processor as ``self.pipeline_worker`` so processors can
             reach task-scoped state (e.g. ``self.pipeline_worker.app_resources``).
@@ -103,9 +110,11 @@ class FrameProcessorSetup:
     pipeline_worker: PipelineWorker
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
+    expression_policy: ExpressionPolicy | None = None
     observer: BaseObserver | None = None
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None
@@ -1177,6 +1186,28 @@ class FrameProcessor(BaseObject):
                 # all, so its cause can't be attributed.
                 category=ErrorCategory.UNKNOWN,
             )
+
+    async def _cancel_frame_in_progress(self, frame: Frame) -> bool:
+        """Stop processing a frame if it is the one in progress, leaving the queue as it is.
+
+        Unlike :meth:`_start_interruption`, this drops nothing else: the frames
+        queued behind the cancelled one, interruptible or not, are processed
+        next. The cancelled frame's callback, if any, is not called.
+
+        Call it from a system frame's processing, as interruptions are, so it
+        runs on the input task and never overlaps an interruption.
+
+        Args:
+            frame: The frame to stop processing.
+
+        Returns:
+            Whether ``frame`` was in progress and its processing was cancelled.
+        """
+        if self.__process_current_frame is not frame or not self.__process_frame_task:
+            return False
+        await self.__cancel_process_task()
+        self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
+        return True
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         """Internal method to push frames to adjacent processors.

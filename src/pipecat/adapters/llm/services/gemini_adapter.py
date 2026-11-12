@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -38,6 +39,164 @@ class GeminiLLMInvocationParams(TypedDict):
     system_instruction: str | None
     messages: list[Content]
     tools: list[Any] | NotGiven
+
+
+def gemini_function_declarations(
+    functions: list[FunctionSchema], warned: set[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Convert function schemas to Gemini function declarations.
+
+    Each schema is adapted to the subset of JSON Schema Gemini accepts (see
+    :func:`_adapt_gemini_schema`), and the adaptations are logged as a warning
+    once per tool, so a stable tool set warns on the first inference rather
+    than on all of them, while a tool added later still gets reported.
+
+    Args:
+        functions: The function schemas to convert.
+        warned: The (adaptation, tool name) pairs already reported. Updated
+            in place with the ones this call reports.
+
+    Returns:
+        One function declaration per schema, with ``name``, ``description``
+        and ``parameters``.
+    """
+    declarations = []
+    adapted: dict[str, list[str]] = {}
+    for func in functions:
+        func_dict = func.to_default_dict()
+        notes: set[str] = set()
+        func_dict["parameters"] = _adapt_gemini_schema(func_dict["parameters"], notes)
+        for note in notes:
+            adapted.setdefault(note, []).append(func_dict["name"])
+        declarations.append(func_dict)
+
+    lines = []
+    for note, tools in sorted(adapted.items()):
+        fresh = [t for t in tools if (note, t) not in warned]
+        if not fresh:
+            continue
+        warned.update((note, t) for t in fresh)
+        listed = ", ".join(fresh[:3])
+        if len(fresh) > 3:
+            listed += f" and {len(fresh) - 3} more"
+        lines.append(f"  {note}: {listed}")
+    if lines:
+        logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
+
+    return declarations
+
+
+def _adapt_gemini_schema(schema: Any, notes: set[str]) -> Any:
+    """Recursively adapt a JSON schema to the subset Gemini accepts.
+
+    Tool schemas are JSON Schema, but Gemini takes only a limited subset of it
+    — its schema object follows OpenAPI 3.0's, which predates JSON Schema
+    alignment — and it rejects anything outside that subset. Three constructs
+    need adapting:
+
+    - Keys it has no field for, namely ``additionalProperties`` and vendor
+      extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's MCP
+      server attaches to its tool properties), are dropped.
+    - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
+    - ``enum`` members must be strings, so an ``enum`` holding other values is
+      dropped and its constraint lost.
+
+    Args:
+        schema: The JSON schema to process.
+        notes: Collects one description per kind of adaptation applied.
+
+    Returns:
+        The schema, in the form Gemini accepts.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    result: dict[str, Any] = {}
+
+    for key, value in schema.items():
+        if key == "additionalProperties" or key.startswith("x-"):
+            notes.add(f"dropped unsupported key '{key}'")
+        elif key == "properties" and isinstance(value, dict):
+            # Keys here name the tool's parameters rather than schema keywords,
+            # so adapt the values but keep every key.
+            result[key] = {name: _adapt_gemini_schema(prop, notes) for name, prop in value.items()}
+        elif key == "type" and isinstance(value, list):
+            notes.add("converted a union 'type' to 'anyOf'")
+            result["anyOf"] = [{"type": member} for member in value]
+        elif (
+            key == "enum"
+            and isinstance(value, list)
+            and not all(isinstance(member, str) for member in value)
+        ):
+            notes.add("dropped a non-string 'enum', losing its constraint")
+        elif isinstance(value, dict):
+            result[key] = _adapt_gemini_schema(value, notes)
+        elif isinstance(value, list):
+            result[key] = [_adapt_gemini_schema(item, notes) for item in value]
+        else:
+            result[key] = value
+
+    return result
+
+
+# Gemini 3 rejects a model turn whose function calls carry no thought
+# signature, which is what a call from another provider (an LLM switched
+# mid-conversation) or one injected by the application looks like. Google
+# documents this placeholder to skip that check; both the Gemini API and
+# Vertex AI accept it, and the SDK encodes it on the wire as it would a
+# real signature.
+GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
+
+
+def gemini_thought_signature_message(
+    signature: bytes | str, bookmark: dict[str, Any]
+) -> dict[str, Any]:
+    """The Google-specific context message that stores a thought signature.
+
+    Every Gemini service stores signatures this way and every Gemini adapter
+    reads them back, so a context carries them between the services.
+
+    Args:
+        signature: The signature, as raw bytes, or as base64 text when it
+            arrived in a form that doesn't decode.
+        bookmark: What the signature arrived with, for putting it back in
+            place: ``{"function_call": <call id>}``, ``{"text": <text>}`` or
+            ``{"inline_data": <Blob>}``.
+
+    Returns:
+        The message, to wrap with the adapter's ``create_llm_specific_message``.
+    """
+    return {"type": "thought_signature", "signature": signature, "bookmark": bookmark}
+
+
+def gemini_text_bookmark_matches(bookmark_text: str, text: str) -> bool:
+    """Whether a thought signature's text bookmark names a reply's text.
+
+    Whitespace is normalized, and either text may be a prefix of the other: an
+    interruption cuts the stored text short, and a signature can arrive with
+    the first chunk of a reply.
+
+    Args:
+        bookmark_text: The text the signature arrived with.
+        text: The text of a reply in the context.
+    """
+    bookmark_text = " ".join(bookmark_text.split())
+    text = " ".join(text.split())
+    return bool(text) and (bookmark_text.startswith(text) or text.startswith(bookmark_text))
+
+
+def gemini_supports_file_url(url: str) -> bool:
+    """Whether the Gemini developer API reads a file URL itself.
+
+    Only its own Files API URIs qualify; other URLs must be inlined.
+
+    Args:
+        url: The file URL.
+    """
+    hostname = urlsplit(url).hostname or ""
+    return url.startswith("https://") and (
+        hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
+    )
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
@@ -109,71 +268,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             List of tool definitions formatted for Gemini's function-calling API.
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
-
-        def _adapt_schema(schema: Any, notes: set[str]) -> Any:
-            """Recursively adapt a JSON schema to the subset Gemini accepts.
-
-            Tool schemas are JSON Schema, but Gemini takes only a limited subset
-            of it — its schema object follows OpenAPI 3.0's, which predates JSON
-            Schema alignment — and it rejects anything outside that subset. Three
-            constructs need adapting:
-
-            - Keys it has no field for, namely ``additionalProperties`` and vendor
-              extensions (``x-`` prefixed, such as the ``x-mcp-header`` GitHub's
-              MCP server attaches to its tool properties), are dropped.
-            - A union ``type`` (a list of types) becomes the equivalent ``anyOf``.
-            - ``enum`` members must be strings, so an ``enum`` holding other values
-              is dropped and its constraint lost.
-
-            Args:
-                schema: The JSON schema to process.
-                notes: Collects one description per kind of adaptation applied.
-
-            Returns:
-                The schema, in the form Gemini accepts.
-            """
-            if not isinstance(schema, dict):
-                return schema
-
-            result: dict[str, Any] = {}
-
-            for key, value in schema.items():
-                if key == "additionalProperties" or key.startswith("x-"):
-                    notes.add(f"dropped unsupported key '{key}'")
-                elif key == "properties" and isinstance(value, dict):
-                    # Keys here name the tool's parameters rather than schema
-                    # keywords, so adapt the values but keep every key.
-                    result[key] = {name: _adapt_schema(prop, notes) for name, prop in value.items()}
-                elif key == "type" and isinstance(value, list):
-                    notes.add("converted a union 'type' to 'anyOf'")
-                    result["anyOf"] = [{"type": member} for member in value]
-                elif (
-                    key == "enum"
-                    and isinstance(value, list)
-                    and not all(isinstance(member, str) for member in value)
-                ):
-                    notes.add("dropped a non-string 'enum', losing its constraint")
-                elif isinstance(value, dict):
-                    result[key] = _adapt_schema(value, notes)
-                elif isinstance(value, list):
-                    result[key] = [_adapt_schema(item, notes) for item in value]
-                else:
-                    result[key] = value
-
-            return result
-
         functions_schema = tools_schema.standard_tools
         if functions_schema:
-            formatted_functions = []
-            adapted: dict[str, list[str]] = {}
-            for func in functions_schema:
-                func_dict = func.to_default_dict()
-                notes: set[str] = set()
-                func_dict["parameters"] = _adapt_schema(func_dict["parameters"], notes)
-                for note in notes:
-                    adapted.setdefault(note, []).append(func_dict["name"])
-                formatted_functions.append(func_dict)
-            self._warn_schema_adaptations(adapted)
+            formatted_functions = gemini_function_declarations(
+                functions_schema, self._warned_schema_adaptations
+            )
             formatted_standard_tools = [{"function_declarations": formatted_functions}]
         else:
             formatted_standard_tools = []
@@ -182,30 +281,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
         return formatted_standard_tools + custom_gemini_tools
-
-    def _warn_schema_adaptations(self, adapted: dict[str, list[str]]) -> None:
-        """Report tool schemas that had to be adapted before Gemini would accept them.
-
-        Each (adaptation, tool) pair is reported once, so a stable tool set warns
-        on the first inference rather than on all of them, while a tool added
-        later still gets reported.
-
-        Args:
-            adapted: Adaptation description mapped to the tools it applied to.
-        """
-        lines = []
-        for note, tools in sorted(adapted.items()):
-            fresh = [t for t in tools if (note, t) not in self._warned_schema_adaptations]
-            if not fresh:
-                continue
-            self._warned_schema_adaptations.update((note, t) for t in fresh)
-            listed = ", ".join(fresh[:3])
-            if len(fresh) > 3:
-                listed += f" and {len(fresh) - 3} more"
-            lines.append(f"  {note}: {listed}")
-
-        if lines:
-            logger.warning("Adapted tool schemas Gemini doesn't accept as-is:\n" + "\n".join(lines))
 
     @staticmethod
     def to_function_response_dict(content: Any) -> dict[str, Any]:
@@ -299,10 +374,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         to use instead). Only Vertex reads ``gs://`` directly — see
         :class:`GeminiVertexLLMAdapter`.
         """
-        hostname = urlsplit(url).hostname or ""
-        return url.startswith("https://") and (
-            hostname == "googleapis.com" or hostname.endswith(".googleapis.com")
-        )
+        return gemini_supports_file_url(url)
 
     @dataclass
     class MessageConversionParams:
@@ -738,14 +810,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return merged_messages
 
-    # Gemini 3 rejects a model turn whose function calls carry no thought
-    # signature, which is what a call from another provider (an LLM switched
-    # mid-conversation) or one injected by the application looks like. Google
-    # documents this placeholder to skip that check; both the Gemini API and
-    # Vertex AI accept it, and the SDK encodes it on the wire as it would a
-    # real signature.
-    _PLACEHOLDER_THOUGHT_SIGNATURE = b"skip_thought_signature_validator"
-
     def _add_placeholder_thought_signatures(self, messages: list[Content]) -> None:
         """Give function calls in unsigned model turns the placeholder signature.
 
@@ -759,7 +823,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 continue
             for part in message.parts:
                 if getattr(part, "function_call", None):
-                    part.thought_signature = self._PLACEHOLDER_THOUGHT_SIGNATURE
+                    part.thought_signature = GEMINI_PLACEHOLDER_THOUGHT_SIGNATURE
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: list[dict], messages: list[Content]
@@ -865,18 +929,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
     def _thought_signature_text_bookmark_matches_part(self, bookmark_text: str, part: Part) -> bool:
         if hasattr(part, "text") and part.text:
-            # Normalize whitespace for comparison
-            bookmark_text = " ".join(bookmark_text.split())
-            part_text = " ".join(part.text.split())
-            # Check that either:
-            # - the part text is the same as the bookmark text
-            # - a prefix of the bookmark text (in case the part text was truncated due to interruption)
-            # - the bookmark text is a prefix of the part text (in case the bookmark represents just first chunk of multi-chunk text)
-            if (
-                part_text == bookmark_text
-                or bookmark_text.startswith(part_text)
-                or part_text.startswith(bookmark_text)
-            ):
+            if gemini_text_bookmark_matches(bookmark_text, part.text):
                 log_display_text = f"{part.text[:50]}..." if len(part.text) > 50 else part.text
                 logger.trace(f"Thought signature text match: {log_display_text}")
                 return True

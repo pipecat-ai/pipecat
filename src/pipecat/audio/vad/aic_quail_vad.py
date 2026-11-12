@@ -23,7 +23,7 @@ from aic_sdk import (
     ProcessorConfig,
     Vad,
     VadContext,
-    # Exported at runtime but absent from aic-sdk 3.0.0's type stub.
+    # Exported at runtime but absent from aic-sdk's type stub.
     set_sdk_id,  # type: ignore[attr-defined]
 )
 from loguru import logger
@@ -31,7 +31,7 @@ from loguru import logger
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.utils.deprecation import warn_deprecated
 
-DEFAULT_QUAIL_VAD_MODEL_ID = "vad-2.1-xxs-16khz"
+DEFAULT_QUAIL_VAD_MODEL_ID = "vad-ms-2.1-xxs-16khz"
 
 # Telemetry identifier registered with the AIC SDK; identifies pipecat to the
 # vendor's usage pipeline. Mirrors the value used by AICFilter; kept private
@@ -94,7 +94,7 @@ class AICQuailVADAnalyzer(VADAnalyzer):
         Args:
             license_key: ai-coustics SDK license key.
             model_id: Dedicated VAD model identifier. Defaults to
-                ``"vad-2.1-xxs-16khz"``. See https://artifacts.ai-coustics.io/
+                ``"vad-ms-2.1-xxs-16khz"``. See https://artifacts.ai-coustics.io/
                 for the catalogue. Ignored if ``model_path`` is provided.
                 Enhancement models are rejected by the SDK.
             model_path: Optional path to a local ``.aicmodel`` file. Overrides

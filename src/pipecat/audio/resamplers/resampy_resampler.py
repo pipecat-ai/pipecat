@@ -11,15 +11,22 @@ for high-quality audio sample rate conversion.
 """
 
 import numpy as np
-import resampy
+from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.utils.deprecation import deprecated
 
+try:
+    import resampy
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use ResampyResampler, you need to `uv add "pipecat-ai[resampy]"`.')
+    raise ImportError(f"Missing module: {e}") from e
+
 
 @deprecated(
     "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use "
-    "`SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead."
+    "`SincAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead."
 )
 class ResampyResampler(BaseAudioResampler):
     """Audio resampler implementation using the resampy library.
@@ -28,7 +35,7 @@ class ResampyResampler(BaseAudioResampler):
     for high-quality audio resampling with good performance characteristics.
 
     .. deprecated:: 1.2.0
-        Use :class:`SOXRAudioResampler`, :func:`create_file_resampler()`,
+        Use :class:`SincAudioResampler`, :func:`create_file_resampler()`,
         or :func:`create_stream_resampler()` instead. Will be removed in 2.0.0.
     """
 

@@ -19,6 +19,8 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.minimax_adapter import MiniMaxExpressionAdapter
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -28,9 +30,9 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.deprecation import deprecated
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 
 def language_to_minimax_language(language: Language) -> str:
@@ -103,8 +105,29 @@ class MiniMaxTTSSettings(TTSSettings):
             "disgusted", "surprised", "calm", "fluent", "whisper"). "fluent" and
             "whisper" need a speech-2.6 model.
         text_normalization: Enable text normalization (Chinese/English).
+
+            .. deprecated:: 1.16.0
+                Use ``text_normalization_mode="basic"`` instead. Will be removed
+                in 2.0.0.
+
+        text_normalization_mode: Normalization mode, "basic" (rule-based) or "quality".
+            Takes precedence over ``text_normalization``. "quality" applies to
+            non-streaming requests on the speech-2.6 and speech-2.8 models, and is
+            treated as "basic" elsewhere.
         latex_read: Enable LaTeX formula reading.
         language_boost: Language boost string for multilingual support.
+        pronunciation_dict: Pronunciation replacements, each an
+            ``"original/replacement"`` string. The replacement is plain text
+            (``"omg/oh my god"``), IPA in parentheses (``"Pipecat/(ˈpaɪpkæt)"``),
+            pinyin with tone numbers in parentheses (``"处理/(chu3)(li3)"``), or
+            Japanese kana. Sent as the request's ``pronunciation_dict.tone`` list.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -112,8 +135,10 @@ class MiniMaxTTSSettings(TTSSettings):
     pitch: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     emotion: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization_mode: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latex_read: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -244,7 +269,9 @@ class MiniMaxHttpTTSService(TTSService):
             language_boost=None,
             emotion=None,
             text_normalization=None,
+            text_normalization_mode=None,
             latex_read=None,
+            pronunciation_dict=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -297,6 +324,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
+            self._warn_if_text_normalization(settings)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -318,6 +346,19 @@ class MiniMaxHttpTTSService(TTSService):
         self._audio_format = "pcm"
         self._audio_channel = 1
         self._audio_sample_rate = 0  # Set in start()
+
+        self._speech_28_expression_adapter = MiniMaxExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: speech-2.8 models perform expression, others none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("speech-2.8"):
+            return self._speech_28_expression_adapter
+        return super().get_expression_adapter()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -374,8 +415,9 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.emotion is not None:
             voice_setting["emotion"] = self._settings.emotion
-        if self._settings.text_normalization is not None:
-            voice_setting["text_normalization"] = self._settings.text_normalization
+        # In expressive conversation, the request's delivery chooses its emotion and
+        # its speed.
+        voice_setting.update(self.expression_settings)
         if self._settings.latex_read is not None:
             voice_setting["latex_read"] = self._settings.latex_read
 
@@ -397,6 +439,12 @@ class MiniMaxHttpTTSService(TTSService):
         }
         if self._settings.language_boost is not None:
             payload["language_boost"] = self._settings.language_boost
+        text_normalization_mode = self._text_normalization_mode()
+        if text_normalization_mode is not None:
+            payload["text_normalization_mode"] = text_normalization_mode
+        pronunciation_dict = assert_given(self._settings.pronunciation_dict)
+        if pronunciation_dict is not None:
+            payload["pronunciation_dict"] = {"tone": pronunciation_dict}
 
         try:
             async with self._session.post(
@@ -484,3 +532,35 @@ class MiniMaxHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
+
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta, warning if it sets ``text_normalization``.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        self._warn_if_text_normalization(delta)
+        return await super()._update_settings(delta)
+
+    def _warn_if_text_normalization(self, settings: TTSSettings):
+        """Warn if ``settings`` sets the deprecated ``text_normalization``."""
+        if (
+            isinstance(settings, self.Settings)
+            and is_given(settings.text_normalization)
+            and settings.text_normalization is not None
+        ):
+            warn_deprecated(
+                "`MiniMaxHttpTTSService.Settings.text_normalization` is deprecated since 1.16.0 "
+                'and will be removed in 2.0.0. Use `text_normalization_mode="basic"` instead.',
+                stacklevel=3,
+            )
+
+    def _text_normalization_mode(self) -> str | None:
+        """Return the mode to request, with ``text_normalization`` read as "basic"."""
+        mode = assert_given(self._settings.text_normalization_mode)
+        if mode is None and self._settings.text_normalization:
+            mode = "basic"
+        return mode

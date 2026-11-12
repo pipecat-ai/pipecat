@@ -4,12 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Judges a conversation against a simulation's ``success`` and its criterion metrics.
+"""Judges a conversation against a simulation's, or a rubric's, ``success`` and criterion metrics.
 
 The simulation driver judges a run with it when the run ends, and ``pipecat
 eval judge`` judges saved conversation files with it, so a conversation gets
-the same verdicts either way. Measured metrics are not its part: they come
-from a live run, not from what was said.
+the same verdicts either way. With an
+:class:`~pipecat.evals.simulation.EvalRubric`, it judges a conversation no
+simulation produced, such as a production call. Measured metrics are not its
+part: they come from a live run, not from what was said.
 """
 
 import json
@@ -17,7 +19,7 @@ from dataclasses import dataclass
 
 from pipecat.evals.judge import EvalJudge, JudgeVerdict
 from pipecat.evals.results import EvalSimulationMetricScore, EvalSimulationTurnVerdict, EvalTrace
-from pipecat.evals.simulation import EvalSimulationMetric, EvalSimulationScenario
+from pipecat.evals.simulation import EvalRubric, EvalSimulationMetric, EvalSimulationScenario
 
 
 @dataclass
@@ -25,8 +27,8 @@ class EvalSimulationJudgement:
     """What the judge decided about one conversation.
 
     Parameters:
-        goal: The verdict on the simulation's ``success``: ``yes``, ``no``, or
-            ``none`` when the judge gave none.
+        goal: The verdict on the ``success``: ``yes``, ``no``, or ``none``
+            when the judge gave none.
         metrics: The criterion metrics' outcomes, in the simulation's order.
     """
 
@@ -35,7 +37,7 @@ class EvalSimulationJudgement:
 
 
 class EvalSimulationJudge:
-    """Judges conversations against a simulation.
+    """Judges conversations against a simulation or a rubric.
 
     Each conversation is judged by a judge built from the simulation's
     ``judge`` config, closed once the conversation is judged. A judge passed
@@ -45,13 +47,19 @@ class EvalSimulationJudge:
     Example::
 
         scenario = EvalScenarioFile.load("book_table.yaml")["book_table/available"]
-        messages = json.loads(Path("run.conversation.json").read_text())
+        messages = json.loads(Path("run.conversation.json").read_text(encoding="utf-8"))
         judgement = await EvalSimulationJudge(scenario).judge(messages)
+
+    A production call, recorded by
+    :class:`~pipecat.evals.conversation_observer.EvalConversationObserver`::
+
+        rubric = EvalScenarioFile.load("food_ordering.yaml")["food_ordering/production"]
+        judgement = await EvalSimulationJudge(rubric).judge(message.conversation)
     """
 
     def __init__(
         self,
-        simulation: EvalSimulationScenario,
+        simulation: EvalSimulationScenario | EvalRubric,
         *,
         judge: EvalJudge | None = None,
         explain_below: float | None = None,
@@ -60,7 +68,8 @@ class EvalSimulationJudge:
         """Initialize the simulation judge.
 
         Args:
-            simulation: The simulation whose ``success`` and metrics to judge.
+            simulation: The simulation, or the rubric, whose ``success`` and
+                metrics to judge.
             judge: The judge to ask, which should not have seen any
                 conversation yet; ``None`` builds one for each conversation.
             explain_below: For the judges it builds, a ``yes`` less sure than

@@ -7,7 +7,9 @@
 """Observer that records a bot's conversation as a conversation file holds it.
 
 It lets a call the harness didn't drive, such as a production one, be judged
-with ``pipecat eval judge`` against a simulation's ``success`` and metrics.
+with ``pipecat eval judge`` against a rubric
+(:class:`~pipecat.evals.simulation.EvalRubric`) or a simulation's ``success``
+and metrics.
 """
 
 from dataclasses import dataclass
@@ -64,7 +66,7 @@ class EvalConversationObserver(BaseObserver):
 
         @observer.event_handler("on_conversation_ended")
         async def on_conversation_ended(observer, message: EvalConversationEndedMessage):
-            Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2))
+            Path("call.conversation.json").write_text(json.dumps(message.conversation, indent=2), encoding="utf-8")
 
         worker = PipelineWorker(pipeline, observers=[observer])
     """
@@ -93,6 +95,9 @@ class EvalConversationObserver(BaseObserver):
         if frame.broadcast_sibling_id is not None and data.direction != FrameDirection.DOWNSTREAM:
             return
 
+        if isinstance(frame, LLMContextUserTurnFrame) and frame.speculation:
+            # The turn is added once it ends, as written to the context.
+            return
         if isinstance(frame, (LLMContextUserTurnFrame, RTVISendTextFrame)):
             self._conversation.add_user_message(frame.text)
         elif isinstance(frame, LLMContextAssistantTurnFrame):

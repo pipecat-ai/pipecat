@@ -9,10 +9,22 @@
 import base64
 import json
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 import pytest
+from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TextType,
+    TTSTextFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.services.elevenlabs.dialogue.tts import (
     _KEEPALIVE_CONTEXT_ID,
     ElevenLabsDialogueTTSService,
@@ -21,6 +33,8 @@ from pipecat.services.elevenlabs.dialogue.tts import (
 )
 from pipecat.services.elevenlabs.tts import calculate_word_times
 from pipecat.services.tts_service import TextAggregationMode
+from pipecat.tests.utils import run_test
+from tests.test_tts_frame_ordering import _MockWordTimestampHttpTTSService
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
 
@@ -327,10 +341,45 @@ def test_dialogue_voice_settings_omitted_when_stability_unset():
     assert service._voice_settings is None
 
 
+def test_dialogue_clone_strength_is_sent_for_v4_models():
+    """The v4 websocket voice settings read clone_strength; it shapes v4 PVCs."""
+    service = _make_dialogue_service(stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3, "clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_alone_is_enough():
+    service = _make_dialogue_service(clone_strength=0.2)
+    assert service._voice_settings == {"clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_is_dropped_for_v3_models():
+    """Only eleven_v4 models read clone_strength; v3 reads stability alone."""
+    service = _make_dialogue_service(model="eleven_v3", stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3}
+
+
+def test_dialogue_clone_strength_change_does_not_require_reconnect():
+    """clone_strength rides in the per-context registration, not the URL."""
+    assert "clone_strength" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
+    assert "clone_strength" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
 def test_dialogue_voice_change_does_not_require_reconnect():
     """Voices are registered per context, so a voice change just needs a new one."""
     assert "voice" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
     assert "voice" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
+@pytest.mark.parametrize("mode", [None, "auto", "on", "off"])
+def test_dialogue_text_normalization_is_sent_only_when_set(mode):
+    service = _make_dialogue_service(apply_text_normalization=mode)
+    query = parse_qs(urlparse(service._build_websocket_url()).query)
+    assert query.get("apply_text_normalization") == ([mode] if mode else None)
+
+
+def test_dialogue_text_normalization_change_requires_reconnect():
+    """apply_text_normalization is a query parameter of the websocket URL."""
+    assert "apply_text_normalization" in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
 
 
 def test_dialogue_alignment_is_normalized_for_word_times():
@@ -373,7 +422,7 @@ async def test_dialogue_wordless_alignment_still_advances_the_clock():
             },
         }
     )
-    after_first = service._cumulative_time
+    after_first = service._word_clocks["ctx-1"].cumulative_time
     assert after_first == pytest.approx(0.560)
 
     # "!" alone: completes no word, but occupies 320ms of audio.
@@ -388,7 +437,7 @@ async def test_dialogue_wordless_alignment_still_advances_the_clock():
         }
     )
 
-    assert service._cumulative_time == pytest.approx(after_first + 0.320), (
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(after_first + 0.320), (
         "word-less alignment chunk dropped from the clock; later word timestamps would run early"
     )
 
@@ -456,9 +505,7 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
 
     service.add_word_timestamps = _noop
 
-    # The next turn is under way with a fresh clock.
-    service._cumulative_time = 0.0
-    service._partial_word = ""
+    # The next turn is under way.
     service._audio_context_manager.remove("ctx-1")
     await service._audio_context_manager.create("ctx-2")
 
@@ -474,9 +521,232 @@ async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
         }
     )
 
-    assert service._cumulative_time == 0.0, "drained context advanced the next turn's clock"
-    assert service._partial_word == "", "drained context left a partial word behind"
+    assert "ctx-1" not in service._word_clocks, "drained context's alignment was processed"
+    assert "ctx-2" not in service._word_clocks, "drained context disturbed the next turn's clock"
+
+
+def _ttd_message(context_id: str, text: str) -> dict:
+    """A Text-to-Dialogue alignment message for text, one character every 10ms."""
+    alignment = _alignment(text)
+    return {
+        "context_id": context_id,
+        "alignment": {
+            "chars": alignment["chars"],
+            "char_start_times_ms": alignment["charStartTimesMs"],
+            "char_durations_ms": alignment["charDurationsMs"],
+        },
+    }
+
+
+def test_dialogue_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_dialogue_service()._pause_frame_processing is True
+    service = ElevenLabsDialogueTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
+@pytest.mark.asyncio
+async def test_dialogue_interleaved_contexts_align_words_independently():
+    """The server generates concurrent contexts together and interleaves their
+    alignment on one socket; a word split across one context's chunks must not
+    pick up another context's characters or clock."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word, start) for word, start in word_times)
+
+    service.add_word_timestamps = _record
+
+    for context_id, chunk in (
+        ("ctx-1", "Hello wor"),
+        ("ctx-2", "Good mor"),
+        ("ctx-1", "ld again "),
+        ("ctx-2", "ning all "),
+    ):
+        await service._handle_message(_ttd_message(context_id, chunk))
+
+    assert [(c, w) for c, w, _ in reported if c == "ctx-1"] == [
+        ("ctx-1", "Hello"),
+        ("ctx-1", "world"),
+        ("ctx-1", "again"),
+    ]
+    assert [(c, w) for c, w, _ in reported if c == "ctx-2"] == [
+        ("ctx-2", "Good"),
+        ("ctx-2", "morning"),
+        ("ctx-2", "all"),
+    ]
+    # Each context's times run on its own clock: "again" starts after ctx-1's
+    # first chunk (90ms) plus "ld " (30ms), whatever ctx-2 sent in between.
+    starts = {(c, w): t for c, w, t in reported}
+    assert starts[("ctx-1", "world")] == pytest.approx(0.06)
+    assert starts[("ctx-1", "again")] == pytest.approx(0.09 + 0.03)
+    assert starts[("ctx-2", "morning")] == pytest.approx(0.05)
+    assert starts[("ctx-2", "all")] == pytest.approx(0.08 + 0.05)
+
+
+@pytest.mark.asyncio
+async def test_dialogue_context_completion_resets_only_its_own_clock():
+    """A context finishing while another is mid-word must not wipe that word."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word) for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    await service._handle_message(_ttd_message("ctx-1", "Done "))
+    await service._handle_message(_ttd_message("ctx-2", "Kail"))
+    service._reset_alignment_state("ctx-1")  # ctx-1's audio context completes
+    await service._handle_message(_ttd_message("ctx-2", "ash "))
+
+    assert "ctx-1" not in service._word_clocks
+    assert ("ctx-2", "Kailash") in reported
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _alignment(text: str, start_ms: int = 0) -> dict:
+    """Alignment for text, one character every 10ms."""
+    return {
+        "chars": list(text),
+        "charStartTimesMs": [start_ms + 10 * i for i in range(len(text))],
+        "charDurationsMs": [10] * len(text),
+    }
+
+
+def test_an_audio_tag_is_one_word():
+    word_times, partial, _ = calculate_word_times(
+        _alignment("10\u00a0000, [short pause] two"), 0.0, audio_tags=True
+    )
+
+    assert [word for word, _ in word_times] == ["10\u00a0000,", "[short pause]"]
+    assert partial == "two"
+
+
+def test_an_audio_tag_split_across_chunks_is_one_word():
+    first, partial, start = calculate_word_times(_alignment("[clear th"), 0.0, audio_tags=True)
+    second, partial, _ = calculate_word_times(
+        _alignment("roat] It's"), 0.0, partial, start, audio_tags=True
+    )
+
+    assert first == []
+    assert [word for word, _ in second] == ["[clear throat]"]
+    assert partial == "It's"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_word_timestamps_report_audio_tags_as_words():
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    for chunk in ("[exci", "ted] Good news [clear th", "roat] it's ", "back."):
+        alignment = _alignment(chunk)
+        await service._handle_message(
+            {
+                "context_id": "ctx-1",
+                "alignment": {
+                    "chars": alignment["chars"],
+                    "char_start_times_ms": alignment["charStartTimesMs"],
+                    "char_durations_ms": alignment["charDurationsMs"],
+                },
+            }
+        )
+
+    assert reported == ["[excited]", "Good", "news", "[clear throat]", "it's"]
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
+
+
+class TestAudioTagExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert capabilities.allows_free_text_sounds
+        assert capabilities.allows_free_text_delivery
+        assert capabilities.emphasis
+        assert capabilities.pause_range_ms == (100, 3000)
+
+    def test_delivery_names_are_single_words(self):
+        # A delivery tag separates its names by spaces.
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
+
+    def test_tags_formatted_where_delivery_changes(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
+
+    def test_slow_and_fast_are_written_as_pace_tags(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm] [slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], ["calm"]) == "[quickly] Hi."
+
+    def test_return_to_baseline_formats_nothing(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis_is_capitalized(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("back up", ["emphasis"], None) == "BACK UP"
+        assert adapter.format_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
+
+    def test_sounds(self):
+        assert ElevenLabsAudioTagExpressionAdapter().format_sound("laughs") == " [laughs] "
+
+    def test_pauses_are_short_or_long(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_pause(500) == " [short pause] "
+        assert adapter.format_pause(1500) == " [long pause] "
+
+
+class _AlignedTTSService(_MockWordTimestampHttpTTSService):
+    """Reports the words of what it's sent as ElevenLabs aligns them, audio tags whole."""
+
+    expression_adapter_class = ElevenLabsAudioTagExpressionAdapter
+
+    async def run_tts(self, text: str, context_id: str):
+        word_times, partial, start = calculate_word_times(_alignment(text), 0.0, audio_tags=True)
+        self._word_times = word_times + ([(partial, start)] if partial else [])
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tag", ["[[inhales deeply]]", "[[clears throat]]", "[[pause 400]]"])
+async def test_every_word_around_a_tag_of_several_words_is_reported(tag):
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        down, _ = await run_test(
+            _AlignedTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(f"Here's a story. {tag} Every night, a lighthouse blinked."),
+                LLMFullResponseEndFrame(),
+            ],
+            pipeline_params=PipelineParams(enable_expressive_conversation=True),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    words = [f.text for f in down if isinstance(f, TTSTextFrame) and f.text_type == TextType.WORD]
+    assert words == ["Here's", "a", "story.", "Every", "night,", "a", "lighthouse", "blinked."]
+    assert not [w for w in warnings if "Dropping word" in w]
