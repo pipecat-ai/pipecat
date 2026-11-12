@@ -11,6 +11,7 @@ processors without modifying the pipeline structure. Observers can be used
 for logging, debugging, analytics, and monitoring pipeline behavior.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -124,23 +125,68 @@ class BaseObserver(BaseObject):
     once, such as one that reports the moment a frame represents, is created
     with ``observe_every_push=False`` and is told about a frame only when it
     is first pushed.
+
+    By default an observer is also told about every frame. One that reads only
+    some frame classes is created with ``frame_types``, or overrides
+    :meth:`observes_frame_type`, and is told only about frames of those
+    classes, which spares it the audio frames a call is mostly made of.
     """
 
-    def __init__(self, *, observe_every_push: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        observe_every_push: bool = True,
+        frame_types: Sequence[type[Frame]] | None = None,
+        **kwargs,
+    ):
         """Initialize the observer.
 
         Args:
             observe_every_push: Whether to observe every push of a frame,
                 rather than only its first. Defaults to True.
+            frame_types: The frame classes the observer reads. It is told only
+                about frames of these classes and their subclasses. Defaults
+                to None, which tells it about every frame.
             **kwargs: Additional arguments passed to the parent class.
+
+        Raises:
+            TypeError: If ``frame_types`` holds anything but frame classes.
         """
         super().__init__(**kwargs)
         self._observe_every_push = observe_every_push
+        self._frame_types: tuple[type[Frame], ...] | None = None
+        if frame_types is not None:
+            self._frame_types = tuple(frame_types)
+            if not all(isinstance(t, type) and issubclass(t, Frame) for t in self._frame_types):
+                raise TypeError(f"frame_types must be frame classes, got {frame_types!r}")
 
     @property
     def observe_every_push(self) -> bool:
         """Whether the observer observes every push of a frame, not only the first."""
         return self._observe_every_push
+
+    def observes_frame_type(self, frame_type: type[Frame]) -> bool:
+        """Whether the observer is told about frames of the given class.
+
+        A frame of a class the observer doesn't observe is passed to neither
+        :meth:`on_push_frame` nor :meth:`on_process_frame`. By default this is
+        every class, or, when ``frame_types`` was given, those classes and
+        their subclasses. Override it to describe the classes another way,
+        such as every class but a few.
+
+        The answer is asked for once per frame class and kept while the
+        pipeline's observers stay the same, so it must depend only on the
+        class and on settings that don't change while the observer is
+        attached. If it raises, the error is logged and the observer is told
+        about the class.
+
+        Args:
+            frame_type: The class of the frames in question.
+
+        Returns:
+            Whether frames of this class are passed to the observer.
+        """
+        return self._frame_types is None or issubclass(frame_type, self._frame_types)
 
     async def on_process_frame(self, data: FrameProcessed):
         """Handle the event when a frame is being processed by a processor.

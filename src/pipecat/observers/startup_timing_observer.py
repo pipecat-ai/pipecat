@@ -234,6 +234,9 @@ class StartupTimingObserver(BaseObserver):
                 If None, all non-internal processors are measured.
             **kwargs: Additional arguments passed to parent class.
         """
+        # A subclass may read other frames: it observes every class unless given frame_types.
+        if type(self) is StartupTimingObserver:
+            kwargs.setdefault("frame_types", (StartFrame, BotConnectedFrame, ClientConnectedFrame))
         super().__init__(**kwargs)
         self._processor_types = processor_types
 
