@@ -58,7 +58,7 @@ from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated, warn_deprecated
-from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -944,6 +944,18 @@ _CLIENT_CHUNK_MS = 50
 # parameter (model, language, VAD tuning) or the account isn't enabled for it.
 _REJECTED_SETTINGS_CLOSE_CODE = 4000
 
+# Categories for the `code` of an `error` event that carries no `status_code`.
+# Sarvam closes a rejected key, rate limit and exhausted quota alike with 1003,
+# so the event, not the close code, says whether retrying can help.
+_ERROR_CODE_CATEGORIES = {
+    "invalid_subscription_key": ErrorCategory.AUTHENTICATION,
+    "beta_access_required": ErrorCategory.AUTHORIZATION,
+    "invalid_model": ErrorCategory.INVALID_REQUEST,
+    "invalid_request": ErrorCategory.INVALID_REQUEST,
+    "rate_limit_exceeded": ErrorCategory.RATE_LIMIT,
+    "quota_exceeded": ErrorCategory.QUOTA,
+}
+
 # Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
 # `language_code`; the rest share their `Settings` names. Of these,
 # `language_code`, `stream_type`, `mode`, and `prompt` are boundary-gated: the
@@ -1059,6 +1071,22 @@ class SarvamRealtimeSTTSettings(STTSettings):
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _error_event_category(message: dict[str, Any]) -> ErrorCategory | None:
+    """Categorize a Sarvam realtime `error` event.
+
+    The event's HTTP-style ``status_code`` decides when present (401 for a bad
+    key, 403 for a model the account can't use, 400 for a rejected setting,
+    429, 402); otherwise its ``code`` does. Events with neither, such as a
+    non-fatal ``transcriber_error``, are left for ``push_error`` to classify.
+    """
+    status_code = message.get("status_code")
+    if isinstance(status_code, int):
+        category = classify_http_status_code(status_code)
+        if category is not ErrorCategory.UNKNOWN:
+            return category
+    return _ERROR_CODE_CATEGORIES.get(message.get("code"))
 
 
 class SarvamRealtimeSTTService(WebsocketSTTService):
@@ -1424,7 +1452,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             async for message in messages:
                 await self._process_message(message)
         except ConnectionClosedError as e:
-            if e.rcvd is not None and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE:
+            if (
+                e.rcvd is not None
+                and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE
+                and self._is_service_usable
+            ):
                 await self.push_error(
                     error_msg=f"Sarvam realtime STT rejected the connection: {e.rcvd.reason}",
                     exception=e,
@@ -1625,6 +1657,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _handle_error(self, message: dict[str, Any]):
         await self.push_error(
             error_msg=f"Sarvam realtime STT error: {json.dumps(message, ensure_ascii=False)}",
+            category=_error_event_category(message),
         )
 
     async def _send_audio_chunk(self, chunk: bytes):
