@@ -557,7 +557,7 @@ class ProjectGenerator:
 
             if self.config.deploy_to_cloud:
                 console.print(
-                    "\n[dim]See https://docs.pipecat.ai/deployment/pipecat-cloud for deployment info.[/dim]\n"
+                    "\n[dim]See https://docs.pipecat.ai/pipecat-cloud/introduction for deployment info.[/dim]\n"
                 )
             else:
                 console.print(
@@ -597,7 +597,7 @@ class ProjectGenerator:
                 else "evals/starter_audio.yaml"
             )
             console.print(
-                "  • Test it headless: [bold cyan]uv run bot.py -t eval[/bold cyan], then in "
+                "  • Test it with evals: [bold cyan]uv run bot.py[/bold cyan], then in "
                 f"another terminal [bold cyan]uv run pipecat eval run {starter} -v[/bold cyan]"
             )
         if has_telephony:
@@ -609,7 +609,7 @@ class ProjectGenerator:
         # Add cloud deployment info if applicable
         if self.config.deploy_to_cloud:
             console.print(
-                "\n[dim]See https://docs.pipecat.ai/deployment/pipecat-cloud for deployment info.[/dim]\n"
+                "\n[dim]See https://docs.pipecat.ai/pipecat-cloud/introduction for deployment info.[/dim]\n"
             )
         else:
             console.print("\n[dim]See README.md for detailed setup instructions.[/dim]\n")
@@ -793,7 +793,7 @@ class ProjectGenerator:
             fmt = subprocess.run(
                 [*ruff, "format", str(project_path)],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
                 check=False,
             )
 
@@ -801,7 +801,7 @@ class ProjectGenerator:
             imports = subprocess.run(
                 [*ruff, "check", "--fix", "--select", "I", str(project_path)],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
                 check=False,
             )
         except (FileNotFoundError, OSError) as e:

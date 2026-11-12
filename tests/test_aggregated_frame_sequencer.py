@@ -31,7 +31,7 @@ import unittest
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
     TTSTextFrame,
 )
 from pipecat.utils.context.aggregated_frame_sequencer import (
@@ -51,7 +51,7 @@ def _seq(streaming: bool = False) -> AggregatedFrameSequencer:
 
 
 def _spoken_frame(text: str, raw_text: str | None = None) -> AggregatedTextFrame:
-    return AggregatedTextFrame(text, AggregationType.SENTENCE, raw_text=raw_text)
+    return AggregatedTextFrame(text, TextType.SENTENCE, raw_text=raw_text)
 
 
 def _skipped_frame(text: str) -> AggregatedTextFrame:
@@ -230,6 +230,13 @@ class TestProcessWordBasic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].text, "hello")
         self.assertEqual(result[0].pts, 100)
 
+    async def test_frame_segment_id(self):
+        seq = _seq()
+        segment = _spoken_frame("hello")
+        await seq.register_spoken(segment, "ctx1", "hello", True)
+        result = seq.process_word("hello", pts=1, context_id="ctx1")
+        self.assertEqual(result[0].segment_id, segment.id)
+
     async def test_frame_context_id(self):
         seq = await self._seq_with_spoken("hello", ctx="ctx99")
         result = seq.process_word("hello", pts=1, context_id="ctx99")
@@ -362,6 +369,16 @@ class TestProcessWordOverflow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word_frames[0].text, "abc")
         self.assertEqual(word_frames[1].text, "def")
 
+    async def test_overflow_words_carry_their_own_segment_id(self):
+        seq = _seq()
+        first, second = _spoken_frame("abc"), _spoken_frame("def")
+        await seq.register_spoken(first, "ctx1", "abc", True)
+        await seq.register_spoken(second, "ctx1", "def", True)
+
+        result = seq.process_word("abcdef", pts=100, context_id="ctx1")
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([f.segment_id for f in word_frames], [first.id, second.id])
+
     async def test_overflow_stays_within_context(self):
         seq = _seq()
         await seq.register_spoken(_spoken_frame("abc"), "ctx1", "abc", True)
@@ -461,6 +478,16 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tts_frames[0].text, "world")
         self.assertEqual(tts_frames[0].pts, 50)
 
+    async def test_remaining_text_carries_the_segment_id(self):
+        seq = _seq()
+        segment = _spoken_frame("hello world")
+        await seq.register_spoken(segment, "ctx1", "hello world", True)
+        seq.process_word("hello", pts=10, context_id="ctx1")
+
+        result = seq.force_complete("ctx1", last_word_pts=50)
+        tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(tts_frames[0].segment_id, segment.id)
+
     async def test_emits_full_text_when_no_words_arrived(self):
         seq = _seq()
         await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
@@ -469,6 +496,25 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertEqual(len(tts_frames), 1)
         self.assertEqual(tts_frames[0].text, "hello world")
+
+    async def test_drops_remaining_text_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)
+
+        result = seq.force_complete("ctx1", last_word_pts=0, emit_remaining=False)
+        self.assertEqual(result, [])
+        # The slot is complete, so a word arriving afterwards emits nothing.
+        self.assertEqual(seq.process_word("hello", pts=10, context_id="ctx1"), [])
+
+    async def test_flushes_skipped_frames_without_audio(self):
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("hello"), "ctx1", "hello", True)
+        skipped = _skipped_frame("code")
+        await seq.register_skipped(skipped, "ctx2", None)
+
+        result = seq.force_complete("ctx1", last_word_pts=20, emit_remaining=False)
+        self.assertEqual(result, [skipped])
+        self.assertTrue(skipped.append_to_context)
 
     async def test_already_complete_slot_emits_nothing(self):
         seq = _seq()
@@ -1038,7 +1084,7 @@ class TestAggregatedTextProgressFrame(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(progress), 1)
         p = progress[0]
         self.assertEqual(p.text, "hello")
-        self.assertEqual(p.aggregated_by, AggregationType.SENTENCE)
+        self.assertEqual(p.text_type, TextType.SENTENCE)
         self.assertEqual(p.accumulated_text, "hello")
         self.assertEqual(p.remaining_text, "")
         self.assertEqual(p.context_id, "ctx1")
@@ -1333,7 +1379,7 @@ class TestVoiceFormattingTransforms(unittest.IsolatedAsyncioTestCase):
 
     async def _setup(self):
         seq = AggregatedFrameSequencer(name="test-billing")
-        source = AggregatedTextFrame(_BILL_UF, AggregationType.SENTENCE, raw_text=_BILL_UF)
+        source = AggregatedTextFrame(_BILL_UF, TextType.SENTENCE, raw_text=_BILL_UF)
         await seq.register_spoken(source, "ctx1", _BILL_TTS, append_to_context=True)
         return seq, source
 
@@ -1479,6 +1525,32 @@ async def _stream(seq, ctx, *tokens):
 
 
 class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
+    async def test_promoted_sentence_keeps_the_type_its_text_was_given_with(self):
+        seq = _seq(streaming=True)
+        frame = AggregatedTextFrame("One moment, please.", "status")
+        await seq.register_spoken(frame, "ctx1", "One moment, please.", append_to_context=False)
+        await seq.finalize("ctx1")
+        self.assertEqual(seq._slots[0].frame.text_type, "status")
+
+    async def test_sentence_spoken_in_one_piece_carries_its_segment_id(self):
+        seq = _seq(streaming=True)
+        frame = AggregatedTextFrame("Hi there.", TextType.TOKEN)
+        result = await seq.register_spoken(
+            frame, "ctx1", "Hi there.", append_to_context=True, build_tracker=False
+        )
+        result += await seq.finalize("ctx1")
+        sentence = next(f for f in result if type(f) is AggregatedTextFrame)
+        spoken = next(f for f in result if isinstance(f, TTSTextFrame))
+        self.assertEqual(spoken.segment_id, sentence.id)
+
+    async def test_streamed_tokens_promote_as_a_sentence(self):
+        seq = _seq(streaming=True)
+        for token in ("Hi", " there", "!"):
+            frame = AggregatedTextFrame(token, TextType.TOKEN)
+            await seq.register_spoken(frame, "ctx1", token, append_to_context=True)
+        await seq.finalize("ctx1")
+        self.assertEqual(seq._slots[0].frame.text_type, TextType.SENTENCE)
+
     async def test_non_terminal_tokens_do_not_promote(self):
         seq = _seq(streaming=True)
         await _stream(seq, "ctx1", "Hi", " there")
@@ -1497,7 +1569,7 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seq._slots), 1)
         slot = seq._slots[0]
         self.assertIsNotNone(slot.tracker)
-        self.assertEqual(slot.frame.aggregated_by, AggregationType.SENTENCE)
+        self.assertEqual(slot.frame.text_type, TextType.SENTENCE)
         self.assertEqual(slot.frame.text, "Hi there!")
 
     async def test_promoted_slot_processes_words_normally(self):
@@ -1574,6 +1646,18 @@ class TestRegisterSpokenStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([f.text for f in word_frames], ["Hi there!"])
         self.assertTrue(word_frames[0].will_be_spoken)
         self.assertTrue(word_frames[0].append_to_context)
+
+    async def test_no_tracker_sentence_text_is_trimmed_for_the_context(self):
+        # The context joins its parts with a space, so a second sentence that
+        # keeps its token's leading space would be joined with two.
+        seq = _seq(streaming=True)
+        result = []
+        for t in ("Hi.", " Bye", " now", ".", " Ok"):
+            result += await seq.register_spoken(
+                _spoken_frame(t), "ctx1", t, append_to_context=True, build_tracker=False
+            )
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual([(f.text, f.raw_text) for f in word_frames][-1], ("Bye now.", "Bye now."))
 
 
 # ---------------------------------------------------------------------------
@@ -1940,6 +2024,13 @@ class TestParallelSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.tts_text, " How are you?")
 
+    async def test_numbered_list_marker_stays_with_item(self):
+        agg = _ParallelSentenceAggregator()
+        out = await _agg_feed(agg, "1", ".", " Take", " a", " walk", ".", "\n", "2", ".", " Read")
+        self.assertEqual([e[0] for e in out], ["1. Take a walk."])
+        f = await agg.flush()
+        self.assertEqual(f.tts_text, "\n2. Read")
+
     async def test_flush_emits_trailing_partial_sentence(self):
         agg = _ParallelSentenceAggregator()
         await _agg_feed(agg, "Just", " a", " fragment")
@@ -2204,7 +2295,19 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
         seq = await self._seq_past_the_tag()
         self.assertEqual(seq.process_word("whenx", pts=20, context_id="ctx1"), [])
 
-    async def test_resync_carries_the_closing_delimiter_into_context(self):
+    async def test_the_closing_delimiter_goes_into_context_with_the_word_it_touches(self):
+        seq = _seq()
+        frame = _spoken_frame(self.USER_FACING, raw_text=self.LLM)
+        await seq.register_spoken(frame, "ctx1", self.TTS, append_to_context=True)
+        seq.process_word("Call", pts=10, context_id="ctx1")
+        words = [
+            f
+            for f in seq.process_word("4111", pts=20, context_id="ctx1")
+            if isinstance(f, TTSTextFrame)
+        ]
+        self.assertEqual(words[0].raw_text, "<card>4111</card>")
+
+    async def test_resync_carries_the_skipped_words_into_context(self):
         seq = await self._seq_past_the_tag()
         seq.process_word("whenx", pts=20, context_id="ctx1")
         words = [
@@ -2213,7 +2316,7 @@ class TestProcessWordResyncWithMarkup(unittest.IsolatedAsyncioTestCase):
             if isinstance(f, TTSTextFrame)
         ]
         self.assertEqual([f.text for f in words], ["when it is"])
-        self.assertEqual(words[0].raw_text, "</card> when it is")
+        self.assertEqual(words[0].raw_text, "when it is")
 
     async def test_slot_completes_after_the_resync(self):
         seq = await self._seq_past_the_tag()

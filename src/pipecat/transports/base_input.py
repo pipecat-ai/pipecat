@@ -17,7 +17,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    FilterUpdateSettingsFrame,
+    FilterControlFrame,
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
@@ -305,7 +305,7 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, StopFrame):
             await self.push_frame(frame, direction)
             await self.pause(frame)
-        elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
+        elif isinstance(frame, FilterControlFrame) and self._params.audio_in_filter:
             await self._params.audio_in_filter.process_frame(frame)
         # Other frames
         else:

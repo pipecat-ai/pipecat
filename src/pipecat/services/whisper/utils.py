@@ -28,10 +28,12 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> float | None:
 
     Example::
 
+        import os
+
         from pipecat.services.groq.stt import GroqSTTService
         from pipecat.services.whisper.utils import extract_whisper_probability
 
-        stt = GroqSTTService(include_prob_metrics=True)
+        stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"), include_prob_metrics=True)
         # ... use stt in pipeline ...
         # In your frame processor:
         if isinstance(frame, TranscriptionFrame):

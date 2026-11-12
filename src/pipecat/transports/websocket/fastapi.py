@@ -200,7 +200,11 @@ class FastAPIWebsocketClient:
         if self._leave_counter > 0:
             return
 
-        if self.is_connected and not self.is_closing:
+        if (
+            self.is_connected
+            and not self.is_closing
+            and self._websocket.application_state != WebSocketState.DISCONNECTED
+        ):
             self._closing = True
             self._close_task = asyncio.create_task(self._websocket.close(), name="fastapi-ws-close")
             self._close_task.add_done_callback(self._on_close_done)
@@ -453,7 +457,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        bytes_per_second = self.sample_rate * self._params.audio_out_channels * 2
+        self._send_interval = self.audio_chunk_size / bytes_per_second
 
         await self._client.setup(setup)
 

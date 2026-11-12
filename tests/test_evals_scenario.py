@@ -6,6 +6,7 @@
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -13,6 +14,7 @@ from loguru import logger
 from pipecat.evals.scenario import (
     EvalExpectation,
     EvalFunctionCall,
+    EvalRubric,
     EvalScenarioFile,
     EvalScriptScenario,
     EvalScriptTurn,
@@ -116,6 +118,74 @@ class TestScenarioGroups(unittest.TestCase):
         self.assertTrue(all(isinstance(s, EvalSimulationScenario) for s in scenarios))
         self.assertEqual([s.goal for s in scenarios], ["Book a table.", "Cancel a booking."])
         self.assertEqual(scenarios["diner/book"].persona, "An impatient diner.")
+
+    def test_an_entry_with_success_and_no_persona_or_turns_is_a_rubric(self):
+        scenarios = EvalScenarioFile.load(
+            _write(
+                """
+                name: diner
+                judge: {eval: {service: ollama, model: judge}}
+                metrics:
+                  - name: politeness
+                    criterion: "stays polite"
+                scenarios:
+                  - name: simulated
+                    persona: "An impatient diner."
+                    goal: "Book a table."
+                    success: "the bot booked a table"
+                  - name: production
+                    success: "the bot booked the table the caller asked for"
+                """
+            )
+        )
+        self.assertIsInstance(scenarios["diner/simulated"], EvalSimulationScenario)
+        rubric = scenarios["diner/production"]
+        assert isinstance(rubric, EvalRubric)
+        self.assertEqual(rubric.success, "the bot booked the table the caller asked for")
+        # The file's defaults are merged in, as for any entry.
+        self.assertEqual([m.name for m in rubric.metrics], ["politeness"])
+        self.assertEqual(rubric.judge, {"service": "ollama", "model": "judge"})
+
+    def test_a_rubric_leaves_out_the_measured_metrics_it_takes_from_the_file(self):
+        scenarios = EvalScenarioFile.load(
+            _write(
+                """
+                name: diner
+                metrics:
+                  - name: politeness
+                    criterion: "stays polite"
+                  - measure: words
+                    max_value: 40
+                scenarios:
+                  - name: simulated
+                    persona: "An impatient diner."
+                    goal: "Book a table."
+                    success: "the bot booked a table"
+                  - name: production
+                    success: "the bot booked the table the caller asked for"
+                """
+            )
+        )
+        simulated = scenarios["diner/simulated"]
+        assert isinstance(simulated, EvalSimulationScenario)
+        self.assertEqual([m.name for m in simulated.metrics], ["politeness", "words"])
+        production = scenarios["diner/production"]
+        self.assertEqual([m.name for m in production.metrics], ["politeness"])
+
+    def test_a_rubric_refuses_a_measured_metric_it_lists_itself(self):
+        path = _write(
+            """
+            name: diner
+            scenarios:
+              - name: production
+                success: "the bot booked a table"
+                metrics:
+                  - measure: words
+                    max_value: 40
+            """
+        )
+        with self.assertRaisesRegex(ValueError, "metric 'words' is measured"):
+            EvalScenarioFile.load(path)
 
     def test_a_file_knows_its_name_and_path_and_finds_a_scenario_by_name(self):
         path = _write(GROUP)
@@ -268,6 +338,32 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertTrue(s.user_audio)
         self.assertEqual(s.user_speech, {"service": "cartesia", "voice": "v1"})
 
+    def test_user_turn_with_pauses(self):
+        s = _script(
+            _write(
+                "name: a\n"
+                "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+                "turns:\n"
+                "  - user: ['So last week I went to', {pause_ms: 2000}, 'Spain.']\n"
+            )
+        )
+        turn = s.turns[0]
+        self.assertEqual(turn.user, "So last week I went to Spain.")
+        self.assertEqual(turn.parts, ["So last week I went to", 2000, "Spain."])
+
+    def test_user_turn_pauses_are_validated(self):
+        audio = "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+        cases = {
+            "pauses but no text": audio + "turns: [{user: [{pause_ms: 500}]}]\n",
+            "items must be text": audio + "turns: [{user: ['Hi', {pause_ms: 0}]}]\n",
+            "text modality": "turns: [{user: ['Hi', {pause_ms: 500}, 'there']}]\n",
+        }
+        for message, body in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as cm:
+                    _script(_write("name: a\n" + body))
+                self.assertIn(message, str(cm.exception))
+
     def test_user_audio_requires_speech(self):
         with self.assertRaises(ValueError) as cm:
             _script(
@@ -325,6 +421,40 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(exp.calls)
         self.assertFalse(exp.absent)
 
+    def test_text_matches_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: matches
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        text_matches: "^Hi"
+                      - event: llm_response
+                        text_matches: ["^Hi", "!$"]
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].text_matches, ["^Hi"])
+        self.assertEqual(s.turns[0].expect[1].text_matches, ["^Hi", "!$"])
+
+    def test_text_matches_rejects_bad_patterns(self):
+        for value in ('"(unclosed"', "[1, 2]"):
+            with self.assertRaises(ValueError):
+                _script(
+                    _write(
+                        f"""
+                        name: bad_matches
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                text_matches: {value}
+                        """
+                    )
+                )
+
     def test_absent_expectation_parsed(self):
         s = _script(
             _write(
@@ -346,7 +476,12 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.within_ms, 5000)
 
     def test_absent_rejects_content_checks(self):
-        for extra in ('eval: "repeats itself"', 'text_contains: "again"', 'text_excludes: "x"'):
+        for extra in (
+            'eval: "repeats itself"',
+            'text_contains: "again"',
+            'text_excludes: "x"',
+            'text_matches: "x"',
+        ):
             with self.assertRaises(ValueError):
                 _script(
                     _write(
@@ -973,5 +1108,54 @@ class TestTurnAudioFile(unittest.TestCase):
         self.assertIn("turn(s) [1]", str(cm.exception))
 
 
+class TestDeprecatedTriggerDisconnect(unittest.TestCase):
+    def test_the_field_is_deprecated_and_still_read(self):
+        path = _write("name: t\ntrigger_disconnect: true\nturns: [{user: hi}]\n")
+        with self.assertWarns(DeprecationWarning) as cm:
+            scenario = _script(path)
+        self.assertTrue(scenario.trigger_disconnect)
+        self.assertIn("`trigger_disconnect:`", str(cm.warning))
+
+    def test_a_scenario_without_it_does_not_warn(self):
+        path = _write("name: t\nturns: [{user: hi}]\n")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            scenario = _script(path)
+        self.assertFalse(scenario.trigger_disconnect)
+        self.assertEqual([w for w in caught if "trigger_disconnect" in str(w.message)], [])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckFrom(unittest.TestCase):
+    """The ``check_from:`` key on an expectation."""
+
+    def _turns(self, expectation: str):
+        return (
+            "name: g\nscenarios:\n  - name: a\n    turns:\n      - user: hi\n"
+            f"        expect:\n          - {expectation}\n"
+        )
+
+    def test_defaults_to_previous(self):
+        scenario = EvalScenarioFile.load(_write(self._turns("{event: response}"))).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "previous")
+
+    def test_turn_start_is_accepted(self):
+        scenario = EvalScenarioFile.load(
+            _write(self._turns("{event: response, check_from: turn_start}"))
+        ).scenarios[0]
+        self.assertEqual(scenario.turns[0].expect[0].check_from, "turn_start")
+
+    def test_other_values_are_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(_write(self._turns("{event: response, check_from: later}")))
+        self.assertIn("'check_from:' must be one of previous, turn_start", str(cm.exception))
+
+    def test_not_combined_with_absent(self):
+        with self.assertRaises(ValueError) as cm:
+            EvalScenarioFile.load(
+                _write(self._turns("{event: response, absent: true, check_from: turn_start}"))
+            )
+        self.assertIn("cannot be combined with 'check_from'", str(cm.exception))

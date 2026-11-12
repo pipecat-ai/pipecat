@@ -88,6 +88,18 @@ async def test_requests_one_image_per_call():
     assert kwargs["contents"] == "a red square"
     assert kwargs["config"].response_modalities == ["IMAGE"]
     assert kwargs["config"].image_config.aspect_ratio == "1:1"
+    assert kwargs["config"].image_config.image_size is None
+
+
+@pytest.mark.asyncio
+async def test_sends_image_size():
+    """image_size reaches the request's image config."""
+    service = _service([_response([_image_part()])], image_size="2K")
+
+    await _frames(service)
+
+    kwargs = service._client.aio.models.generate_content.call_args.kwargs
+    assert kwargs["config"].image_config.image_size == "2K"
 
 
 @pytest.mark.asyncio

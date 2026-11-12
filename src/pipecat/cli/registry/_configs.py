@@ -75,7 +75,9 @@ SERVICE_CONFIGS = {
     ),
     "openai_stt": 'OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
+    "rime_stt": 'RimeSTTService(api_key=os.getenv("RIME_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
     "moonshine_stt": (
@@ -93,6 +95,7 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "xai_stt": 'XAISTTService(api_key=os.getenv("XAI_API_KEY"))',
+    "zoom_ai_stt": 'ZoomAISTTService(api_key=os.getenv("ZOOM_AI_API_KEY"))',
     # LLM Services
     "anthropic_llm": (
         "AnthropicLLMService(\n"
@@ -171,6 +174,26 @@ SERVICE_CONFIGS = {
         "GoogleLLMService(\n"
         '        api_key=os.getenv("GOOGLE_API_KEY"),\n'
         "        settings=GoogleLLMService.Settings(\n"
+        '            model=os.getenv("GOOGLE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "google_interactions_llm": (
+        "GoogleInteractionsLLMService(\n"
+        '        api_key=os.getenv("GOOGLE_API_KEY"),\n'
+        "        settings=GoogleInteractionsLLMService.Settings(\n"
+        '            model=os.getenv("GOOGLE_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "google_interactions_vertex_llm": (
+        "GoogleInteractionsVertexLLMService(\n"
+        '        project_id=os.getenv("GOOGLE_PROJECT_ID"),\n'
+        '        credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),\n'
+        '        location=os.getenv("GOOGLE_LOCATION"),\n'
+        "        settings=GoogleInteractionsVertexLLMService.Settings(\n"
         '            model=os.getenv("GOOGLE_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
@@ -277,10 +300,10 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "perplexity_llm": (
-        "PerplexityLLMService(\n"
+        "PerplexityAgentHttpLLMService(\n"
         '        api_key=os.getenv("PERPLEXITY_API_KEY"),\n'
-        "        settings=PerplexityLLMService.Settings(\n"
-        '            model=os.getenv("PERPLEXITY_MODEL"),\n'
+        "        settings=PerplexityAgentHttpLLMService.Settings(\n"
+        '            model=os.getenv("PERPLEXITY_MODEL", "openai/gpt-5.6-luna"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -312,6 +335,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "smallest_llm": (
+        "SmallestLLMService(\n"
+        '        api_key=os.getenv("SMALLEST_API_KEY"),\n'
+        "        settings=SmallestLLMService.Settings(\n"
+        '            model=os.getenv("SMALLEST_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "together_llm": (
         "TogetherLLMService(\n"
         '        api_key=os.getenv("TOGETHER_API_KEY"),\n'
@@ -322,6 +354,14 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     # TTS Services
+    "assemblyai_tts": (
+        "AssemblyAITTSService(\n"
+        '        api_key=os.getenv("ASSEMBLYAI_API_KEY"),\n'
+        "        settings=AssemblyAITTSService.Settings(\n"
+        '            voice=os.getenv("ASSEMBLYAI_VOICE_ID", "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "asyncai_tts": (
         "AsyncAITTSService(\n"
         '        api_key=os.getenv("ASYNCAI_API_KEY"),\n'
@@ -461,11 +501,11 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "hume_tts": (
-        "HumeTTSService(\n"
-        '        api_key=os.getenv("HUME_API_KEY"),\n'
-        "        settings=HumeTTSService.Settings(\n"
-        '            voice=os.getenv("HUME_VOICE_ID"),\n'
+    "heygen_tts": (
+        "HeyGenTTSService(\n"
+        '        api_key=os.getenv("HEYGEN_API_KEY"),\n'
+        "        settings=HeyGenTTSService.Settings(\n"
+        '            voice=os.getenv("HEYGEN_VOICE_ID", "83548de556df48ba8c09c42a57c51d85"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -706,6 +746,14 @@ SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"
         ")\n"

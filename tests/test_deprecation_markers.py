@@ -22,6 +22,7 @@ import json
 import subprocess
 import sys
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -36,17 +37,19 @@ from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
+    EagerEndOfTurnCancelFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
     StartFrame,
     StopTaskFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 from pipecat.pipeline.worker import PipelineTask, PipelineTaskParams  # noqa: E402
 from pipecat.processors.filters.identity_filter import IdentityFilter  # noqa: E402
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
-from pipecat.utils.deprecation import warn_deprecated_read  # noqa: E402
+from pipecat.utils.deprecation import renamed_init_field, warn_deprecated_read  # noqa: E402
 
 SRC_ROOT = Path(__file__).parent.parent / "src" / "pipecat"
 _SCAN = dscan.scan_source(SRC_ROOT)
@@ -103,6 +106,45 @@ def test_no_replacement_directive_extracts_no_replacement():
     use = "Use :class:`Foo` instead. Will be removed in 2.0.0."
     assert dscan.first_reference(use) == "Foo"
     assert dscan.relation_for(use, "Foo") == "use_existing"
+
+
+def test_directives_are_attributed_to_the_entry_they_sit_under():
+    """A directive under an event bullet or an Args entry deprecates that entry alone."""
+    docstring = """A processor.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    - on_old_event: Triggered by the old thing.
+
+      .. deprecated:: 1.8.0
+          Use ``on_ready`` instead. Will be removed in 2.0.0.
+
+    Args:
+        old_param: An old parameter.
+
+            .. deprecated:: 1.8.0
+                Use ``new_param`` instead. Will be removed in 2.0.0.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [("on_old_event", "event"), ("old_param", "parameter")]
+
+
+def test_top_level_directive_deprecates_the_symbol():
+    """A directive outside any entry deprecates the symbol the docstring belongs to."""
+    docstring = """A processor.
+
+    .. deprecated:: 1.8.0
+        Use ``NewProcessor`` instead. Will be removed in 2.0.0.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [(None, "parameter")]
 
 
 # --- @deprecated decorator message consistency -------------------------------
@@ -209,14 +251,43 @@ def test_task_frame_aliases_warn(frame_cls):
         frame_cls()
 
 
+def test_eager_end_of_turn_cancel_frame_warns():
+    with pytest.warns(DeprecationWarning, match="`EagerEndOfTurnCancelFrame` is deprecated"):
+        frame = EagerEndOfTurnCancelFrame()
+    assert isinstance(frame, UserTurnResponseCancelFrame)
+
+
+def test_deferring_a_stop_strategy_warns_once():
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        deferred(SpeechTimeoutUserTurnStopStrategy())
+    messages = [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert messages == [
+        "`deferred` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement."
+    ]
+
+
+def test_external_user_turn_completion_stop_strategy_warns():
+    from pipecat.turns.user_stop import ExternalUserTurnCompletionStopStrategy
+
+    with pytest.warns(
+        DeprecationWarning, match="`ExternalUserTurnCompletionStopStrategy` is deprecated"
+    ):
+        ExternalUserTurnCompletionStopStrategy()
+
+
 def test_no_deprecation_warnings_at_import_time():
     """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
-    Guards the suppression of @deprecated subclassing warnings for the task frame
-    aliases defined inside pipecat.frames.frames. Done in a subprocess for a
+    Guards against @deprecated subclassing warnings from the task frame aliases
+    in pipecat.frames.frames, the deprecated stop strategies in
+    pipecat.turns.user_stop, and the deprecated TTS base classes in
+    pipecat.services.tts_service. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
-    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
-    e.g. ``audioop`` on Python 3.12 — don't trip it.
+    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib and
+    third-party warnings don't trip it.
     """
     script = (
         "import sys, warnings\n"
@@ -225,7 +296,9 @@ def test_no_deprecation_warnings_at_import_time():
         "    import pipecat.frames.frames\n"
         "    import pipecat.pipeline.worker\n"
         "    import pipecat.pipeline.runner\n"
-        "bad = [str(w.message) for w in caught\n"
+        "    import pipecat.turns.user_stop\n"
+        "    import pipecat.services.tts_service\n"
+        "bad =[str(w.message) for w in caught\n"
         "       if issubclass(w.category, DeprecationWarning)\n"
         "       and ' is deprecated since ' in str(w.message)]\n"
         "if bad:\n"
@@ -320,6 +393,38 @@ def test_intercepted_read_warns_through_an_ignore_filter():
     assert "`StartFrame.enable_metrics` is deprecated" in result.stderr
 
 
+# --- Renamed dataclass fields (renamed_init_field) ----------------------------
+#
+# A class's constructor is wrapped the first time the class is built, so each
+# test builds a hierarchy of its own that no other test has built before.
+
+
+@renamed_init_field(
+    "old",
+    "new",
+    "`_RenamedBase.old` is deprecated since 1.0.0 and will be removed in 2.0.0. Use `new` instead.",
+)
+@dataclass
+class _RenamedBase:
+    new: int
+
+
+@dataclass
+class _RenamedChild(_RenamedBase):
+    extra: int = 0
+
+
+class _PassesOldNameToSuper(_RenamedChild):
+    def __init__(self):
+        super().__init__(old=1)
+
+
+def test_renamed_field_reaches_a_constructor_that_passes_it_to_super():
+    with pytest.warns(DeprecationWarning, match="`_RenamedBase.old`"):
+        frame = _PassesOldNameToSuper()
+    assert frame.new == 1
+
+
 # --- Removal history (removals.json) ------------------------------------------
 #
 # Removals are detected at release-prep by diffing the previous release tag's
@@ -391,6 +496,13 @@ def test_compute_removals_detects_disappeared_symbol():
 def test_compute_removals_no_change_when_nothing_removed():
     prev = _dep_registry(_dep_record("A"))
     current = _dep_registry(_dep_record("A"))
+    assert drem.compute_removals(prev, current, "2.0.0", []) == []
+
+
+def test_compute_removals_ignores_subject_recorded_by_member():
+    """A subject now recorded per member (``X`` → ``X.member``) wasn't removed."""
+    prev = _dep_registry(_dep_record("Proc"))
+    current = _dep_registry(_dep_record("Proc.on_event", kind="event"))
     assert drem.compute_removals(prev, current, "2.0.0", []) == []
 
 

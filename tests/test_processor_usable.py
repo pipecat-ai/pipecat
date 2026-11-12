@@ -102,6 +102,7 @@ class TestErrorClassification(unittest.TestCase):
             ErrorCategory.QUOTA,
             ErrorCategory.CONNECTIVITY,
             ErrorCategory.SERVER,
+            ErrorCategory.CONTENT_FILTERED,
         ):
             self.assertFalse(category.is_permanent)
 

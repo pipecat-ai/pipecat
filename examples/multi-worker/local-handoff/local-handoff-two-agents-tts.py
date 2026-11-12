@@ -117,10 +117,14 @@ class AcmeTTSWorker(LLMWorker):
         """
         logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
         await params.result_callback(f"Transferring to {agent} agent.")
+        message = (
+            f"The {self.name} agent transferred the user to you. Take over the "
+            f"conversation and help them. Reason for the transfer: {reason}"
+        )
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": reason}],
+                messages=[{"role": "developer", "content": message}],
             ),
             deactivate_self=True,
         )

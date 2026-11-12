@@ -180,7 +180,7 @@ class UIWorker(LLMContextWorker):
                 ``llm`` answers them through an
                 :class:`~pipecat.classifiers.llm.classifier.LLMClassifier`,
                 which costs an LLM call per question; a
-                :class:`~pipecat.classifiers.jev.classifier.JevClassifier`
+                :class:`~pipecat.classifiers.typesafe.jev.classifier.JevClassifier`
                 answers in about a tenth of a second with a calibrated
                 probability.
             assistant_params: Optional assistant-aggregator parameters, e.g. to

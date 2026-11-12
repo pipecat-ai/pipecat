@@ -58,7 +58,7 @@ def language_to_neuphonic_lang_code(language: Language) -> str:
         Language.FR: "fr",
         Language.PT: "pt",
         Language.RU: "ru",
-        Language.HI: "HI",
+        Language.HI: "hi",
         Language.ZH: "zh",
     }
 
@@ -73,10 +73,14 @@ class NeuphonicTTSSettings(TTSSettings):
         speed: Speech speed multiplier. Defaults to 1.0.
         temperature: Randomness introduced into the synthesis, from 0.0 to 1.0.
             Left to Neuphonic's own default when unset.
+        ipa_key: Regional variant whose sounds ``<phoneme:...>`` tags in the text are
+            read with, either ``es-castilian`` or ``pt-br``. Left to Neuphonic's own
+            default when unset.
     """
 
     speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    ipa_key: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -160,6 +164,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             language=Language.EN,
             speed=1.0,
             temperature=None,
+            ipa_key=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -194,7 +199,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self._url = url
         self._receive_task = None
-        self._keepalive_task = None
         self._encoding = encoding
         self._sampling_rate = sample_rate
 
@@ -250,8 +254,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=10)
 
     async def _disconnect(self):
         """Disconnect from Neuphonic WebSocket and clean up tasks."""
@@ -261,9 +265,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -282,6 +284,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 "encoding": self._encoding,
                 "sampling_rate": self._sampling_rate,
                 "voice_id": self._settings.voice,
+                "ipa_key": self._settings.ipa_key,
             }
 
             query_params = []
@@ -338,19 +341,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     )
                     await self.append_to_audio_context(context_id, frame)
 
-    async def _keepalive_task_handler(self):
-        """Handle keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            await self._send_keepalive()
-
     async def _send_keepalive(self):
-        """Send keepalive message to maintain connection."""
+        """Send empty text to keep the connection open through silences."""
         if self._websocket:
-            # Send empty text for keepalive
-            msg = {"text": ""}
-            await self._websocket.send(json.dumps(msg))
+            await self._websocket.send(json.dumps({"text": ""}))
 
     async def _send_text(self, text: str):
         """Send text to Neuphonic WebSocket for synthesis."""
@@ -462,6 +456,7 @@ class NeuphonicHttpTTSService(TTSService):
             language=Language.EN,
             speed=1.0,
             temperature=None,
+            ipa_key=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -587,6 +582,9 @@ class NeuphonicHttpTTSService(TTSService):
 
         if self._settings.temperature is not None:
             payload["temperature"] = self._settings.temperature
+
+        if self._settings.ipa_key is not None:
+            payload["ipa_key"] = self._settings.ipa_key
 
         try:
             async with self._session.post(url, json=payload, headers=headers) as response:

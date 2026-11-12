@@ -41,6 +41,7 @@ class OLLamaLLMService(OpenAILLMService):
         *,
         model: str | None = None,
         base_url: str = "http://localhost:11434/v1",
+        api_key: str = "ollama",
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -55,6 +56,8 @@ class OLLamaLLMService(OpenAILLMService):
 
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".
+            api_key: API key for an Ollama server that requires one, such as
+                one behind an authenticating proxy. A local Ollama ignores it.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
@@ -73,7 +76,7 @@ class OLLamaLLMService(OpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        super().__init__(base_url=base_url, api_key="ollama", settings=default_settings, **kwargs)
+        super().__init__(base_url=base_url, api_key=api_key, settings=default_settings, **kwargs)
 
     def create_client(self, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Ollama.

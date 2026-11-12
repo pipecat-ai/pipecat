@@ -12,10 +12,12 @@ the main pipeline execution.
 """
 
 import asyncio
+import traceback
 import weakref
 from typing import Any
 
 from attr import dataclass
+from loguru import logger
 
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import (
@@ -117,8 +119,13 @@ class WorkerObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.task)
+            # Cancel the proxy worker right away. An observer removing itself
+            # runs on that worker, which can't be cancelled from inside, so
+            # the worker ends itself instead.
+            if proxy.task is not asyncio.current_task():
+                await self.cancel_task(proxy.task)
+            # Shutdown only cleans up the observers in _proxies.
+            await observer.cleanup()
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -140,7 +147,11 @@ class WorkerObserver(BaseObserver):
             await observer.setup(task_manager)
 
     async def cleanup(self):
-        """Cleanup all proxy observers."""
+        """Cleanup all proxy observers.
+
+        Tearing down is best effort: an observer that raises is logged and the
+        rest are still cleaned up.
+        """
         await super().cleanup()
 
         if not self._proxies:
@@ -150,7 +161,10 @@ class WorkerObserver(BaseObserver):
             await self.cancel_task(proxy.task)
 
         for observer in self._proxies:
-            await observer.cleanup()
+            try:
+                await observer.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {observer}: {e}")
 
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
@@ -234,15 +248,37 @@ class WorkerObserver(BaseObserver):
         while True:
             data = await queue.get()
 
-            if isinstance(data, _PipelineStartedSignal):
-                await observer.on_pipeline_started()
-            elif isinstance(data, FramePushed):
-                await observer.on_push_frame(data)
-            elif isinstance(data, FrameProcessed):
-                await observer.on_process_frame(data)
-            elif isinstance(data, ProcessorSetUp):
-                await observer.on_processor_setup(data)
-            elif isinstance(data, StartupWarmup):
-                await observer.on_startup_warmup(data)
+            # A failing observer must not end this task, or it would get
+            # nothing more while its queue keeps growing.
+            try:
+                await self._notify_observer(observer, data)
+            except Exception as e:
+                # Cancellation still ends the task, even when the observer turns it into an error.
+                if (task := asyncio.current_task()) and task.cancelling():
+                    raise
+                tb = traceback.extract_tb(e.__traceback__)
+                last = tb[-1]
+                logger.error(
+                    f"{self}: uncaught exception in observer {observer} "
+                    f"({last.filename}:{last.lineno}): {e}"
+                )
 
             queue.task_done()
+
+            # Stop once the observer has removed itself (see remove_observer()).
+            proxy = self._proxies.get(observer) if self._proxies else None
+            if not proxy or proxy.queue is not queue:
+                break
+
+    async def _notify_observer(self, observer: BaseObserver, data: Any):
+        """Call the observer callback that matches the queued data."""
+        if isinstance(data, _PipelineStartedSignal):
+            await observer.on_pipeline_started()
+        elif isinstance(data, FramePushed):
+            await observer.on_push_frame(data)
+        elif isinstance(data, FrameProcessed):
+            await observer.on_process_frame(data)
+        elif isinstance(data, ProcessorSetUp):
+            await observer.on_processor_setup(data)
+        elif isinstance(data, StartupWarmup):
+            await observer.on_startup_warmup(data)

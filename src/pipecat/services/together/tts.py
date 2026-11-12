@@ -77,9 +77,20 @@ class TogetherTTSSettings(TTSSettings):
 
     Parameters:
         max_partial_length: Maximum partial text length for streaming.
+        extra_params: Model-specific synthesis options sent in the session
+            update, such as ``pronunciation_dict``, a list of
+            ``"<source>/<replacement>"`` entries.
+
+            Another way to guide pronunciation, besides ``pronunciation_dict``, is to
+            pass :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace
+            rules through the ``text_transforms`` parameter. Pipecat applies them before
+            the text reaches the provider, so the same rules can work across TTS
+            services and depend less on what each provider supports. They're worth
+            trying if ``pronunciation_dict`` isn't giving you the results you want.
     """
 
     max_partial_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    extra_params: dict[str, Any] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class TogetherTTSService(WebsocketTTSService):
@@ -132,6 +143,7 @@ class TogetherTTSService(WebsocketTTSService):
             voice="af_heart",
             language=Language.EN,
             max_partial_length=None,
+            extra_params=None,
         )
 
         if settings is not None:
@@ -249,11 +261,11 @@ class TogetherTTSService(WebsocketTTSService):
 
             # Ensure voice is set on the server side
             try:
-                voice_update_msg = {
-                    "type": "tts_session.updated",
-                    "session": {"voice": self._settings.voice},
-                }
-                await self._get_websocket().send(json.dumps(voice_update_msg))
+                session: dict[str, Any] = {"voice": self._settings.voice}
+                if is_given(self._settings.extra_params) and self._settings.extra_params:
+                    session["extra_params"] = self._settings.extra_params
+                session_update_msg = {"type": "tts_session.updated", "session": session}
+                await self._get_websocket().send(json.dumps(session_update_msg))
                 logger.debug(f"Sent initial voice setting to WebSocket: {self._settings.voice}")
             except Exception as e:
                 logger.warning(f"Error sending initial voice setting: {e}")

@@ -409,7 +409,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 if not isinstance(frame, MetricsFrame):
                     return
                 try:
-                    playing_id = getattr(service, "_playing_context_id", None)
+                    playing_id = service._audio_context_manager.playing_context_id
                     if playing_id is None:
                         return
                     entry = service._tts_spans.get(playing_id)
@@ -438,7 +438,7 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
                 return await orig_completed(context_id)
 
             def traced_reset_active_audio_context():
-                playing_id = getattr(service, "_playing_context_id", None)
+                playing_id = service._audio_context_manager.playing_context_id
                 if playing_id is not None:
                     end_tts_span(service, playing_id, interrupted=True)
                 return orig_reset_active()

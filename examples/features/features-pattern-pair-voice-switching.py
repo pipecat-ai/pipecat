@@ -147,7 +147,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=CartesiaTTSService.Settings(
             voice=VOICE_IDS["narrator"],
         ),
-        skip_aggregator_types=["voice"],  # Skip voice tags in TTS speech
+        skip_text_types=["voice"],  # Skip voice tags in TTS speech
     )
 
     # System prompt for storytelling with voice switching

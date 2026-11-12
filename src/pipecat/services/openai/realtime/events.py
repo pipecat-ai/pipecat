@@ -12,9 +12,9 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 
@@ -68,27 +68,30 @@ class PCMAAudioFormat(AudioFormat):
 
 
 class InputAudioTranscription(BaseModel):
-    """Configuration for audio transcription settings."""
+    """Configuration for audio transcription settings.
+
+    Parameters:
+        model: Transcription model to use (e.g., "gpt-realtime-whisper",
+            "gpt-transcribe", "gpt-live-transcribe").
+        language: Optional language code for transcription.
+        prompt: Optional transcription hint text.
+        delay: How long the model waits before emitting transcription text.
+            Higher values trade latency for accuracy. Supported by
+            ``"gpt-realtime-whisper"``.
+        keywords: Words or phrases that guide transcription of the input
+            audio. Supported by ``"gpt-transcribe"`` and
+            ``"gpt-live-transcribe"``.
+        languages: Possible languages of the input audio, as ISO-639-1
+            codes. Supported by ``"gpt-transcribe"`` and
+            ``"gpt-live-transcribe"``.
+    """
 
     model: str = OPENAI_REALTIME_WHISPER_MODEL
-    language: str | None
-    prompt: str | None
-
-    def __init__(
-        self,
-        model: str | None = OPENAI_REALTIME_WHISPER_MODEL,
-        language: str | None = None,
-        prompt: str | None = None,
-    ):
-        """Initialize InputAudioTranscription.
-
-        Args:
-            model: Transcription model to use (e.g., "gpt-realtime-whisper",
-                "gpt-4o-transcribe", "whisper-1").
-            language: Optional language code for transcription.
-            prompt: Optional transcription hint text.
-        """
-        super().__init__(model=model, language=language, prompt=prompt)
+    language: str | None = None
+    prompt: str | None = None
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+    keywords: list[str] | None = None
+    languages: list[str] | None = None
 
 
 class TurnDetection(BaseModel):
@@ -128,9 +131,13 @@ class InputAudioNoiseReduction(BaseModel):
 
     Parameters:
         type: Noise reduction type for different microphone scenarios.
+        strength: Suppression strength between 0.0 and 1.0; higher values suppress
+            more. Left unset, the server keeps the strength already in force, which
+            is 1.0 when noise reduction is first enabled.
     """
 
     type: Literal["near_field", "far_field"] | None
+    strength: float | None = None
 
 
 class AudioInput(BaseModel):
@@ -188,6 +195,48 @@ class Reasoning(BaseModel):
     effort: Literal["minimal", "low", "medium", "high", "xhigh"] | str | None = None
 
 
+class TruncationTokenLimits(BaseModel):
+    """Custom token limits for a retention-ratio truncation strategy.
+
+    Parameters:
+        post_instructions: Maximum input tokens a response may use for the
+            conversation after the instructions (which include tool
+            definitions). Setting it below the model's own limit caps each
+            response's token usage, and so its cost, at the price of the model
+            seeing less of the conversation. Cannot exceed the model's context
+            window minus the maximum output tokens.
+    """
+
+    post_instructions: int | None = None
+
+
+class TruncationRetentionRatio(BaseModel):
+    """Truncation that drops more of the conversation than needed, to truncate less often.
+
+    Once the conversation outgrows the input token limit, the server drops the
+    oldest messages until ``retention_ratio`` of the limit is left, leaving
+    headroom before the next truncation. The ``"auto"`` strategy instead drops
+    only as many as each response needs, so a session past the limit truncates
+    on every turn. Every truncation changes the start of the conversation and
+    so invalidates the prompt cache; truncating less often keeps more input
+    cached, which OpenAI recommends for lowering the cost of long sessions.
+    The model sees less of the conversation after each truncation.
+
+    Parameters:
+        type: Truncation strategy, always "retention_ratio".
+        retention_ratio: Fraction of the token limit to keep after truncating
+            (0.0-1.0). 0.8, the value OpenAI's guidance uses, drops messages
+            until 80% of the limit is used. 1.0 drops only what is necessary,
+            like ``"auto"``.
+        token_limits: Custom token limits for this strategy. Defaults to the
+            model's own limits.
+    """
+
+    type: Literal["retention_ratio"] = "retention_ratio"
+    retention_ratio: float
+    token_limits: TruncationTokenLimits | None = None
+
+
 class SessionProperties(BaseModel):
     """Configuration properties for an OpenAI Realtime session.
 
@@ -210,6 +259,15 @@ class SessionProperties(BaseModel):
         include: Additional fields to include in server outputs.
         reasoning: Reasoning configuration. Only supported by reasoning-capable
             Realtime models such as ``gpt-realtime-2``.
+        truncation: What the server does once the conversation outgrows the
+            model's input token limit, which only long sessions reach.
+            ``"auto"`` (the server's default) drops the oldest messages, only
+            as many as each response needs. A
+            :class:`TruncationRetentionRatio` drops more at once so it
+            truncates less often, which keeps more input in the prompt cache
+            and lowers the cost of long sessions. ``"disabled"`` returns an
+            error instead, for applications that manage the conversation's
+            size themselves.
     """
 
     # Needed to support ToolSchema in tools field.
@@ -235,6 +293,7 @@ class SessionProperties(BaseModel):
     expires_at: int | None = None
     include: list[str] | None = None
     reasoning: Reasoning | None = None
+    truncation: Literal["auto", "disabled"] | TruncationRetentionRatio | None = None
 
     @field_validator("tools", mode="before")
     @classmethod
@@ -1063,11 +1122,11 @@ class Usage(BaseModel):
         output_token_details: Detailed breakdown of output token usage.
     """
 
-    total_tokens: int
-    input_tokens: int
-    output_tokens: int
-    input_token_details: TokenDetails
-    output_token_details: TokenDetails
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    input_token_details: TokenDetails | None = None
+    output_token_details: TokenDetails | None = None
 
 
 class Response(BaseModel):
@@ -1089,11 +1148,11 @@ class Response(BaseModel):
         output_audio_format: The format of output audio.
     """
 
-    id: str
-    object: Literal["realtime.response"]
-    status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
-    status_details: Any
-    output: list[ConversationItem]
+    id: str | None = None
+    object: Literal["realtime.response"] | None = None
+    status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"] | None = None
+    status_details: Any = None
+    output: list[ConversationItem] | None = None
     output_modalities: list[Modality] | None = None
     max_output_tokens: int | Literal["inf"] | None = None
     audio: AudioConfiguration | None = None
@@ -1145,16 +1204,17 @@ def parse_server_event(str):
         str: JSON string containing the server event.
 
     Returns:
-        Parsed server event object of the appropriate type.
+        Parsed server event object of the appropriate type, or ``None`` if the
+        event type has no model here.
 
     Raises:
-        Exception: If the event type is unimplemented or parsing fails.
+        Exception: If parsing fails.
     """
     try:
         event = json.loads(str)
         event_type = event["type"]
         if event_type not in _server_event_types:
-            raise Exception(f"Unimplemented server event type: {event_type}")
+            return None
         return _server_event_types[event_type].model_validate(event)
     except Exception as e:
         raise Exception(f"{e} \n\n{str}")

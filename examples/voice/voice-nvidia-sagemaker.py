@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 # For a full example of how to deploy to SageMaker, see:
-# https://github.com/pipecat-ai/pipecat-examples/tree/main/nvidia_sagemaker_example/deployment/aws-sagemaker-nvidia
+# https://github.com/pipecat-ai/pipecat-examples/tree/main/deployment/aws-sagemaker-nvidia
 
 import os
 

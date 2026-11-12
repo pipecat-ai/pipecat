@@ -43,7 +43,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
         llm = create_llm("anthropic")
 
         # Use specific provider and model
-        llm = create_llm("openai", "gpt-4o-mini")
+        llm = create_llm("openai", "gpt-6-luna")
 
         # Use AWS Bedrock (requires AWS credentials via SSO, env vars, or IAM)
         llm = create_llm("aws")
@@ -73,7 +73,7 @@ def create_llm(provider: str | None = None, model: str | None = None) -> Any:
         "google": {
             "service": "pipecat.services.google.llm.GoogleLLMService",
             "api_key_env": "GOOGLE_API_KEY",
-            "default_model": "gemini-2.5-flash",
+            "default_model": "gemini-3.6-flash",
         },
         "aws": {
             "service": "pipecat.services.aws.llm.AWSBedrockLLMService",

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from botocore.exceptions import ClientError, EventStreamError
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.aws.llm import AWSBedrockLLMService
 

@@ -424,12 +424,19 @@ class BaseWorker(BaseObject, BusSubscriber):
 
         Cancels all running job groups and reports any still-active
         job requests back to their requesters as ``CANCELLED``, so
-        parents aren't left waiting.
+        parents aren't left waiting, and cancels the handlers still
+        running for them, such as one holding a long-lived job open.
         """
         for job_id in list(self._job_groups.keys()):
             await self.cancel_job_group(job_id, reason=f"worker '{self}' stopped")
         for job_id in list(self._active_jobs.keys()):
             await self.send_job_response(job_id, status=JobStatus.CANCELLED)
+
+        # Cancel every handler still running, including any that may have
+        # already responded (so are no longer in ``_active_jobs``) but live on
+        # for some reason.
+        for task in list(self._job_handler_tasks.values()):
+            await self.cancel_task(task)
         self._finished_event.set()
 
     async def end(self, *, reason: str | None = None) -> None:

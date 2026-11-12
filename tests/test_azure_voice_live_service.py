@@ -571,8 +571,8 @@ async def test_connect_authenticates_with_the_configured_credential(
 async def test_frames_reach_voice_live_and_pass_through():
     """Audio is streamed and a tools update is sent as a session update; every frame
     continues downstream."""
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
-    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
     from pipecat.frames.frames import (
         InputAudioRawFrame,
         LLMServiceMetadataFrame,
@@ -611,3 +611,46 @@ async def test_frames_reach_voice_live_and_pass_through():
 
     assert "InputAudioBufferAppendEvent" in sent
     assert "SessionUpdateEvent" in sent
+
+
+@pytest.mark.asyncio
+async def test_response_done_reports_cached_and_audio_tokens():
+    service = _service()
+    service.stop_processing_metrics = _noop
+    reported = []
+
+    async def _record(tokens):
+        reported.append(tokens)
+
+    service.start_llm_usage_metrics = _record
+
+    await service._handle_evt_response_done(
+        events.ResponseDone(
+            type="response.done",
+            response={
+                "id": "resp_1",
+                "status": "completed",
+                "usage": {
+                    "total_tokens": 1500,
+                    "input_tokens": 1200,
+                    "output_tokens": 300,
+                    "input_token_details": {
+                        "cached_tokens": 1000,
+                        "text_tokens": 400,
+                        "audio_tokens": 800,
+                    },
+                    "output_token_details": {"text_tokens": 60, "audio_tokens": 240},
+                },
+            },
+        )
+    )
+
+    [tokens] = reported
+    assert (tokens.prompt_tokens, tokens.completion_tokens, tokens.total_tokens) == (
+        1200,
+        300,
+        1500,
+    )
+    assert tokens.cache_read_input_tokens == 1000
+    assert tokens.input_audio_tokens == 800
+    assert tokens.output_audio_tokens == 240

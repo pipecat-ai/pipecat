@@ -118,8 +118,8 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
-    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so the
-    # generated bot is runnable with `-t eval` for behavioral evals.
+    # The "eval" transport entry (pc create --eval) needs EvalTransportParams so
+    # `pipecat eval` can drive the generated bot for behavioral evals.
     "eval": ["EvalTransportParams"],
     # Video input on a Daily or SmallWebRTC transport captures its sources from
     # video_in_sources.
@@ -447,11 +447,27 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="rime_stt",
+            label="Rime",
+            package="pipecat-ai[rime]",
+            class_name=["RimeSTTService"],
+            env_prefix="RIME",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="sarvam_stt",
             label="Sarvam",
             package="pipecat-ai[sarvam]",
             class_name=["SarvamSTTService"],
             env_prefix="SARVAM",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="smallest_stt",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestSTTService"],
+            env_prefix="SMALLEST",
             include_params=["api_key"],
         ),
         ServiceDefinition(
@@ -494,6 +510,14 @@ class ServiceRegistry:
             package="pipecat-ai[xai]",
             class_name=["XAISTTService"],
             env_prefix="XAI",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="zoom_ai_stt",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAISTTService"],
+            env_prefix="ZOOM_AI",
             include_params=["api_key"],
         ),
     ]
@@ -580,6 +604,24 @@ class ServiceRegistry:
             class_name=["GoogleLLMService"],
             env_prefix="GOOGLE",
             include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="google_interactions_llm",
+            label="Google Gemini Interactions",
+            package="pipecat-ai[google]",
+            class_name=["GoogleInteractionsLLMService"],
+            env_prefix="GOOGLE",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="google_interactions_vertex_llm",
+            label="Google Vertex AI Interactions",
+            package="pipecat-ai[google]",
+            class_name=["GoogleInteractionsVertexLLMService"],
+            env_prefix="GOOGLE",
+            include_params=["credentials", "location", "project_id"],
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
@@ -686,10 +728,11 @@ class ServiceRegistry:
             value="perplexity_llm",
             label="Perplexity",
             package="pipecat-ai[perplexity]",
-            class_name=["PerplexityLLMService"],
+            class_name=["PerplexityAgentHttpLLMService"],
             env_prefix="PERPLEXITY",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
+            param_defaults={"model": "openai/gpt-5.6-luna"},
         ),
         ServiceDefinition(
             value="qwen_llm",
@@ -719,6 +762,15 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="smallest_llm",
+            label="Smallest",
+            package="pipecat-ai[smallest]",
+            class_name=["SmallestLLMService"],
+            env_prefix="SMALLEST",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
             value="together_llm",
             label="Together AI",
             package="pipecat-ai[together]",
@@ -731,6 +783,16 @@ class ServiceRegistry:
 
     # Text-to-Speech Services
     TTS_SERVICES: list[ServiceDefinition] = [
+        ServiceDefinition(
+            value="assemblyai_tts",
+            label="AssemblyAI",
+            package="pipecat-ai[assemblyai]",
+            class_name=["AssemblyAITTSService"],
+            env_prefix="ASSEMBLYAI",
+            include_params=["api_key"],
+            settings_params=["voice"],
+            param_defaults={"voice": "49c443a4-8a1d-5f7e-b70b-98bdbd9823c3"},
+        ),
         ServiceDefinition(
             value="asyncai_tts",
             label="Async",
@@ -887,13 +949,14 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
-            value="hume_tts",
-            label="Hume TTS",
-            package="pipecat-ai[hume]",
-            class_name=["HumeTTSService"],
-            env_prefix="HUME",
+            value="heygen_tts",
+            label="HeyGen TTS",
+            package="pipecat-ai",
+            class_name=["HeyGenTTSService"],
+            env_prefix="HEYGEN",
             include_params=["api_key"],
             settings_params=["voice"],
+            param_defaults={"voice": "83548de556df48ba8c09c42a57c51d85"},
         ),
         ServiceDefinition(
             value="inworld_tts",
@@ -1137,6 +1200,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="zoom_ai_realtime",
+            label="Zoom AI Voice Agent",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIRealtimeLLMService"],
+            env_prefix="ZOOM_AI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="ultravox",
             label="Ultravox",
             package="pipecat-ai[ultravox]",
@@ -1258,6 +1330,14 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
         ")"

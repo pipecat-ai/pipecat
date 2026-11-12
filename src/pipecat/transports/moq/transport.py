@@ -99,14 +99,15 @@ _PEER_GONE_KINDS = _NORMAL_CLOSE_KINDS | frozenset(
     }
 )
 
-# ``Cancel`` and ``Dropped`` as moq-net's reason rather than a kind: moq-ffi
+# Normal-close reasons as moq-net renders them rather than a kind: moq-ffi
 # renders an ``Error.Audio`` to a string, so what ended the audio track
-# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``).
-# A relay cancels a subscription when the session publishing the broadcast
-# ends, which includes a reconnecting peer replacing it with a fresh one. Only
-# the whole reason is matched, so an error that merely mentions cancellation
-# still propagates.
-_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled"})
+# survives only as its message tail (``"moq: cancelled"``, ``"moq: dropped"``,
+# ``"moq: no error"``). A relay cancels a subscription when the session
+# publishing the broadcast ends, which includes a reconnecting peer replacing
+# it with a fresh one; "no error" is a close with code 0, graceful by moq-net
+# convention. Only the whole reason is matched, so an error that merely
+# mentions cancellation still propagates.
+_NORMAL_CLOSE_REASONS = frozenset({"dropped", "cancelled", "no error"})
 
 # Remote reset codes inside a subsystem error message. A 0.14 peer's
 # reset reaches moq-ffi 0.4 as an unregistered code, rendered "unknown
@@ -882,7 +883,19 @@ class MOQTransportClient:
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
 
+        # Set `now` pre-sleep unless a reset lands mid-sleep, so late wake
+        # leaves pacing clock on schedule.
+        budget = self._params.audio_out_max_buffer_ms / 1000.0
         now = time.monotonic()
+        if self._publish_audio_clock is not None:
+            wait = self._publish_audio_clock - now - budget
+            if wait > 0:
+                await asyncio.sleep(wait)
+                if self._audio_out is None:
+                    return
+                if self._publish_audio_clock is None:
+                    now = time.monotonic()
+
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
             # Writes resumed after idle (turn gap, interruption re-anchor).
             # Re-anchor encoder timeline: an un-anchored gap is measured as
@@ -894,17 +907,9 @@ class MOQTransportClient:
                 self._audio_out.reset_epoch()
                 logger.debug(
                     f"MOQ: audio epoch re-anchored after "
-                    f"{'first write' if gap is None else f'{gap:.3f}s gap'}"
+                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'}"
                 )
             self._publish_audio_clock = now
-
-        # Sleep so we're never more than `audio_out_max_buffer_ms` ahead
-        # of wall-clock. Pacing happens BEFORE the write so the moq
-        # library never sees more than that much audio queued at once.
-        budget = self._params.audio_out_max_buffer_ms / 1000.0
-        wait = self._publish_audio_clock - now - budget
-        if wait > 0:
-            await asyncio.sleep(wait)
 
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.

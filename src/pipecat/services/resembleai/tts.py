@@ -9,7 +9,7 @@
 import base64
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 from websockets.protocol import State
@@ -27,13 +27,26 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Settings for ResembleAITTSService."""
+    """Settings for ResembleAITTSService.
 
-    pass
+    Parameters:
+        apply_custom_pronunciations: Whether Resemble AI applies the team's
+            custom pronunciations to matching words in the input text.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
+    """
+
+    apply_custom_pronunciations: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ResembleAITTSService(WebsocketTTSService):
@@ -82,6 +95,7 @@ class ResembleAITTSService(WebsocketTTSService):
             model=None,
             voice=None,
             language=None,
+            apply_custom_pronunciations=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -155,6 +169,7 @@ class ResembleAITTSService(WebsocketTTSService):
             "sample_rate": self._resemble_sample_rate,
             "precision": self._precision,
             "no_audio_header": True,
+            "apply_custom_pronunciations": self._settings.apply_custom_pronunciations,
         }
 
         self._request_id_counter += 1

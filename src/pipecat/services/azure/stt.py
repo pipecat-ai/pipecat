@@ -69,6 +69,14 @@ _PROFANITY_OPTIONS: dict[AzureProfanity, ProfanityOption] = {
     "removed": ProfanityOption.Removed,
 }
 
+AzurePostProcessing = Literal["TrueText", "PostRefinement"]
+"""Post-processing Azure applies to recognition results before returning them.
+
+* ``"TrueText"`` — display formatting (punctuation, capitalization).
+* ``"PostRefinement"`` — post-stream refinement: a more accurate final result
+  built from broader audio context, leaving interim results untouched.
+"""
+
 
 @dataclass
 class AzureSTTSettings(STTSettings):
@@ -94,10 +102,22 @@ class AzureSTTSettings(STTSettings):
             contain pauses; higher values keep slow or hesitant speech in one
             transcript. See `phrase segmentation
             <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-recognize-speech#change-how-silence-is-handled>`_.
+        post_processing_option: Post-processing Azure applies before returning
+            results, either ``"TrueText"`` or ``"PostRefinement"`` (see
+            ``AzurePostProcessing``); only one applies at a time. Store-mode
+            default is ``None`` (keep Azure's default). ``"PostRefinement"``
+            replaces each segment's final result with a more accurate one built
+            from broader audio context, leaving interim results untouched; Azure
+            notes very short phrases often come back unchanged. See
+            `post-processing
+            <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-post-processing>`_.
     """
 
     profanity: AzureProfanity | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     segmentation_silence_timeout_ms: int | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    post_processing_option: AzurePostProcessing | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -154,6 +174,7 @@ class AzureSTTService(STTService):
             language=Language.EN_US,
             profanity=None,
             segmentation_silence_timeout_ms=None,
+            post_processing_option=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -203,6 +224,7 @@ class AzureSTTService(STTService):
 
         self._apply_profanity()
         self._apply_segmentation_silence_timeout()
+        self._apply_post_processing_option()
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -250,6 +272,17 @@ class AzureSTTService(STTService):
                 PropertyId.Speech_SegmentationSilenceTimeoutMs, str(timeout_ms)
             )
 
+    def _apply_post_processing_option(self):
+        """Apply the current ``post_processing_option`` setting.
+
+        A no-op when the setting is ``None`` (keeps Azure's default).
+        """
+        option = assert_given(self._settings.post_processing_option)
+        if option is not None:
+            self._speech_config.set_property(
+                PropertyId.SpeechServiceResponse_PostProcessingOption, option
+            )
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if a recognizer setting changed."""
         changed = await super()._update_settings(delta)
@@ -265,6 +298,9 @@ class AzureSTTService(STTService):
         if "segmentation_silence_timeout_ms" in changed:
             self._apply_segmentation_silence_timeout()
 
+        if "post_processing_option" in changed:
+            self._apply_post_processing_option()
+
         # These settings are baked into the recognizer at connect time, so a
         # live change only takes effect after a reconnect.
         if (
@@ -273,6 +309,7 @@ class AzureSTTService(STTService):
                 "language",
                 "profanity",
                 "segmentation_silence_timeout_ms",
+                "post_processing_option",
             }
             and self._audio_stream
         ):

@@ -15,7 +15,6 @@ only allowing them through after wake phrases have been detected. Includes
 keepalive functionality to maintain conversation flow after wake detection.
 """
 
-import re
 import time
 from enum import Enum
 
@@ -24,6 +23,7 @@ from loguru import logger
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import compile_phrase_pattern
 
 
 @deprecated(
@@ -80,18 +80,16 @@ class WakeCheckFilter(FrameProcessor):
 
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
+                Blank entries are ignored.
             keepalive_timeout: Duration in seconds to keep passing frames after
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
-        self._wake_patterns = []
-        for name in wake_phrases:
-            pattern = re.compile(
-                r"\b" + r"\s*".join(re.escape(word) for word in name.split()) + r"\b", re.IGNORECASE
-            )
-            self._wake_patterns.append(pattern)
+        self._wake_patterns = [
+            compile_phrase_pattern(phrase) for phrase in wake_phrases if phrase.strip()
+        ]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames, filtering transcriptions based on wake detection.
@@ -104,6 +102,9 @@ class WakeCheckFilter(FrameProcessor):
 
         try:
             if isinstance(frame, TranscriptionFrame):
+                if not self._wake_patterns:
+                    return
+
                 p = self._participant_states.get(frame.user_id)
                 if p is None:
                     p = WakeCheckFilter.ParticipantState(frame.user_id)

@@ -23,11 +23,10 @@ from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -47,6 +46,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -657,7 +657,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         answers the call, unless a reconnect has left the API without the id to
         answer, in which case it goes in as a message too.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
@@ -1139,7 +1143,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         await self.push_frame(llm_text_frame)
 
         # Push TTSTextFrame
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 

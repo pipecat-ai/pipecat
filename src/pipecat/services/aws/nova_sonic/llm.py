@@ -26,13 +26,13 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from typing_extensions import override
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregatedTextFrame,
-    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -420,6 +421,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._audio_config = audio_config or (
             params.audio_config if params is not None else AudioConfig()
         )
+        self._input_resampler = create_stream_resampler()
         # Accept a plain list of standard tools as a convenience; normalize it to a
         # ToolsSchema so the rest of the service has a single form to handle.
         if isinstance(tools, list):
@@ -627,7 +629,11 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         text: interactive when the model should say something about it,
         plain text for it to take in otherwise.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
         if is_final:
             await self._send_tool_result(frame.tool_call_id, result)
@@ -697,8 +703,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if self._triggering_assistant_response:
             return
 
+        audio = await self._resample_input_audio(frame)
+
         # Session continuation: let the helper buffer audio during the transition window
-        self._sc.on_audio_input(frame.audio)
+        self._sc.on_audio_input(audio)
 
         # Stop sending audio to the old stream once a handoff is in progress.
         # Audio is still being buffered above and will be replayed to the new
@@ -707,7 +715,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         if self._sc.handoff_in_progress:
             return
 
-        await self._send_user_audio_event(frame.audio)
+        await self._send_user_audio_event(audio)
+
+    async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
+        """Convert the user's audio to the input rate the session declares."""
+        rate = self._audio_config.input_sample_rate
+        if frame.sample_rate == rate:
+            return frame.audio
+        return await self._input_resampler.resample(frame.audio, frame.sample_rate, rate)
 
     async def _handle_interruption_frame(self):
         pass
@@ -1669,7 +1684,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
 
-        aggregated_text_frame = AggregatedTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        aggregated_text_frame = AggregatedTextFrame(text, text_type=TextType.SENTENCE)
         aggregated_text_frame.append_to_context = False
         await self.push_frame(aggregated_text_frame)
 
@@ -1678,7 +1693,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     async def _report_tts_text(self):
         if self._pending_speculative_text:
             tts_text_frame = TTSTextFrame(
-                self._pending_speculative_text, aggregated_by=AggregationType.SENTENCE
+                self._pending_speculative_text, text_type=TextType.SENTENCE
             )
             tts_text_frame.includes_inter_frame_spaces = True
             await self.push_frame(tts_text_frame)
@@ -1798,6 +1813,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return
 
         self._triggering_assistant_response = True
+        # User audio is dropped while the trigger plays, so the audio after it
+        # must not start with the end of the audio before.
+        await self._input_resampler.reset()
 
         # Send the trigger audio, if we're fully connected and set up
         if self._connected_time:

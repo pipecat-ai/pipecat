@@ -7,11 +7,12 @@
 """Vonage Audio Connector WebSocket serializer for Pipecat."""
 
 import json
+from typing import Any
 
 from loguru import logger
+from pydantic import model_validator
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -21,8 +22,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class VonageFrameSerializer(FrameSerializer):
@@ -39,14 +40,52 @@ class VonageFrameSerializer(FrameSerializer):
         """Configuration parameters for VonageFrameSerializer.
 
         Parameters:
-            vonage_sample_rate: Sample rate used by Vonage, defaults to 16000 Hz.
-                Common values: 8000, 16000, 24000 Hz.
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Vonage sends, defaults to
+                16000 Hz. Common values: 8000, 16000, 24000 Hz.
+            audio_out_sample_rate: Sample rate of the audio sent to Vonage, defaults to
+                16000 Hz.
+            vonage_sample_rate: Sample rate used by Vonage.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
-        vonage_sample_rate: int = 16000
+        audio_in_sample_rate: int = 16000
+        audio_out_sample_rate: int = 16000
+        vonage_sample_rate: int | None = None
         sample_rate: int | None = None
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("vonage_sample_rate") is not None:
+                warn_deprecated(
+                    "`VonageFrameSerializer.InputParams.vonage_sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["vonage_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["vonage_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`VonageFrameSerializer.InputParams.sample_rate` is deprecated since 1.16.0 "
+                    "and will be removed in 2.0.0. Use `PipelineParams.audio_in_sample_rate` "
+                    "instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(self, params: InputParams | None = None):
         """Initialize the VonageFrameSerializer.
@@ -57,24 +96,6 @@ class VonageFrameSerializer(FrameSerializer):
         params = params or VonageFrameSerializer.InputParams()
         super().__init__(params)
         self._params: VonageFrameSerializer.InputParams = params
-
-        self._vonage_sample_rate = self._params.vonage_sample_rate
-        self._sample_rate = 0  # Pipeline input rate
-
-        self._input_resampler = create_stream_resampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
-        self._output_resampler = create_stream_resampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Vonage WebSocket format.
@@ -88,22 +109,17 @@ class VonageFrameSerializer(FrameSerializer):
             Serialized data as string (JSON commands) or bytes (audio), or None if the frame isn't handled.
         """
         if isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             # Clear the audio buffer to stop playback immediately
             answer = {"action": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
-            data = frame.audio
-
-            # Output: Convert PCM at frame's rate to Vonage's sample rate (16-bit linear PCM)
-            serialized_data = await self._output_resampler.resample(
-                data, frame.sample_rate, self._vonage_sample_rate
-            )
-            if serialized_data is None or len(serialized_data) == 0:
-                # Ignoring in case we don't have audio
+            data = await self._resample_audio_out(frame)
+            if not data:
                 return None
 
             # Vonage expects raw binary PCM data (not base64 encoded)
-            return serialized_data
+            return data
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             if self.should_ignore_frame(frame):
                 return None
@@ -128,24 +144,15 @@ class VonageFrameSerializer(FrameSerializer):
         # Check if this is binary audio data
         if isinstance(data, bytes):
             # Binary message = audio data (16-bit linear PCM)
-            payload = data
-
-            # Input: Convert Vonage's PCM audio to pipeline sample rate
-            deserialized_data = await self._input_resampler.resample(
-                payload,
-                self._vonage_sample_rate,
-                self._sample_rate,
-            )
-            if deserialized_data is None or len(deserialized_data) == 0:
-                # Ignoring in case we don't have audio
+            audio = await self._resample_audio_in(data)
+            if not audio:
                 return None
 
-            audio_frame = InputAudioRawFrame(
-                audio=deserialized_data,
+            return InputAudioRawFrame(
+                audio=audio,
                 num_channels=1,  # Vonage uses mono audio
-                sample_rate=self._sample_rate,  # Use the configured pipeline input rate
+                sample_rate=self._sample_rate,
             )
-            return audio_frame
         else:
             # Text message = JSON event
             try:

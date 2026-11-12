@@ -84,9 +84,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             # force a certain amount of thinking if you want it
-            # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+            # thinking=GoogleLLMService.ThinkingConfig(thinking_level="medium")
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )

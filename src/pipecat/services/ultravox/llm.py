@@ -25,12 +25,11 @@ from typing_extensions import override
 from websockets.asyncio import client as websocket_client
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
-    AggregationType,
     CancelFrame,
     EndFrame,
     Frame,
@@ -44,6 +43,7 @@ from pipecat.frames.frames import (
     LLMServiceMetadataFrame,
     LLMTextFrame,
     StartFrame,
+    TextType,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -496,7 +496,11 @@ class UltravoxRealtimeLLMService(LLMService):
         channel, or as text when the call was already settled with the
         placeholder that unfreezes an async one.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
@@ -840,7 +844,7 @@ class UltravoxRealtimeLLMService(LLMService):
                 frame.append_to_context = False
                 await self.push_frame(frame)
             if delta:
-                tts_frame = TTSTextFrame(text=delta, aggregated_by=AggregationType.WORD)
+                tts_frame = TTSTextFrame(text=delta, text_type=TextType.WORD)
                 tts_frame.includes_inter_frame_spaces = True
                 await self.push_frame(tts_frame)
         elif medium == "text":

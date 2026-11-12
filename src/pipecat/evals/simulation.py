@@ -79,7 +79,8 @@ Fields:
     value from the run, no judge involved, and the metric scores 1 inside the
     range and 0 outside, which fails the run. ``turns`` is the persona's
     turns, ``duration`` the conversation's seconds from its first line to the
-    hang-up, ``words`` the longest bot reply in words, and ``latency`` the slowest
+    hang-up, ``words`` the longest bot reply in words (each Chinese or Japanese
+    character counts as one), and ``latency`` the slowest
     reply in seconds: from the persona's send to the reply's first token in
     text mode, from the bot noticing the persona stop to its first spoken
     sentence in audio mode, which a failure's reason spells out, since the two
@@ -118,6 +119,7 @@ from pipecat.evals.scenario_config import (
     _judge_segments,
     _llm_identity,
     _parse_judge_block,
+    _parse_trigger_disconnect,
     _parse_user_block,
     _user_segments,
 )
@@ -161,6 +163,77 @@ class EvalSimulationMetric:
 
 
 @dataclass
+class EvalRubric:
+    """What a conversation is judged on, without the caller a simulation plays.
+
+    It judges a conversation the harness didn't drive, such as a production
+    call recorded by
+    :class:`~pipecat.evals.conversation_observer.EvalConversationObserver`,
+    with :class:`~pipecat.evals.simulation_judge.EvalSimulationJudge`. In a
+    scenario file (:mod:`pipecat.evals.scenario`), an entry with a
+    ``success:`` and neither ``persona:`` nor ``turns:`` is a rubric. Its
+    metrics are judged ones: a measured metric needs a live run.
+
+    Parameters:
+        name: The rubric's name.
+        success: What counts as the bot having done its job, judged over the
+            whole conversation.
+        metrics: The criteria every reply is judged on.
+        judge: Judge LLM config, as a simulation's ``judge``.
+
+    Raises:
+        ValueError: If the rubric has a measured metric.
+    """
+
+    name: str
+    success: str
+    metrics: list[EvalSimulationMetric] = field(default_factory=list)
+    judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
+
+    def __post_init__(self):
+        for metric in self.metrics:
+            if metric.measure is not None:
+                raise ValueError(
+                    f"rubric {self.name!r}: metric {metric.name!r} is measured; a rubric's "
+                    "metrics are judged ('criterion:'), since a measure needs a live run"
+                )
+
+    @classmethod
+    def from_dict(cls, data: dict, *, source: str | Path = "rubric") -> "EvalRubric":
+        """Build a rubric from a mapping with a rubric entry's keys.
+
+        Args:
+            data: ``name``, ``success``, and the optional ``metrics`` and
+                ``judge`` block, each as a scenario file writes it; other keys
+                are ignored.
+            source: Where the mapping came from, for error messages.
+
+        Returns:
+            The rubric.
+
+        Raises:
+            ValueError: If a key is invalid, or ``name`` or ``success`` is missing.
+        """
+        where = Path(source)
+        name = data.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{where}: missing or invalid 'name:' field")
+        success = data.get("success")
+        if not success or not isinstance(success, str) or not success.strip():
+            raise ValueError(f"{where}: missing or invalid 'success:' field (a non-empty string)")
+        _, _, judge = _parse_judge_block(data.get("judge"), where)
+        try:
+            return cls(
+                name=name,
+                success=success.strip(),
+                metrics=_parse_metrics(data.get("metrics"), where),
+                judge=judge,
+            )
+        except ValueError as e:
+            raise ValueError(f"{where}: {e}") from e
+
+
+@dataclass
 class EvalSimulationScenario:
     """A parsed simulation file.
 
@@ -184,8 +257,13 @@ class EvalSimulationScenario:
         max_duration_s: Cap on the run's wall clock, in seconds.
         max_silence_s: Cap on a lull with no event from either side, in seconds.
         runs: How many times the suite runs the simulation; every run must pass.
-        trigger_disconnect: Whether the harness fires the bot's
+        trigger_disconnect: Whether a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
             ``on_client_disconnected`` handler when the connection ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
         source_path: Path the simulation was loaded from, for error messages.
     """
 
@@ -279,7 +357,7 @@ def _parse_simulation(data: dict, path: Path) -> EvalSimulationScenario:
         max_duration_s=_positive_number(data, "max_duration_s", DEFAULT_MAX_DURATION_S, path),
         max_silence_s=_positive_number(data, "max_silence_s", DEFAULT_MAX_SILENCE_S, path),
         runs=_positive_int(data, "runs", 1, path),
-        trigger_disconnect=bool(data.get("trigger_disconnect", False)),
+        trigger_disconnect=_parse_trigger_disconnect(data, path),
         source_path=path,
     )
 

@@ -12,7 +12,9 @@ from unittest.mock import AsyncMock
 import pytest
 from websockets.protocol import State
 
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+from pipecat import version as pipecat_version
+from pipecat.frames.frames import InputAudioRawFrame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.meta.stt import MetaSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
@@ -27,6 +29,7 @@ class _FakeWebsocket:
         self.state = state
         self.sent = []
         self.closed = False
+        self.connect_kwargs = {}
 
     async def send(self, payload):
         self.sent.append(payload)
@@ -48,6 +51,7 @@ class _FakeWebsocket:
 
 def _patch_connect(monkeypatch, websocket: _FakeWebsocket) -> _FakeWebsocket:
     async def fake_websocket_connect(*args, **kwargs):
+        websocket.connect_kwargs = kwargs
         return websocket
 
     monkeypatch.setattr(
@@ -88,6 +92,14 @@ async def test_handshake_carries_credential_and_session_config(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_connect_identifies_the_pipecat_integration(monkeypatch):
+    _, websocket = await _connected(monkeypatch)
+
+    user_agent = websocket.connect_kwargs["additional_headers"]["User-Agent"]
+    assert user_agent == f"Meta/1.0 (integration=Pipecat/{pipecat_version()})"
+
+
+@pytest.mark.asyncio
 async def test_handshake_language_bias_replaces_the_single_language(monkeypatch):
     _, websocket = await _connected(
         monkeypatch,
@@ -119,10 +131,9 @@ async def test_audio_encoding_follows_the_pipeline_sample_rate(monkeypatch, samp
 async def test_off_rate_audio_is_resampled_before_it_is_sent(monkeypatch):
     service, websocket = await _connected(monkeypatch, 8000)
 
-    # The stream resampler buffers, so a single short chunk yields nothing.
     for _ in range(10):
-        async for _ in service.run_stt(b"\x00" * 1600):
-            pass
+        frame = InputAudioRawFrame(audio=b"\x00" * 1600, sample_rate=8000, num_channels=1)
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
 
     audio_sent = b"".join(chunk for chunk in websocket.sent if isinstance(chunk, bytes))
     # 8 kHz in, 16 kHz out: twice the bytes, less what the resampler still holds.
@@ -271,6 +282,106 @@ async def test_settings_change_reconnects(monkeypatch):
 
     assert service._settings.keywords == ["Pipecat"]
     reconnect.assert_awaited_once()
+
+
+def _diarized_turn(turn_id: int, label: str, transcript: str) -> list[str]:
+    """A turn as Meta sends it in DIARIZATION mode, speaker event before speechEnd."""
+    return [
+        json.dumps({"type": "speechStart", "turnId": turn_id, "audioProcessedMs": 0}),
+        json.dumps({"type": "transcript", "transcript": transcript, "final": False}),
+        json.dumps({"type": "speaker", "label": label, "audioProcessedMs": 900}),
+        json.dumps({"type": "speechEnd", "turnId": turn_id, "audioProcessedMs": 800}),
+        json.dumps({"type": "speechComplete", "turnId": turn_id, "transcript": transcript}),
+    ]
+
+
+def _final_frames(monkeypatch, service) -> list[TranscriptionFrame]:
+    frames = []
+    monkeypatch.setattr(service, "push_frame", AsyncMock(side_effect=lambda f: frames.append(f)))
+    monkeypatch.setattr(service, "emit_stt_usage_metrics", AsyncMock())
+    return frames
+
+
+@pytest.mark.asyncio
+async def test_diarized_turns_carry_their_speaker(monkeypatch):
+    service = _service(
+        settings=MetaSTTService.Settings(
+            mode="DIARIZATION", speaker_format="[Speaker {speaker_number}] {text}"
+        )
+    )
+    service._websocket = _FakeWebsocket(
+        _diarized_turn(0, "A", "My favorite fruit is the mango.")
+        + _diarized_turn(1, "B", "Mine is the banana.")
+        + _diarized_turn(2, "A", "I take the train.")
+    )
+    frames = _final_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    finals = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert [(f.speaker.label, f.speaker.number, f.text) for f in finals] == [
+        ("A", 1, "[Speaker 1] My favorite fruit is the mango."),
+        ("B", 2, "[Speaker 2] Mine is the banana."),
+        ("A", 1, "[Speaker 1] I take the train."),
+    ]
+    assert all(f.speaker is None for f in frames if isinstance(f, InterimTranscriptionFrame))
+
+
+@pytest.mark.asyncio
+async def test_speaker_belongs_to_the_turn_open_when_it_arrives(monkeypatch):
+    service = _service(settings=MetaSTTService.Settings(mode="DIARIZATION"))
+    service._websocket = _FakeWebsocket(
+        [
+            json.dumps({"type": "speechStart", "turnId": 0}),
+            json.dumps({"type": "speaker", "label": "A"}),
+            json.dumps({"type": "speechEnd", "turnId": 0}),
+            # The next turn opens before the first one completes.
+            json.dumps({"type": "speechStart", "turnId": 1}),
+            json.dumps({"type": "speechComplete", "turnId": 0, "transcript": "Hello."}),
+            json.dumps({"type": "speaker", "label": "B"}),
+            json.dumps({"type": "speechComplete", "turnId": 1, "transcript": "Hi."}),
+        ]
+    )
+    frames = _final_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    assert [(f.speaker.label, f.text) for f in frames] == [("A", "Hello."), ("B", "Hi.")]
+
+
+@pytest.mark.asyncio
+async def test_turn_with_several_speakers_is_not_labelled(monkeypatch):
+    service = _service(settings=MetaSTTService.Settings(mode="DIARIZATION"))
+    service._websocket = _FakeWebsocket(
+        [
+            json.dumps({"type": "speechStart", "turnId": 0}),
+            json.dumps({"type": "speaker", "label": "A"}),
+            json.dumps({"type": "speaker", "label": "B"}),
+            json.dumps({"type": "speechComplete", "turnId": 0, "transcript": "Hello. Hi."}),
+        ]
+    )
+    frames = _final_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = frames
+    assert frame.speaker is None
+    assert frame.text == "Hello. Hi."
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_change_does_not_reconnect(monkeypatch):
+    service = _service()
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    changed = await service._update_settings(
+        MetaSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    reconnect.assert_not_awaited()
+    assert "speaker_format" not in json.dumps(service._build_handshake())
 
 
 @pytest.mark.asyncio

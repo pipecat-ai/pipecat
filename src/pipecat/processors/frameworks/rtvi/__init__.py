@@ -8,6 +8,7 @@
 
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIClientMessageFrame,
+    RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICancelJobGroupFrame,
@@ -32,6 +33,7 @@ __all__ = [
     "RTVIObserver",
     "RTVIObserverParams",
     "RTVIProcessor",
+    "RTVISendTextFrame",
     "RTVIServerMessageFrame",
     "RTVIServerResponseFrame",
     "RTVIUICancelJobGroupFrame",

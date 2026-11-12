@@ -144,7 +144,7 @@ class BusFlushProgressMessage(BusDataMessage):
     it.
 
     Parameters:
-        flush_id: The id of the probe being reported on.
+        flush_id: The ``flush_id`` of the probe being reported on.
     """
 
     flush_id: int

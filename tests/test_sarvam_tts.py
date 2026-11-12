@@ -214,3 +214,43 @@ async def test_switching_the_http_service_to_v4_flash_takes_its_capabilities():
     assert payload["speaker"] == "shubh_en_narration_gentle"
     assert payload["pitch"] == 0.3
     assert "temperature" not in payload
+
+
+@pytest.mark.parametrize("settings_cls", [SarvamTTSService.Settings, SarvamHttpTTSService.Settings])
+@pytest.mark.parametrize(
+    "key, field, value",
+    [
+        ("voice_id", "voice", "priya"),
+        ("speaker", "voice", "priya"),
+        ("target_language_code", "language", "hi-IN"),
+    ],
+)
+def test_settings_dicts_accept_the_sarvam_api_names(settings_cls, key, field, value):
+    """An unaliased key lands in ``extra``, which never reaches the API."""
+    settings = settings_cls.from_mapping({key: value})
+
+    assert getattr(settings, field) == value
+    assert settings.extra == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["voice_id", "speaker"])
+async def test_a_voice_from_a_settings_dict_is_sent_as_the_speaker(key):
+    service = _service(model="bulbul:v3")
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamTTSService.Settings.from_mapping({key: "priya"}))
+
+    assert _sent_config(service)["speaker"] == "priya"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["voice_id", "speaker"])
+async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
+    session = _FakeSession()
+    service = _http_service(session, model="bulbul:v3")
+
+    await service._update_settings(SarvamHttpTTSService.Settings.from_mapping({key: "priya"}))
+    payload = await _synthesize(service)
+
+    assert payload["speaker"] == "priya"

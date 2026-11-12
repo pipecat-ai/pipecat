@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.deepseek.llm import DeepSeekLLMService
 from pipecat.services.inception.llm import InceptionLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -86,6 +86,18 @@ def test_grok_settings_extra_reasoning_effort_wins():
         GrokLLMService.Settings(reasoning_effort="low", extra={"reasoning_effort": "high"}),
     )
     assert params["reasoning_effort"] == "high"
+
+
+def test_grok_guidelines_unset_by_default():
+    params = _build_params(GrokLLMService)
+    assert "extra_body" not in params
+
+
+def test_grok_guidelines_in_extra_body():
+    guidelines = [{"type": "policy", "category": "profanity", "behavior": "decline"}]
+    params = _build_params(GrokLLMService, GrokLLMService.Settings(guidelines=guidelines))
+    assert "guidelines" not in params
+    assert params["extra_body"] == {"guidelines": guidelines}
 
 
 def test_deepseek_disables_thinking_by_default():

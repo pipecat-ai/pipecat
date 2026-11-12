@@ -95,7 +95,9 @@ class BaseEvalDriver(ABC, Generic[R]):
             failure: The failure, scored against the trace's current turn.
         """
 
-    async def _say(self, text: str, *, audio_file: str | None = None) -> None:
+    async def _say(
+        self, text: str, *, audio_file: str | None = None, parts: list[str | int] | None = None
+    ) -> None:
         """Send one user utterance to the bot.
 
         It goes out as the recording in ``audio_file`` when given, spoken by the
@@ -108,12 +110,16 @@ class BaseEvalDriver(ABC, Generic[R]):
                 four" answering this question).
             audio_file: Optional recording to play in place of synthesizing
                 ``text``.
+            parts: Optional text and pauses to speak in place of ``text``, as
+                :attr:`~pipecat.evals.script.EvalScriptTurn.parts`.
         """
         self._stream.drop_pending_bot_output("before send")
         how = audio_file or ("audio" if self._client.has_user_tts else "text")
         self._trace.log(f"send: {text!r} ({how})")
         if audio_file is not None:
             await self._client.play(audio_file)
+        elif parts is not None and self._client.has_user_tts:
+            await self._client.say_with_pauses(parts)
         elif self._client.has_user_tts:
             await self._client.say(text)
         else:

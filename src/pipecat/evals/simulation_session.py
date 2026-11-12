@@ -9,7 +9,7 @@
 Example::
 
     for scenario in EvalScenarioFile.load("scenarios/simulated/curious_caller.yaml"):
-        run = await EvalSimulationSession.from_scenario(scenario, "ws://localhost:7860").run()
+        run = await EvalSimulationSession.from_scenario(scenario, "ws://localhost:7860/ws").run()
         print(f"{'succeeded' if run.succeeded else 'failed'}: {run.reason}")
 """
 

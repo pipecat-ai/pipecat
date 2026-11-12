@@ -15,7 +15,7 @@ import random
 import string
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 from loguru import logger
 from websockets import Subprotocol
@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import (
@@ -56,11 +55,25 @@ class AWSTranscribeSTTSettings(STTSettings):
             the fastest. AWS binds this to a connection, so updating it at
             runtime triggers a reconnect. See
             https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
+        show_speaker_label: Enable speaker diarization. Each contiguous speaker
+            run of a final result is emitted as its own frame with AWS's speaker
+            label (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results
+            are not labelled. Updating it at runtime triggers a reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    show_speaker_label: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class AWSTranscribeSTTService(WebsocketSTTService):
@@ -128,6 +141,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             model=None,
             language=Language.EN,
             partial_results_stability="high",
+            show_speaker_label=False,
+            speaker_format=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -151,23 +166,17 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         # Init-only connection config (not runtime-updatable).
         self._media_encoding = "linear16"
         self._number_of_channels = 1
-        self._show_speaker_label = False
         self._enable_channel_identification = False
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
-        resolved = resolve_credentials(
+        # Explicit or environment keys. Without them, each connection is signed
+        # with keys from the default chain (see `_signing_credentials`).
+        self._credentials = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
             aws_session_token=aws_session_token,
             region=region,
         )
-
-        self._credentials = {
-            "aws_access_key_id": resolved.access_key,
-            "aws_secret_access_key": resolved.secret_key,
-            "aws_session_token": resolved.session_token,
-            "region": resolved.region,
-        }
+        self._aws_session = None
 
         self._receive_task = None
 
@@ -178,6 +187,15 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             True, as AWS Transcribe STT supports metrics generation.
         """
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, 16000 Hz unless the input is at 8000 or 16000 Hz.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return self.sample_rate if self.sample_rate in (8000, 16000) else 16000
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -193,11 +211,25 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
         return encoding_map.get(encoding, encoding)
 
+    def _speaker_words(self, alternative: dict[str, Any]) -> list[tuple[str, Any]] | None:
+        """Return a diarized alternative's ``(word, speaker)`` pairs, or ``None``.
+
+        Punctuation items carry no speaker; they stay in the transcript and end
+        up in the run of the word before them.
+        """
+        if not self._settings.show_speaker_label:
+            return None
+        return [
+            (item.get("Content", ""), item.get("Speaker"))
+            for item in alternative.get("Items") or []
+            if item.get("Type") == "pronunciation"
+        ]
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if anything changed."""
+        """Apply a settings delta and reconnect if a connection setting changed."""
         changed = await super()._update_settings(delta)
 
-        if changed and self._websocket:
+        if changed.keys() - self.Settings.LOCAL_FIELDS and self._websocket:
             await self._disconnect()
             await self._connect()
 
@@ -260,7 +292,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -284,6 +318,46 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
+    async def _signing_credentials(self) -> dict[str, str | None]:
+        """Return the keys to sign the next connection's URL with.
+
+        Keys passed in or set in the environment are used as given. Otherwise
+        they come from the default AWS credential chain through an aiobotocore
+        session, which renews temporary credentials as they near expiry, so
+        every connection is signed with current keys.
+
+        Raises:
+            ValueError: If no keys are passed in, set in the environment, or
+                found by the default chain.
+        """
+        if self._credentials.access_key or self._credentials.secret_key:
+            return {
+                "access_key": self._credentials.access_key,
+                "secret_key": self._credentials.secret_key,
+                "session_token": self._credentials.session_token,
+            }
+
+        if self._aws_session is None:
+            try:
+                import aiobotocore.session
+            except ModuleNotFoundError as e:
+                raise ValueError(
+                    "No AWS credentials were given, and the default credential chain "
+                    'needs aiobotocore: `uv add "pipecat-ai[aws]"`.'
+                ) from e
+            self._aws_session = aiobotocore.session.get_session()
+            self._aws_session.set_config_variable("region", self._credentials.region)
+
+        credentials = await self._aws_session.get_credentials()
+        if credentials is None:
+            raise ValueError("No AWS credentials found in the parameters, environment or chain.")
+        frozen = await credentials.get_frozen_credentials()
+        return {
+            "access_key": frozen.access_key,
+            "secret_key": frozen.secret_key,
+            "session_token": frozen.token,
+        }
+
     async def _connect_websocket(self):
         """Establish the websocket connection to AWS Transcribe."""
         try:
@@ -296,14 +370,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             if not language_code:
                 raise ValueError(f"Unsupported language: {language_code}")
 
-            # Validate sample rate — AWS Transcribe only supports 8000 or 16000 Hz
-            connect_sample_rate = self.sample_rate
-            if connect_sample_rate not in (8000, 16000):
-                logger.warning(
-                    f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. "
-                    f"Converting from {connect_sample_rate} Hz to 16000 Hz."
+            if self.send_sample_rate != self.sample_rate:
+                logger.debug(
+                    f"{self} resampling audio from {self.sample_rate} Hz to "
+                    f"{self.send_sample_rate} Hz for AWS Transcribe"
                 )
-                connect_sample_rate = 16000
 
             # Generate random websocket key
             websocket_key = "".join(
@@ -322,21 +393,17 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             # Get presigned URL
             presigned_url = get_presigned_url(
-                region=self._credentials["region"],
-                credentials={
-                    "access_key": self._credentials["aws_access_key_id"],
-                    "secret_key": self._credentials["aws_secret_access_key"],
-                    "session_token": self._credentials["aws_session_token"],
-                },
+                region=self._credentials.region,
+                credentials=await self._signing_credentials(),
                 language_code=language_code,
                 media_encoding=self.get_service_encoding(
                     self._media_encoding
                 ),  # Convert to AWS format
-                sample_rate=connect_sample_rate,
+                sample_rate=self.send_sample_rate,
                 number_of_channels=self._number_of_channels,
                 enable_partial_results_stabilization=True,
                 partial_results_stability=assert_given(self._settings.partial_results_stability),
-                show_speaker_label=self._show_speaker_label,
+                show_speaker_label=assert_given(self._settings.show_speaker_label),
                 enable_channel_identification=self._enable_channel_identification,
             )
 
@@ -688,18 +755,15 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                     "Language | None", assert_given(self._settings.language)
                                 )
                                 if is_final:
+                                    runs = self._diarized_runs(
+                                        transcript, self._speaker_words(alternatives[0])
+                                    )
                                     # Report usage before the transcription
                                     # frame so tracing can attach it to the
                                     # STT span the frame closes.
                                     await self.emit_stt_usage_metrics()
-                                    await self.push_frame(
-                                        TranscriptionFrame(
-                                            transcript,
-                                            self._user_id,
-                                            time_now_iso8601(),
-                                            language,
-                                            result=result,
-                                        )
+                                    await self._push_transcription_runs(
+                                        runs, language=language, result=result
                                     )
                                     await self._handle_transcription(
                                         transcript,

@@ -32,9 +32,9 @@ from typing import Any, cast
 
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.flows.actions import ActionError, ActionManager
 from pipecat.flows.adapters import LLMAdapter
 from pipecat.flows.exceptions import (
