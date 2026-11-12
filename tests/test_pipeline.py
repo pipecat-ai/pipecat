@@ -984,21 +984,70 @@ class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([CancelFilter()])
         worker = PipelineWorker(pipeline, cancel_timeout_secs=0.2)
 
-        cancelled = False
+        timed_out = []
+        finished = []
 
         @worker.event_handler("on_pipeline_started")
         async def on_pipeline_started(worker: PipelineWorker, frame: StartFrame):
             await worker.cancel()
 
+        @worker.event_handler("on_pipeline_timeout")
+        async def on_pipeline_timeout(worker: PipelineWorker, frame: Frame):
+            timed_out.append(frame)
+
         @worker.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(worker: PipelineWorker, frame: Frame):
-            nonlocal cancelled
-            cancelled = isinstance(frame, CancelFrame)
+            finished.append(frame)
 
-        try:
-            await worker.run(WorkerParams(task_manager=TaskManager()))
-        except asyncio.CancelledError:
-            assert cancelled
+        await asyncio.wait_for(worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0)
+
+        # The CancelFrame is swallowed, so the worker gives up waiting for it
+        # but still reports the pipeline as finished.
+        assert worker.has_finished()
+        assert len(timed_out) == 1
+        assert isinstance(timed_out[0], CancelFrame)
+        assert len(finished) == 1
+        assert isinstance(finished[0], CancelFrame)
+
+    async def test_task_cancel_from_on_pipeline_started(self):
+        # The StartFrame has reached the sink, so the pipeline has started:
+        # cancelling must push a CancelFrame and report it as finished, however
+        # soon the handler cancels.
+        async def cancel_after(yields: int):
+            received = []
+            finished = []
+
+            class Recorder(FrameProcessor):
+                async def process_frame(self, frame: Frame, direction: FrameDirection):
+                    await super().process_frame(frame, direction)
+                    received.append(frame)
+                    await self.push_frame(frame, direction)
+
+            worker = PipelineWorker(Pipeline([Recorder()]), cancel_timeout_secs=1.0)
+
+            @worker.event_handler("on_pipeline_started")
+            async def on_pipeline_started(worker, frame):
+                for _ in range(yields):
+                    await asyncio.sleep(0)
+                await worker.cancel()
+
+            @worker.event_handler("on_pipeline_finished")
+            async def on_pipeline_finished(worker, frame):
+                finished.append(frame)
+
+            await asyncio.wait_for(
+                worker.run(WorkerParams(task_manager=TaskManager())), timeout=2.0
+            )
+            return worker, received, finished
+
+        for yields in range(4):
+            with self.subTest(yields=yields):
+                worker, received, finished = await cancel_after(yields)
+
+                assert worker.has_finished()
+                assert any(isinstance(f, CancelFrame) for f in received)
+                assert len(finished) == 1
+                assert isinstance(finished[0], CancelFrame)
 
     async def test_task_cancel_before_start_reaches_sink(self):
         class StartBlocker(FrameProcessor):

@@ -1196,7 +1196,11 @@ class PipelineWorker(BaseWorker):
             # returns.
             if self._pipeline_setup_task and not self._pipeline_setup_task.done():
                 self._pipeline_setup_task.cancel()
-            if self._pipeline_start_task and not self._pipeline_start_task.done():
+            if (
+                self._pipeline_start_task
+                and not self._pipeline_start_task.done()
+                and not self._pipeline_start_event.is_set()
+            ):
                 self._pipeline_start_task.cancel()
 
     async def _create_tasks(self):
