@@ -7,8 +7,9 @@
 """Piper TTS service implementation."""
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator, AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,19 +24,45 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, require_given
 
 try:
-    from piper import PiperVoice
+    from piper import PiperVoice, SynthesisConfig
     from piper.download_voices import download_voice
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Piper, you need to `uv add "pipecat-ai[piper]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+PIPER_CACHE_DIR = Path(os.path.expanduser("~/.cache/pipecat/piper"))
+
+# Settings Piper takes with each utterance it synthesizes, so a runtime update of any
+# of them applies to the next one.
+_SYNTHESIS_FIELDS = ("speaker_id", "length_scale", "noise_scale", "noise_w_scale")
+
 
 @dataclass
-class PiperTTSSettings(TTSSettings):
+class _PiperBaseTTSSettings(TTSSettings):
+    """Shared settings for Piper TTS services.
+
+    Parameters:
+        speaker_id: Which speaker to use, for voices trained on several speakers (such as
+            ``en_US-libritts_r-medium``). It's an index from 0 to the voice's speaker count
+            minus one, listed in the voice's ``.onnx.json`` file. Voices with a single speaker
+            ignore it.
+        length_scale: Phoneme length scale; below 1 is faster, above 1 is slower.
+        noise_scale: Amount of generator noise, which varies the audio.
+        noise_w_scale: Amount of phoneme width noise, which varies the speaking style.
+    """
+
+    speaker_id: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    length_scale: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noise_scale: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noise_w_scale: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class PiperTTSSettings(_PiperBaseTTSSettings):
     """Settings for PiperTTSService."""
 
     pass
@@ -80,7 +107,7 @@ class PiperTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             download_dir: Directory for storing voice model files. Defaults to
-                the current working directory.
+                Pipecat's cache directory.
             force_redownload: Re-download the voice model even if it already exists.
             use_cuda: Use CUDA for GPU-accelerated inference.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -88,7 +115,15 @@ class PiperTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model=None, voice=None, language=None)
+        default_settings = self.Settings(
+            model=None,
+            voice=None,
+            language=None,
+            speaker_id=None,
+            length_scale=None,
+            noise_scale=None,
+            noise_w_scale=None,
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
@@ -108,13 +143,13 @@ class PiperTTSService(TTSService):
             **kwargs,
         )
 
-        download_dir = download_dir or Path.cwd()
+        download_dir = download_dir or PIPER_CACHE_DIR
+        if not download_dir.exists():
+            download_dir.mkdir(parents=True, exist_ok=True)
 
-        _voice = assert_given(self._settings.voice)
-        if _voice is None:
-            raise ValueError("Piper TTS voice must be specified")
+        _voice = require_given(self._settings.voice, "Piper TTS voice")
         model_file = f"{_voice}.onnx"
-        model_path_resolved = Path(download_dir) / model_file
+        model_path_resolved = download_dir / model_file
 
         if not model_path_resolved.exists():
             logger.debug(f"Downloading Piper '{_voice}' model")
@@ -137,13 +172,14 @@ class PiperTTSService(TTSService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Settings are stored but not applied to the active connection.
+        Synthesis controls take effect on the next utterance; the rest are
+        stored but not applied to the loaded voice.
         """
         changed = await super()._update_settings(delta)
         if not changed:
             return changed
         # TODO: voice changes would require re-downloading and loading the model.
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.keys() - _SYNTHESIS_FIELDS)
         return changed
 
     @traced_tts
@@ -172,10 +208,14 @@ class PiperTTSService(TTSService):
                 yield item.audio_int16_bytes
 
         try:
+            syn_config = SynthesisConfig(
+                **{name: assert_given(getattr(self._settings, name)) for name in _SYNTHESIS_FIELDS}
+            )
+
             await self.start_tts_usage_metrics(text)
 
             async for frame in self._stream_audio_frames_from_iterator(
-                async_iterator(self._voice.synthesize(text)),
+                async_iterator(self._voice.synthesize(text, syn_config=syn_config)),
                 in_sample_rate=self._voice.config.sample_rate,
                 context_id=context_id,
             ):
@@ -197,8 +237,11 @@ class PiperTTSService(TTSService):
 #  $ uv pip install "piper-tts[http]"
 #  $ uv run python -m piper.http_server -m en_US-ryan-high
 #
+# The server listens on port 5000 and synthesizes on POST /synthesize, so
+# `base_url` is "http://localhost:5000/synthesize".
+#
 @dataclass
-class PiperHttpTTSSettings(TTSSettings):
+class PiperHttpTTSSettings(_PiperBaseTTSSettings):
     """Settings for PiperHttpTTSService."""
 
     pass
@@ -210,6 +253,14 @@ class PiperHttpTTSService(TTSService):
     Provides integration with Piper's HTTP TTS server for text-to-speech
     synthesis. Supports streaming audio generation with configurable sample
     rates and automatic WAV header removal.
+
+    Example::
+
+        tts = PiperHttpTTSService(
+            base_url="http://localhost:5000/synthesize",
+            aiohttp_session=session,
+            settings=PiperHttpTTSService.Settings(voice="en_US-ryan-high"),
+        )
     """
 
     Settings = PiperHttpTTSSettings
@@ -227,7 +278,9 @@ class PiperHttpTTSService(TTSService):
         """Initialize the Piper TTS service.
 
         Args:
-            base_url: Base URL for the Piper TTS HTTP server.
+            base_url: URL of the Piper HTTP server's synthesis endpoint, which
+                requests are posted to as-is (e.g.
+                `http://localhost:5000/synthesize`).
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
@@ -240,7 +293,15 @@ class PiperHttpTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model=None, voice=None, language=None)
+        default_settings = self.Settings(
+            model=None,
+            voice=None,
+            language=None,
+            speaker_id=None,
+            length_scale=None,
+            noise_scale=None,
+            noise_w_scale=None,
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
@@ -290,10 +351,14 @@ class PiperHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
         try:
-            data = {
+            data: dict[str, Any] = {
                 "text": text,
                 "voice": self._settings.voice,
             }
+            for name in _SYNTHESIS_FIELDS:
+                value = assert_given(getattr(self._settings, name))
+                if value is not None:
+                    data[name] = value
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:
                 if response.status != 200:

@@ -1,0 +1,73 @@
+# The insurance quote flow as data. Loaded by bot.py and joined to the tools in
+# handlers.py. The quote_results node reads the current quote from the manager's
+# state; update_coverage leads back to the same node, which is rendered again
+# with the new figures.
+
+initial_node: initial
+
+nodes:
+  initial:
+    role_message: >-
+      You are a friendly insurance agent on the phone. Your responses will be
+      converted to audio, so avoid special characters and say amounts in words,
+      like "eighty one dollars a month". Keep every reply to one or two short
+      sentences, and don't thank the customer for each answer or explain why
+      you're asking. Always use the available functions to progress the
+      conversation.
+    task_messages:
+      - role: developer
+        content: >-
+          Greet the customer, say you can put together a quick insurance quote
+          with a couple of details, and ask how old they are. Keep it to two
+          short sentences.
+    functions:
+      - name: collect_age
+        transition_to: marital_status
+
+  marital_status:
+    task_messages:
+      - role: developer
+        content: Ask whether they're single or married.
+    functions:
+      - name: collect_marital_status
+        transition_to: quote_calculation
+
+  quote_calculation:
+    task_messages:
+      - role: developer
+        content: >-
+          Call calculate_quote for a {{ age }} year old {{ marital_status }}
+          customer right away, without saying anything first.
+    functions:
+      - name: calculate_quote
+        transition_to: quote_results
+
+  quote_results:
+    task_messages:
+      - role: developer
+        content: >-
+          The current quote is {{ quote.monthly_premium }} dollars a month for
+          {{ quote.coverage_amount }} dollars of coverage with a
+          {{ quote.deductible }} dollar deductible. Tell the customer the
+          premium, coverage, and deductible in one sentence, then ask if they'd
+          like to change the coverage or deductible. If this is an updated
+          quote, say the new premium and whether it went up or down from the
+          last one, in a sentence. When they ask for a change, call
+          update_coverage with the new amounts. When they're done, use
+          end_quote.
+    functions:
+      - name: update_coverage
+        transition_to: quote_results
+      - name: end_quote
+        transition_only: true
+        description: Complete the quote process when the customer is satisfied.
+        transition_to: end
+
+  end:
+    task_messages:
+      - role: developer
+        content: >-
+          Say a representative will be in touch about the quote and say
+          goodbye, in one or two sentences.
+    post_actions:
+      - type: end_conversation

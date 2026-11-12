@@ -37,7 +37,7 @@ class AudioVolumeTracker:
         """Initialize the volume tracker."""
         self._sample_rate = 0
         self._window_num_bytes = 0
-        self._buffer = b""
+        self._buffer = bytearray()
         # None once the window holds audio that hasn't been measured yet.
         self._volume: float | None = 0.0
 
@@ -50,7 +50,10 @@ class AudioVolumeTracker:
             holds a measurable amount of audio.
         """
         if self._volume is None:
-            self._volume = calculate_audio_volume(self._buffer, self._sample_rate)
+            # Measure a copy. A view of the window outlives the measurement
+            # whenever another thread holds this thread's frame (a profiler or
+            # a stack sampler does), and the next update can't resize it.
+            self._volume = calculate_audio_volume(bytes(self._buffer), self._sample_rate)
         return self._volume
 
     def update(self, audio: bytes, sample_rate: int):
@@ -67,11 +70,13 @@ class AudioVolumeTracker:
             self._window_num_bytes = math.ceil(VOLUME_WINDOW_SECS * sample_rate) * 2
             self.reset()
 
-        self._buffer = (self._buffer + audio)[-self._window_num_bytes :]
+        self._buffer += audio
+        if len(self._buffer) > self._window_num_bytes:
+            del self._buffer[: len(self._buffer) - self._window_num_bytes]
         if len(self._buffer) == self._window_num_bytes:
             self._volume = None
 
     def reset(self):
         """Clear the rolling window and the tracked volume."""
-        self._buffer = b""
+        self._buffer = bytearray()
         self._volume = 0.0

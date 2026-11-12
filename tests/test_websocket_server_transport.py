@@ -19,6 +19,7 @@ listening), not on the transport's internal teardown bookkeeping.
 import asyncio
 import socket
 import unittest
+from unittest.mock import AsyncMock
 
 import websockets
 
@@ -186,3 +187,60 @@ class TestServerTornDownAfterSession(WebsocketServerTransportTest):
         await client.close()
 
         await self._assert_not_listening(port)
+
+
+class _CoalescingSerializer(FrameSerializer):
+    """Emits one coalesced payload every third frame, buffering the two before it."""
+
+    def __init__(self):
+        super().__init__()
+        self._seen = 0
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit the accumulated block on every third audio frame."""
+        if not isinstance(frame, OutputAudioRawFrame):
+            return None
+        self._seen += 1
+        if self._seen % 3:
+            return None
+        return frame.audio * 3
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+class TestWriteAudioFramePacesWrittenFrames(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue #5592.
+
+    A serializer that buffers audio across calls emits no payload on most of
+    them. Those frames have still been written, so pacing has to follow the
+    frames taken rather than the payloads that go out, and the frames have to
+    keep reaching downstream consumers.
+    """
+
+    def _make_output(self, serializer):
+        params = SingleClientWebsocketServerParams(serializer=serializer, audio_out_enabled=True)
+        output = SingleClientWebsocketServerTransport(params=params).output()
+        output._websocket = AsyncMock()
+        output._sample_rate = SAMPLE_RATE
+        output._write_audio_sleep = AsyncMock()
+        return output
+
+    @staticmethod
+    def _audio_frame():
+        return OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=SAMPLE_RATE, num_channels=1)
+
+    async def test_every_frame_is_paced_when_payloads_are_coalesced(self):
+        """Pacing follows the frames taken, not the payloads that go out."""
+        output = self._make_output(_CoalescingSerializer())
+
+        written = [await output.write_audio_frame(self._audio_frame()) for _ in range(9)]
+
+        self.assertEqual(written, [True] * 9)
+        self.assertEqual(output._write_audio_sleep.await_count, 9)
+        self.assertEqual(output._websocket.send.await_count, 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

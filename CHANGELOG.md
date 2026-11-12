@@ -7,6 +7,7029 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [1.16.0] - 2026-11-11
+
+### Added
+
+- Added a `normalization` field to `CartesiaTTSService.Settings` and
+  `CartesiaHttpTTSService.Settings`, passing Cartesia's text normalization mode
+  (`"auto"`, `"off"`, or a locale code such as `"en-GB"`) through to synthesis
+  requests.
+  (PR [#5430](https://github.com/pipecat-ai/pipecat/pull/5430))
+
+- Added `SarvamHttpSTTService`, which sends each VAD speech segment to Sarvam's
+  REST speech-to-text API (`saaras:v4` by default, or `saaras:v3`) and yields
+  the transcription from `run_stt()`. It takes the same `mode` and `keyterms`
+  options as `SarvamSTTService`, and sends a segment longer than the API's
+  30-second limit as consecutive pieces whose transcripts are joined.
+
+    ```python
+    stt = SarvamHttpSTTService(
+        api_key=os.getenv("SARVAM_API_KEY"),
+        settings=SarvamHttpSTTService.Settings(language=Language.HI_IN),
+    )
+    ```
+  (PR [#5501](https://github.com/pipecat-ai/pipecat/pull/5501))
+
+- Added `max_speakers` and `filter_profanity` to
+  `AssemblyAISTTService.Settings`, passing AssemblyAI's speaker-label cap and
+  profanity filter through to the streaming session.
+  (PR [#5530](https://github.com/pipecat-ai/pipecat/pull/5530))
+
+- `CartesiaSTTService.Settings` now exposes Cartesia's `min_volume` and
+  `max_silence_duration_secs`, which control the silence that triggers
+  automatic transcript finalization on ink-whisper models.
+  (PR [#5531](https://github.com/pipecat-ai/pipecat/pull/5531))
+
+- Added `speed` to Inworld Realtime's `AudioOutput`, so a session can set the
+  agent's speaking rate.
+  (PR [#5541](https://github.com/pipecat-ai/pipecat/pull/5541))
+
+- Added `noise_reduction` to Inworld Realtime's `AudioInput`, so a session can
+  enable Inworld's near-field or far-field input filter.
+  (PR [#5541](https://github.com/pipecat-ai/pipecat/pull/5541))
+
+- Added `threshold`, `prefix_padding_ms`, `silence_duration_ms` and
+  `idle_timeout_ms` to Inworld Realtime's `TurnDetection`, so
+  `type="server_vad"` sessions can be tuned the way Inworld documents.
+  (PR [#5541](https://github.com/pipecat-ai/pipecat/pull/5541))
+
+- Added `language` and `prompts` to Inworld Realtime's `InputTranscription`, so
+  a session can pin the STT language and list expected words or phrases for the
+  transcriber to recognize.
+  (PR [#5541](https://github.com/pipecat-ai/pipecat/pull/5541))
+
+- Added an `instruction` field to `InworldHttpTTSService.Settings`, which
+  passes Inworld's plain-English steering for a request (e.g. `"speak loudly
+  and urgently"`) through to `inworld-tts-2`. The WebSocket API takes steering
+  as inline `[tags]` in the text instead, so `InworldTTSService` ignores the
+  field.
+  (PR [#5542](https://github.com/pipecat-ai/pipecat/pull/5542))
+
+- Added `pronunciation_dict` to `MiniMaxHttpTTSService.Settings`, passing
+  MiniMax's `pronunciation_dict.tone` replacements (e.g.
+  `"Pipecat/(ˈpaɪpkæt)"`) through to synthesis requests.
+  (PR [#5545](https://github.com/pipecat-ai/pipecat/pull/5545))
+
+- Added a `truncation` field to the OpenAI Realtime `SessionProperties`, which
+  sets what the server does once a long session outgrows the model's input
+  token limit. By default it drops the oldest messages, only as many as each
+  response needs. `TruncationRetentionRatio` drops more at once so truncation
+  happens less often and more input stays in the prompt cache, which OpenAI
+  recommends for lowering the cost of long sessions; `"disabled"` returns an
+  error instead of truncating.
+  (PR [#5547](https://github.com/pipecat-ai/pipecat/pull/5547))
+
+- Added `delay`, `keywords` and `languages` to the OpenAI Realtime
+  `InputAudioTranscription` settings, exposing OpenAI's input-transcription
+  latency/accuracy control and transcription hints.
+  (PR [#5547](https://github.com/pipecat-ai/pipecat/pull/5547))
+
+- Added `speaker_id`, `length_scale`, `noise_scale` and `noise_w_scale`
+  settings to `PiperTTSService` and `PiperHttpTTSService`, exposing Piper's
+  speaker selection, speaking speed and variability controls.
+  (PR [#5551](https://github.com/pipecat-ai/pipecat/pull/5551))
+
+- Added `apply_text_normalization` to `ElevenLabsDialogueTTSService.Settings`,
+  which controls whether ElevenLabs converts numbers, dates and currencies to
+  words before speaking them. `"on"` always converts, so `07/03/2026` is read
+  as "July third, twenty twenty-six"; `"off"` skips the conversion; `"auto"`
+  lets ElevenLabs decide. Left unset, ElevenLabs' default, `"auto"`, applies.
+  (PR [#5554](https://github.com/pipecat-ai/pipecat/pull/5554))
+
+- Added `keyterm`, `filler_words`, `vad_threshold`, `smart_turn` and
+  `smart_turn_timeout` to `XAISTTSettings`, covering the rest of xAI's
+  streaming transcription query parameters: keyword biasing, disfluency
+  retention, the voice-activity gate, and the server's semantic end-of-turn
+  detection. All are unset by default, leaving the server's defaults in place.
+  (PR [#5561](https://github.com/pipecat-ai/pipecat/pull/5561))
+
+- Added a `replace` field to `XAIHttpTTSService.Settings`, which passes xAI's
+  pronunciation substitution map (up to 200 phrase-to-respelling entries) to
+  `POST /v1/tts`.
+  (PR [#5562](https://github.com/pipecat-ai/pipecat/pull/5562))
+
+- Added `apply_custom_pronunciations` to `ResembleAITTSService.Settings`, which
+  asks Resemble AI to apply the team's custom pronunciations to matching words
+  in the input text.
+  (PR [#5563](https://github.com/pipecat-ai/pipecat/pull/5563))
+
+- Added `SegmentedSTTService.segment_sample_rate`, which a subclass overrides
+  to receive its segments at the sample rate its model reads.
+  (PR [#6161](https://github.com/pipecat-ai/pipecat/pull/6161))
+
+- TTS services and output transports now log their audio sample rate at DEBUG
+  level, and log when they start resampling audio.
+  (PR [#6200](https://github.com/pipecat-ai/pipecat/pull/6200))
+
+- Added `GenesysAudioHookSerializer.create_pause_request()` and
+  `create_resume_request()`, which build the `pause` and `resume` messages that
+  ask Genesys to pause or resume the audio stream. A session opened with
+  `start_paused=True` now starts paused and resumes once Genesys confirms a
+  resume request; previously it could never be resumed.
+  (PR [#6250](https://github.com/pipecat-ai/pipecat/pull/6250))
+
+- Added speaker diarization to `ElevenLabsSTTService` (`diarize`),
+  `AWSTranscribeSTTService` (`show_speaker_label`) and `OpenAISTTService` with
+  diarization models such as `gpt-4o-transcribe-diarize`.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Added `speaker` to `TranscriptionFrame`, `InterimTranscriptionFrame` and
+  `EagerTranscriptionFrame`: the `TranscriptionSpeaker` (provider label and
+  speaker number) an STT service's diarization assigned to the text.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- `DeepgramSTTService`, `DeepgramSageMakerSTTService`, `SonioxSTTService`,
+  `XAISTTService`, `SmallestSTTService`, `MetaSTTService` and
+  `ZoomAISTTService` now report the diarization speaker in the transcription
+  frame's `speaker`.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Added a `speaker_format` setting to every STT service that supports speaker
+  diarization, to write the speaker into the transcript text (e.g. `"[Speaker
+  {speaker_number}] {text}"`).
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Added `ZoomAIRealtimeLLMService`, speech-to-speech conversation with the Zoom
+  AI Voice Agent. Install it with `pipecat-ai[zoom-ai]`. `pipecat init` offers
+  it as "Zoom AI Voice Agent".
+    - The Voice Agent detects turns and handles barge-in itself, so the
+      pipeline needs no VAD analyzer.
+    - `Settings.speak` sets the voice and `Settings.listen` the custom
+      vocabulary. `Settings.provider` runs the conversation on your own OpenAI
+      or Anthropic account.
+  (PR [#6353](https://github.com/pipecat-ai/pipecat/pull/6353))
+
+- Added a `pause_frame_processing` option to `ElevenLabsTTSService` and
+  `ElevenLabsDialogueTTSService`. It defaults to `True`; set it to `False` to
+  let contexts synthesize concurrently on one socket, such as two
+  `TTSSpeakFrame`s pushed at once or back-to-back turns. Audio still plays in
+  order.
+  (PR [#6392](https://github.com/pipecat-ai/pipecat/pull/6392))
+
+- Added `framing` to `SimliVideoService` for Simli Trinity-2 faces.
+  `SimliVideoService.Framing(...)` sets the video's size (`streaming_width`,
+  `streaming_height`, such as 1366x768 for 16:9), where the avatar sits in it
+  (`avatar_position_x`, `avatar_position_y`), the camera it starts with
+  (`SimliVideoService.Camera(...)`), and an uploaded `background_id` or
+  `foreground_id`.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- Added `eou_timeout_ms` to `SmallestSTTService.Settings`, exposing Pulse's
+  end-of-utterance silence timeout (100-10000ms). Left unset, Pulse's own
+  endpointing-dependent default (600ms/800ms) applies.
+  (PR [#6459](https://github.com/pipecat-ai/pipecat/pull/6459))
+
+- `ElevenLabsRealtimeSTTService` now supports specifying secondary languages.
+  (PR [#6475](https://github.com/pipecat-ai/pipecat/pull/6475))
+
+- Added `clone_strength` to `ElevenLabsDialogueTTSService.Settings`. It
+  controls how closely a Professional Voice Clone fine-tuned for an Eleven v4
+  model follows its samples, and is sent only to `eleven_v4` models.
+  (PR [#6483](https://github.com/pipecat-ai/pipecat/pull/6483))
+
+- Added `vad_force_turn_endpoint` to `ZoomAISTTService`. With
+  `vad_force_turn_endpoint=True`, Scribe's own voice activity detection is
+  turned off and the service commits each turn on
+  `VADUserStoppedSpeakingFrame`, so Pipecat's VAD and turn strategies (e.g.
+  Smart Turn) decide when the user is done. The service then reports a TTFS P99
+  latency (`ZOOM_AI_TTFS_P99`, overridable with `ttfs_p99_latency`) and leaves
+  the default user turn strategies in place. The default (`False`) keeps
+  Scribe's turn detection unchanged.
+  (PR [#6497](https://github.com/pipecat-ai/pipecat/pull/6497))
+
+- Added "Google Gemini Interactions" to the LLMs `pipecat init` offers, which
+  generates a bot using `GoogleInteractionsLLMService`.
+  (PR [#6504](https://github.com/pipecat-ai/pipecat/pull/6504))
+
+- Added `GoogleInteractionsLLMService`, an LLM service for the Gemini
+  Interactions API. It sends the full context each turn with `store=False`, so
+  Google keeps no conversation state. Import it from
+  `pipecat.services.google.interactions.llm`; it needs `google-genai` 2.0.0 or
+  later.
+    - It takes the same settings as `GoogleLLMService`, so switching is a change
+      of class. `top_k`, `frequency_penalty`, `presence_penalty` and a thinking
+      budget have no Interactions API field and are ignored with a warning;
+      thinking is set by `thinking_level`.
+    - Thought signatures are stored in the context the same way
+      `GoogleLLMService` stores them, so a conversation can move between the two
+      services mid-call, including one with function calls.
+    - Supports streaming text, function calls (parallel and sequential), thought
+      summaries, images, audio and documents, built-in Gemini tools passed as
+      `tools`, `run_inference()` with a `response_schema`, and token usage
+      metrics.
+    - A completed response with no text and no function call logs a warning and
+      pushes a non-fatal `ErrorFrame`, so the application can react instead of
+      the bot going silent.
+    - See `examples/voice/voice-google-interactions.py`,
+      `examples/function-calling/function-calling-google-interactions.py`,
+      `examples/function-calling/function-calling-google-interactions-video.py`,
+      `examples/function-calling/function-calling-google-interactions-async.py`,
+      `examples/vision/vision-google-interactions.py` and
+      `examples/thinking/thinking-functions-google-interactions.py`.
+  (PR [#6504](https://github.com/pipecat-ai/pipecat/pull/6504))
+
+- Added `GoogleInteractionsVertexLLMService`, which runs
+  `GoogleInteractionsLLMService` on Vertex AI. Import it from
+  `pipecat.services.google.interactions.vertex.llm`.
+    - It authenticates with Google Cloud credentials (`credentials`,
+      `credentials_path`, or the application default credentials) for a
+      `project_id`, and refuses an `api_key`.
+    - `location` defaults to `"global"`. Vertex serves the Interactions API only
+      from `global`, `us` and `eu`, and only for Gemini 3 models and later; the
+      default model is `gemini-3.8-flash`.
+    - `gs://` image and file URLs are passed to Vertex directly.
+    - See
+      `examples/function-calling/function-calling-google-interactions-vertex.py`.
+  (PR [#6508](https://github.com/pipecat-ai/pipecat/pull/6508))
+
+- Added "Google Vertex AI Interactions" to the LLMs `pipecat init` offers,
+  which generates a bot using `GoogleInteractionsVertexLLMService`.
+  (PR [#6508](https://github.com/pipecat-ai/pipecat/pull/6508))
+
+- Added `load_shared_model()` in `pipecat.utils.models`, which loads a model
+  off the event loop the first time it's asked for and hands the same one to
+  every later caller with the same key, so a local model is loaded once a
+  process however many pipelines use it. Pipecat Tone's reader and tagger load
+  their models through it.
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- Added `PipecatToneClassifier` in `pipecat.classifiers.tone.classifier`, a
+  classifier that runs Pipecat Tone's reader model on the CPU. It answers the
+  questions built into the model, listed in `PipecatToneClassifier.questions`:
+  the turn's `emotion` and `move` as choices, and `sarcasm` and `backchannel`
+  (whether the turn is only a listening sound, such as "mhm") as yes/no
+  questions. The questions take their options from the model, which `setup()`
+  loads, and any other question raises a `ClassifierError`. The state is the
+  turn's text, or `{"user": ..., "assistant": ...}` to read it with the bot's
+  words before it.
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- Added `PerceptionReader` to expressive conversation (alpha), a processor that
+  reads how each user turn was said by asking classifiers. Place it after the
+  STT service and give it its `sources`, each a `PerceptionSource`: a
+  classifier, the questions it's asked and how long a transcription waits for
+  its answers. A text classifier reads each final transcription, with the bot's
+  previous reply, and one that hears, such as `HumeAudioClassifier`, hears the
+  user's speech. The sources are asked at once and their answers added to the
+  transcription's `perception`, one signal per question, in the sources' order,
+  after any signals the STT service read (`replace_perception=True` replaces
+  them instead); a source that's late or fails leaves only its own signals out.
+  A `ChoiceQuestion` reports its likeliest options, a `YesNoQuestion` its
+  probability and a `ScoreQuestion` its position on the scale, and each
+  `PerceptionQuestion` carries the `description` the LLM is given for its
+  signal.
+
+    ```python
+    from pipecat.expressive.processors.perception_reader import (
+        PerceptionQuestion,
+        PerceptionReader,
+        PerceptionSource,
+    )
+    from pipecat.expressive.processors.tone_reader import PipecatToneSource
+
+    hume = PerceptionSource(
+        classifier=HumeAudioClassifier(api_key=os.getenv("HUME_API_KEY")),
+        questions={
+            "hesitation": PerceptionQuestion(
+                question=YesNoQuestion(instructions="Is the user unsure?"),
+                description="The chance the user is unsure, from 0 to 1.",
+            ),
+        },
+    )
+    reader = PerceptionReader(sources=[PipecatToneSource(), hume])
+    ```
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- Added `SpeechSegmentBuffer` in `pipecat.audio.speech_segment_buffer`, which
+  keeps one stretch of the user's speech with the audio just before it. Between
+  stretches of speech it keeps the last `pre_speech_secs`, 1 s by default, so a
+  segment starts before the VAD reports speech. From `start()` to `stop()` it
+  keeps everything, or the last `max_secs`, and `stop()` returns the segment.
+  `SegmentedSTTService` keeps its segments in one.
+  (PR [#6523](https://github.com/pipecat-ai/pipecat/pull/6523))
+
+- Added `HumeAudioClassifier` in `pipecat.classifiers.hume.audio_decisions`, a
+  classifier backed by Hume's Audio Decisions API that hears a clip of the
+  user's speech. Install it with `pipecat-ai[hume]`. As a `PerceptionReader`
+  source, it reads how the user sounded: see
+  `examples/expressive-conversation/expressive-conversation-hume-audio-decisions.py`.
+  (PR [#6530](https://github.com/pipecat-ai/pipecat/pull/6530))
+
+- Added `PerceptionFrame`, which `PerceptionReader` broadcasts with every
+  reading as soon as it's made.
+  (PR [#6530](https://github.com/pipecat-ai/pipecat/pull/6530))
+
+- Added audio to classifiers: a classifier whose `supports_audio` is set hears
+  `ClassifierAudio` clips passed in `inputs=`.
+  (PR [#6555](https://github.com/pipecat-ai/pipecat/pull/6555))
+
+- Added `ErrorCategory.CONTENT_FILTERED` for requests a provider's content
+  policy rejected. It is not a permanent category, so it does not mark a
+  service unusable. The OpenAI Chat Completions and Responses LLM services
+  report a `content_filter` 400 with it.
+  (PR [#6566](https://github.com/pipecat-ai/pipecat/pull/6566))
+
+- Added `enable_agent_text_input` to `SonioxSTTService.Settings`, on by
+  default. Each reply is sent to Soniox once the bot has said it, so the
+  recognizer knows the bot's side of the conversation and words the bot used
+  are recognized when the user repeats them. It takes effect only on models
+  that support agent text input (`stt-rt-v6` and later); it stays off for older
+  models.
+  (PR [#6571](https://github.com/pipecat-ai/pipecat/pull/6571))
+
+- Added `enable_echo_cancellation` to `SonioxSTTService.Settings`. It sends the
+  bot's reply word by word while it plays, so Soniox lines the words up with
+  the audio and does not transcribe the bot's own voice as the user. Needs a
+  TTS service that reports word timestamps, such as `SonioxTTSService`.
+  `agent_text_lead_ms` (default 700) sets how far ahead of playback each word
+  is sent.
+  (PR [#6572](https://github.com/pipecat-ai/pipecat/pull/6572))
+
+- Added `BotSpeechObserver`, which reports the text the bot will speak as the
+  TTS service produces it, through `on_bot_text`, and the end of the bot's
+  speech, with whether it was interrupted, through `on_bot_speech_ended`. A TTS
+  service that reports word timestamps produces one word at a time, each with
+  its presentation timestamp. Text of a reply the user cut off, and expression
+  sounds and pauses, are left out.
+  (PR [#6572](https://github.com/pipecat-ai/pipecat/pull/6572))
+
+- Added `JambonzFrameSerializer`, for connecting a Pipecat pipeline to
+  [jambonz](https://jambonz.org) through its `listen` verb. jambonz sends raw
+  16-bit PCM rather than base64 in a JSON envelope, and announces the call's
+  sample rate, channel layout and identifiers in a preamble before any audio,
+  so the rate is read from the connection rather than configured — a narrowband
+  call needs no change. Later text frames are events: a DTMF digit becomes an
+  `InputDTMFFrame` when the verb sets `passDtmf`, and `mark` and `playDone`
+  replies are ignored. `InterruptionFrame` sends `killAudio`, and
+  `disconnect_on_end` (on by default) ends the `listen` verb when the pipeline
+  stops, which needs no API credentials.
+
+    The verb has to set three things explicitly. `streaming` defaults to
+  `false`, and while it is, audio sent back is ignored and the caller simply
+  hears nothing. `sampleRate` defaults to `8000`. And
+  `bidirectionalAudio.sampleRate` has no default — omitted, your audio is read
+  at the call's negotiated codec rate, which depends on the carrier. jambonz
+  resamples whatever arrives at that rate, but this serializer sends at the
+  `sampleRate` it read from the preamble, so set the two to the same value, or
+  set the serializer's `audio_out_sample_rate` to
+  `bidirectionalAudio.sampleRate`:
+
+    ```json
+    {
+      "verb": "listen",
+      "url": "wss://your-bot.example.com/ws",
+      "sampleRate": 16000,
+      "mixType": "mono",
+      "bidirectionalAudio": { "enabled": true, "streaming": true, "sampleRate":
+  16000 }
+    }
+    ```
+
+    ```python
+    from pipecat.serializers.jambonz import JambonzFrameSerializer
+
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(serializer=JambonzFrameSerializer()),
+    )
+    ```
+  (PR [#6573](https://github.com/pipecat-ai/pipecat/pull/6573))
+
+- Added `audio_in_sample_rate` and `audio_out_sample_rate` to
+  `FrameSerializer.InputParams`, the sample rates of a serializer's wire
+  format. `FrameSerializer` converts audio between these rates and the
+  pipeline's, so a serializer subclass only encodes and decodes.
+  (PR [#6576](https://github.com/pipecat-ai/pipecat/pull/6576))
+
+- Added `max_buffer_delay_ms` and `buffer_char_threshold` constructor arguments
+  to `InworldTTSService`. These were previously only settable through the
+  deprecated `InworldTTSService.InputParams`, whose fields of the same name
+  still apply when the arguments are not set.
+  (PR [#6593](https://github.com/pipecat-ai/pipecat/pull/6593))
+
+- Added `inputs=` to classifiers' `ask()`, `yes_no()`, `choice()` and
+  `score()`: the images, audio clips and files (`ClassifierFile`, such as a PDF
+  or a video) that come with the state; a classifier lists the file types it
+  takes in `file_types`.
+  (PR [#6594](https://github.com/pipecat-ai/pipecat/pull/6594))
+
+- Added `SincStreamAudioResampler`, a streaming resampler whose output keeps
+  pace with its input: equal input chunks come out as equal output chunks. It
+  runs in the new `pipecat-resampler` package, now a core dependency.
+  (PR [#6598](https://github.com/pipecat-ai/pipecat/pull/6598))
+
+- Added `RimeSTTService`, streaming speech-to-text with Rime. Rime transcribes
+  one utterance per stream, so the service needs VAD frames from the user
+  aggregator or a `VADProcessor`, and streams each speech segment as its own
+  request with interim transcripts and one final. `Settings` take the language,
+  `mode` (`written` or `verbatim`), `context_terms` and `output_contract`. The
+  `rime` extra now installs Rime's `rimelabs-sdk` alongside the TTS client, and
+  `pipecat init` offers Rime as a speech-to-text service.
+
+    ```python
+    stt = RimeSTTService(
+        api_key=os.getenv("RIME_API_KEY"),
+        settings=RimeSTTService.Settings(language="en",
+  context_terms=["Pipecat"]),
+    )
+    ```
+  (PR [#6602](https://github.com/pipecat-ai/pipecat/pull/6602))
+
+- Added `SincAudioResampler`, a one-shot resampler for whole clips whose output
+  lines up with its input. It runs in `pipecat-resampler`.
+  (PR [#6625](https://github.com/pipecat-ai/pipecat/pull/6625))
+
+- Added an `enhance_generation` field to `InworldHttpTTSService.Settings`,
+  which asks Inworld to denoise the synthesized audio. The WebSocket API has no
+  equivalent, so `InworldTTSService` ignores the field.
+  (PR [#6654](https://github.com/pipecat-ai/pipecat/pull/6654))
+
+- `MiniMaxHttpTTSService.Settings` now has a `text_normalization_mode` field
+  (`"basic"` or `"quality"`), MiniMax's replacement for the deprecated
+  `voice_setting.text_normalization` parameter.
+  (PR [#6655](https://github.com/pipecat-ai/pipecat/pull/6655))
+
+- Added `complexity` to `OpenAIImageGenService.Settings`, OpenAI's control over
+  how much a GPT Image model plans before rendering (`low`, `medium`, `high`).
+  (PR [#6657](https://github.com/pipecat-ai/pipecat/pull/6657))
+
+- Added `strength` to OpenAI Realtime's `InputAudioNoiseReduction`, so a
+  session can set how much suppression the input noise filter applies.
+  (PR [#6659](https://github.com/pipecat-ai/pipecat/pull/6659))
+
+- `GrokLLMService.Settings` now takes `guidelines`, xAI's per-category content
+  guidelines (`nsfw`, `violence`, `profanity`).
+  (PR [#6663](https://github.com/pipecat-ai/pipecat/pull/6663))
+
+- Added a `language_hint` field to `DeepgramSTTService.Settings`, which biases
+  Nova-3 multilingual language detection toward the languages you expect.
+  (PR [#6665](https://github.com/pipecat-ai/pipecat/pull/6665))
+
+- `AzureSTTService.Settings` gained `post_processing_option`, which selects
+  Azure's `TrueText` display formatting or `PostRefinement` post-stream
+  refinement, the latter replacing each segment's final transcript with a more
+  accurate one built from broader audio context. Azure's default applies when
+  it's unset.
+  (PR [#6667](https://github.com/pipecat-ai/pipecat/pull/6667))
+
+- Added a `redact_usage` setting to the Deepgram Flux STT services, which
+  stores keyterms as `[REDACTED]` in Deepgram's usage records.
+  (PR [#6668](https://github.com/pipecat-ai/pipecat/pull/6668))
+
+- `DeepgramFluxTTSService` and `DeepgramFluxSageMakerTTSService` settings
+  gained `normalize_volume`, Flux's control for levelling loudness across
+  voices and turns. Unset leaves Flux at its default, which normalizes.
+  (PR [#6669](https://github.com/pipecat-ai/pipecat/pull/6669))
+
+- Added `PipecatToneSource` in `pipecat.expressive.processors.tone_reader`,
+  Pipecat Tone as one of a `PerceptionReader`'s sources, so it reads a turn's
+  `emotion` and `sarcasm` beside other classifiers.
+  (PR [#6673](https://github.com/pipecat-ai/pipecat/pull/6673))
+
+- Added `pipecat.audio.g711`, with `pcm_to_ulaw`, `ulaw_to_pcm`, `pcm_to_alaw`
+  and `alaw_to_pcm` for converting between 16-bit PCM and G.711 μ-law or A-law
+  at the same sample rate. They produce the same bytes as `audioop`, and the
+  Twilio, Plivo, Genesys and Telnyx serializers use them.
+  (PR [#6681](https://github.com/pipecat-ai/pipecat/pull/6681))
+
+- Added `STTService.send_sample_rate`, the rate input audio is resampled to
+  before `run_stt()`. A speech-to-text service whose provider takes only some
+  rates overrides it.
+  (PR [#6684](https://github.com/pipecat-ai/pipecat/pull/6684))
+
+- Added HeyGen Voice text-to-speech services. Both default to the
+  `heygen-voice-1-turbo` model and the public voice Nadine, and both serve
+  `heygen-voice-1`, `heygen-voice-1-turbo` and `heygen-voice-1-turbo-free`.
+    - `HeyGenTTSService` streams text over HeyGen's `multi-stream-input`
+      WebSocket. Per-character alignment drives word-level text frames, so an
+      interruption commits only the words actually spoken. It takes HeyGen's
+      `enable_ssml_parsing`, `enable_logging` and `end_user_id` options, and
+      `apply_text_normalization` and `expressiveness_boost` as settings. With
+      `text_aggregation_mode=TextAggregationMode.TOKEN` it streams LLM tokens,
+      and HeyGen generates at each sentence end. `pipecat create` offers it.
+    - `HeyGenHttpTTSService` streams raw PCM from the
+      `/v3/models/audio/tts/stream` endpoint, one request per sentence. It also
+      serves professional voice clones, with the `heygen-voice-1` model.
+
+      ```python
+      from pipecat.services.heygen.tts import HeyGenTTSService
+
+      tts = HeyGenTTSService(
+          api_key=os.environ["HEYGEN_API_KEY"],
+          settings=HeyGenTTSService.Settings(voice="<voice_id>"),
+      )
+      ```
+  (PR [#6713](https://github.com/pipecat-ai/pipecat/pull/6713))
+
+- RTVI `user-input` and `stt-raw-text` messages now carry the transcription's
+  diarization `speaker` (`label` and `number`).
+  (PR [#6714](https://github.com/pipecat-ai/pipecat/pull/6714))
+
+- Added `PipecatVoiceSource` and `PipecatVoiceReader` in
+  `pipecat.expressive.processors.voice_reader`, Pipecat Voice Reader as one of
+  a `PerceptionReader`'s sources and as a reader of its own. Each time the user
+  stops speaking, it hears their speech and reports their `tone` of voice,
+  `arousal`, `laughter`, `speech_rate` and `sarcasm_voice`, and `sad` with
+  `sad=True`. In one `PerceptionReader` it goes beside `PipecatToneSource`,
+  which reads the words: see
+  `examples/expressive-conversation/expressive-conversation-voice-reader.py`.
+  (PR [#6719](https://github.com/pipecat-ai/pipecat/pull/6719))
+
+- Added `PipecatVoiceClassifier` in `pipecat.classifiers.voice.classifier`, a
+  classifier that runs [Pipecat Voice
+  Reader](https://huggingface.co/pipecat-ai/voice-reader) on the CPU and hears
+  how a clip of the user's speech sounds. It answers the questions built into
+  the model, listed in `PipecatVoiceClassifier.questions`: the speaker's `tone`
+  of voice as a choice, `sarcasm`, `laughter` and `sad` as yes/no questions,
+  and `arousal`, `upset` and `speech_rate` as scores. Any other question raises
+  a `ClassifierError`. Every call takes one clip of 0.8 to 8 seconds, and
+  `sarcasm_threshold` is the probability from which the model's release counts
+  a turn as sarcastic. The model comes in two sizes (`variant="base"` or
+  `"tiny"`) and downloads from Hugging Face on first use. Install it with
+  `pipecat-ai[expressivity]`.
+  (PR [#6719](https://github.com/pipecat-ai/pipecat/pull/6719))
+
+- Added `EvalRubric` (`pipecat.evals.simulation`) to judge a conversation the
+  eval harness didn't drive, such as a production call recorded by
+  `EvalConversationObserver`. A rubric holds a simulation's judging keys,
+  `judge`, `success` and judged `metrics`, with no persona or goal, and
+  `EvalSimulationJudge` takes one wherever it takes a simulation. In a scenario
+  file, an entry with `success:` and neither `persona:` nor `turns:` is a
+  rubric: `EvalScenarioFile.load()` returns it with the file's defaults merged
+  in, `pipecat eval run` and `pipecat eval suite` skip it, since it has nothing
+  to run, and `pipecat eval judge -s <entry>` judges saved conversations with
+  it. `EvalRubric.from_dict()` builds one from a mapping with the same keys. A
+  measured metric needs a live run, so a rubric leaves out the ones it takes
+  from the file's `metrics:` and refuses one it lists itself.
+
+    ```yaml
+    name: food_ordering
+    judge: !include judge_text.yaml
+    scenarios:
+      - name: production
+        success: "the bot took the caller's order and completed it"
+        metrics:
+          - name: politeness
+            criterion: "the reply is courteous and helpful, never curt or
+  dismissive"
+            min_score: 1
+    ```
+
+    ```python
+    rubric =
+  EvalScenarioFile.load("food_ordering.yaml")["food_ordering/production"]
+    judgement = await EvalSimulationJudge(rubric).judge(message.conversation)
+    ```
+  (PR [#6740](https://github.com/pipecat-ai/pipecat/pull/6740))
+
+- Added `GoogleDecisionsClassifier` in
+  `pipecat.classifiers.google.decisions.classifier`, a classifier backed by
+  Google's Decisions API that can also see images, hear clips of audio and read
+  files. Install it with `pipecat-ai[google]`.
+  (PR [#6742](https://github.com/pipecat-ai/pipecat/pull/6742))
+
+- Added the `expressivity` extra, which installs what Pipecat Tone's reader and
+  tagger and Pipecat Voice Reader need to download and run their models: `uv
+  add "pipecat-ai[expressivity]"`.
+  (PR [#6751](https://github.com/pipecat-ai/pipecat/pull/6751))
+
+### Changed
+
+- `InworldTTSService` now creates its server-side context together with the
+  first sentence of a turn instead of when the LLM response starts. Turns that
+  produce no text no longer open a context.
+  (PR [#6149](https://github.com/pipecat-ai/pipecat/pull/6149))
+
+- `InworldTTSService` with `text_aggregation_mode=TextAggregationMode.TOKEN` on
+  an `inworld-tts-2` model now uses the `SENTENCE_BOUNDARY` auto-mode strategy,
+  so the server splits streamed tokens at sentence boundaries instead of
+  synthesizing fragments as they arrive.
+  (PR [#6266](https://github.com/pipecat-ai/pipecat/pull/6266))
+
+- ⚠️ `AssemblyAISTTService`, `SpeechmaticsSTTService` and `NvidiaSTTService`
+  now put the diarization speaker in `speaker` instead of `user_id`, which
+  keeps the transport participant id. Read `frame.speaker` instead.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- ⚠️ `SpeechmaticsSTTService` with the deprecated `InputParams` and
+  `enable_diarization=True` no longer prefixes transcripts with `@{speaker_id}:
+  `. Set `speaker_format="@{speaker}: {text}"` to keep it.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- `InworldTTSService` sends `cancel_context` instead of `close_context` when a
+  reply is interrupted or the websocket disconnects, so the server stops
+  synthesizing text that will not be played. A completed turn still sends
+  `close_context`.
+  (PR [#6278](https://github.com/pipecat-ai/pipecat/pull/6278))
+
+- `pipecat-ai[simli]` now requires `simli-ai` 2.1. It fixes a leak in the SDK's
+  frame reader, where every frame received left a task pending until the
+  session ended, about 75 a second. A session that can't start now fails with
+  Simli's reason, such as an invalid API key or face ID, instead of a generic
+  `Failed To Initialize SimliClient`.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- `SimliVideoService` now sends the bot's audio to Simli as it arrives,
+  whatever the face. With `is_trinity_avatar=True` it used to hold back up to 4
+  seconds of TTS audio at the start and after each interruption, and play it
+  with `sendImmediate`. That pre-buffer is removed, and every interruption now
+  clears Simli's buffer. A user who starts speaking without interrupting the
+  bot, as with `OpenAILiveLLMService`, no longer clears it, so the avatar keeps
+  talking when the bot does.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- `MetaSTTService` now sends a `User-Agent` header identifying the Pipecat
+  integration, consistent with the AssemblyAI and xAI services.
+  (PR [#6456](https://github.com/pipecat-ai/pipecat/pull/6456))
+
+- `ElevenLabsTTSService` now warns at construction when given an Eleven v3 or
+  v4 model, which its WebSocket endpoint doesn't serve, and points to
+  `ElevenLabsDialogueTTSService` (real-time) or `ElevenLabsHttpTTSService`
+  (HTTP streaming).
+  (PR [#6483](https://github.com/pipecat-ai/pipecat/pull/6483))
+
+- `PipecatToneReader` is now a `PerceptionReader` that asks a
+  `PipecatToneClassifier` its emotion and sarcasm questions, with the same
+  arguments and readings. It takes a `timeout`: a transcription waits at most
+  0.5 seconds for its reading by default. With metrics enabled, it pushes the
+  classifier's processing metrics.
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- ⚠️ `PipecatToneTagger` moved to `pipecat.expressive.processors.tone_tagger`,
+  beside `PipecatToneReader`, and `pipecat.processors.tone` is removed, since
+  expressive conversation is alpha.
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- ⚠️ `PipecatToneReader` moved to `pipecat.expressive.processors.tone_reader`,
+  beside `PerceptionReader`, and Pipecat Tone's reader model to
+  `pipecat.classifiers.tone.model`, beside `PipecatToneClassifier`. The old
+  `pipecat.processors.tone.reader` paths are removed, since expressive
+  conversation is alpha.
+  (PR [#6519](https://github.com/pipecat-ai/pipecat/pull/6519))
+
+- With expressive conversation on, the user aggregator merges all the final
+  readings of a user turn, instead of keeping only the last one, so a reading
+  from earlier in the turn, such as a sarcastic first sentence, still reaches
+  the LLM. The new `merge_perception()` in `pipecat.expressive.perception`
+  keeps the higher of each signal: a value keeps its highest value, and labels
+  keep every label read, each with its highest confidence, likeliest first. The
+  merged reading is written at the head of the user message and reported in
+  `on_user_turn_stopped`.
+  (PR [#6554](https://github.com/pipecat-ai/pipecat/pull/6554))
+
+- Expressive conversation's instructions now name RCS, the Real-time Context
+  Standard, and teach readings as the LLM's input only and tags as its output
+  only.
+  (PR [#6567](https://github.com/pipecat-ai/pipecat/pull/6567))
+
+- `SonioxSTTService` now defaults to `stt-rt-v6`, the model that supports agent
+  text input. Pass `settings=SonioxSTTService.Settings(model="stt-rt-v5")` for
+  the previous default.
+  (PR [#6571](https://github.com/pipecat-ai/pipecat/pull/6571))
+
+- The `aic` extra now requires `aic-sdk~=3.4.0`, which uses core SDK 0.26.0 and
+  model file version 8. `AICQuailVADAnalyzer` now defaults to
+  `vad-ms-2.1-xxs-16khz`, and `AICTytoObserver` now defaults to Tyto 1.2,
+  `tyto-1.2-l-16khz`. The SDK cannot download a model that has no version 8
+  file, such as `quail-vf-2.2-l-16khz`, `tyto-1.1-l-16khz` or
+  `vad-2.1-xxs-16khz`. If you set `model_id` yourself, change to a current
+  model, for example `quail-vf-2.3-l-16khz`. See
+  https://artifacts.ai-coustics.io/ for the available models.
+  (PR [#6581](https://github.com/pipecat-ai/pipecat/pull/6581))
+
+- A custom classifier's `_ask()` takes `inputs` instead of `images`.
+  (PR [#6594](https://github.com/pipecat-ai/pipecat/pull/6594))
+
+- ⚠️ `resampy`, and with it `numba` and `llvmlite`, is no longer a core
+  dependency, which roughly halves the default install. Install
+  `pipecat-ai[resampy]` to keep using the deprecated `ResampyResampler`.
+  (PR [#6595](https://github.com/pipecat-ai/pipecat/pull/6595))
+
+- `create_stream_resampler()` returns `SincStreamAudioResampler` instead of
+  `SOXRStreamAudioResampler`. Resampled audio is delayed by a few milliseconds
+  rather than held back.
+  (PR [#6598](https://github.com/pipecat-ai/pipecat/pull/6598))
+
+- A function call that returns `""`, `{}` or `False` now runs the LLM. Return
+  `None` to complete a call without a reply.
+  (PR [#6603](https://github.com/pipecat-ai/pipecat/pull/6603))
+
+- `create_file_resampler()` returns `SincAudioResampler` instead of
+  `SOXRAudioResampler`, and `LocalSmartTurnAnalyzerV3` and `RNNoiseFilter`
+  resample with `pipecat-resampler` instead of soxr.
+  (PR [#6625](https://github.com/pipecat-ai/pipecat/pull/6625))
+
+- ⚠️ `soxr` is no longer a core dependency. Install `pipecat-ai[soxr]` to keep
+  using the deprecated `SOXRAudioResampler` and `SOXRStreamAudioResampler`.
+  (PR [#6625](https://github.com/pipecat-ai/pipecat/pull/6625))
+
+- The Google image-generation voice example now uses
+  `gemini-3.1-flash-lite-image`, Google's replacement for
+  `gemini-2.5-flash-image`, which is scheduled for shutdown and reachable only
+  by projects that already used the Gemini 2.5 models.
+  (PR [#6641](https://github.com/pipecat-ai/pipecat/pull/6641))
+
+- `GeminiTTSService` now picks its default model per backend:
+  `gemini-3.8-flash-lite-tts` on the Gemini API, which retires
+  `gemini-3.1-flash-tts-preview` on November 17, 2026, and
+  `gemini-3.1-flash-tts-preview` on Cloud Text-to-Speech, which serves no
+  Gemini 3.8 model.
+  (PR [#6643](https://github.com/pipecat-ai/pipecat/pull/6643))
+
+- The OpenAI usage examples in `LLMClassifier`, `features-classifiers.py`,
+  `flows/python/utils.py` and `measure_turn_completion.py` now name
+  `gpt-6-luna` instead of `gpt-4o-mini`, which OpenAI shuts down on 2027-01-14.
+  (PR [#6658](https://github.com/pipecat-ai/pipecat/pull/6658))
+
+- `OpenAIResponsesLLMService` no longer carries reasoning defaults for `o1`,
+  `o1-pro`, `o3-mini` and `o4-mini`, which OpenAI removed from the API on
+  2026-10-23.
+  (PR [#6660](https://github.com/pipecat-ai/pipecat/pull/6660))
+
+- `FishAudioTTSService` now sends `Settings.language` as Fish Audio's BCP-47
+  `language` field, which controls how numbers, dates, units and symbols are
+  spelled out before synthesis. Unset, Fish Audio keeps detecting the language
+  of each chunk.
+  (PR [#6661](https://github.com/pipecat-ai/pipecat/pull/6661))
+
+- `FishAudioTTSService`'s documentation no longer suggests `s1`, which Fish
+  Audio retires on December 31, 2026, serving its requests with `s2.1-pro` from
+  then on.
+  (PR [#6661](https://github.com/pipecat-ai/pipecat/pull/6661))
+
+- Added `prompt_cache_key` to `SmallestLLMService.Settings`, Electron's key for
+  grouping one conversation's requests so each turn reuses the prefix cache.
+  (PR [#6662](https://github.com/pipecat-ai/pipecat/pull/6662))
+
+- `AnthropicLLMService` now sends `output_config.effort: "low"` by default on
+  `claude-fable-5-2`, the lowest setting Anthropic documents for a model whose
+  adaptive thinking can't be turned off.
+  (PR [#6666](https://github.com/pipecat-ai/pipecat/pull/6666))
+
+- The `server/Dockerfile` that `pipecat init` generates now builds on
+  `dailyco/pipecat-base:latest-py3.14`, so a deployed bot runs on the same
+  Python version that uv picks for local development (the newest one the
+  generated `pyproject.toml` allows).
+  (PR [#6675](https://github.com/pipecat-ai/pipecat/pull/6675))
+
+- `TTSService` now resamples the audio `run_tts` yields to its `sample_rate`,
+  so a TTS service can yield audio at the provider's own rate.
+  (PR [#6676](https://github.com/pipecat-ai/pipecat/pull/6676))
+
+- `AWSPollyTTSService` now requests 8 kHz audio when the pipeline runs at 8
+  kHz.
+  (PR [#6676](https://github.com/pipecat-ai/pipecat/pull/6676))
+
+- `pipecat eval` caches the simulated user's voice at 24 kHz, so one cache
+  serves every sample rate. Audio cached at another rate is regenerated once.
+  (PR [#6676](https://github.com/pipecat-ai/pipecat/pull/6676))
+
+- Stream resamplers keep the audio they hold across pauses, instead of
+  discarding it after 0.2 s without audio, so a pause no longer cuts a short
+  gap into the audio. Call `reset()` where one stream ends and an unrelated one
+  starts.
+  (PR [#6678](https://github.com/pipecat-ai/pipecat/pull/6678))
+
+- The `local-smart-turn` extra no longer installs `torchaudio`, which pipecat
+  doesn't use. If your own code imports `torchaudio`, add it to your project's
+  dependencies.
+  (PR [#6680](https://github.com/pipecat-ai/pipecat/pull/6680))
+
+- ⚠️ `audioop-lts` is no longer a core dependency on Python 3.13+, and
+  importing pipecat no longer imports the standard library's deprecated
+  `audioop` on Python 3.11 and 3.12. If your own code imports `audioop` on
+  Python 3.13+, add `audioop-lts` to your project's dependencies.
+  (PR [#6681](https://github.com/pipecat-ai/pipecat/pull/6681))
+
+- Changed `DailyRESTHelper.get_token()` to respect `exp` and `is_owner` set in
+  `params` instead of silently overwriting them. `expiry_time` (default 1 hour)
+  and `owner` (default `True`) are now only used when `params` does not set
+  `exp` or `is_owner`. Callers passing no `params` get the same token as
+  before.
+  (PR [#6689](https://github.com/pipecat-ai/pipecat/pull/6689))
+
+- With `ExpressionGuidance.MATCH_STYLE`, an LLM now laughs at a joke with a
+  laugh sound more reliably, instead of only an amused delivery.
+  (PR [#6721](https://github.com/pipecat-ai/pipecat/pull/6721))
+
+- A nested `!include` now resolves relative to the file that names it, not the
+  top-level document's directory, in eval scenarios and `FlowConfig` alike. A
+  nested include written against the top-level directory needs a path relative
+  to its own file.
+  (PR [#6738](https://github.com/pipecat-ai/pipecat/pull/6738))
+
+- The `google` extra now installs `google-genai` 3 (3.2.0 or later). Pipecat's
+  Gemini Developer API services keep using API version `v1beta`.
+  (PR [#6741](https://github.com/pipecat-ai/pipecat/pull/6741))
+
+### Deprecated
+
+- `GenesysAudioHookSerializer.create_resumed_response()` is deprecated in favor
+  of `create_resume_request()`, and the `on_pause` event in favor of
+  `on_paused`. `create_resumed_response()` built a `resumed` message, which
+  only Genesys sends; it now returns a `resume` request.
+  (PR [#6250](https://github.com/pipecat-ai/pipecat/pull/6250))
+
+- `AssemblyAISTTService(speaker_format=...)` is deprecated. Use
+  `settings=AssemblyAISTTService.Settings(speaker_format=...)` instead.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- The `diarization_max_speakers` setting of `NvidiaSTTService` and
+  `NvidiaSegmentedSTTService` is deprecated. Use `max_speakers` instead.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- `SpeechmaticsSTTService.Settings(speaker_active_format=...)` is deprecated.
+  Use `speaker_format` instead, with `{speaker}` in place of `{speaker_id}`.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Deprecated `SimliVideoService(is_trinity_avatar=...)`. No replacement: it has
+  no effect, since the bot's audio goes to Simli as it arrives for every face.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- Deprecated `HumeTTSService`. No replacement: Hume shuts down its TTS API on
+  November 13, 2026, after which the service can no longer synthesize speech.
+  It will be removed in 2.0.0.
+  (PR [#6556](https://github.com/pipecat-ai/pipecat/pull/6556))
+
+- Deprecated `sample_rate` in the Twilio, Telnyx, Plivo, Exotel, Genesys and
+  Vonage serializers' `InputParams`. It has no effect: incoming audio is
+  converted to `PipelineParams.audio_in_sample_rate`.
+  (PR [#6576](https://github.com/pipecat-ai/pipecat/pull/6576))
+
+- Deprecated `twilio_sample_rate`, `telnyx_sample_rate`, `plivo_sample_rate`,
+  `exotel_sample_rate`, `genesys_sample_rate` and `vonage_sample_rate` in the
+  serializers' `InputParams`. Use `audio_in_sample_rate` and
+  `audio_out_sample_rate` instead.
+  (PR [#6576](https://github.com/pipecat-ai/pipecat/pull/6576))
+
+- Deprecated `FrameSerializer.InputParams.resampler_clear_after_secs`, with no
+  replacement. It has no effect: the serializer resets the resampler of its
+  outgoing audio on an interruption.
+  (PR [#6576](https://github.com/pipecat-ai/pipecat/pull/6576))
+
+- `images=` on classifiers' `ask()`, `yes_no()`, `choice()` and `score()` is
+  deprecated. Pass the images in `inputs=` instead.
+  (PR [#6594](https://github.com/pipecat-ai/pipecat/pull/6594))
+
+- `RNNoiseFilter(resampler_quality=...)` is deprecated and has no effect.
+  (PR [#6625](https://github.com/pipecat-ai/pipecat/pull/6625))
+
+- `SOXRAudioResampler` and `SOXRStreamAudioResampler` are deprecated. Use
+  `SincAudioResampler` and `SincStreamAudioResampler` instead.
+  (PR [#6625](https://github.com/pipecat-ai/pipecat/pull/6625))
+
+- `MiniMaxHttpTTSService.Settings.text_normalization` is deprecated. Use
+  `text_normalization_mode="basic"` instead.
+  (PR [#6655](https://github.com/pipecat-ai/pipecat/pull/6655))
+
+- Deprecated the `clear_after_secs` argument of `SincStreamAudioResampler` and
+  `create_stream_resampler()`. Use `flush()` or `reset()` at the end of each
+  stream instead.
+  (PR [#6678](https://github.com/pipecat-ai/pipecat/pull/6678))
+
+- `ulaw_to_pcm`, `pcm_to_ulaw`, `alaw_to_pcm` and `pcm_to_alaw` in
+  `pipecat.audio.utils` are deprecated. Use the functions of the same name in
+  `pipecat.audio.g711`, which are synchronous and don't resample, with a stream
+  resampler when the rate changes.
+  (PR [#6681](https://github.com/pipecat-ai/pipecat/pull/6681))
+
+- The `tone` extra is deprecated. Use `expressivity` instead: `uv add
+  "pipecat-ai[expressivity]"`. The `tone` extra installs the same packages
+  until 2.0.0.
+  (PR [#6751](https://github.com/pipecat-ai/pipecat/pull/6751))
+
+### Removed
+
+- `pipecat init` no longer offers Hume TTS, which stops working when Hume shuts
+  down its TTS API on November 13, 2026.
+  (PR [#6556](https://github.com/pipecat-ai/pipecat/pull/6556))
+
+### Fixed
+
+- Fixed the `realtime-ultravox-text` example to use `inworld-tts-2`; Inworld
+  discontinued `inworld-tts-1` on 2026-06-15.
+  (PR [#5542](https://github.com/pipecat-ai/pipecat/pull/5542))
+
+- Fixed `OpenAIRealtimeLLMService` going silent with the `gpt-transcribe` and
+  `gpt-live-transcribe` transcription models. The `session.updated` event
+  OpenAI sends back carries a `languages` field that `InputAudioTranscription`
+  failed to parse, which stopped the service from handling any further server
+  events. `InputAudioTranscription` now ignores transcription fields it doesn't
+  model.
+  (PR [#5547](https://github.com/pipecat-ai/pipecat/pull/5547))
+
+- Fixed `XAISTTService`'s docstring to list `opus` as an accepted `encoding`.
+  (PR [#5561](https://github.com/pipecat-ai/pipecat/pull/5561))
+
+- Fixed `GoogleSTTService` dropping the user's last utterance every time it
+  restarts its stream at Google's four minute streaming limit. The response
+  loop stopped on the limit before handling the response it had already
+  received, so the final Google sends when the request stream half-closes was
+  discarded. The loop now runs until Google closes the response stream, and the
+  restart is unchanged.
+  (PR [#5648](https://github.com/pipecat-ai/pipecat/pull/5648))
+
+- Fixed `expand_currency` reading an amount with a scale word as cents: `"$2.5
+  billion"` was spoken as "two dollars and fifty cents billion" and is now "two
+  point five billion dollars".
+  (PR [#5914](https://github.com/pipecat-ai/pipecat/pull/5914))
+
+- Fixed `expand_units` reading "5M" and "5G" as "5 meters" and "5 grams". The
+  single-letter units `m`, `g` and `in` now match only in lowercase; liters
+  match `l` or `L`.
+  (PR [#5955](https://github.com/pipecat-ai/pipecat/pull/5955))
+
+- Fixed `GeminiLiveLLMService` leaving connection failures that the pipeline
+  could not act on. A session that fails to open is now retried and reported
+  like a dropped connection, giving up after repeated failures and a failed
+  send now mark the service unusable, so `ProcessorUnusablePolicy` applies
+  instead of the bot staying silent.
+  (PR [#6030](https://github.com/pipecat-ai/pipecat/pull/6030))
+
+- Fixed `GeminiLiveLLMService` leaving a bot reply open when the connection
+  dropped mid-reply. The cut-off reply now ends with `TTSStoppedFrame` and
+  `LLMFullResponseEndFrame`, so a later `EndFrame` no longer waits 30 seconds,
+  and an `EndFrame` already waiting for that reply is released instead of being
+  discarded by the reconnect.
+  (PR [#6030](https://github.com/pipecat-ai/pipecat/pull/6030))
+
+- Fixed `FastAPIWebsocketTransport` logging `exception while closing the
+  websocket: Cannot call "send" once a close message has been sent.` at ERROR
+  when the peer disconnected while audio was still being sent. `disconnect()`
+  now skips the close when Starlette already marked the app side disconnected.
+  (PR [#6152](https://github.com/pipecat-ai/pipecat/pull/6152))
+
+- Fixed `FunASRSTTService` reading the WAV header of each segment as audio.
+  (PR [#6161](https://github.com/pipecat-ai/pipecat/pull/6161))
+
+- Fixed `WhisperSTTService`, `WhisperSTTServiceMLX`, `MoonshineSTTService` and
+  `FunASRSTTService` mistranscribing audio when the input sample rate isn't 16
+  kHz (e.g. 8 kHz telephony).
+  (PR [#6161](https://github.com/pipecat-ai/pipecat/pull/6161))
+
+- Fixed `TavusVideoService` not passing `BotStartedSpeakingFrame` on.
+  Processors before it in the pipeline, such as the user aggregator's user mute
+  and user turn start strategies and `UserIdleController`, never saw the bot
+  start speaking, so a user mute strategy did not mute the user while the Tavus
+  avatar spoke.
+  (PR [#6170](https://github.com/pipecat-ai/pipecat/pull/6170))
+
+- Fixed `FishAudioTTSService` losing long sentences with `latency="normal"`.
+  Fish returns their audio as a few large WebSocket messages, and one over the
+  `websockets` default of 1 MiB closed the connection with code 1009 (message
+  too big). The service now accepts messages up to 16 MiB.
+  (PR [#6217](https://github.com/pipecat-ai/pipecat/pull/6217))
+
+- Fixed `TTSService` adding text to the assistant context when the TTS produced
+  no audio for it (for example, a provider error, a provider that returns no
+  audio, or a service that is no longer usable). Text from an audio context
+  that ends without audio is now dropped with a warning.
+  (PR [#6234](https://github.com/pipecat-ai/pipecat/pull/6234))
+
+- `GenesysAudioHookSerializer` now follows the AudioHook protocol for pausing.
+  It pauses when Genesys sends `paused` and resumes on `resumed`, dropping
+  audio in both directions while paused, and fires the new `on_paused` and
+  `on_resumed` events. Previously it waited for a `pause` message that Genesys
+  never sends and logged Genesys's `paused` and `resumed` as unknown, so a hold
+  went unnoticed.
+  (PR [#6250](https://github.com/pipecat-ai/pipecat/pull/6250))
+
+- Fixed `DailyTransport` SIP call transfer, SIP REFER and DTMF writing
+  `sessionId` into the settings dict passed to them. A settings dict reused
+  across calls no longer sends later requests to the first call's session.
+  (PR [#6263](https://github.com/pipecat-ai/pipecat/pull/6263))
+
+- Fixed `AssemblyAISTTService` reporting `Unknown message type:
+  SpeakerRevision` errors with `speaker_labels` enabled.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Fixed `NvidiaSegmentedSTTService` ignoring `speaker_diarization`. Speakers
+  need a model that returns words, such as `parakeet-ctc-1.1b-asr`.
+  (PR [#6269](https://github.com/pipecat-ai/pipecat/pull/6269))
+
+- Fixed `GeminiLiveLLMService` configuring the session with only the
+  `system_instruction` it was constructed with. The model now receives the full
+  system instruction `LLMService` composes, including the async-tool guidance,
+  text added with `append_system_instruction()`, and turn-completion
+  instructions; the session reconnects on the first context to pick it up. As
+  with other LLM services, when the composed instruction is all there is (no
+  `system_instruction` of your own), it replaces a `system` message in the
+  context, so set the prompt on `system_instruction` instead.
+  (PR [#6289](https://github.com/pipecat-ai/pipecat/pull/6289))
+
+- `LiveKitOutputTransport` now sends every button of a multi-digit
+  `OutputDTMFFrame` or `OutputDTMFUrgentFrame` instead of only the first one.
+  (PR [#6371](https://github.com/pipecat-ai/pipecat/pull/6371))
+
+- Fixed `GeminiTTSService` (Gemini API backend) playing audio at the wrong
+  speed when the pipeline's output sample rate is not 24 kHz (e.g. 8 kHz
+  telephony).
+  (PR [#6380](https://github.com/pipecat-ai/pipecat/pull/6380))
+
+- Fixed `ElevenLabsTTSService` and `ElevenLabsDialogueTTSService` mixing up
+  words and word timestamps across contexts that synthesize at the same time,
+  such as with `pause_frame_processing=False`. Each context now builds its
+  words on its own clock.
+  (PR [#6392](https://github.com/pipecat-ai/pipecat/pull/6392))
+
+- Fixed `SimliVideoService` showing no avatar with `OpenAILiveLLMService` and
+  other services that stream their voice as `SpeechOutputAudioRawFrame`. It
+  passed that audio through untouched, so the avatar never got any; it now
+  animates from it as it does from `TTSAudioRawFrame`, and pushes the avatar's
+  voice as the same frame type.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- Fixed `SimliVideoService` showing no avatar until the bot first spoke. Its
+  video and audio consumers waited for the bot's first audio, so Simli's idle
+  video piled up unread and then played ahead of the answer, putting the
+  avatar's video up to a few seconds behind its voice. Both now read from Simli
+  as soon as it is connected: the avatar appears with Simli's idle video and
+  stays in sync with its voice, and Simli's idle audio from before the bot
+  first speaks is dropped.
+  (PR [#6400](https://github.com/pipecat-ai/pipecat/pull/6400))
+
+- Fixed `WakePhraseUserTurnStartStrategy` and `WakeCheckFilter` never matching
+  a Chinese or Japanese wake phrase that is followed or preceded by more speech
+  in the same transcript (e.g. "小助手今天天气怎么样"), because a word boundary was
+  required next to characters of scripts written without spaces.
+  (PR [#6405](https://github.com/pipecat-ai/pipecat/pull/6405))
+
+- Fixed `OpenAILiveLLMService` cutting long Chinese and Japanese context
+  appends in the middle of a sentence: full-width `。！？` now count as sentence
+  boundaries when the text is chunked.
+  (PR [#6413](https://github.com/pipecat-ai/pipecat/pull/6413))
+
+- Fixed `strip_markdown` and `VoiceFormatter` leaving link syntax in the spoken
+  text when a Markdown link's URL or title contains parentheses
+  (`[Python](https://en.wikipedia.org/wiki/Python_(language))` became
+  `Python)`) or its label contains brackets.
+  (PR [#6423](https://github.com/pipecat-ai/pipecat/pull/6423))
+
+- Fixed context summarization writing each tool result into the summary
+  transcript twice. A tool result now appears once, as its `TOOL_RESULT` line.
+  (PR [#6428](https://github.com/pipecat-ai/pipecat/pull/6428))
+
+- Fixed IPA stress placement for nasal vowels with Unicode-composed diacritics.
+  (PR [#6438](https://github.com/pipecat-ai/pipecat/pull/6438))
+
+- Fixed `SyncParallelPipeline` dropping the `EndFrame` when a pipeline had
+  output queued ahead of it.
+  (PR [#6457](https://github.com/pipecat-ai/pipecat/pull/6457))
+
+- Fixed `ParallelPipeline`, and so `ServiceSwitcher` and `LLMSwitcher`, using
+  more memory the longer a session ran.
+  (PR [#6460](https://github.com/pipecat-ai/pipecat/pull/6460))
+
+- Fixed JSON worker-bus messages dropping explicit `None` values, so settings
+  updates sent between workers can now clear configured values.
+  (PR [#6461](https://github.com/pipecat-ai/pipecat/pull/6461))
+
+- Fixed malformed Protobuf messages stopping WebSocket input processing.
+  Invalid binary messages are skipped so subsequent frames can still be
+  received.
+  (PR [#6462](https://github.com/pipecat-ai/pipecat/pull/6462))
+
+- Fixed a `DeprecationWarning` on Python 3.14+ when Pipecat Flows ran a custom
+  action handler: it now uses `inspect.iscoroutinefunction` instead of
+  `asyncio.iscoroutinefunction`, which will be removed in Python 3.16.
+  (PR [#6467](https://github.com/pipecat-ai/pipecat/pull/6467))
+
+- Fixed a `PipelineWorker` observer that raised an exception in one of its
+  callbacks receiving no more frames for the rest of the session, while every
+  later frame was still queued for it. The exception is logged and the observer
+  keeps receiving frames.
+  (PR [#6470](https://github.com/pipecat-ai/pipecat/pull/6470))
+
+- Fixed `seconds_to_nanoseconds()` returning one nanosecond less than the exact
+  value for many inputs (e.g. `1.001` gave `1000999999`), which made TTS word
+  timestamps print a microsecond early.
+  (PR [#6472](https://github.com/pipecat-ai/pipecat/pull/6472))
+
+- Fixed `SonioxTTSService` becoming unusable when an interruption's cancel
+  crossed the end of its stream: Soniox's `invalid_stream_state` answer to that
+  cancel is no longer reported as an error.
+  (PR [#6480](https://github.com/pipecat-ai/pipecat/pull/6480))
+
+- Fixed memory leak in `LiveKitTransport` when `audio_in_enabled` is `False`:
+  every subscribed participant's audio was still queued, with nothing reading
+  it.
+  (PR [#6484](https://github.com/pipecat-ai/pipecat/pull/6484))
+
+- Fixed WebSocket services leaving a provider connection open when their
+  disconnect was cancelled before the connection closed, which could happen
+  when a `CancelFrame` arrived during shutdown. The connection kept answering
+  keepalive pings until the process exited, so providers that limit concurrent
+  sessions, such as Deepgram Flux, could start refusing new connections (HTTP
+  429). A service that clears or replaces its connection while it is still open
+  now aborts it, which covers every service built on `WebsocketService`.
+  (PR [#6490](https://github.com/pipecat-ai/pipecat/pull/6490))
+
+- Chinese and Japanese speech can interrupt the bot under
+  `MinWordsUserTurnStartStrategy`: each character counts as a word, since those
+  languages are written without spaces. The evals `words` measure uses the same
+  count.
+  (PR [#6499](https://github.com/pipecat-ai/pipecat/pull/6499))
+
+- Fixed `UserIdleController` treating an async function call's intermediate
+  result (`is_final=False`) as the call ending. The controller is meant to keep
+  the idle timer off while function calls are still ongoing, since the bot's
+  turn isn't over until the result comes back and the bot answers it. Only the
+  final result or a cancel settles the call now.
+  (PR [#6509](https://github.com/pipecat-ai/pipecat/pull/6509))
+
+- Fixed `SarvamTTSService` and `SarvamHttpTTSService` ignoring a voice given in
+  a settings dict under `speaker`, Sarvam's name for it, or under `voice_id`
+  for `SarvamTTSService`, as in `TTSUpdateSettingsFrame(settings={"speaker":
+  "priya"})`. The model's default speaker (`shubh` on bulbul:v3) was used
+  instead. Both services now read `speaker` and `voice_id` as `voice`, and
+  `target_language_code` as `language`.
+  (PR [#6512](https://github.com/pipecat-ai/pipecat/pull/6512))
+
+- Fixed `SmallWebRTCTransport` audio going silent after a `restart_pc` when the
+  bot was writing audio during the restart.
+  (PR [#6516](https://github.com/pipecat-ai/pipecat/pull/6516))
+
+- Fixed `FrameSerializer.should_ignore_frame` raising `AttributeError` when an
+  `OutputTransportMessageFrame` or `OutputTransportMessageUrgentFrame` carries
+  a `message` that isn't a dict. `message` is typed `Any`, but the RTVI label
+  lookup assumed a dict, so the frame failed before reaching `serialize()`.
+  Since it is a base-class method, every serializer inherited the failure.
+  (PR [#6521](https://github.com/pipecat-ai/pipecat/pull/6521))
+
+- Fixed `DeepgramFluxSTTService` ignoring the `WebsocketService` arguments it
+  accepts (`reconnect_backoff_min_wait`, `reconnect_backoff_max_wait`,
+  `reconnect_on_error`, `ws_close_timeout` and `ws_send_timeout`): it always
+  used their defaults.
+  (PR [#6527](https://github.com/pipecat-ai/pipecat/pull/6527))
+
+- Fixed `LocalFileStorage` deleting files it did not save. Trimming to
+  `max_files` now only counts and removes uploads, so other files in the
+  uploads folder are left alone.
+  (PR [#6532](https://github.com/pipecat-ai/pipecat/pull/6532))
+
+- Fixed `IdleFrameProcessor` leaving its input and process tasks running after
+  the pipeline ends, which was reported as dangling tasks.
+  (PR [#6533](https://github.com/pipecat-ai/pipecat/pull/6533))
+
+- Fixed `AnthropicLLMService` speaking Claude Haiku 5.5's reasoning before a
+  tool call when neither `thinking` nor `effort` is set. Haiku 5.5 now gets
+  `effort="low"` by default instead of `thinking: disabled`, which adds about
+  0.1 s to a turn with a clear answer and about 0.6 s to a turn where the model
+  has to decide what to do.
+  (PR [#6535](https://github.com/pipecat-ai/pipecat/pull/6535))
+
+- Fixed `OpenClawGatewayClient` ignoring the `WebsocketService` arguments
+  passed to it (`reconnect_backoff_min_wait`, `reconnect_backoff_max_wait`,
+  `ws_close_timeout` and `ws_send_timeout`): it always used their defaults.
+  (PR [#6536](https://github.com/pipecat-ai/pipecat/pull/6536))
+
+- Fixed `SonioxSTTService` never pushing a final transcript for speech the
+  local VAD missed, such as a short, quiet reply, which could leave the user
+  turn open with no transcript. With the default
+  `vad_force_turn_endpoint=True`, Soniox endpoint detection now stays on: a VAD
+  stop still finalizes early, and the endpoint ends the transcript when the VAD
+  misses the speech. Pipecat's user turn strategies still decide when the turn
+  ends.
+  (PR [#6537](https://github.com/pipecat-ai/pipecat/pull/6537))
+
+- Fixed `AssemblyAISTTService` reconnecting after its pipeline ended when the
+  connection was down at shutdown (the first connect failed, the connection
+  dropped, or a reconnect was in progress). It could open an AssemblyAI session
+  that nothing used or closed, or keep reporting connection errors after the
+  call. Ending the pipeline now stops a pending reconnect.
+  (PR [#6538](https://github.com/pipecat-ai/pipecat/pull/6538))
+
+- Fixed `FrameLogger` logging no frames at all when `ignored_frame_types` is
+  empty. It now logs every frame in that case.
+  (PR [#6542](https://github.com/pipecat-ai/pipecat/pull/6542))
+
+- Fixed an event handler that removes itself while its event runs causing the
+  next handler for that event to be skipped. Handlers added or removed during
+  an event now take effect from the next event.
+  (PR [#6543](https://github.com/pipecat-ai/pipecat/pull/6543))
+
+- Fixed `WakePhraseUserTurnStartStrategy` never matching a wake phrase that
+  contains punctuation, such as "let's talk" or "hey wall-e". Phrases now have
+  their punctuation stripped like the transcript.
+  (PR [#6544](https://github.com/pipecat-ai/pipecat/pull/6544))
+
+- Fixed `IVRProcessor` carrying the text of an interrupted response, including
+  a half-streamed tag, into the next response. Its text aggregator is now reset
+  on interruption.
+  (PR [#6545](https://github.com/pipecat-ai/pipecat/pull/6545))
+
+- Fixed `StatelessTextTransformer` replacing each text frame with a plain
+  `TextFrame` pushed downstream. It now updates the frame's text in place, so
+  the frame keeps its type (e.g. `LLMTextFrame`, `TranscriptionFrame`), its
+  fields and its direction.
+  (PR [#6549](https://github.com/pipecat-ai/pipecat/pull/6549))
+
+- Fixed `SentenceAggregator` keeping a partial sentence across an interruption,
+  which glued the cut-off text onto the start of the next reply. It now clears
+  the partial sentence on `InterruptionFrame`.
+  (PR [#6550](https://github.com/pipecat-ai/pipecat/pull/6550))
+
+- Fixed `EagerUserTurnStopStrategy` leaving its speculation timer running after
+  `cleanup()`, which could withdraw a speculation after the session had ended.
+  (PR [#6551](https://github.com/pipecat-ai/pipecat/pull/6551))
+
+- Fixed `RTVIObserver` sending the untransformed text in `bot-output` progress
+  messages when a progress-aware bot output transform returned an empty string,
+  such as after stripping a stage direction.
+  (PR [#6552](https://github.com/pipecat-ai/pipecat/pull/6552))
+
+- Fixed direct functions describing a `typing.Any` parameter, or `Any` nested
+  in a type such as `dict[str, Any]`, as an empty object in the function
+  schema, which told the model the value must be an object.
+  (PR [#6558](https://github.com/pipecat-ai/pipecat/pull/6558))
+
+- Fixed `AzureVoiceLiveLLMService` leaving the cached input tokens and the
+  input and output audio tokens out of its LLM usage metrics.
+  (PR [#6559](https://github.com/pipecat-ai/pipecat/pull/6559))
+
+- Fixed `JSONMessageSerializer` sending string enums such as `KeypadEntry` and
+  `Language` as plain strings, so DTMF frames received over a Redis or PGMQ bus
+  failed on `button.value`.
+  (PR [#6560](https://github.com/pipecat-ai/pipecat/pull/6560))
+
+- Fixed `BaseOpenAILLMService` subclasses (such as `OpenAILLMService` and
+  `AzureLLMService`) and `OpenAIResponsesHttpLLMService` marking themselves
+  unusable when a content filter rejects a request (an HTTP 400 with `code:
+  content_filter`). The rejection is about that request's content, so the
+  service stays usable for the next one. Every other 400 is still treated as
+  permanent.
+  (PR [#6566](https://github.com/pipecat-ai/pipecat/pull/6566))
+
+- Fixed a reading of how the user sounded changing the turn completion marker
+  of an LLM that filters incomplete turns in expressive conversation, such as ○
+  instead of ◐ when a hesitant user trailed off, which made the bot wait longer
+  to prompt them.
+  (PR [#6567](https://github.com/pipecat-ai/pipecat/pull/6567))
+
+- Fixed an LLM in expressive conversation, such as Claude, sometimes starting
+  its reply with a reading of how the user sounded, which a bot that doesn't
+  filter incomplete turns would speak.
+  (PR [#6567](https://github.com/pipecat-ai/pipecat/pull/6567))
+
+- Fixed sentence aggregation sending numbered-list markers to TTS on their own:
+  `1. Take a walk.` was split into `1.` and `Take a walk.`, giving each list
+  item an extra TTS request. List items now stay whole, including when the TTS
+  service streams LLM tokens.
+  (PR [#6568](https://github.com/pipecat-ai/pipecat/pull/6568))
+
+- Updated `sentencex` to 1.0.34, which fixes a crash in sentence aggregation
+  when a one-letter word is followed by a non-breaking space (or other
+  non-ASCII whitespace) and a period. The crash raised
+  `pyo3_runtime.PanicException`, which `except Exception` does not catch. The
+  update also stops French, German, Spanish, Italian and Portuguese text from
+  splitting after title abbreviations such as `M.` in `M. Dupont`.
+  (PR [#6568](https://github.com/pipecat-ai/pipecat/pull/6568))
+
+- Fixed `WhisperSTTServiceMLX` never filtering hallucinated segments: its
+  compression-ratio check compared a computed value for equality against a
+  fixed one, so it could not match.
+  (PR [#6575](https://github.com/pipecat-ai/pipecat/pull/6575))
+
+- Fixed the telephony serializers sending the end of an interrupted reply at
+  the start of the next one when audio keeps flowing, such as with a background
+  sound mixer. They now discard the audio held in their output resampler on an
+  interruption.
+  (PR [#6576](https://github.com/pipecat-ai/pipecat/pull/6576))
+
+- Fixed `SentryMetrics` never sending a TTFB transaction to Sentry when
+  `report_only_initial_ttfb` is enabled.
+  (PR [#6579](https://github.com/pipecat-ai/pipecat/pull/6579))
+
+- Fixed eager end of turn answering a turn held open across several transcripts
+  (for example by `FilterIncompleteUserTurnStrategies`) with the earlier
+  transcripts repeated and run together, as in "Hold on a second.Okay. I'm
+  ready." after "Hold on a second." was already in the context. The speculative
+  user message now holds only what the context doesn't hold yet: transcripts
+  not yet written, joined with spaces, followed by the predicted text.
+  (PR [#6584](https://github.com/pipecat-ai/pipecat/pull/6584))
+
+- Fixed `SyncParallelPipeline` pushing system frames, such as input audio, a
+  second time when its pipelines passed them on.
+  (PR [#6596](https://github.com/pipecat-ai/pipecat/pull/6596))
+
+- Fixed bot audio leaving the telephony serializers in uneven bursts when the
+  pipeline's output sample rate differs from the provider's, which some
+  providers play back choppy.
+  (PR [#6598](https://github.com/pipecat-ai/pipecat/pull/6598))
+
+- Fixed eval recordings losing the end of a track that had to be resampled to
+  the recording's rate.
+  (PR [#6598](https://github.com/pipecat-ai/pipecat/pull/6598))
+
+- Fixed `strip_markdown` rewriting Markdown-like text inside inline code. Text
+  between matching single or double backticks is kept as written, including
+  literal backticks inside the span, so `` `__init__` `` is read as `__init__`
+  rather than `init`, and `` `*args` `` and `` `# comment` `` keep their
+  symbols.
+  (PR [#6599](https://github.com/pipecat-ai/pipecat/pull/6599))
+
+- Fixed a function call that returns a falsy result such as `{}`, `[]` or `0`
+  not running the LLM and recording `"COMPLETED"` instead of the value.
+  (PR [#6603](https://github.com/pipecat-ai/pipecat/pull/6603))
+
+- Fixed RTVI `llm-function-call-stopped` messages sending a falsy function call
+  result such as `{}`, `[]` or `0` as `null`.
+  (PR [#6605](https://github.com/pipecat-ai/pipecat/pull/6605))
+
+- Pipecat now reads and writes its own text files as UTF-8 on every platform,
+  so Windows no longer falls back to the system's ANSI code page: the `pipecat
+  eval` worker's config and result files, the `pipecat eval suite` results
+  file, the `pipecat eval judge` output, and the Google STT `credentials_path`
+  file. Existing files read the same, since their contents are ASCII.
+  (PR [#6616](https://github.com/pipecat-ai/pipecat/pull/6616))
+
+- A currency amount followed by a scale word is read without the trailing zeros
+  of its fraction: `$2.50 million` reads "two point five million dollars" and
+  `$1.0 million` reads "one million dollars". A currency code written directly
+  before the symbol stays a separate word: `US$5` reads "US five dollars"
+  instead of "USfive dollars".
+  (PR [#6618](https://github.com/pipecat-ai/pipecat/pull/6618))
+
+- A percentage written with a thousand separator is read as one number:
+  `1,500%` reads "one thousand, five hundred percent" instead of "1,five
+  hundred percent".
+  (PR [#6619](https://github.com/pipecat-ai/pipecat/pull/6619))
+
+- Fixed an action handler that is an object with an async `__call__`, or a sync
+  wrapper that returns a coroutine, being called and its coroutine left
+  unawaited, so the action was logged as executed without running.
+  (PR [#6621](https://github.com/pipecat-ai/pipecat/pull/6621))
+
+- Blank wake phrases no longer activate the bot in `WakeCheckFilter` or
+  `WakePhraseUserTurnStartStrategy`.
+  (PR [#6637](https://github.com/pipecat-ai/pipecat/pull/6637))
+
+- `MoonshineSTTService` now decodes Arabic, Chinese, Japanese, Korean and
+  Ukrainian with the raised `max_tokens_per_second` Moonshine documents for
+  those languages, so long utterances are no longer truncated mid-sentence.
+  (PR [#6639](https://github.com/pipecat-ai/pipecat/pull/6639))
+
+- Fixed the WebSocket (server, FastAPI, client) and Tavus transports playing
+  stereo audio at half speed.
+  (PR [#6651](https://github.com/pipecat-ai/pipecat/pull/6651))
+
+- Fixed `MistralLLMService` failing every completion when `Settings.seed` was
+  set. Mistral's `random_seed` now travels in the request's `extra_body`, which
+  the OpenAI client accepts, instead of as a keyword argument it rejects.
+  (PR [#6656](https://github.com/pipecat-ai/pipecat/pull/6656))
+
+- Fixed `uv sync` failing in projects created by `pipecat init` when Python
+  3.15 is the newest Python installed. `onnxruntime` publishes no 3.15 wheels,
+  so the generated `pyproject.toml` now sets `requires-python = ">=3.11,<3.15"`
+  and uv chooses the newest supported Python.
+  (PR [#6674](https://github.com/pipecat-ai/pipecat/pull/6674))
+
+- Fixed short gaps in the middle of TTS speech, and clipped endings, when the
+  TTS service produces audio at a different sample rate than the pipeline's.
+  (PR [#6676](https://github.com/pipecat-ai/pipecat/pull/6676))
+
+- Fixed `SimliVideoService` starting a reply with the end of the one that was
+  interrupted.
+  (PR [#6677](https://github.com/pipecat-ai/pipecat/pull/6677))
+
+- Fixed the HeyGen and Tavus avatars dropping the last few milliseconds of each
+  utterance when their audio is resampled.
+  (PR [#6677](https://github.com/pipecat-ai/pipecat/pull/6677))
+
+- Fixed `HeyGenVideoService` cutting short gaps into the avatar's speech about
+  once a second during long replies.
+  (PR [#6677](https://github.com/pipecat-ai/pipecat/pull/6677))
+
+- Fixed `GenesysAudioHookSerializer` starting resumed audio with a few
+  milliseconds of bot audio from before a short pause.
+  (PR [#6678](https://github.com/pipecat-ai/pipecat/pull/6678))
+
+- Fixed `RimeSTTService` starting a segment with the end of the previous one
+  when they were less than 0.2 s apart.
+  (PR [#6678](https://github.com/pipecat-ai/pipecat/pull/6678))
+
+- Fixed `AWSNovaSonicLLMService` sending the user's audio at the pipeline's
+  input rate instead of its declared `input_sample_rate`.
+  (PR [#6679](https://github.com/pipecat-ai/pipecat/pull/6679))
+
+- Fixed `AWSTranscribeSTTService` sending audio at the wrong rate when the
+  pipeline's input rate isn't 8000 or 16000 Hz. It's now resampled to 16000 Hz.
+  (PR [#6679](https://github.com/pipecat-ai/pipecat/pull/6679))
+
+- Preserve literal link and image markup inside inline code in `StripMarkdown`.
+  (PR [#6682](https://github.com/pipecat-ai/pipecat/pull/6682))
+
+- Fixed streaming speech-to-text services sending audio at the pipeline's input
+  rate when constructed with a different `sample_rate`. It's now resampled to
+  that rate.
+  (PR [#6684](https://github.com/pipecat-ai/pipecat/pull/6684))
+
+- Fixed `ElevenLabsRealtimeSTTService` sending audio at the pipeline's input
+  rate while declaring 16 kHz when ElevenLabs doesn't take that rate. It's now
+  resampled to 16 kHz.
+  (PR [#6684](https://github.com/pipecat-ai/pipecat/pull/6684))
+
+- Fixed importing `pipecat.services.tts_service` emitting a
+  `DeprecationWarning` for `AudioContextTTSService` even when the deprecated
+  classes are not used.
+  (PR [#6688](https://github.com/pipecat-ai/pipecat/pull/6688))
+
+- Fixed `DailyRESTHelper.get_token()` sending `eject_at_token_exp: false` on
+  every token. Daily treats any token-level eject setting, even `false`, as an
+  override of the room's `eject_at_room_exp`, so rooms set to eject at expiry
+  never ejected these participants. The argument now defaults to `None` and is
+  left out of the request unless you set it, or set it in `params`. Pass `True`
+  or `False` to override the room setting.
+  (PR [#6689](https://github.com/pipecat-ai/pipecat/pull/6689))
+
+- `SUMMARY_TOKEN_BUFFER` now drives the summarization buffer instead of a
+  repeated `0.8` literal, so changing the constant has an effect.
+  (PR [#6690](https://github.com/pipecat-ai/pipecat/pull/6690))
+
+- `LLMAssistantAggregator` no longer removes ●, ◐ and ○ from the assistant
+  transcript when turn completion is off.
+  (PR [#6696](https://github.com/pipecat-ai/pipecat/pull/6696))
+
+- Fixed `ElevenLabsTTSService` not applying an `apply_text_normalization`
+  change from `TTSUpdateSettingsFrame` until its next reconnect. The change now
+  reconnects right away.
+  (PR [#6707](https://github.com/pipecat-ai/pipecat/pull/6707))
+
+- Fixed `AudioBufferProcessor` recordings playing a few milliseconds of earlier
+  audio again when a bot reply starts or the user is unmuted.
+  (PR [#6710](https://github.com/pipecat-ai/pipecat/pull/6710))
+
+- The `funasr` extra now installs `torch` and `kaldi-native-fbank`, which
+  `FunASRSTTService` needs to transcribe, and requires `funasr>=1.4.5`.
+  (PR [#6711](https://github.com/pipecat-ai/pipecat/pull/6711))
+
+- Fixed `pipecat eval` sometimes reporting a cancelled function call's
+  `function_call_stopped` ahead of the `function_call` the bot sent before it,
+  which failed scenarios that expect the cancel tool first.
+  (PR [#6712](https://github.com/pipecat-ai/pipecat/pull/6712))
+
+- Fixed `normalize_dates` reading the year as a cardinal quantity ("one
+  thousand, nine hundred and ninety-nine"); it now reads it as a year
+  ("nineteen ninety-nine").
+  (PR [#6715](https://github.com/pipecat-ai/pipecat/pull/6715))
+
+- Fixed `expand_currency` reading an abbreviated scale wrongly: `$2.5m` read
+  "two dollars and fifty centsm" and `$5m` became "$5 meters"; they now read
+  "two point five million dollars" and "five million dollars" (`k`, `m`/`mn`,
+  `b`/`bn`, `t`/`tn`).
+  (PR [#6716](https://github.com/pipecat-ai/pipecat/pull/6716))
+
+- Fixed `pipecat eval` blaming the bot when one of the harness's own services
+  failed during a scripted run: a user voice or bot transcription error was
+  reported as a `timeout` or missing function call after the turn's full
+  budget. The turn now fails at once with an `error` failure carrying the
+  service's error.
+  (PR [#6718](https://github.com/pipecat-ai/pipecat/pull/6718))
+
+- Fixed `RTVIProcessor` raising `AttributeError` on an inbound transport
+  message that isn't a dict (for example a JSON array or string a client sent).
+  Such messages are now ignored like any other non-RTVI message.
+  (PR [#6720](https://github.com/pipecat-ai/pipecat/pull/6720))
+
+- Required simulation measurements fail with an error when no value is
+  available.
+  (PR [#6723](https://github.com/pipecat-ai/pipecat/pull/6723))
+
+### Performance
+
+- `ExternalUserTurnStopStrategy` ends the user's turn as soon as a finalized
+  transcription arrives after the stop signal, instead of waiting its `timeout`
+  for more text. With Deepgram Flux, whose end-of-turn transcription is
+  finalized, this saves up to 0.5 seconds when the transcription reaches the
+  user aggregator after Flux's stop proposal.
+  (PR [#6541](https://github.com/pipecat-ai/pipecat/pull/6541))
+
+- `XTTSService` starts playing sooner: it streams audio as it arrives instead
+  of in one-second blocks.
+  (PR [#6676](https://github.com/pipecat-ai/pipecat/pull/6676))
+
+## [1.15.0] - 2026-10-28
+
+### Added
+
+- Added a `custom_configuration` field to `NvidiaTTSService.Settings`, which
+  forwards model-specific key/value parameters to NVIDIA TTS — Magpie's `flush`,
+  `chunk_len_threshold` and `max_chunk_threshold` streaming controls, or
+  Chatterbox's `exaggeration_factor`.
+  (PR [#5580](https://github.com/pipecat-ai/pipecat/pull/5580))
+
+- Added `ClassifierUserTurnStopStrategy` and `ClassifierUserTurnStrategies`,
+  which let a classifier, such as `JevClassifier`, decide whether the user's
+  turn is complete. They're an alternative to
+  `FilterIncompleteUserTurnStrategies` for an LLM that doesn't follow the
+  turn-completion markers well. At every pause with new words, the classifier
+  judges the turn so far from the user's words and the bot's last line:
+  `complete` ends the turn, and `short` and `long` keep it open for a few
+  seconds unless the user continues. `ClassifierUserTurnStrategies` adds the
+  classifier to the default stop strategies (smart turn), and the turn ends
+  once both have decided; for the classifier alone, pass
+  `UserTurnStrategies(stop=[ClassifierUserTurnStopStrategy(...)])`.
+
+    ```python
+    user_params = LLMUserAggregatorParams(
+        user_turn_strategies=ClassifierUserTurnStrategies(
+            classifier=JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY")),
+            context=context,
+        ),
+    )
+    ```
+  (PR [#5870](https://github.com/pipecat-ai/pipecat/pull/5870))
+
+- Added `number_pronunciation_language` to `SmallestTTSService` settings, which
+  reads numerals, currency, times and dates in a language of its own,
+  independent of the synthesis language.
+  (PR [#5936](https://github.com/pipecat-ai/pipecat/pull/5936))
+
+- Added `text_matches` to scripted eval expectations: one or more regular
+  expressions the event's text must each match, such as a format a reply must
+  open with. A miss fails the expectation with the new `text_unmatched` failure
+  kind.
+  (PR [#5991](https://github.com/pipecat-ai/pipecat/pull/5991))
+
+- `LLMWithBackend(predictive_delegation=PredictiveDelegation(classifier))` is
+  an optimization that can speed up responses that need backend involvement. It
+  uses a fast yes/no classifier (such as `JevClassifier`) to determine, after
+  each user request, whether it needs to wait for a frontend inference or can
+  go ahead and trigger an early backend delegation. The cost is money, not
+  time: the classifier runs in parallel with the frontend, but on every turn,
+  and an early delegation abandons a frontend request already under way. Only
+  text frontends are supported, and only request strategies that have
+  `BackendRequestStrategy.delegate_needs_arguments` set to `False` (like
+  `TranscriptBackendRequestStrategy`).
+  (PR [#6174](https://github.com/pipecat-ai/pipecat/pull/6174))
+
+- Added `AICTytoObserver`, which scores the quality of the user's audio with
+  the ai-coustics Tyto model after every 5 seconds of received audio. Each
+  result fires the `on_analysis_result` event with the risk score and
+  per-degradation scores. At the end of the call, `on_call_summary` receives
+  the mean, p95, and max scores, the degraded fraction, and the dominant
+  degradation dimension. Pass the transport's `AICFilter` as `audio_filter` to
+  score the audio before enhancement.
+  (PR [#6181](https://github.com/pipecat-ai/pipecat/pull/6181))
+
+- `AWSBedrockLLMService` now emits the reasoning a model returns in
+  `reasoningContent` (Claude with extended thinking, Nova 2 with reasoning
+  enabled) as `LLMThoughtStartFrame` / `LLMThoughtTextFrame` /
+  `LLMThoughtEndFrame`. Signed reasoning, such as Claude's, is kept in the
+  context and passed back to the model on later turns, so Claude keeps its
+  reasoning across tool calls.
+  (PR [#6229](https://github.com/pipecat-ai/pipecat/pull/6229))
+
+- `TavusTransport` and `TavusVideoService` now set the Tavus replica's facial
+  emotion from the delivery the bot speaks in, when expressive conversation is
+  enabled (`PipelineParams(enable_expressive_conversation=True)`). They convert
+  each `TTSTextFrame.delivery` to a `TavusEmotion` and send
+  `conversation.set_emotion` when it changes, as the frame's words are heard.
+  `TAVUS_DELIVERY_EMOTIONS` maps Pipecat's core deliveries, such as `warm` to
+  `happiness`, and a universal delivery for each other emotion, such as `angry`
+  to `anger`; any other mood shows `neutral`. A delivery the expression policy
+  offers that the replica has no emotion for is logged as a warning at startup.
+  (PR [#6291](https://github.com/pipecat-ai/pipecat/pull/6291))
+
+- Added the `expression` event to `pipecat eval` scenarios: the expression a
+  bot's TTS performed, in the tags the LLM writes, such as `<<excited>>` or
+  `[[laughs]]`. A tag the TTS can't perform is never reported, so a scenario
+  can check that what the LLM wrote was performed.
+  (PR [#6303](https://github.com/pipecat-ai/pipecat/pull/6303))
+
+- Added expressive conversation (alpha), turned on with
+  `PipelineParams(enable_expressive_conversation=True)`: TTS services perform
+  expression tags the LLM writes into its reply, instead of speaking them. The
+  tag syntax and these APIs are likely to change between releases.
+    - `<<name>>` sets the delivery of the words that follow, such as
+      `<<excited>>`, until the next delivery tag or the end of the response, and
+      `<<neutral>>` returns to the voice's baseline. `[[sound]]` is a sound at
+      one point, such as `[[laugh]]`, `[[pause 500]]` is a pause in
+      milliseconds, and `^^word^^` stresses a word. `<<slow: A B 7>>` speaks
+      just those words in that delivery, on top of the delivery around
+      them. `<<slow>>` and `<<fast>>` are deliveries every service that performs
+      them names the same, for saying something carefully, such as a code, or in
+      passing; Cartesia and MiniMax change speed only between sentences.
+    - Each TTS service performs what its expression adapter supports and leaves
+      out the rest, with a warning. Adapters subclass `BaseExpressionAdapter`
+      and live in `pipecat.adapters.tts`, beside the LLM adapters. Adapters ship
+      for `CartesiaTTSService` and `CartesiaHttpTTSService`,
+      `ElevenLabsDialogueTTSService`, `ElevenLabsHttpTTSService` on Eleven v3
+      and v4 models, `FishAudioTTSService` on S2 models, and
+      `MiniMaxHttpTTSService` on speech-2.8 models. A service broadcasts what it
+      can perform at start in a `TTSMetadataFrame`.
+    - The context records the reply as the LLM wrote it, tags included, and
+      clients see the words without the tags. From a service that reports word
+      timestamps, clients receive each word's `delivery` on `bot-output`, and
+      each sound and pause where it is performed, as a `bot-output` segment of
+      the `expression_sound` or `expression_pause` type. A service without word
+      timestamps reports each sentence in the delivery it starts in, after its
+      sounds and pauses. Expression sounds and pauses are sent to clients of
+      RTVI protocol 2.3.0 or later, the protocol version now.
+    - Examples for each provider are in `examples/expressive-conversation/`.
+  (PR [#6303](https://github.com/pipecat-ai/pipecat/pull/6303))
+
+- Added the LLM's side of expressive conversation (alpha): with
+  `PipelineParams(enable_expressive_conversation=True)`, an LLM service teaches
+  itself the expression tags the TTS service it feeds can perform, by their
+  universal names and as a list to keep to, in its system instruction, so a
+  prompt doesn't need to describe them. It reads them from the
+  `TTSMetadataFrame` that TTS service broadcasts.
+    - `PipelineParams(expression_policy=...)` takes an `ExpressionPolicy`, which
+      every LLM service in the pipeline is taught, each one in an `LLMSwitcher`
+      included. Its `delivery` and `sounds` say which tags are offered, by their
+      universal names, or by default a core set such as `<<calm>>`, `<<warm>>`
+      and `[[laugh]]`, and its `guidance` lines say when to use them: presets
+      such as `ExpressionGuidance.MATCH_STYLE`, which answers in the user's mood
+      and energy, and `ExpressionGuidance.SLOW_FOR_DETAILS`, which says just a
+      code or a number slowly, in a span such as `<<slow: A B 7>>`, and the
+      developer's own, joined in order. Tags in the policy the TTS service can't
+      perform are left out, with a warning.
+    - The instruction follows the active TTS service. A `ServiceSwitcher`
+      switch, or a settings change such as a new model that changes what a TTS
+      service performs, broadcasts its `TTSMetadataFrame` again, and the LLM's
+      instruction is rebuilt from it.
+    - `expression_instructions()` returns the instruction for a service's
+      capabilities and a policy, to read or to build a prompt of one's own, and
+      `expression_policy_warning()` what that policy asks for that the service
+      can't perform.
+  (PR [#6315](https://github.com/pipecat-ai/pipecat/pull/6315))
+
+- Added `PipecatToneReader` to expressive conversation (alpha), a processor
+  that reads each transcribed user turn with the Pipecat Tone model and sets
+  the reading on its `TranscriptionFrame`: the user's likeliest emotions and
+  how likely the turn is to be sarcastic, read from the words against the bot's
+  previous reply. Place it after the STT service; the model downloads from
+  Hugging Face at start and runs on the CPU. Install it with
+  `pipecat-ai[tone]`. See
+  `examples/expressive-conversation/expressive-conversation-tone.py`.
+  (PR [#6319](https://github.com/pipecat-ai/pipecat/pull/6319))
+
+- Added perception to expressive conversation (alpha): with
+  `PipelineParams(enable_expressive_conversation=True)`, the LLM reads how the
+  user spoke, as reported by a perception producer such as an STT service or a
+  processor after it.
+    - `TranscriptionFrame`, `InterimTranscriptionFrame` and
+      `EagerTranscriptionFrame` carry the reading in a new `perception` field:
+      `PerceptionSignal`s, each read as the likeliest labels with how sure the
+      reading is, such as a tone of `frustrated 0.86`, or as a value. An STT
+      service that perceives sets it on the transcriptions it pushes, and a
+      processor after the STT can set it on the transcriptions it passes
+      along. A reading of an interim transcription is provisional. A reading of
+      an eager transcription is written into the user message that an early
+      reply, with `enable_eager_end_of_turn`, is generated from. The producer
+      declares the signals it reports in a `PerceptionMetadataFrame` at start.
+    - The user aggregator writes the turn's final reading at the head of its
+      user message, such as `([tone frustrated=0.86, neutral=0.10]) Can you tell
+      me where my order is?`, and the LLM service's system instruction explains
+      how to read it: what the confidences mean, that a reading below 0.5 is a
+      guess, and each signal the producer declares. `ExpressionPolicy` guidance
+      can say what to do with a reading, such as "If the user sounds frustrated
+      at 0.7 or above, apologize once".
+    - Apps get the turn's final reading in `UserTurnStoppedMessage.perception`,
+      on the user aggregator's `on_user_turn_stopped` event. Processors after
+      the user aggregator get the reading written into the context in
+      `LLMContextUserTurnFrame.perception`. Clients get the reading in the
+      `perception` field of the transcription's `user-input` message, which
+      waits for a processor after the STT to read it.
+  (PR [#6319](https://github.com/pipecat-ai/pipecat/pull/6319))
+
+- Added `AssemblyAITTSService`, streaming text-to-speech with per-word timings
+  from AssemblyAI's Streaming TTS WebSocket API. Install it with
+  `pipecat-ai[assemblyai]`. `pipecat init` offers it as "AssemblyAI".
+    - `Settings.voice` is sent as the API's `voice_id`: any voice by its ID, an
+      AssemblyAI voice by its library slug, such as `aai-jane`, or a cloned
+      voice by the slug the AssemblyAI dashboard shows. It defaults to Audrey, a
+      voice from AssemblyAI's public voice library. `Settings.language` and
+      `Settings.model` are optional.
+    - The service connects to the US host; set `url` to
+      `wss://tts.eu.assemblyai.com/v1/ws` to process data in the EU.
+    - Interruptions cancel synthesis in flight without reconnecting. The service
+      keeps an idle session open, replaces a session before its one-hour limit,
+      and waits as long as the server asks before reconnecting.
+    - See `examples/voice/voice-assemblyai.py`.
+  (PR [#6322](https://github.com/pipecat-ai/pipecat/pull/6322))
+
+- Added `UserTurnStrategiesParams` (in `pipecat.turns.user_turn_strategies`) to
+  choose how user turn strategies combine. Pass it as
+  `user_turn_strategies_params` to `LLMUserAggregatorParams`,
+  `UserTurnProcessor` or `UserTurnController`. `start_mode` and `stop_mode`
+  take a `StrategyMode`: with `FIRST` the first strategy to decide wins, and
+  with `ALL` every strategy has to agree. `start_mode` defaults to `FIRST` and
+  `stop_mode` to `ALL`. `start_merge_mode` and `stop_merge_mode` take a
+  `MergeMode`: `REPLACE`, the default, uses the bot's strategies instead of the
+  ones a service recommends, and `EXTEND` adds them to the service's.
+
+    ```python
+    # Filter incomplete turns on top of a service's stop strategies.
+    user_params = LLMUserAggregatorParams(
+        user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+        user_turn_strategies_params=UserTurnStrategiesParams(
+            stop_merge_mode=MergeMode.EXTEND,
+        ),
+    )
+    ```
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Added `BaseUserTurnStopStrategy.decision_scheduled`. A stop strategy returns
+  True while it's sure to decide soon on its own, as
+  `LLMTurnCompletionUserTurnStopStrategy` is while a re-prompt is scheduled,
+  and `user_turn_stop_timeout` then waits instead of ending the turn.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Added `BaseUserTurnStopStrategy.waits_for_inference`. A stop strategy that
+  decides from the turn's inference instead of from the user, such as
+  `LLMTurnCompletionUserTurnStopStrategy`, returns True. The turn controller
+  runs the inference once the other stop strategies have decided, and that
+  strategy then decides from it.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Added `UserTurnCompletionFrame`, which an LLM service using turn-completion
+  markers pushes upstream once per inference. Its `kind` is `"complete"`,
+  `"short"`, `"long"`, or `None` when the response has no marker, and its
+  `context_frame_id` is the id of the `LLMContextFrame` that started the
+  inference. A tool call before any marker counts as `"complete"`.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Added `ExpressionGuidance.BREATHE` to expressive conversation (alpha), a
+  preset for an occasional audible breath before a long or difficult sentence,
+  at most once a reply. `PipecatToneTagger` writes breaths only with it,
+  drawing each as a light breath, a deep breath or an exhale at the shares
+  people take them in, and naming each kind as the TTS service performs it: on
+  ElevenLabs, `[quick breath]`, `[deep breath]` and `[exhales softly]`.
+  (PR [#6385](https://github.com/pipecat-ai/pipecat/pull/6385))
+
+- Added `ExpressionMetadataFrame` to expressive conversation (alpha), broadcast
+  at start by a processor between the LLM and the TTS service that writes the
+  expression tags itself. The LLM is then taught no tags, keeping how to read
+  perception and the policy's own guidance lines when there's a reading to act
+  on, and the assistant aggregator writes each reply to the context as its
+  words alone.
+  (PR [#6385](https://github.com/pipecat-ai/pipecat/pull/6385))
+
+- Added `PipecatToneTagger` to expressive conversation (alpha), a processor
+  that writes the expression tags for an LLM's plain replies with Pipecat
+  Tone's tagger model. Placed between the LLM and the TTS service, it labels
+  each sentence with a delivery, slow spans for details, stressed words and
+  sounds, from the call so far, how the user sounded and the expression
+  policy's presets, and writes them by their universal names, which the TTS
+  service performs by its own, trying an optional `vocabulary` of your own
+  names first. The model downloads from Hugging Face the first time, at an
+  optional `size` (`"17m"` or `"32m"`) and `revision`, or comes from an
+  optional `model_dir` of your own. It loads while the pipeline is set up, once
+  a process for every tagger to share, and runs on the CPU; if it can't load,
+  the LLM writes the tags itself. Install it with `pipecat-ai[tone]`. See
+  `examples/expressive-conversation/expressive-conversation-tone-tagger.py`.
+  (PR [#6385](https://github.com/pipecat-ai/pipecat/pull/6385))
+
+- Added an optional `revision` to `PipecatToneReader`, the model's release on
+  Hugging Face, and an optional `model_dir` to load the model from a folder of
+  your own instead.
+  (PR [#6407](https://github.com/pipecat-ai/pipecat/pull/6407))
+
+- Added an `accent` setting to `CartesiaTTSService` and
+  `CartesiaHttpTTSService`, which picks the accent a multilingual voice speaks
+  the language with.
+  (PR [#6429](https://github.com/pipecat-ai/pipecat/pull/6429))
+
+- Added `moderation` to `OpenAIImageGenService.Settings`, which sets the
+  content-moderation level OpenAI's Images API applies to generated images
+  (`"low"` for less restrictive filtering, or `"auto"`).
+  (PR [#6432](https://github.com/pipecat-ai/pipecat/pull/6432))
+
+- Added a `pronunciations` setting to `SpeechifyHttpTTSService`, which tells
+  Speechify how to speak specific words, by IPA phones or by a spoken alias.
+  (PR [#6436](https://github.com/pipecat-ai/pipecat/pull/6436))
+
+- Added `TogetherLLMSettings.reasoning_effort`, Together's reasoning-depth
+  control ("low", "medium", "high", and "max" on some models). It reaches
+  models that ignore the `reasoning` toggle, such as `zai-org/GLM-5.3`.
+  (PR [#6437](https://github.com/pipecat-ai/pipecat/pull/6437))
+
+- Added universal names to expressive conversation (alpha): the
+  `ExpressionDelivery` and `ExpressionSound` string enums name each delivery
+  and sound the TTS services with an expression adapter perform, the same on
+  every service. A universal name in a tag, such as `<<warm>>` or `[[laugh]]`,
+  is sent to each service by its own name, such as ElevenLabs' `warmly` or
+  Cartesia's `laughter`, while the spoken words' `delivery`, the sounds
+  reported to clients and the context keep it as written.
+  `ExpressionCapabilities.service_vocabulary` maps the names that differ,
+  filled in for Cartesia, ElevenLabs, Fish Audio and MiniMax, and
+  `ExpressionCapabilities.delivery_name()` and `sound_name()` give the name a
+  service performs.
+  (PR [#6439](https://github.com/pipecat-ai/pipecat/pull/6439))
+
+- Added expressive conversation (alpha) adapters for five more TTS services, so
+  their LLMs are taught the expression tags they perform. See
+  `examples/expressive-conversation/` for each.
+    - `InworldTTSService` and `InworldHttpTTSService` on `inworld-tts-2` perform
+      any delivery as a free-text instruction, such as `[calm and slow]`, with
+      `^^emphasis^^` in capitals, Inworld's non-verbal sounds and `<break>`
+      pauses. On `inworld-tts-2-flash`, which ignores instructions, only sounds
+      and pauses are performed.
+    - `SonioxTTSService` on `tts-rt-v2` performs deliveries and sounds as
+      Soniox's audio tags, such as `[excited]` and `[laughs]`, with `*emphasis*`
+      and approximate pauses. Its word timestamps report an audio tag as one
+      word and a stressed word without its asterisks.
+    - `MistralTTSService` on Voxtral 3 models (`voxtral-mini-tts-3-0`) performs
+      a delivery as one of Mistral's emotions, such as `[emotion=warm]`, slow
+      and fast as `[pace=slow]` and `[pace=fast]`, and sounds such as
+      `[laugh]`. The default model, `voxtral-mini-tts-2603`, performs none.
+    - `GeminiTTSService` on Gemini 3.8 models with the Gemini API performs any
+      delivery as a style sent with each sentence, added to the `prompt`
+      setting's style, with emphasis in capitals and inline sounds and pauses
+      such as `<laugh>` and `<short pause>`.
+    - `AzureTTSService` and `AzureHttpTTSService` with a DragonHD or DragonHD
+      Omni voice, such as `en-US-Ava:DragonHDOmniLatestNeural`, perform a
+      delivery as one of Azure's HD styles, such as `[excited]`, and its
+      paralinguistic sounds, such as `[laughter]`.
+    - `ExpressionCapabilities.allows_free_text_delivery` and
+      `allows_free_text_sounds` say whether a service takes free text for each
+      kind, as Inworld and Gemini do for delivery alone.
+    - `ExpressionDelivery` and `ExpressionSound` gain the universal names these
+      services perform, such as `playful`, `soft`, `encouraging`, `sniffle` and
+      `whimper`.
+  (PR [#6444](https://github.com/pipecat-ai/pipecat/pull/6444))
+
+### Changed
+
+- Updated the `aic` extra to require `aic-sdk~=3.3.1` (previously `~=3.1.0`).
+  (PR [#6181](https://github.com/pipecat-ai/pipecat/pull/6181))
+
+- `LLMWithBackend`'s frontend acknowledges a delegation to the backend in fewer
+  words, such as "Let me look into that". A longer acknowledgement sounds
+  awkward, and holds up a backend's answer that lands while the acknowledgement
+  is still being spoken.
+  (PR [#6267](https://github.com/pipecat-ai/pipecat/pull/6267))
+
+- `LLMWithBackend`'s frontend avoids the awkward double acknowledgement of a
+  delegation. When it has acknowledged in the same response as its `delegate`
+  tool call (for example "Stopping the retry test fix, I'll leave that alone
+  for you."), which it *sometimes* does, the reply it generates when the call
+  settles completes the thought (for example "Checking CI on main for you
+  now!"), or adds nothing when the first part said it all.
+  (PR [#6314](https://github.com/pipecat-ai/pipecat/pull/6314))
+
+- When filtering incomplete turns, a turn the LLM marks ◐ or ○ now stays open
+  until the user is re-prompted (after
+  `UserTurnCompletionConfig.incomplete_short_timeout` or
+  `incomplete_long_timeout`). Before, `user_turn_stop_timeout` ended the turn
+  first and fired `on_user_turn_stop_timeout`.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- ⚠️ Several stop strategies in one `UserTurnStrategies.stop` list now all have
+  to agree before a user turn ends, because `stop_mode` defaults to
+  `StrategyMode.ALL`. For example, `TurnAnalyzerUserTurnStopStrategy` next to
+  `SpeechTimeoutUserTurnStopStrategy` now ends the turn only once both say the
+  user is done. Pass `UserTurnStrategiesParams(stop_mode=StrategyMode.FIRST)`
+  to end the turn on the first stop strategy that decides, as before. A list
+  with a single stop strategy behaves as before.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- ⚠️ `WakePhraseUserTurnStartStrategy` now starts turns on its own: once awake,
+  it starts a turn when the user speaks or a final transcription arrives. Use
+  it as the only start strategy,
+  `start=[WakePhraseUserTurnStartStrategy(...)]`. In a `StrategyMode.FIRST`
+  list, the start strategies after it no longer decide once it's awake. To
+  combine it with others, such as `MinWordsUserTurnStartStrategy`, use
+  `start_mode=StrategyMode.ALL`.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- ⚠️ A custom stop strategy that decides from the turn's inference, for example
+  one that called `trigger_user_turn_finalized()` next to `deferred()`
+  strategies, must now return True from
+  `BaseUserTurnStopStrategy.waits_for_inference`. Otherwise the turn controller
+  treats it as a strategy that listens to the user: in a `StrategyMode.ALL`
+  list the inference doesn't run until `user_turn_stop_timeout` ends the turn,
+  and in a `StrategyMode.FIRST` list the turn ends without waiting for it.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- `FilterIncompleteUserTurnStrategies` now works with an eager end of turn and
+  with the stop strategies a service recommends (with
+  `stop_merge_mode=MergeMode.EXTEND`). With an eager end of turn, the
+  speculative answer goes out once the transcript commits and the LLM marks the
+  turn complete, in either order, and ◐ or ○ withdraws it.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- ⚠️ A user turn stop strategy now only reports that the user is done.
+  `BaseUserTurnStopStrategy.report_user_turn_stopped()`, which replaces
+  `trigger_user_turn_stopped()`, fires `on_user_turn_stopped` and no longer
+  `on_user_turn_inference_triggered`, because the turn controller now runs the
+  turn's inference itself once the stop strategies have decided. A custom stop
+  strategy starts an inference only to speculate, with
+  `start_user_turn_speculation()`. The deprecated
+  `trigger_user_turn_inference_triggered()` ignores a call without a
+  speculation, with a warning the first time.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- ⚠️ Turning on turn-completion markers with only the deprecated
+  `filter_incomplete_user_turns` LLM setting no longer re-prompts a user who
+  goes quiet after ◐ or ○, since `LLMTurnCompletionUserTurnStopStrategy` now
+  does the re-prompting. Use
+  `user_turn_strategies=FilterIncompleteUserTurnStrategies()` instead.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- When the user speaks again after a turn's answer has started but before the
+  turn ended, that answer is now cancelled: the user aggregator interrupts the
+  bot, or broadcasts a `UserTurnResponseCancelFrame` when the turn doesn't
+  interrupt the bot. `UserTurnController` and `UserTurnProcessor` have a new
+  `on_user_turn_resumed` event, emitted when the user starts speaking again in
+  an open turn.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- `ServiceSwitcher` now passes a `ServiceMetadataFrame` from a service outside
+  it to its inactive services too, so a service that reads another service's
+  metadata has it when it becomes active. Only the active service's own
+  metadata leaves the switcher, as before.
+  (PR [#6365](https://github.com/pipecat-ai/pipecat/pull/6365))
+
+- With `enable_eager_end_of_turn`, the user aggregator also broadcasts an
+  `LLMContextUserTurnFrame` for the turn an early reply answers, with
+  `speculation=True`, ahead of the reply. Processors after the LLM learn the
+  turn before the held reply is released. The turn is broadcast again, as
+  written to the context, when it ends, so a processor that keeps the
+  conversation should skip speculative turns.
+  (PR [#6385](https://github.com/pipecat-ai/pipecat/pull/6385))
+
+- Changed the default model of `InceptionLLMService` from `mercury-2` to
+  `mercury-3`. Inception is retiring Mercury 2 and 2.5 on November 15, 2026,
+  and they are closed to new signups. To keep using Mercury 2 until then, set
+  `settings=InceptionLLMService.Settings(model="mercury-2")`.
+  (PR [#6397](https://github.com/pipecat-ai/pipecat/pull/6397))
+
+- `SmallestTTSService.Settings` gained a `date_format` field, which reads
+  all-numeric dates day-first (`"EU"`) or month-first (`"US"`).
+  (PR [#6431](https://github.com/pipecat-ai/pipecat/pull/6431))
+
+- `SmallestTTSService.Settings`' `content_filter` now also takes Smallest's
+  `"redact"` action, which drops a matched term and speaks the rest.
+  (PR [#6431](https://github.com/pipecat-ai/pipecat/pull/6431))
+
+- The MoQ transport example now uses `OpenAILLMService`'s default model instead
+  of pinning `gpt-4o`, which OpenAI shuts down on 2027-01-14.
+  (PR [#6433](https://github.com/pipecat-ai/pipecat/pull/6433))
+
+- `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` now send
+  `reasoning.effort="none"` for `gpt-6.1-terra` when reasoning isn't
+  configured, matching the other models whose lowest documented effort is
+  `none`.
+  (PR [#6434](https://github.com/pipecat-ai/pipecat/pull/6434))
+
+- Renamed `RELAY_NOTE` to `BACKEND_MESSAGE_RELAY_INSTRUCTION` and
+  `STRATEGY_PLACEHOLDER` to `PAIRING_INSTRUCTION_STRATEGY_PLACEHOLDER` in
+  `pipecat.pipeline.llm_with_backend`.
+  (PR [#6435](https://github.com/pipecat-ai/pipecat/pull/6435))
+
+- `pipecat.pipeline.llm_with_backend` now exports only the classes an app
+  builds with: `LLMWithBackend`, `BackendConnector`, `PredictiveDelegation`,
+  and the request strategies. Import the prompt texts and the marks on backend
+  messages from `pipecat.pipeline.llm_with_backend.prompts`, and
+  `DELEGATE_TOOL_NAME` and `ConnectorContext` from
+  `pipecat.pipeline.llm_with_backend.connector`.
+  (PR [#6435](https://github.com/pipecat-ai/pipecat/pull/6435))
+
+- Updated `PipecatToneReader` to download the Pipecat Tone reader's
+  `reader-rc2` release by default (previously `reader-rc1`), which reads
+  sarcasm with the bot's reply before each turn as context. Pass
+  `revision="reader-rc1"` to keep rc1.
+  (PR [#6450](https://github.com/pipecat-ai/pipecat/pull/6450))
+
+### Deprecated
+
+- Deprecated `BaseUserTurnStartStrategy.trigger_user_turn_started()` and
+  `BaseUserTurnStopStrategy.trigger_user_turn_stopped()`. Use
+  `report_user_turn_started()` and `report_user_turn_stopped()` instead: a
+  strategy reports its decision, and the turn controller decides when the turn
+  starts and ends. A subclass that overrides the old method keeps getting the
+  reports until 2.0.0.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `BaseUserTurnStopStrategy.trigger_user_turn_inference_triggered()`
+  and `trigger_user_turn_speculation_cancelled()`. Use
+  `start_user_turn_speculation()` and `cancel_user_turn_speculation()` instead.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `EagerEndOfTurnCancelFrame`. Use `UserTurnResponseCancelFrame`
+  instead. Frames pushed under the old name still cancel.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `deferred()` and `DeferredUserTurnStopStrategy`, with no
+  replacement. Pass the wrapped strategy itself: the turn controller now runs
+  the turn's inference once the stop strategies have decided.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `ProcessFrameResult`. Use `StrategyMode` instead: user turn
+  strategies no longer need to return anything from `process_frame()`, and
+  every strategy sees every frame. Until 2.0.0, a `StrategyMode.FIRST` list
+  still honors `ProcessFrameResult.STOP`, with a deprecation warning.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `ExternalUserTurnCompletionStopStrategy`. Use
+  `ExternalUserTurnStopStrategy` instead, and push a
+  `ProposedUserStoppedSpeakingFrame` once the user is done. For the LLM's
+  turn-completion markers, use `LLMTurnCompletionUserTurnStopStrategy`.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+- Deprecated `BaseUserTurnStopStrategy.trigger_user_turn_finalized()`. Use
+  `report_user_turn_stopped()` instead, which fires the same event.
+  (PR [#6346](https://github.com/pipecat-ai/pipecat/pull/6346))
+
+### Fixed
+
+- `LLMWithBackend`'s frontend now more reliably delegates a stop or a change to
+  work it has handed over to the backend. Before, gpt-4.1 and Claude often
+  answered a user's "never mind" themselves, with no call, and the backend
+  carried on with its work. Asked how the work is going before any of the
+  backend's progress has reached it, the frontend now says there is no update
+  yet instead of describing work it cannot see.
+  (PR [#6174](https://github.com/pipecat-ai/pipecat/pull/6174))
+
+- `NvidiaLLMService` now recognizes a leading `<think>` block that follows
+  whitespace, and no longer passes the whitespace between `</think>` and the
+  answer on to TTS.
+  (PR [#6229](https://github.com/pipecat-ai/pipecat/pull/6229))
+
+- `AWSBedrockLLMService` no longer sends Amazon Nova's
+  `<thinking>...</thinking>` reasoning to TTS. Nova (v1) models write it into
+  the answer text before calling a tool, so voice bots were reading it aloud. A
+  `<thinking>` block at the start of the response, or of any text the model
+  writes between tool calls, is now emitted as `LLMThoughtStartFrame` /
+  `LLMThoughtTextFrame` / `LLMThoughtEndFrame`.
+  (PR [#6229](https://github.com/pipecat-ai/pipecat/pull/6229))
+
+- Fixed TTS services without word timestamps joining streamed sentences in the
+  context with two spaces, and pushing skipped text, such as a code block,
+  ahead of the sentence spoken before it.
+  (PR [#6366](https://github.com/pipecat-ai/pipecat/pull/6366))
+
+- Fixed `SkipTagsAggregator` recognizing only the first of several tag pairs,
+  and never opening a pair whose start and end are the same, such as `("**",
+  "**")`.
+  (PR [#6367](https://github.com/pipecat-ai/pipecat/pull/6367))
+
+- Fixed TTS services with word timestamps recording a closing tag written
+  against a word with a space before it in the assistant context, as
+  `<card>4111 </card> is yours` for `<card>4111</card> is yours`, and leaving
+  it out when the bot was interrupted right after that word.
+  (PR [#6368](https://github.com/pipecat-ai/pipecat/pull/6368))
+
+- Fixed the Pipecat Cloud documentation link printed by `pipecat init` (and
+  used in the generated README), which pointed to a page that no longer exists.
+  (PR [#6387](https://github.com/pipecat-ai/pipecat/pull/6387))
+
+- Fixed `JevClassifier`, `ClefClassifier` and `OpenAIDecisionsClassifier`
+  letting a broken TLS connection through as an `ssl.SSLError` instead of a
+  `ClassifierError`, so code that falls back when a classifier can't answer
+  missed it.
+  (PR [#6409](https://github.com/pipecat-ai/pipecat/pull/6409))
+
+- Fixed `nanoseconds_to_str()` (used when printing a frame's `pts`) dropping a
+  microsecond through float rounding, e.g. 2.3 s printed as `0:00:02.299999`.
+  (PR [#6411](https://github.com/pipecat-ai/pipecat/pull/6411))
+
+- Fixed `FilterIncompleteUserTurnStrategies` leaving the bot silent when the
+  user made a sound with no words while the LLM was answering, for example
+  right before a tool call. The bot now responds as it does to an empty user
+  turn that interrupted it, following
+  `LLMUserAggregatorParams.empty_user_turn`: by default it asks the user to
+  repeat what they said.
+  (PR [#6422](https://github.com/pipecat-ai/pipecat/pull/6422))
+
+- Fixed `AudioVolumeTracker` raising `BufferError` on `update` when another
+  thread, such as a profiler, held the frame that measured the volume, which
+  stopped VAD for the rest of the session.
+  (PR [#6425](https://github.com/pipecat-ai/pipecat/pull/6425))
+
+- Fixed a user turn ending on the user's earlier words with segmented STT
+  services such as `WhisperSTTService`, `OpenAISTTService`, `GroqSTTService`
+  and `MoonshineSTTService`. When the user spoke again before an earlier
+  segment was transcribed, that segment's transcript was marked finalized, so
+  the stop strategies took it as the user's last words and could end the turn
+  before the new words were transcribed. `SegmentedSTTService` now marks a
+  transcript finalized only when the user hasn't spoken again since its segment
+  ended.
+  (PR [#6446](https://github.com/pipecat-ai/pipecat/pull/6446))
+
+- `NvidiaTTSService` no longer freezes the bot while it fetches its synthesis
+  config from the server on startup. A slow NVIDIA endpoint used to block the
+  whole event loop, so nothing else could run and the pipeline's setup timeout
+  couldn't fire until the call returned. The call now runs in a thread.
+  (PR [#6449](https://github.com/pipecat-ai/pipecat/pull/6449))
+
+- Fixed segmented STT services (`SegmentedSTTService` and the services built on
+  it, such as `WhisperSTTService`, `MoonshineSTTService` and
+  `NvidiaSegmentedSTTService`) leaving their transcription task running when
+  the pipeline's setup timed out, for example because a service after them
+  couldn't connect. The runner warned about it as a dangling task, and a
+  long-running server never released it.
+  (PR [#6452](https://github.com/pipecat-ai/pipecat/pull/6452))
+
+### Performance
+
+- `OpenAIResponsesLLMService` (WebSocket) now replies sooner after an
+  interruption: the next request no longer waits for the interrupted response
+  to finish. The two run on separate "lanes" (each with a `stream_id`), so the
+  interrupted one finishes on the side while the next request can still send
+  only the new messages, continuing from the previous response
+  (`previous_response_id`), rather than the full context.
+  (PR [#6174](https://github.com/pipecat-ai/pipecat/pull/6174))
+
+## [1.14.0] - 2026-10-23
+
+### Added
+
+- Added `PerplexityAgentHttpLLMService` for Perplexity's Agent API, which
+  answers with web search and supports function calling. It defaults to
+  `openai/gpt-5.6-luna` with web search on.
+    - `Settings` adds `preset`, `web_search` and `max_steps`. `preset` and
+      `model` are independent, and at least one must be set.
+    - With neither `preset` nor `reasoning` set, each request sends Perplexity's
+      `fast` preset, its lowest-latency setup, and the first request for each
+      model logs it. With `use_provider_thinking_default` set, no preset is
+      sent.
+    - Answers can include citation markers such as `[1]`, and Anthropic models
+      need `max_completion_tokens` set.
+  (PR [#5985](https://github.com/pipecat-ai/pipecat/pull/5985))
+
+- `NvidiaSTTService` now exposes speaker diarization in transcription frames.
+  When `speaker_diarization` is enabled, each contiguous speaker run of a final
+  result is emitted as its own frame with the NVIDIA speaker tag in `user_id`.
+  The new `speaker_format` setting optionally adds speaker labels to the
+  transcript text:
+  `settings=NvidiaSTTService.Settings(speaker_diarization=True,
+  speaker_format="Speaker {speaker}: {text}")`.
+  (PR [#6076](https://github.com/pipecat-ai/pipecat/pull/6076))
+
+- Added `NvidiaOmniLLMService` for NVIDIA Nemotron Omni models, which take
+  speech, images, and video as well as text. In audio input mode (the default,
+  set with the `audio_input` constructor argument), Omni hears the user
+  directly and replaces the STT service: it transcribes and answers each spoken
+  turn in a single request, and pushes the user's transcript upstream for the
+  context. In this mode it behaves like a realtime service that still needs a
+  TTS. It announces itself as a realtime service, which switches the user
+  aggregator into realtime mode, so read the user's text from
+  `on_user_turn_message_added` rather than `on_user_turn_stopped`. With
+  `audio_input=False`, it is a text LLM for a cascaded pipeline. Audio and
+  video files in the context, from `LLMContext.create_file_message()` or
+  `create_audio_message()`, are sent in the form Omni reads by the new
+  `NvidiaOmniLLMAdapter`. `run_multimodal_inference()` runs a one-off request
+  outside the conversation, for example to describe a video clip, with optional
+  streaming callbacks for text and reasoning. See
+  `examples/voice/voice-nvidia-omni.py`.
+  (PR [#6085](https://github.com/pipecat-ai/pipecat/pull/6085))
+
+- `SpeechmaticsSTTService` now supports 8 kHz audio, alongside 16 kHz. Any
+  other sample
+    rate is reported as a permanent error when the service connects.
+  (PR [#6235](https://github.com/pipecat-ai/pipecat/pull/6235))
+
+- Added `emit_sentences` to `SpeechmaticsSTTService.Settings`. When enabled,
+  Speechmatics closes a segment at every end of sentence, so each sentence is
+  emitted as its own final transcription.
+  (PR [#6235](https://github.com/pipecat-ai/pipecat/pull/6235))
+
+- Added `text_transforms` to `LLMTextProcessor`, with `add_text_transformer()`
+  and `remove_text_transformer()`. The same `(text_type | "*", transform)` pairs
+  a TTS service takes can now rewrite each aggregation before it splits toward
+  the TTS, the context and the client, so a habit the LLM keeps repeating
+  (emoji, stage directions), a name it should not use, or a pattern to redact
+  can be rewritten for everyone. A transform registered on the TTS service still
+  rewrites only what is spoken. A transform that leaves nothing but whitespace
+  drops the aggregation. `TextTransform` in `pipecat.utils.text.transforms`
+  names the callable type.
+  (PR [#6264](https://github.com/pipecat-ai/pipecat/pull/6264))
+
+- Added `api_key_sid` and `api_key_secret` to `TwilioFrameSerializer`, so auto
+  hang-up can authenticate with a Twilio API key instead of the account's Auth
+  Token. Credentials must belong to the configured region.
+  (PR [#6270](https://github.com/pipecat-ai/pipecat/pull/6270))
+
+- Added `ZoomAISTTService`, streaming speech-to-text with Zoom Scribe Live.
+  Install it with `pipecat-ai[zoom-ai]`. `pipecat init` offers it as "Zoom AI".
+    - Scribe's voice activity detection ends each turn, so the service
+      recommends `ExternalUserTurnStrategies`. `Settings.silence_duration_ms`
+      (default 350, tuned for voice agents) sets how much silence ends a turn.
+    - `Settings.diarization` (off by default) labels speakers; the labels are
+      in `TranscriptionFrame.result`.
+  (PR [#6280](https://github.com/pipecat-ai/pipecat/pull/6280))
+
+- The development runner's Twilio serializer now reads `TWILIO_API_KEY` and
+  `TWILIO_API_SECRET`, so auto hang-up can authenticate with a Twilio API key
+  instead of the Auth Token, and `TWILIO_REGION` and `TWILIO_EDGE`, so it hangs
+  up calls in a non-US1 region such as `ie1` / `dublin`. Set
+  `TWILIO_AUTH_TOKEN` or the API key pair, not both.
+  (PR [#6293](https://github.com/pipecat-ai/pipecat/pull/6293))
+
+- Added `SmallestLLMService`, connecting to Smallest AI's Electron model via
+    the OpenAI-compatible Waves API. `pipecat init` offers it as "Smallest".
+  (PR [#6339](https://github.com/pipecat-ai/pipecat/pull/6339))
+
+- `pipecat init` now offers Smallest as an STT service (`--stt smallest_stt`).
+  (PR [#6339](https://github.com/pipecat-ai/pipecat/pull/6339))
+
+- `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` now log a
+  warning and push a non-fatal `ErrorFrame` when a response completes with no
+  text and no function call. Nothing reaches the TTS for such a response, so
+  the bot stays silent until the user speaks again; the error lets the
+  application react in `on_pipeline_error`, for example by running the LLM
+  again. The warning lists the response's output items, such as `['reasoning']`
+  or `['message[refusal]']`, and the WebSocket service also logs whether the
+  request sent the full context or only the items added since the previous
+  response.
+  (PR [#6348](https://github.com/pipecat-ai/pipecat/pull/6348))
+
+- Added `output_type` to the RTVI `bot-output` message, the counterpart of
+  `input_type` on `user-input`. It says what kind of text the message holds: a
+  sentence, a word, a backchannel, or a custom type such as `"code"`.
+  (PR [#6351](https://github.com/pipecat-ai/pipecat/pull/6351))
+
+### Changed
+
+- `pipecat init` scaffolds `PerplexityAgentHttpLLMService` for Perplexity, with
+  `openai/gpt-5.6-luna` when `PERPLEXITY_MODEL` isn't set.
+  (PR [#5985](https://github.com/pipecat-ai/pipecat/pull/5985))
+
+- ⚠️ `RimeV1TTSService` requires an explicit `settings.model`. The `coda` and
+  `mistv3` models default to `wss://coda.api.rime.ai/ws` and
+  `wss://mist.api.rime.ai/ws`. Set `websocket_url` to override the public
+  endpoint for a custom deployment; URL paths do not select the model.
+  (PR [#6245](https://github.com/pipecat-ai/pipecat/pull/6245))
+
+- `DeepgramFluxSTTService` now reports Deepgram's reason when it refuses the
+  connection, so an out-of-range setting or a bad API key is named in the error
+  (for example, `Deepgram refused the connection (HTTP 400): eot_threshold must
+  be between 0.5 and 1, inclusive.`) rather than a bare `server rejected
+  WebSocket connection: HTTP 400`. The `on_connection_error` event receives the
+  same message.
+  (PR [#6246](https://github.com/pipecat-ai/pipecat/pull/6246))
+
+- `DeepgramFluxTTSService` and `DeepgramTTSService` now report Deepgram's
+  reason when it refuses the connection (for example, `Deepgram refused the
+  connection (HTTP 400): 'speed' must be within documented range.`) rather than
+  a bare `server rejected WebSocket connection: HTTP 400`. The
+  `on_connection_error` event receives the same message.
+  (PR [#6248](https://github.com/pipecat-ai/pipecat/pull/6248))
+
+- Changed the default model of `GoogleVertexLLMService` from `gemini-3.6-flash`
+  to `gemini-3.8-flash`, because Vertex AI retires `gemini-3.6-flash` on
+  2026-11-19. The default thinking level for the new model is `low`; pass
+  `settings=GoogleVertexLLMService.Settings(model="gemini-3.6-flash")` to keep
+  the previous model until then.
+  (PR [#6259](https://github.com/pipecat-ai/pipecat/pull/6259))
+
+- A TTS `text_transforms` entry whose output is only whitespace now leaves its
+  text unspoken, instead of sending a lone space to the synthesizer.
+  (PR [#6264](https://github.com/pipecat-ai/pipecat/pull/6264))
+
+- Updated the Pillow dependency range to allow Pillow 13.
+  (PR [#6286](https://github.com/pipecat-ai/pipecat/pull/6286))
+
+- `strip_markdown` reduces a Markdown link or image to its label or alt text,
+  so the URL is no longer read out. To keep the syntax as it was, register
+  `StripMarkdown(strip_urls=False)` instead, or pass `strip_urls=False` to
+  `VoiceFormatter`.
+  (PR [#6295](https://github.com/pipecat-ai/pipecat/pull/6295))
+
+- `SpeechifyHttpTTSService` now defaults to the `simba-3.5` model, which covers
+  48 languages under one model id. Set `settings.model` to keep using
+  `simba-3.2` or `simba-3.0`.
+  (PR [#6298](https://github.com/pipecat-ai/pipecat/pull/6298))
+
+- Raised the `pipecat-ai[cli]` Context Hub floor to `pipecat-ai-context-hub`
+  0.9.0, which adds `pipecat context-hub repos` for adding and removing indexed
+  repos, and lets hub queries wait out a running `refresh` instead of failing.
+  (PR [#6305](https://github.com/pipecat-ai/pipecat/pull/6305))
+
+- `LemonSliceTransport` now default to using 24kHz audio for input and output
+  audio. User can set the audio input/output sample rate via the
+  `audio_sample_rate` parameter.
+  (PR [#6310](https://github.com/pipecat-ai/pipecat/pull/6310))
+
+- `LemonSliceTransport` now takes in `model` parameter to specify LemonSlice
+  models. Default model is used if left unspecified.
+  (PR [#6310](https://github.com/pipecat-ai/pipecat/pull/6310))
+
+- Widened the `onnxruntime` dependency from `~=1.24.3` to `>=1.24.3,<2`, so
+  pipecat-ai can be installed next to packages that require a newer
+  onnxruntime.
+  (PR [#6312](https://github.com/pipecat-ai/pipecat/pull/6312))
+
+- `pipecat.services.openai.realtime.events.parse_server_event` returns `None`
+  for a server event type it has no model for, instead of raising, and the
+  `Response` and `Usage` fields are optional, matching the GA Realtime spec.
+  (PR [#6329](https://github.com/pipecat-ai/pipecat/pull/6329))
+
+- `NvidiaLLMService` now defaults to `nvidia/nemotron-3.5-super-vl-120b-a12b`.
+  NVIDIA's NIM cloud endpoint can answer requests for the previous default,
+  `nvidia/nemotron-3-super-120b-a12b`, with HTTP 404 ("Not found for account")
+  while still listing the model. To keep the previous model, set
+  `settings=NvidiaLLMService.Settings(model="nvidia/nemotron-3-super-120b-a12b")`.
+  (PR [#6354](https://github.com/pipecat-ai/pipecat/pull/6354))
+
+### Deprecated
+
+- `PerplexityLLMService` is deprecated in favor of
+  `PerplexityAgentHttpLLMService`. Perplexity has ended support for the Sonar
+  chat completions API it uses.
+  (PR [#5985](https://github.com/pipecat-ai/pipecat/pull/5985))
+
+- Deprecated `text_filters` on `TTSService`, along with `BaseTextFilter` and
+  `MarkdownTextFilter`. Use `text_transforms` instead: `strip_markdown` from
+  `pipecat.utils.text.transforms` replaces `MarkdownTextFilter`, and a transform
+  registered on `LLMTextProcessor` rewrites the context as well as the
+  speech. In place of `filter_code` and `filter_tables`, give the block its own
+  text type with `PatternPairAggregator` and list it in the TTS service's
+  `skip_text_types`, which keeps it in the context and out of the audio. Will be
+  removed in 2.0.0.
+  (PR [#6264](https://github.com/pipecat-ai/pipecat/pull/6264))
+
+- `WebsocketService.send_with_retry` is deprecated and will be removed in
+  2.0.0. No replacement: send on the websocket directly and leave reconnecting
+  to the receive loop.
+  (PR [#6300](https://github.com/pipecat-ai/pipecat/pull/6300))
+
+- `pipecat.adapters.base_llm_adapter`, `pipecat.adapters.schemas.*` and
+  `pipecat.adapters.services.*` are deprecated. Use
+  `pipecat.adapters.llm.base_llm_adapter`, `pipecat.adapters.llm.schemas.*` and
+  `pipecat.adapters.llm.services.*` instead (for example, `from
+  pipecat.adapters.llm.schemas.function_schema import FunctionSchema`). The
+  module names are unchanged, and the old paths still work, with a deprecation
+  warning, until 2.0.0.
+  (PR [#6331](https://github.com/pipecat-ai/pipecat/pull/6331))
+
+- Workers on a shared bus send tool schemas under their new module path, so
+  a worker on an earlier Pipecat version can't read the tool schemas a worker
+  on this version sends. Upgrade the workers that share a bus together.
+  (PR [#6331](https://github.com/pipecat-ai/pipecat/pull/6331))
+
+- Deprecated the `text_type` field of the RTVI `bot-output` message. Read
+  `output_type` instead, which carries the same value. The bot sends
+  `output_type`, `text_type` and the deprecated `aggregated_by` until 2.0.0.
+  (PR [#6351](https://github.com/pipecat-ai/pipecat/pull/6351))
+
+### Fixed
+
+- Fixed `SkipTagsAggregator` and `PatternPairAggregator` (with
+  `MatchAction.KEEP`) splitting a sentence at punctuation inside a tag once the
+  tag had closed, and `SkipTagsAggregator` missing a tag that started after an
+  earlier sentence was emitted.
+  (PR [#5898](https://github.com/pipecat-ai/pipecat/pull/5898))
+
+- Fixed DailyTransport raising an AttributeError for app and prebuilt chat
+  messages sent after a pipeline setup timeout releases its client. App
+  messages sent after cleanup are dropped, and prebuilt chat messages return a
+  not-joined error.
+  (PR [#6191](https://github.com/pipecat-ai/pipecat/pull/6191))
+
+- `DeepgramFluxSTTService` retries a connection that opens but never receives
+  Flux's `Connected` message, instead of treating it as a rejected request and
+  stopping on the first one. It gives up after three such connections in a row.
+  Unsupported settings are still a permanent error: Flux refuses them with an
+  HTTP 400 during the handshake.
+  (PR [#6219](https://github.com/pipecat-ai/pipecat/pull/6219))
+
+- `DeepgramFluxSTTService` reconnects in the background, both when its
+  connection drops and when its first connection fails, so audio and other
+  frames keep moving through the pipeline instead of waiting until the
+  reconnect finishes. Audio that arrives while the connection is down isn't
+  transcribed.
+  (PR [#6219](https://github.com/pipecat-ai/pipecat/pull/6219))
+
+- When a `DeepgramFluxSTTService` connection or a
+  `DeepgramFluxSageMakerSTTService` session ends partway through the user's
+  turn, the turn ends with the transcript received so far, instead of staying
+  open and losing what the user said. If `DeepgramFluxSTTService` reconnects
+  and the user keeps talking, the rest is transcribed as a new turn.
+  (PR [#6219](https://github.com/pipecat-ai/pipecat/pull/6219))
+
+- Text filters are reset when an LLM reply ends, so `MarkdownTextFilter` with
+  `filter_code=True` no longer mutes later replies after one ends inside an
+  open code block.
+  (PR [#6237](https://github.com/pipecat-ai/pipecat/pull/6237))
+
+- When a `CartesiaTurnsSTTService` connection ends partway through the user's
+  turn, the turn ends with the transcript received so far, instead of staying
+  open and losing what the user said. If the service reconnects and the user
+  keeps talking, the rest is transcribed as a new turn.
+  (PR [#6242](https://github.com/pipecat-ai/pipecat/pull/6242))
+
+- `CartesiaTurnsSTTService` reports settings Cartesia rejects, such as an
+  unknown model or an out-of-range turn threshold, as a permanent
+  invalid-request error carrying Cartesia's message, instead of waiting 10
+  seconds for a confirmation that never comes and then retrying. A connection
+  that opens but is never confirmed is retried, and the service gives up after
+  three in a row.
+  (PR [#6242](https://github.com/pipecat-ai/pipecat/pull/6242))
+
+- `CartesiaTurnsSTTService` reconnects in the background when its connection
+  drops or its first connection fails, so audio and other frames keep moving
+  through the pipeline instead of waiting until the reconnect finishes. Audio
+  that arrives while the connection is down isn't transcribed.
+  (PR [#6242](https://github.com/pipecat-ai/pipecat/pull/6242))
+
+- Fixed the MoQ transport silently dropping an outbound audio frame (logged as
+  `Error writing audio frame: unsupported operand type(s) for +=: 'NoneType'
+  and 'float'`) when an interruption reset the audio pacing clock while a paced
+  `publish_audio` write slept. A reset landing mid-sleep now re-anchors the
+  encoder epoch and pacing clock the same way a fresh write does, and a
+  transport teardown landing in the same sleep (the peer leaving while the bot
+  speaks with a full buffer) drops the write quietly instead of erroring on the
+  closed producer.
+  (PR [#6243](https://github.com/pipecat-ai/pipecat/pull/6243))
+
+- Fixed `DeepgramFluxTTSService` staying usable when Deepgram refuses its
+  connection for a setting it won't accept (such as an out-of-range
+  `expressivity`) or a bad API key. The service retried the same connection on
+  every bot reply, so the bot went silent and a configured failover never took
+  over. Such a refusal now makes the service unusable, as it already did for
+  `DeepgramTTSService`; a rate limit (429) or a server error (5xx) is still
+  retried.
+  (PR [#6248](https://github.com/pipecat-ai/pipecat/pull/6248))
+
+- Fixed websocket-based services stalling when the peer stops reading. A send
+  waited on the full write buffer until TCP gave up, which could take many
+  minutes, holding up the service's processor and every processor after it with
+  no error or reconnect. Each send through `WebsocketService` is now bounded at
+  5 seconds; a send that outlasts it drops the connection and fails with
+  `ConnectionClosedError`, so the service's existing reconnect handling takes
+  over. Set `ws_send_timeout` on `WebsocketService` to change the bound, or
+  `None` to disable it.
+  (PR [#6251](https://github.com/pipecat-ai/pipecat/pull/6251))
+
+- `FalSTTService` now closes the HTTP session it creates for itself when the
+  service is cleaned up. Previously the session and its pooled connection to
+  `fal.run` were left open after every pipeline run. A session passed in with
+  `aiohttp_session` is still left open for the caller to manage.
+  (PR [#6253](https://github.com/pipecat-ai/pipecat/pull/6253))
+
+- Fixed `CartesiaTTSService` writing a sentence-final punctuation mark to the
+  assistant context twice for Chinese and Japanese (e.g. `よろしいでしょうか？？`). An LLM
+  that sees doubled marks in its earlier replies can copy them, adding more
+  each turn. Cartesia reports these marks as separate word-timestamp tokens;
+  they are now merged into the character before them.
+  (PR [#6261](https://github.com/pipecat-ai/pipecat/pull/6261))
+
+- Fixed the MoQ transport treating an audio subscription that closed with code
+  0 (surfaced as `MOQ transport error: 'moq: no error'`) as a fatal transport
+  failure that tore down the session mid-call. A code-0 close is graceful by
+  moq convention, so it now follows the normal resubscribe and peer-disconnect
+  paths like `cancelled` and `dropped` do.
+  (PR [#6262](https://github.com/pipecat-ai/pipecat/pull/6262))
+
+- Fixed `text_filters` output reaching the assistant context on TTS services
+  without word timestamps. The context now keeps the text as the LLM wrote it on
+  every service, as it already did for `text_transforms`.
+  (PR [#6264](https://github.com/pipecat-ai/pipecat/pull/6264))
+
+- Fixed `PipelineWorker.flush_pipeline()` never draining a pipeline that
+  contains a `ParallelPipeline` (including a `ServiceSwitcher`): it waited
+  until the pipeline went quiet and then returned `False`. This stalled RTVI
+  `send-text` messages with `run_immediately`, which flush the pipeline before
+  adding the user's text. Each of the flush probe's three passes (down, up,
+  down again) is now a new `PipelineFlushFrame` carrying the same new
+  `flush_id` field.
+  (PR [#6268](https://github.com/pipecat-ai/pipecat/pull/6268))
+
+- Fixed Cartesia TTS reducing supported regional languages, such as
+  `Language.ES_MX`, to their base language.
+  (PR [#6275](https://github.com/pipecat-ai/pipecat/pull/6275))
+
+- Fixed `redact_secrets()` (and so `ErrorFrame`) raising `RecursionError` on
+  long text made of chained `name:value` pairs such as `a:a:a:...`.
+  (PR [#6282](https://github.com/pipecat-ai/pipecat/pull/6282))
+
+- Fixed `redact_secrets()` (and so `ErrorFrame`) masking the detail after an
+  exception class name that contains a credential word, such as `KeyError:
+  'audio_content'` or `InvalidTokenError: signature has expired`.
+  (PR [#6283](https://github.com/pipecat-ai/pipecat/pull/6283))
+
+- Fixed `bot-output` missing the last sentence of a speech-to-speech reply when
+  the pipeline uses an `LLMTextProcessor` (e.g. with `OpenAIRealtimeLLMService`
+  or `GeminiLiveLLMService`). The bot spoke that sentence, but clients never
+  received it. `LLMTextProcessor` now flushes the text it holds when it
+  receives a `TTSStoppedFrame`, so the sentence goes out while the bot is still
+  speaking.
+  (PR [#6290](https://github.com/pipecat-ai/pipecat/pull/6290))
+
+- `strip_markdown` keeps asterisks that are content (`2*3*4`, `5 * 3`, `Press *
+  then #`, `\*`), strips list bullets at any indent and spaced horizontal rules
+  (`* * *`), and drops `~~struck~~` text instead of speaking the tildes.
+  (PR [#6295](https://github.com/pipecat-ai/pipecat/pull/6295))
+
+- Fixed `ElevenLabsTTSService` word timestamps running early after an alignment
+  message that completes no word, such as trailing punctuation arriving on its
+  own. The words after it, and the `TTSTextFrame`s and `bot-tts-text` messages
+  timed by them, now line up with the audio.
+  (PR [#6297](https://github.com/pipecat-ai/pipecat/pull/6297))
+
+- `PatternPairAggregator` handles a pattern whose start and end delimiters are
+  the same string, such as a Markdown code fence (` ``` `). The text before
+  such a block used to be dropped, and a sentence ending before it could be
+  split inside the delimiter so the block was spoken.
+  (PR [#6299](https://github.com/pipecat-ai/pipecat/pull/6299))
+
+- When `InworldTTSService` fails to send a context's create message, it sends
+  it again with the context's text, instead of sending the text to a context
+  the server never opened.
+  (PR [#6300](https://github.com/pipecat-ai/pipecat/pull/6300))
+
+- `InworldTTSService` now reconnects only from its receive loop. A send on a
+  dropped connection fails the turn right away, instead of reconnecting inline
+  and retrying a message that the new connection would ignore. A turn that
+  starts while the receive loop is reconnecting reports an error, instead of
+  opening a second connection that nothing reads, which left that turn without
+  audio.
+  (PR [#6300](https://github.com/pipecat-ai/pipecat/pull/6300))
+
+- Fixed `MiniMaxHttpTTSService` rejecting the `calm` and `whisper` emotions
+  passed in `InputParams.emotion`, which logged "Unsupported emotion" and left
+  the emotion unset. It now accepts every emotion MiniMax documents.
+  (PR [#6302](https://github.com/pipecat-ai/pipecat/pull/6302))
+
+- Fixed `DailyTransport` stopping all event handling after receiving an inbound
+  DTMF tone A–D. Such tones are now logged and skipped instead of pushed as
+  `InputDTMFFrame`; `on_dtmf_event` handlers still receive them.
+  (PR [#6321](https://github.com/pipecat-ai/pipecat/pull/6321))
+
+- Fixed `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` stopping
+  server-event processing for the rest of a session after a `response.done`
+  without `usage` or `status_details`, or a server event type they have no
+  model for.
+  (PR [#6329](https://github.com/pipecat-ai/pipecat/pull/6329))
+
+- Fixed `DailyTransport` dropping every later Daily event, or incoming audio or
+  video, after a single callback raised an exception. The exception is now
+  logged and processing continues.
+  (PR [#6341](https://github.com/pipecat-ai/pipecat/pull/6341))
+
+- `SarvamRealtimeSTTService` reports settings Sarvam rejects, such as an
+  unknown model or language, as a permanent invalid-request error carrying
+  Sarvam's reason, instead of retrying the connection.
+  (PR [#6342](https://github.com/pipecat-ai/pipecat/pull/6342))
+
+- `SarvamRealtimeSTTService` fires `on_connected` once Sarvam confirms the
+  session with `session.begin`, not as soon as the socket opens. A connection
+  that opens but is never confirmed is retried, and the service gives up after
+  three in a row.
+  (PR [#6342](https://github.com/pipecat-ai/pipecat/pull/6342))
+
+- When a `SarvamRealtimeSTTService` connection ends partway through the user's
+  speech, the utterance ends with the latest partial transcript, instead of
+  losing what the user said. If the service reconnects and the user keeps
+  talking, the rest is transcribed as a new utterance.
+  (PR [#6342](https://github.com/pipecat-ai/pipecat/pull/6342))
+
+- Fixed a `pipecat eval` scenario stalling until its timeout when a vision bot
+  asked for the user's image before any turn had registered one with `image:`
+  (e.g. a bot that looks at the user while greeting them). The eval transport
+  now answers the request with an error, as the Daily, LiveKit and SmallWebRTC
+  transports do when there's no video, so the bot's function call finishes and
+  the conversation goes on.
+  (PR [#6350](https://github.com/pipecat-ai/pipecat/pull/6350))
+
+### Security
+
+- Fixed `redact_secrets()` (and so `ErrorFrame`) leaving a credential unmasked
+  when its pair follows another pair, as in `Unknown error occurred: api_key:
+  abc123`, `ValueError: Authorization: Bearer abc123` or `error:
+  headers=Authorization: Bearer abc123`. A prefix on an error message no longer
+  changes what it masks.
+  (PR [#6308](https://github.com/pipecat-ai/pipecat/pull/6308))
+
+- Raised the `aiohttp` minimum version to `3.14.4`, the first release with
+  fixes for several aiohttp security advisories. Installs that resolve
+  `pipecat-ai` from PyPI no longer pick up an earlier, vulnerable `aiohttp`.
+  (PR [#6325](https://github.com/pipecat-ai/pipecat/pull/6325))
+
+## [1.13.0] - 2026-10-18
+
+### Added
+
+- Added support for clients sending files and images to the bot via the new
+  RTVI `send-file` message, incorporating them into the LLM context.
+    - New frames: `FileRawFrame`, `InputFileRawFrame`, and `UserFileRawFrame`,
+      carrying a file payload as inline base64 bytes or as a URL.
+    - New `LLMContext` methods: `create_file_message()`,
+      `create_file_url_message()`, and `add_file_frame_message()`, producing
+      universal `file_base64` (base64 data URL) and `file_url` content items
+      translated per adapter (Anthropic, AWS Bedrock, Gemini, OpenAI Chat,
+      OpenAI Responses). Unsupported MIME types raise during conversion rather
+      than being silently dropped, so the invalid message can be cleaned up
+      automatically (see below). AWS Bedrock document names are sanitized to
+      satisfy Bedrock's character restrictions.
+    - File URLs are resolved at the LLM service, right before each completion,
+      because the right resolution depends on the provider: each adapter
+      declares which URLs its provider can consume directly (public `http(s)`
+      per supported MIME type, `s3://` via Bedrock's IAM, `gs://` via Vertex
+      Gemini's IAM, Files API URIs for Gemini), and those are passed through for
+      the provider to fetch itself. Any other URL is downloaded by the service's
+      new `FileResolver` (`pipecat.utils.file_resolver`) and inlined at
+      conversion time — the context itself stays canonical, holding only the
+      URL, while the downloaded bytes live in the resolver's in-memory cache,
+      keyed by URL. Each file is fetched and decoded once, not per turn, and
+      services sharing one resolver instance (e.g.  services switched between
+      mid-session) reuse each other's downloads while still making their own
+      per-provider pass-through decisions. A URL is assumed to identify
+      immutable content (uploads mint a fresh URL each time);
+      `FileResolver.forget(url)` forces a re-fetch when an application knows a
+      URL's content changed.
+    - `FileResolver` is configured per LLM service via the new `file_resolver`
+      parameter. It downloads `http(s)` URLs only when the resolved address is
+      publicly routable or falls within its `allowed_url_networks` CIDR ranges
+      (defaulting to the `PIPECAT_ALLOWED_FILE_URL_NETWORKS` env var; SSRF
+      guard; redirects refused, 50 MB cap), and delegates any other scheme to
+      its `FileStorage`. Subclass it to fetch from credentialed backends.
+    - New `FileStorage` interface (`pipecat.utils.file_storage`) with a
+      `LocalFileStorage` default implementation. `save()` returns a URL the
+      backend can later resolve (`pipecat:<id>` for local storage); a custom
+      backend can mint e.g. `gs://` or `s3://` URLs, which the LLM provider may
+      then fetch itself without the bot in the loop. A backend whose URLs are
+      all uploads it owns can set `delete_after_load` (as `LocalFileStorage`
+      does) to have a file removed once its bytes are cached by the resolver,
+      which then serves every later use of the file; it stays off for backends
+      whose URLs may point at shared data.
+    - The development runner gains a session-scoped `POST
+      /sessions/{session_id}/files` upload endpoint (50 MB cap), mirroring
+      Pipecat Cloud's session routes; it's enabled with the new
+      `-u/--uploads-folder` flag (or `PIPECAT_UPLOADS_FOLDER` env var) and
+      responds with an RTVI file source (`{"type": "url", "url":
+      "pipecat:<id>"}`) the client passes straight back in `send-file`. A
+      session's uploads are deleted when its bot session ends;
+      `--uploads-folder-max-files` (default 10) trims the oldest uploads as a
+      backstop. A flat `POST /files` also exists for transports whose clients
+      never learn a session id (no session-end cleanup there). `/start`
+      responses advertise the route to use as `fileUploadUrl` (relative to the
+      `/start` endpoint's origin; omitted when uploads are disabled), so clients
+      never reconstruct upload routes themselves. To back the endpoints with a
+      custom `FileStorage` (e.g. a cloud bucket) instead of the local uploads
+      folder, define a `create_file_storage()` function alongside your `bot()`:
+      whichever host runs the bot discovers and calls it the same way, so the
+      bot code stays identical across hosts. The active backend is injected into
+      the bot as `runner_args.file_storage` — hand it to your LLM service's
+      `FileResolver` so send-file messages can resolve the URLs it mints.
+    - `LLMContext.remove_invalid_file_message()` removes the oldest file or
+      image message added since the model's last successful reply when the
+      OpenAI, Anthropic, AWS Bedrock, or Gemini LLM service determines a request
+      was rejected (including a local resolution or conversion failure that
+      never reached the API), preventing the context from getting permanently
+      stuck.
+  (PR [#3415](https://github.com/pipecat-ai/pipecat/pull/3415))
+
+- `FishAudioTTSService.Settings` gained `chunk_length`, `min_chunk_length`,
+  `condition_on_previous_chunks` and `prosody_normalize_loudness`, passing Fish
+  Audio's text-chunking and loudness-normalization request fields through to
+  the synthesis request.
+  (PR [#5534](https://github.com/pipecat-ai/pipecat/pull/5534))
+
+- Added `provider` to `OpenRouterLLMService.Settings`, which carries
+  OpenRouter's provider routing preferences — which upstream providers may
+  serve a request, in what order, and under what latency, throughput, price,
+  quantization and data-retention constraints:
+  `settings=OpenRouterLLMService.Settings(provider={"sort": "latency"})`.
+  (PR [#5550](https://github.com/pipecat-ai/pipecat/pull/5550))
+
+- Added a `reasoning_effort` field to `GrokLLMService.Settings`, which passes
+  xAI's reasoning effort control through to the completion request. Accepted
+  values vary by model: `"low"`, `"medium"`, and `"high"` on the Grok 4
+  reasoning models, `"xhigh"` on `grok-4.6` and later, and `"none"` on the
+  models that can turn reasoning off.
+  (PR [#5559](https://github.com/pipecat-ai/pipecat/pull/5559))
+
+- Added `LLMAssistantAggregator.has_synchronous_function_calls_in_progress`:
+  whether a synchronous function call is in flight, one whose result the model
+  waits for before it runs again, as opposed to an asynchronous call
+  (`cancel_on_interruption=False`) that has its placeholder in the context.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Added `ExternalFunctionCallsStartedFrame`,
+  `ExternalFunctionCallInProgressFrame`, `ExternalFunctionCallResultFrame` and
+  `ExternalFunctionCallCancelFrame`: system frames reporting function calls
+  that ran outside the pipeline (e.g. in a backend worker's pipeline on behalf
+  of a tool), mirroring the pipeline's own function-call frames, which
+  `RTVIObserver` turns into the usual `llm-function-call-*` messages under the
+  per-function report level and nothing else in the pipeline acts on.
+  `LLMWithBackend` reports the backend's calls this way, and so does
+  `OpenAILiveLLMService` client delegation.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Added `LLMService.cancel_function_calls()`, which cancels every function call
+  in flight, async ones included, where an interruption cancels only the calls
+  that opt into it. It is what `BackendLLMWorker` uses to stop its work when
+  its frontend lets go of it, since the backend's slow tools are the async
+  ones.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Added `pairing_instruction` to `BackendLLMWorker` and
+  `frontend_pairing_instruction` to `BackendConnector`: the text each appends
+  to its model's system instruction about working as one half of the pair, in
+  place of `BACKEND_PAIRING_INSTRUCTION` and `FRONTEND_PAIRING_INSTRUCTION`,
+  for an app that would rather say in its own words when and how to delegate,
+  that to the user there is one assistant, what to do with the backend's
+  messages, and, on the backend, that the user hears what it marks with `>>`
+  and how to take requests that arrive while it works. The request strategies
+  take their own texts as arguments too: `frontend_instruction` (how the
+  request is worded, placed where the frontend's pairing instruction has
+  `{strategy}`), `tool_description` and `request_instruction` (what is placed
+  after the request for the backend).
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Speech-to-speech LLM services now take messages appended to the conversation
+  (`LLMMessagesAppendFrame`) into their session, each on whatever second
+  channel its provider offers: OpenAI Realtime, Azure Realtime and Grok as
+  conversation items, Gemini Live as client content that does not complete the
+  turn, Nova Sonic as a text event. Whether the model answers them is the
+  assistant aggregator's call, as for a tool result: an append that asks to run
+  comes back as the context frame the aggregator pushes upstream, which creates
+  the response, so the hold while the bot speaks and the bundling of a burst
+  apply. This is what carries a backend's messages to a speech-to-speech
+  frontend of an `LLMWithBackend`.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Added `LLMWithBackend` (`pipecat.pipeline.llm_with_backend`), in alpha: a
+  conversational frontend LLM (text or speech-to-speech) with a backend LLM (in
+  a `BackendLLMWorker`) it delegates to for deeper thinking and tool
+  orchestration. The frontend keeps the conversation moving fluidly while the
+  backend does the heavy lifting, sending messages to the frontend as it works.
+  An `LLMWithBackend` drops into a pipeline where a standalone LLM would go,
+  with the frontend's system instruction defining who the assistant is while
+  the backend's defines in more detail what work it does. Behind the scenes,
+  the frontend calls a `delegate` tool and receives a stream of backend
+  outputs, with a `BackendConnector` as the (configurable) glue defining how
+  the two pieces interact. See `examples/multi-worker/llm-with-backend/`.
+
+    ```python
+    llm = LLMWithBackend(
+        frontend=OpenAIResponsesLLMService(...),
+        backend=BackendLLMWorker(
+            llm=AnthropicLLMService(...),
+            context=LLMContext(tools=[search_codebase, read_file, apply_patch,
+  run_tests]),
+        ),
+    )
+    pipeline = Pipeline([transport.input(), stt, user_agg, llm, tts,
+  transport.output(), assistant_agg])
+    ```
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Speech-to-speech LLM services now deliver a tool's intermediate results
+  (reported with `FunctionCallResultProperties(is_final=False)`) to their
+  model, each on whatever second channel its provider offers, since a function
+  call itself takes one output: OpenAI Realtime, Azure Realtime and Grok put
+  them in as conversation items, Gemini Live as a `will_continue` tool
+  response, Nova Sonic as a text event and Ultravox as user-side text. The
+  result's `run_llm` says whether the model should answer it or just take it
+  in. A service that can't do this says so with
+  `LLMService.accepts_intermediate_function_call_results` — Inworld Realtime,
+  whose model calls the tool again rather than relaying what it was told — and
+  drops intermediate results with a warning.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Added `AzureVoiceLiveLLMService`, a speech-to-speech service for Azure's
+  Voice Live API. It supports function calling, caller transcription, Azure's
+  semantic VAD (including the multilingual variant), Azure text-to-speech
+  voices (standard, custom, personal and realtime-native), noise suppression
+  and echo cancellation. Set `turn_detection=None` in `session_properties` to
+  drive turns from transport VAD instead. Voice Live is a separate product from
+  Azure OpenAI Realtime, which `AzureRealtimeLLMService` continues to serve.
+  (PR [#5718](https://github.com/pipecat-ai/pipecat/pull/5718))
+
+- Added `bulbul:v4-flash` (`SarvamTTSModel.BULBUL_V4_FLASH`) to
+  `SarvamTTSService` and `SarvamHttpTTSService`. It supports `pitch` and
+  `loudness`, ignores `temperature`, and uses its own speaker catalogue
+  (default `shubh_en_narration_gentle`).
+  (PR [#5844](https://github.com/pipecat-ai/pipecat/pull/5844))
+
+- Added Gemini 3.8 TTS model support in `GeminiTTSService`:
+  `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`.
+  (PR [#5885](https://github.com/pipecat-ai/pipecat/pull/5885))
+
+- Added `TransportParams.audio_out_filter`, a `BaseAudioFilter` the output
+  transport runs on outgoing audio before the mixer and the write. Like
+  `audio_in_filter`, it starts on setup, stops on cleanup and receives
+  `FilterEnableFrame` and `FilterUpdateSettingsFrame`. Audio the transport
+  generates itself (mixer audio, end silence, DTMF tones) is not filtered.
+  (PR [#5920](https://github.com/pipecat-ai/pipecat/pull/5920))
+
+- Added `system_prompt_cache_ttl` to `AnthropicLLMService.Settings` to set how
+  long the system prompt's cache entry lasts when prompt caching is enabled:
+  `"5m"` (Anthropic's default) or `"1h"`. A 1-hour entry keeps a system prompt
+  shared by many conversations cached across gaps between them, at a higher
+  cache-write price.
+  (PR [#5928](https://github.com/pipecat-ai/pipecat/pull/5928))
+
+- `AWSBedrockLLMService.Settings` has an `effort` field, Bedrock's Converse
+  `outputConfig.effort` reasoning level (`low`, `medium`, `high`, `xhigh`,
+  `max`), so reasoning models such as `us.xai.grok-4.6` can be asked for less
+  reasoning and lower latency.
+  (PR [#5934](https://github.com/pipecat-ai/pipecat/pull/5934))
+
+- Added `reasoning` to `TogetherLLMService.Settings`, which passes Together's
+  reasoning toggle through to the request for the models that support one:
+  `reasoning={"enabled": False}` stops a reasoning model such as GLM from
+  running a reasoning pass before every answer, which shortens the wait for the
+  first spoken token.
+  (PR [#5939](https://github.com/pipecat-ai/pipecat/pull/5939))
+
+- Added an `aspect_ratio` setting to `GoogleImageGenService`, such as `"1:1"`
+  or `"16:9"`. It defaults to `"1:1"`, so images stay square as they were with
+  Imagen.
+  (PR [#5954](https://github.com/pipecat-ai/pipecat/pull/5954))
+
+- Added an `image` event to scripted eval scenarios: an image the bot output,
+  with its size and format. The eval transport reports the bot's images only to
+  a scenario that expects one.
+  (PR [#5956](https://github.com/pipecat-ai/pipecat/pull/5956))
+
+- React clients generated by `pipecat init` now include the shadcn/ui MIT
+  license in `src/components/ui/LICENSE-shadcn.md`, next to the shadcn/ui
+  components they ship with.
+  (PR [#5957](https://github.com/pipecat-ai/pipecat/pull/5957))
+
+- Added Eleven v4 Turbo (`eleven_v4_turbo`) support to
+  `ElevenLabsDialogueTTSService`, including its 84 `language_code` values: the
+  Eleven v3 set plus Asturian, Burmese, Cantonese, Māori, Maltese, Mongolian,
+  Occitan, Odia, Tajik and Uzbek.
+  (PR [#5959](https://github.com/pipecat-ai/pipecat/pull/5959))
+
+- `AnthropicLLMService` reports `reasoning_tokens` when extended thinking is
+  on, from the thinking-token count in Anthropic's usage. `completion_tokens`
+  already includes them.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- RTVI's `bot-ready` message now includes a `capabilities` object describing
+  what the bot does in the session: `audio_in`, `audio_out`, `video_in`,
+  `screen_in`, `video_out` and `metrics`. Clients can use it to show only the
+  UI that applies, such as hiding the video panels for a voice-only bot. A
+  field the bot can't determine is left out, so the client keeps its default;
+  `screen_in` is known when the transport lists its sources in
+  `video_in_sources`. The RTVI protocol version is now 2.2.0.
+    ```json
+    "capabilities": {
+      "audio_in": true,
+      "audio_out": true,
+      "video_in": false,
+      "screen_in": false,
+      "video_out": false,
+      "metrics": true
+    }
+    ```
+  (PR [#5990](https://github.com/pipecat-ai/pipecat/pull/5990))
+
+- Added `PipelineWorker.capabilities`, which returns the bot's
+  `BotCapabilities` (from `pipecat.pipeline.capabilities`), derived from the
+  media the pipeline's transports send and receive and from
+  `PipelineParams.enable_metrics`. To set fields the pipeline can't show, pass
+  `capabilities=BotCapabilities(...)` to `PipelineWorker`; its known fields
+  replace the derived ones.
+  (PR [#5990](https://github.com/pipecat-ai/pipecat/pull/5990))
+
+- `TavusTransport`, `HeyGenTransport` and `LemonSliceTransport` report
+  `video_out` in the bot's capabilities, since the avatar publishes its video
+  to the room itself.
+  (PR [#5990](https://github.com/pipecat-ai/pipecat/pull/5990))
+
+- Added a keepalive to `WebsocketTTSService` for custom websocket TTS services
+  whose provider closes idle connections. Override `_send_keepalive()` to send
+  the provider's keepalive message, and call `_create_keepalive_task(interval)`
+  / `_cancel_keepalive_task()` from `_connect()` / `_disconnect()`.
+  `_send_keepalive()` is called only while the websocket is open, and an
+  exception it raises is logged.
+  (PR [#6011](https://github.com/pipecat-ai/pipecat/pull/6011))
+
+- Added connection-time `keyterms` support to `SarvamSTTService` and
+  `SarvamRealtimeSTTService` for `saaras:v4`.
+  (PR [#6013](https://github.com/pipecat-ai/pipecat/pull/6013))
+
+- Added `ClefClassifier`, which answers classifier questions with Cloudflare's
+  Clef on Workers AI. Pass `model="clef-flash"` for the faster model. It takes
+  a Cloudflare account ID and API token, and several classifiers can share one
+  `ClefClient`. A choice question can have at most 255 options
+  (`CLEF_MAX_CHOICE_OPTIONS`). Install with `uv add "pipecat-ai[cloudflare]"`.
+
+    ```python
+    classifier = ClefClassifier(
+        account_id=os.getenv("CLOUDFLARE_ACCOUNT_ID"),
+        api_key=os.getenv("CLOUDFLARE_API_KEY"),
+    )
+    results = await classifier.yes_no(
+        "Hi, you've reached Dana. Leave a message.",
+        {"voicemail": YesNoQuestion(instructions="is this a voicemail?")},
+    )
+    ```
+  (PR [#6017](https://github.com/pipecat-ai/pipecat/pull/6017))
+
+- Added Pulse 2.0 support to `SmallestSTTService` via
+  `SmallestSTTModel.PULSE_2` (`model="pulse-2"`): an English-only streaming
+  model with built-in end-of-turn detection (`endpointing` has no effect on
+  it), plus per-utterance `emotion` and `gender` on final transcripts,
+  controlled by the new `emotion_detection`/`gender_detection` settings (on by
+  default).
+  (PR [#6018](https://github.com/pipecat-ai/pipecat/pull/6018))
+
+- Added `video_in_sources` to `TransportParams`, so a transport captures the
+  user's video without an `on_client_connected` handler. List the sources to
+  capture, each with its own `VideoInSourceParams(framerate=...)`, and
+  `DailyTransport` captures them from each participant as they join, and
+  `SmallWebRTCTransport` when the peer connects.
+  `VideoInSourceParams(on_request_only=True)` passes on only the frames that
+  answer a `UserImageRequestFrame`. Sources not listed are still captured only
+  when the application asks, as before. Other transports log a warning and
+  ignore `video_in_sources`.
+    ```python
+    DailyParams(
+        video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(framerate=1),
+            "screenVideo": VideoInSourceParams(framerate=1),
+        },
+    )
+    ```
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- `SmallWebRTCTransport.capture_participant_video()` takes a `framerate`, as on
+  Daily. It defaults to `None`, which passes on every frame as before.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- `pipecat init` now offers LiveKit as a web transport (`-t livekit`). The
+  generated bot adds `LiveKitParams` to its transport params, `.env.example`
+  lists the `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`
+  credentials, and generated React and vanilla JS clients connect through
+  `@pipecat-ai/livekit-transport`. Run the bot with `uv run bot.py -t livekit`.
+  (PR [#6035](https://github.com/pipecat-ai/pipecat/pull/6035))
+
+- Added `LiveKitParams.audio_in_user_tracks`, matching
+  `DailyParams.audio_in_user_tracks`. Set it to `False` to mix all
+  participants' audio into one real-time stream of `InputAudioRawFrame`s. With
+  the default, `True`, each participant's audio enters the pipeline as its own
+  stream of `UserAudioRawFrame`s, so a bot with one STT in a room where several
+  participants publish a microphone receives audio faster than real time: its
+  transcripts fall further and further behind and it answers earlier questions.
+  (PR [#6038](https://github.com/pipecat-ai/pipecat/pull/6038))
+
+- Added the `on_active_speaker_changed` event to `LiveKitTransport`, as on
+  `DailyTransport`: called with `{"id": identity}` when the room's loudest
+  speaker changes (the bot can be the speaker while it talks).
+  (PR [#6045](https://github.com/pipecat-ai/pipecat/pull/6045))
+
+- Added `PIPECAT_LOG_LLM_CONTEXT` to control how much of the LLM context LLM
+  services include in their DEBUG logs. With `off`, each response is still
+  logged, but without the context, which otherwise repeats the whole
+  conversation on every inference; `full`, the default, includes every message.
+  An unknown value raises `InvalidEnvVarValueError` when an LLM service is
+  created.
+
+    ```bash
+    PIPECAT_LOG_LLM_CONTEXT=off python bot.py
+    ```
+  (PR [#6047](https://github.com/pipecat-ai/pipecat/pull/6047))
+
+- Added `video_in_sources` support to `LiveKitTransport`, capturing each listed
+  source from a participant at its own framerate, or only to answer image
+  requests with `on_request_only=True`. It also answers a
+  `UserImageRequestFrame` with the next frame of the requested source, so
+  image-request tools such as `fetch_user_image` work on LiveKit, and a request
+  for a source with no subscribed track gets an error result.
+  `LiveKitTransport.capture_participant_video()` captures a source at a
+  framerate. Without `video_in_sources`, every frame of every video track is
+  passed on.
+  (PR [#6055](https://github.com/pipecat-ai/pipecat/pull/6055))
+
+- Added `BaseTransport.capture_participant_video(participant_id, framerate=30,
+  video_source="camera", *, on_request_only=False)`, so a bot captures a user's
+  video on demand the same way on Daily, SmallWebRTC and LiveKit.
+  `on_request_only=True` passes on only the frames that answer image requests,
+  as in `VideoInSourceParams`, and a `framerate` of `None` passes on every
+  frame, which `DailyTransport` now accepts too. Transports that don't receive
+  user video log a warning.
+    ```python
+    client_id = transport.get_client_id(client)
+    await transport.capture_participant_video(client_id, framerate=1,
+  video_source="screenVideo")
+    ```
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- Added `BaseTransport.get_client_id(client)`, which returns the id of the
+  client passed to `on_client_connected`: the participant id on Daily, the
+  participant identity on LiveKit, the peer connection id on SmallWebRTC and
+  the stream id on Vonage. Transports without client events log a warning and
+  return an empty string.
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- `BlandTTSService.Settings` and `BlandHttpTTSService.Settings` gained
+  `auto_formatting`, which asks Bland to rewrite phone numbers and SSNs into
+  digit groups the voice reads digit by digit. It is fixed at session start, so
+  changing it reconnects `BlandTTSService`.
+  (PR [#6061](https://github.com/pipecat-ai/pipecat/pull/6061))
+
+- `pipecat eval` can drive a bot over a WebSocket the bot accepted itself, such
+  as a Pipecat Cloud session or the dev runner's `/ws` route. The harness sends
+  its connection's flags in an `eval-connect` message ahead of the RTVI
+  handshake, and `create_transport` builds the new
+  `EvalFastAPIWebsocketTransport` from it, so a bot's existing
+  `transport_params["eval"]` entry works unchanged.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- Added `EvalSessionParams.bot_ready_timeout_s` and `--bot-ready-timeout` on
+  `pipecat eval run`: how long the harness waits for the bot's RTVI `bot-ready`
+  once connected, which covers the bot's startup. Defaults to 60 seconds.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- The dev runner's WebSocket sessions (`/ws`, `/ws-client`) receive the
+  `--runner-body` file as their `runner_args.body`, since they have no `/start`
+  request to carry one.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- Added `audio_in_frame_source` to `VonageVideoConnectorTransportParams` to
+  choose which incoming audio frames `VonageVideoConnectorTransport` emits: the
+  session-wide mixed `InputAudioRawFrame` (`AudioInFrameSource.MIXED`),
+  per-participant `UserAudioRawFrame`s (`AudioInFrameSource.INDIVIDUAL`), or
+  both (`AudioInFrameSource.BOTH`).
+  (PR [#6066](https://github.com/pipecat-ai/pipecat/pull/6066))
+
+- Added `TransportParams.audio_out_volume` to set the starting volume of the
+  output audio, 1.0 by default.
+  (PR [#6071](https://github.com/pipecat-ai/pipecat/pull/6071))
+
+- Added `VolumeFrame` and `VolumeGainFrame` to control the volume of the bot's
+  audio. `VolumeFrame` sets the output transport's volume, and
+  `VolumeGainFrame` sets a gain on top of it for some audio, for example
+  `VolumeGainFrame(0.5)` before a `TTSSpeakFrame` and `VolumeGainFrame(1.0)`
+  after it to play that utterance at half volume. Both take effect in order
+  with the audio, and an interruption doesn't drop them.
+  (PR [#6071](https://github.com/pipecat-ai/pipecat/pull/6071))
+
+- Added `text_type` to `TTSSpeakFrame`, so the text the TTS service speaks for
+  it carries that type instead of always being a sentence. A custom type, such
+  as `"status"`, lets RTVI keep that text from the client with
+  `RTVIObserverParams(skip_text_types=["status"])`.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Added `segment_id` to `TTSTextFrame`, the ID of the `AggregatedTextFrame` it
+  speaks. TTS services set it on the words they report with timestamps, and on
+  text they speak in one piece.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Added `text_type` to the RTVI `bot-output` message. It says what kind of text
+  the message holds: a sentence, a word, or a custom type such as `"code"`.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Added `check_from: turn_start` to the scripted eval scenario language
+  (`pipecat.evals`). It lets an expectation run against events since the
+  beginning of the turn that were not used by the expectations above it.
+  (PR [#6088](https://github.com/pipecat-ai/pipecat/pull/6088))
+
+- `DeepgramFluxSTTService` now pushes an `InterimTranscriptionFrame` for each
+  Flux `Update` event, holding the transcript of the turn so far.
+  (PR [#6092](https://github.com/pipecat-ai/pipecat/pull/6092))
+
+- Added `UserBackchannelFrame`, for a short acknowledgment the user says while
+  the bot talks, such as "mhm". It is pushed in place of a transcription, so
+  the bot keeps talking and the acknowledgment stays out of the LLM context.
+  (PR [#6093](https://github.com/pipecat-ai/pipecat/pull/6093))
+
+- Added `TextType.BACKCHANNEL` and `BotBackchannelFrame`, a `TTSSpeakFrame` for
+  a short acknowledgment the bot says while the user talks, such as "Mm-hmm.".
+  Its text frames have the backchannel text type, it stays out of the LLM
+  context, and interruptions don't cut it off unless the frame is made
+  interruptible.
+  (PR [#6093](https://github.com/pipecat-ai/pipecat/pull/6093))
+
+- Added the RTVI `user-input` message, the user's counterpart of `bot-output`:
+  what the user said or typed, with an `input_type` of `transcription`, `chat`
+  or `backchannel`, and `final` set to false for an interim transcription. The
+  observer sends one for each transcription, alongside `user-transcription`,
+  and for each `UserBackchannelFrame`. It also acknowledges each `send-text`
+  message, after any interruption it causes, with `input_type` `chat`, the
+  message's id as `msg_id` and, on transports that know the sender such as
+  Daily and LiveKit, their id as `user_id`; `RTVIProcessor` pushes an
+  `RTVISendTextFrame` for this. `RTVIObserverParams.user_input_enabled` turns
+  it off.
+  (PR [#6093](https://github.com/pipecat-ai/pipecat/pull/6093))
+
+- `LLMUserAggregator` and `LLMAssistantAggregator` report backchannels, which
+  stay out of the LLM context and its turn events. `on_user_backchannel` fires
+  with a `UserBackchannelMessage` for each `UserBackchannelFrame` while the
+  user isn't muted, and `on_assistant_backchannel` fires with an
+  `AssistantBackchannelMessage` when the assistant starts saying text of type
+  `backchannel`.
+  (PR [#6093](https://github.com/pipecat-ai/pipecat/pull/6093))
+
+- RTVI now reports bot backchannels to clients of protocol 2.2.0 or later. Text
+  of type `backchannel`, such as a `BotBackchannelFrame`'s, is sent as
+  `bot-output` with `text_type` (and the deprecated `aggregated_by`) set to
+  `"backchannel"`, and as `bot-tts-text`. Add `"backchannel"` to
+  `RTVIObserverParams.skip_text_types` to keep it out of both messages for
+  every client.
+  (PR [#6093](https://github.com/pipecat-ai/pipecat/pull/6093))
+
+- Classifiers can now answer questions about images. `ask()`, `yes_no()`,
+  `choice()` and `score()` take `images=`, a list of `ClassifierImage` (PNG,
+  JPEG or WebP), and `ClassifierImage.from_frame()` builds one from an image
+  frame such as a frame from the user's camera. `ClefClassifier` takes up to 4
+  images per call (`CLEF_MAX_IMAGES`), and `LLMClassifier` sends them to its
+  LLM, which must be able to see them. A classifier says whether it can see
+  images in `supports_images`, and one that cannot raises `ClassifierError`
+  when given some.
+
+    ```python
+    image = await ClassifierImage.from_frame(frame)
+    results = await classifier.yes_no(
+        "A frame from the user's camera.",
+        {"person": YesNoQuestion(instructions="Is there a person in the
+  frame?")},
+        images=[image],
+    )
+    ```
+  (PR [#6101](https://github.com/pipecat-ai/pipecat/pull/6101))
+
+- Added `OpenAIDecisionsClassifier`, which answers classifier questions with
+  OpenAI's Decisions API (`gpt-6-luna`). It takes an OpenAI API key, and
+  several classifiers can share one `OpenAIDecisionsClient`. A choice question
+  can have at most 255 options (`OPENAI_DECISIONS_MAX_CHOICE_OPTIONS`). Install
+  with `uv add "pipecat-ai[openai]"`.
+
+    ```python
+    classifier = OpenAIDecisionsClassifier(api_key=os.getenv("OPENAI_API_KEY"))
+    results = await classifier.yes_no(
+        "Hi, you've reached Dana. Leave a message.",
+        {"voicemail": YesNoQuestion(instructions="is this a voicemail?")},
+    )
+    ```
+  (PR [#6102](https://github.com/pipecat-ai/pipecat/pull/6102))
+
+- `RTVIObserver` can send the raw text of the STT, LLM and TTS as
+  `stt-raw-text`, `llm-raw-text` and `tts-raw-text`, to clients of protocol
+  2.2.0 or later. They carry the same data as `user-transcription`,
+  `bot-llm-text` and `bot-tts-text`, and are off by default;
+  `RTVIObserverParams.stt_raw_text_enabled`, `llm_raw_text_enabled` and
+  `tts_raw_text_enabled` turn them on.
+  (PR [#6104](https://github.com/pipecat-ai/pipecat/pull/6104))
+
+- `OpenAIDecisionsClassifier` can see images: pass `images=` to `ask()`,
+  `yes_no()`, `choice()` or `score()`, up to 128 per call
+  (`OPENAI_DECISIONS_MAX_IMAGES`).
+  (PR [#6106](https://github.com/pipecat-ai/pipecat/pull/6106))
+
+- Added `effort` to `AnthropicLLMService.Settings`, sent as
+  `output_config.effort`. It sets how much the model spends on its response,
+  thinking included, and lowering it is Anthropic's recommended way to reduce
+  thinking.
+  (PR [#6108](https://github.com/pipecat-ai/pipecat/pull/6108))
+
+- Added a `mode` setting to `GeminiSTTService.Settings`, selecting Gemini
+  Live's `VERBATIM` (default) or `SMART` transcription, where the model removes
+  disfluencies and applies light grammatical cleanup and formatting.
+  (PR [#6129](https://github.com/pipecat-ai/pipecat/pull/6129))
+
+- Added an `image_size` setting to `GoogleImageGenService.Settings`, which asks
+  Gemini image models for a `"1K"`, `"2K"` or `"4K"` render.
+  (PR [#6130](https://github.com/pipecat-ai/pipecat/pull/6130))
+
+- Added a `store` setting to `OpenAILiveLLMService`, which asks the Live API to
+  keep the session for 30 days as a downloadable stereo recording and as a
+  source a later session can fork from.
+  (PR [#6135](https://github.com/pipecat-ai/pipecat/pull/6135))
+
+- `NeuphonicTTSService.Settings` and `NeuphonicHttpTTSService.Settings` gained
+  `ipa_key`, selecting the regional variant (`es-castilian` or `pt-br`) whose
+  sounds Neuphonic reads `<phoneme:...>` tags with.
+  (PR [#6139](https://github.com/pipecat-ai/pipecat/pull/6139))
+
+- Added `quality` to `OpenAIImageGenService.Settings`, forwarded to OpenAI's
+  Images API. It accepts the tiers the chosen model supports (`low`, `medium`,
+  `high`, and `xhigh`/`max` on the GPT Image 2.5 models) and trades detail for
+  generation speed; left unset, OpenAI picks the quality for the model.
+  (PR [#6141](https://github.com/pipecat-ai/pipecat/pull/6141))
+
+- `SmallestTTSService` now accepts a `content_filter` setting, passing
+  Smallest's opt-in profanity filter through to the synthesis request.
+  (PR [#6142](https://github.com/pipecat-ai/pipecat/pull/6142))
+
+- `SpeechifyHttpTTSService` gained a `safety_identifier` setting, Speechify's
+  opaque end-user id used to rate-limit or block one user instead of the whole
+  workspace.
+  (PR [#6143](https://github.com/pipecat-ai/pipecat/pull/6143))
+
+- Added `transcript_filtering_config` to `SpeechmaticsSTTService.Settings`,
+  passing Speechmatics' transcript post-processing (`remove_disfluencies`,
+  `replacements`) through to Agent STT.
+  (PR [#6144](https://github.com/pipecat-ai/pipecat/pull/6144))
+
+- `TogetherTTSService.Settings` gained `extra_params`, the model-specific
+  options Together accepts in its session update — a `pronunciation_dict` of
+  `"<source>/<replacement>"` entries, for example.
+  (PR [#6145](https://github.com/pipecat-ai/pipecat/pull/6145))
+
+- Added `itn_normalize` and `no_format_delay` to `SmallestSTTService.Settings`.
+  `itn_normalize` runs Smallest's inverse text normalization so spoken numbers
+  come back as digits; `no_format_delay` opts out of the formatting delay ITN
+  introduces on a number split across finals, emitting every final as soon as
+  it is ready instead.
+  (PR [#6154](https://github.com/pipecat-ai/pipecat/pull/6154))
+
+- Added `LLMSettings.use_provider_thinking_default`. When it's set,
+  `AnthropicLLMService`, `OpenAIResponsesLLMService`,
+  `OpenAIResponsesHttpLLMService`, `GoogleLLMService` and
+  `GoogleVertexLLMService` send no thinking setting to a model that has none
+  configured, so it runs at its provider's default instead of the lowest
+  setting they send a voice LLM.
+  (PR [#6159](https://github.com/pipecat-ai/pipecat/pull/6159))
+
+- Added `bot_backchannel` and `user_backchannel` events to scripted eval
+  scenarios: a short acknowledgment the bot said while the user talked, from a
+  `bot-output` of type `backchannel` spoken to the end, and one the user said
+  while the bot talked, from a `user-input` of type `backchannel`.
+  (PR [#6164](https://github.com/pipecat-ai/pipecat/pull/6164))
+
+- Added pauses to scripted eval user turns in audio modality: `user:` can be a
+  list of text and `pause_ms:` silences, played to the bot as one stretch of
+  audio.
+  (PR [#6164](https://github.com/pipecat-ai/pipecat/pull/6164))
+
+- Added `redact_secrets()` (`pipecat.utils.security.redaction`), which masks
+  credentials in text bound for logs or error reports: values named like a
+  credential (`api_key=`, `Authorization:`, `X-Amz-Signature=`, `'token':
+  '...'`, `apiKey := ...`), URL passwords, and tokens recognizable by format
+  after gitleaks' rules for the same credentials (OpenAI, Anthropic, AWS and
+  Amazon Bedrock, Google, GitHub, Slack, Hugging Face, Perplexity and Twilio
+  keys, JWTs, PEM private keys).
+  (PR [#6178](https://github.com/pipecat-ai/pipecat/pull/6178))
+
+- `JevClassifier` can see images: pass `images=` to `ask()`, `yes_no()`,
+  `choice()` or `score()`. Jev takes PNG and JPEG images, 256 to 1568 pixels on
+  each side, and rejects images outside those limits rather than resizing them.
+  A WebP image raises `ClassifierError` before any request. TypeSafe offers
+  images as a preview, so the limits may change between Jev releases.
+  (PR [#6179](https://github.com/pipecat-ai/pipecat/pull/6179))
+
+- Eval simulation results record what they were judged on: `success` on
+  `EvalSimulationResult` and `criterion` on each judged
+  `EvalSimulationMetricScore`, also written to `results.jsonl` and to `pipecat
+  eval judge`'s `judged.jsonl`.
+  (PR [#6183](https://github.com/pipecat-ai/pipecat/pull/6183))
+
+- Added `pipecat eval judge` to judge a saved simulation conversation again
+  without running the bot. Use it to reword a `success` or a metric and see the
+  new verdicts on runs you already have. From Python, use
+  `EvalSimulationJudge(simulation).judge(messages)`.
+  (PR [#6183](https://github.com/pipecat-ai/pipecat/pull/6183))
+
+- Eval simulation runs now save their conversation (what each side said and the
+  bot's function calls) to `<stem>.conversation.json`, ready for `pipecat eval
+  judge`.
+  (PR [#6183](https://github.com/pipecat-ai/pipecat/pull/6183))
+
+- Added `EvalConversationObserver`, which records a bot's conversation in the
+  same file format eval simulation runs save. Add it to a bot to judge its real
+  calls with `pipecat eval judge`.
+  (PR [#6184](https://github.com/pipecat-ai/pipecat/pull/6184))
+
+- Added `LLMContextUserTurnFrame`, broadcast by the user aggregator each time
+  it adds a user turn to the LLM context. It's the user's side of
+  `LLMContextAssistantTurnFrame`.
+  (PR [#6184](https://github.com/pipecat-ai/pipecat/pull/6184))
+
+- Added `initial_receive_bitrate` to `DailyParams`: the bot's expected download
+  bandwidth, in bits per second. The SFU starts its estimate of what it can
+  send the bot from this value instead of Daily's 1 Mbps default, so incoming
+  video reaches full quality sooner.
+  (PR [#6204](https://github.com/pipecat-ai/pipecat/pull/6204))
+
+- Added an `initial_receive_bitrate` argument to `TavusVideoService`, applied
+  when it joins the Tavus room, so incoming video reaches full quality sooner.
+  (PR [#6204](https://github.com/pipecat-ai/pipecat/pull/6204))
+
+- Added `RimeV1TTSService` for Rime's WebSocket v1 API, with binary and JSON
+  protobuf envelopes, Coda text lookahead, and context cancellation without
+  reconnecting. Text is sent as sentences by default; pass
+  `text_aggregation_mode=TextAggregationMode.TOKEN` to stream LLM tokens, which
+  Rime accumulates into sentences. Install `pipecat-ai[rime]` to use it.
+  (PR [#6208](https://github.com/pipecat-ai/pipecat/pull/6208))
+
+- Added the `on_network_connection_status_updated` event to `DailyTransport`,
+  called when a network connection needed for the call (`"signalling"`,
+  `"sendTransport"` or `"recvTransport"`) is `"interrupted"` or `"connected"`.
+  (PR [#6211](https://github.com/pipecat-ai/pipecat/pull/6211))
+
+- `OLLamaLLMService` accepts an `api_key` for an Ollama server that requires
+  one, such as one behind an authenticating proxy. Passing `api_key` used to
+  raise `TypeError`.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- Added `minimax`, `ollama`, `openclaw` and `xtts` extras, so `uv add
+  "pipecat-ai[ollama]"` and the like install without a missing-extra warning.
+  Like the extras of other services that need only the core dependencies, they
+  are empty.
+  (PR [#6223](https://github.com/pipecat-ai/pipecat/pull/6223))
+
+### Changed
+
+- The minimum `aiohttp` version is now 3.14.0 (required by `google-genai` >=
+  2.8.0). Applications pinning `aiohttp<3.14` will need to update their pin.
+  (PR [#3415](https://github.com/pipecat-ai/pipecat/pull/3415))
+
+- The RTVI protocol version is now 2.2.0, adding the `send-file` client
+  message. Clients gate `sendFile()` on the bot advertising 2.2.0+.
+  (PR [#3415](https://github.com/pipecat-ai/pipecat/pull/3415))
+
+- `OpenAIImageGenService` now defaults to `gpt-image-2.5-flare`. Its previous
+  default, `dall-e-3`, was removed from the OpenAI API on May 12, 2026 and
+  every request naming it is rejected.
+  (PR [#5546](https://github.com/pipecat-ai/pipecat/pull/5546))
+
+- `BackendLLMWorker` now appends a pairing instruction to its LLM's system
+  instruction (`BACKEND_PAIRING_INSTRUCTION`): that it is the backend of a
+  voice assistant, which sends it requests and handles the rest of the
+  conversation itself; that it is heard only through a message it begins with
+  `>>` (the whole of it is told to the user, tool calls or not, and everything
+  else it writes is a note the assistant keeps but does not speak: a result, a
+  question it cannot proceed without, or news the user should have now is worth
+  the mark, and that it has stopped or has nothing to do is not); and how to
+  take requests that arrive while it works (follow the latest, cancel the tools
+  whose results are no longer wanted, do the newest first, and give each result
+  as soon as it has it). A backend prompt need only say what the backend does.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- `OpenAILiveLLMService` client delegation now drives its `BackendLLMWorker`
+  through the worker's `attach`, `message` and `cancel` jobs, the same contract
+  `LLMWithBackend` uses: the service attaches once for the session, sends each
+  delegation as a message, and takes the backend's outputs and tool calls from
+  the stream. Delegations still run one at a time, a follow-up starting when
+  the backend reports it has nothing left to do, and
+  `ClientDelegation.timeout_secs` still abandons one the backend takes too long
+  on. `ClientDelegation.backend` now also takes a worker's name, for a backend
+  running in another process on a shared bus.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- `LLMWorker` and `LLMContextWorker` no longer require a `name`. One is
+  generated when omitted, as for any other worker; a worker that others address
+  by name, such as one in another process, still needs one.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Realtime LLM services take each function call result from the
+  `FunctionCallResultFrame` the service broadcasts, as it is produced, rather
+  than finding it in the context on the next frame the aggregator pushes. A
+  result therefore reaches the provider even when it asks for no inference, or
+  arrives while the user is speaking. What runs the model is unchanged: the
+  context frame the assistant aggregator pushes after a result, which weighs
+  `run_llm`, sibling calls, bot speech and user speech. On the OpenAI-protocol
+  services a response asked for while one is already running is now held until
+  that one is done, where before the API refused it and the reply was lost.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- An `LLMMessagesAppendFrame` that asks to run inference now takes the same
+  path at the assistant aggregator as a function call result: it is held while
+  the bot speaks, since a run mid-sentence answers a context that lacks the
+  answer in progress and the model answers it again; bundled with the results
+  and appends queued behind it, so a burst runs inference once; and left to the
+  user's turn while the user speaks, since that turn runs inference on the
+  context as it stands.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- `GeminiLiveLLMService` now defaults to `models/gemini-3.8-live`, where it
+  defaulted to `models/gemini-2.5-flash-native-audio-preview-12-2025`.
+  Synchronous tools are declared `BLOCKING` on 3.8, where `NON_BLOCKING` is the
+  model's default, so a tool call still finishes the model's turn.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- ⚠️ **Breaking change:** `BackendOutput` no longer carries `is_final`. A
+  backend's outputs are a stream with no final one: a `BackendLLMWorker` sends
+  every turn its model writes as it is produced, whether an `LLMWithBackend` or
+  an `OpenAILiveLLMService` client delegation is attached, and says when it has
+  nothing left to do. `transform_output` is called as
+  `transform_output(output)`, may return `None` to send nothing for an output,
+  and what it returns is sent as is, empty text included. A message the model
+  begins with `>>` asks to be spoken (`prefers_spoken=True`) and arrives
+  without the mark; anything else it writes, a reasoning summary included, does
+  not. The transform sees each output after that, and is where code can change
+  it.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- `AssemblyAISTTService` now defaults to `universal-3-6-pro`, AssemblyAI's
+  flagship streaming model and the server-side default. It has the same feature
+  set as `universal-3-5-pro` and covers 32 declared languages instead of 19.
+  `universal-3-5-pro` remains supported.
+  (PR [#5933](https://github.com/pipecat-ai/pipecat/pull/5933))
+
+- `AWSNovaSonicLLMService`'s docstrings and the AWS Nova Sonic examples now
+  document only Nova 2 Sonic. Bedrock removed the first-generation
+  `amazon.nova-sonic-v1:0` at its 2026-09-14 end of life, and requests naming
+  it are rejected.
+  (PR [#5935](https://github.com/pipecat-ai/pipecat/pull/5935))
+
+- `SpeechifyHttpTTSService` no longer accepts the legacy `simba-english` and
+  `simba-multilingual` models. Speechify retires them at the API version the
+  service now pins, so requests naming them fail with `model_retired`,
+  including on workspaces whose default version still allowed them. Use
+  `simba-3.2` (English) or `simba-3.0` (multilingual) instead.
+  (PR [#5937](https://github.com/pipecat-ai/pipecat/pull/5937))
+
+- `ElevenLabsDialogueTTSService` now defaults to `eleven_v4_turbo` instead of
+  `eleven_v3_conversational`. Set `model="eleven_v3_conversational"` in its
+  `Settings` to keep the previous model.
+  (PR [#5959](https://github.com/pipecat-ai/pipecat/pull/5959))
+
+- Updated the `rnnoise` extra to require `pyrnnoise>=0.4.5` and removed its
+  `av<17.1.0` cap. With `audiolab` 0.5.2, `pyrnnoise` 0.4.3 failed with
+  `TypeError: Graph.__init__() got an unexpected keyword argument 'rate'`;
+  0.4.5 fixes that.
+  (PR [#5975](https://github.com/pipecat-ai/pipecat/pull/5975))
+
+- The Gemini Live `llm_response` tracing span reports thinking tokens as
+  `gen_ai.usage.reasoning.output_tokens`, the attribute the other LLM spans
+  use, instead of `gen_ai.usage.reasoning_tokens`. Its
+  `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens` also include
+  tool-result and thinking tokens, matching the service's token metrics.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- `WebsocketTTSService` closes every open audio context, and moves a turn in
+  progress to a new context ID, when it replaces its provider connection.
+  Subclasses no longer need to close audio contexts in `_disconnect_websocket`.
+  (PR [#6008](https://github.com/pipecat-ai/pipecat/pull/6008))
+
+- `BlandTTSService` now works like the other single-stream TTS services.
+    - It waits until each bot turn has played before sending the next turn's
+      text, since a new turn sent to Bland interrupts the one in progress.
+    - After reconnecting mid-turn, it sends the rest of the turn to the new
+      session instead of dropping it with an error.
+    - After a turn-level error, it keeps sending the rest of that turn's text,
+      as other services do.
+    - A turn that ends as `failed` without an `error` message from Bland is
+      logged as a warning and no longer pushes an `ErrorFrame`.
+  (PR [#6014](https://github.com/pipecat-ai/pipecat/pull/6014))
+
+- The `runner` extra now requires `pipecat-ai-prebuilt>=1.3.0`. The prebuilt
+  client UI served by the development runner now has a camera toggle in the
+  Devices section, next to the mic and screen-share controls. The camera starts
+  off until the user turns it on.
+  (PR [#6026](https://github.com/pipecat-ai/pipecat/pull/6026))
+
+- `SmallWebRTCTransport` answers a `UserImageRequestFrame` with the next frame
+  it passes on, which carries the request, as `DailyTransport` does. It
+  previously pushed an extra copy of the frame for each request, with the
+  request's `user_id`; the answering frame now keeps the peer's id, and several
+  waiting requests are answered by successive frames.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Projects generated by `pipecat init` now require `pipecat-ai>=1.12.0`
+  (previously `>=1.4.0`), so a new project installs a release that matches the
+  code it was generated with.
+  (PR [#6035](https://github.com/pipecat-ai/pipecat/pull/6035))
+
+- LLM services log `<service>: Generating LLM response [...]` on each
+  inference, and realtime services (OpenAI Realtime, Gemini Live, Inworld,
+  Azure Voice Live, xAI Grok) log `<service>: Setting up LLM conversation
+  [...]` when they seed their server-side conversation. These lines replace
+  `Generating chat from context`, the OpenAI Responses services' `Generating
+  response from universal context`, the realtime services' `Setting up ...
+  conversation with initial messages`, and Gemini Live's `Creating initial
+  response`. Log filters matching the old strings need updating.
+  (PR [#6047](https://github.com/pipecat-ai/pipecat/pull/6047))
+
+- ⚠️ `get_llm_invocation_params()` on LLM adapters is now async, so every LLM
+  service can fetch the files a provider needs while building its request. Code
+  that calls it must `await` it, and a custom adapter must define it with
+  `async def`; one that defines it as a sync method gets a `DeprecationWarning`
+  when the class is defined. `AWSNovaSonicLLMService.get_setup_params()` is now
+  async as well.
+  (PR [#6059](https://github.com/pipecat-ai/pipecat/pull/6059))
+
+- ⚠️ The `gstreamer` extra now requires `pygobject>=3.52.0,<4`, which builds
+  against GLib 2.80 or newer. On Debian and Ubuntu, install
+  `libgirepository-2.0-dev` instead of `libgirepository1.0-dev`.
+  (PR [#6060](https://github.com/pipecat-ai/pipecat/pull/6060))
+
+- The default voice of `BlandTTSService` and `BlandHttpTTSService` is now Karen
+  (`29158307-9893-4149-8a75-bc9ce313d64e`) instead of River. Set `voice` to
+  keep River.
+  (PR [#6062](https://github.com/pipecat-ai/pipecat/pull/6062))
+
+- The eval harness sends an `eval-connect` client message first on every
+  connection. A bot on an earlier Pipecat version reads its flags from the URL
+  as before, but receives the message as an RTVI client message of type
+  `eval-connect` (an `RTVIClientMessageFrame` and an `on_client_message`
+  event).
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- ⚠️ Local evals run through the dev runner: start the bot with `python
+  bot.py`, and `pipecat eval run` connects to `ws://localhost:7860/ws` by
+  default. Each scenario gets a fresh `bot()` and pipeline. A `--bot-url`
+  without the `/ws` path is rejected; add `/ws` to it.
+    - `pipecat eval suite` spawns bots without `-t eval`, connects to their
+      `/ws` route, and stops each bot as soon as its run ends. A manifest whose
+      `spawn:` still passes `-t eval` keeps working.
+    - The harness waits up to 60 seconds for a bot's `bot-ready`, up from 10.
+    - The harness ends the bot's session when a run finishes, whatever the bot's
+      `on_client_disconnected` handler does. A bot serving the server
+      `EvalTransport`, such as one run with `-t eval` on an earlier Pipecat
+      version, exits after its first scenario.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- ⚠️ **Behavior change:** `VonageVideoConnectorTransport` now emits only the
+  mixed `InputAudioRawFrame` by default and no longer emits per-participant
+  `UserAudioRawFrame`s. To keep the previous behavior, pass
+  `audio_in_frame_source=AudioInFrameSource.BOTH`.
+  (PR [#6066](https://github.com/pipecat-ai/pipecat/pull/6066))
+
+- The `vonage-video-connector` extra now requires
+  `vonage-video-connector~=1.0.3`, which installs on Linux with Python 3.11 and
+  later (previously Python 3.13 only).
+  (PR [#6066](https://github.com/pipecat-ai/pipecat/pull/6066))
+
+- The second parameter of the built-in text transforms in
+  `pipecat.utils.text.transforms` is now named `text_type` instead of
+  `aggregation_type`. Transforms are called with it positionally.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- `KrispVivaFilter` now emits a `DeprecationWarning` (instead of a log warning)
+  when it falls back to the deprecated `KRISP_VIVA_MODEL_PATH` environment
+  variable. The warning states that the variable will be removed in 2.0.0; set
+  `KRISP_VIVA_FILTER_MODEL_PATH` instead.
+  (PR [#6074](https://github.com/pipecat-ai/pipecat/pull/6074))
+
+- `AWSNovaSonicLLMService`'s default model is now Nova 2.5 Sonic
+  (`"amazon.nova-2-5-sonic"`), which keeps the Nova 2 Sonic API surface under a
+  new Bedrock model id.
+  (PR [#6077](https://github.com/pipecat-ai/pipecat/pull/6077))
+
+- Pipecat's deprecation warnings for parameters, fields, environment variables,
+  and behavior changes now all show, once per line of code that triggers them,
+  including warnings Pipecat raises from its own code while a pipeline runs.
+  Previously about 50 of them were hidden unless the line they named was in
+  your main script, and the rest repeated on every call. Like those, they show
+  regardless of your warning filters.
+  (PR [#6080](https://github.com/pipecat-ai/pipecat/pull/6080))
+
+- Pipecat's deprecation warnings for parameters, fields, environment variables,
+  and behavior changes now name the release that deprecated them and the
+  release that removes them, in the same form as the `@deprecated` ones: ``
+  `Subject` is deprecated since X.Y.Z and will be removed in 2.0.0. Use
+  `Replacement` instead. `` Update any `pytest.warns(match=...)` or
+  `filterwarnings(message=...)` patterns written against the old text.
+  (PR [#6080](https://github.com/pipecat-ai/pipecat/pull/6080))
+
+- The eval harness (`pipecat.evals`) reports function calls made outside the
+  bot's pipeline and reported into it (an `ExternalFunctionCall*Frame`) as
+  `function_call` / `function_call_stopped` events.
+  (PR [#6088](https://github.com/pipecat-ai/pipecat/pull/6088))
+
+- `SonioxSTTService` and `SonioxTTSService` now report the errors Soniox sends
+  in-stream with an `ErrorCategory` derived from the HTTP status code the
+  message carries, so an exhausted balance arrives as `quota` and a rejected
+  key as `authentication` rather than `unknown`. The error frames
+  `SonioxTTSService.run_tts` yields on a failed send or connect carry the
+  exception, so those are classified too.
+  (PR [#6089](https://github.com/pipecat-ai/pipecat/pull/6089))
+
+- `AssemblyAISyncSTTService` now defaults to `universal-3-6-pro`, matching
+  `AssemblyAISTTService`. To keep using `universal-3-5-pro`, pass
+  `AssemblyAISyncSTTService.Settings(model="universal-3-5-pro")`.
+  (PR [#6090](https://github.com/pipecat-ai/pipecat/pull/6090))
+
+- The deprecated `AssemblyAIConnectionParams` now defaults `speech_model` to
+  `universal-3-6-pro`, so an `AssemblyAISTTService` built with
+  `connection_params=` and no explicit `speech_model` uses the same model as
+  one built with `settings=`.
+  (PR [#6090](https://github.com/pipecat-ai/pipecat/pull/6090))
+
+- `SonioxSTTService` and `SonioxTTSService` now authenticate with an
+  `Authorization: Bearer` header on the WebSocket handshake instead of an
+  `api_key` field in the config message, which Soniox deprecates and stops
+  accepting on January 15, 2027.
+  (PR [#6096](https://github.com/pipecat-ai/pipecat/pull/6096))
+
+- `AnthropicLLMService`, `OpenAIResponsesLLMService`,
+  `OpenAIResponsesHttpLLMService`, `GoogleLLMService` and
+  `GoogleVertexLLMService` now send each model they list the lowest reasoning
+  setting its provider documents, unless `thinking`, `effort` or `reasoning` is
+  configured, and log the setting at INFO. A reasoning model they don't list
+  runs at the provider's default and logs a WARNING.
+  (PR [#6108](https://github.com/pipecat-ai/pipecat/pull/6108))
+
+- TTS services created with `pause_frame_processing=True` now hold incoming
+  frames after a reply until every open audio context has ended, instead of
+  until the bot stops speaking. A context ends once its audio has all arrived,
+  or after `stop_frame_timeout_s` without audio for services that never end it.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- `DeepgramFluxSTTService` and `DeepgramFluxSageMakerSTTService` now apply a
+  `numerals` update over the live connection with a Configure message instead
+  of reconnecting.
+  (PR [#6124](https://github.com/pipecat-ai/pipecat/pull/6124))
+
+- `GeminiLiveVertexLLMService` now defaults to `google/gemini-3.8-live`, the
+  generally available Live model Vertex AI recommends, where it defaulted to
+  `google/gemini-live-2.5-flash-native-audio`, which Vertex retires on
+  2026-12-13.
+  (PR [#6127](https://github.com/pipecat-ai/pipecat/pull/6127))
+
+- `TranslationConfig.model` for `GladiaSTTService` now documents all three
+  values Gladia's live API accepts — `base`, `batch` and `enhanced` — and that
+  Gladia uses `batch` when the field is unset.
+  (PR [#6128](https://github.com/pipecat-ai/pipecat/pull/6128))
+
+- The Google LLM examples now use `gemini-3.6-flash`, which any Google API key
+  can reach; access to the Gemini 2.5 models is limited to projects that
+  already used them.
+  (PR [#6131](https://github.com/pipecat-ai/pipecat/pull/6131))
+
+- `GeminiLiveLLMService`'s docstrings now name `gemini-3.8-live` as the example
+  model for the `thinking`, `enable_affective_dialog` and `proactivity`
+  settings, where they named `gemini-2.5-flash-native-audio-preview-12-2025`,
+  which Google retires on 2026-11-17.
+  (PR [#6132](https://github.com/pipecat-ai/pipecat/pull/6132))
+
+- `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` now document
+  `"ultrafast"` among the values their `service_tier` argument accepts,
+  OpenAI's Ultrafast Processing tier.
+  (PR [#6136](https://github.com/pipecat-ai/pipecat/pull/6136))
+
+- `SarvamLLMService` now accepts `deepseekv4.1-flash` and `glm5.3`, Sarvam's
+  current open-weight models, in place of the retired `deepseekv4-flash` and
+  `glm5.2`.
+  (PR [#6138](https://github.com/pipecat-ai/pipecat/pull/6138))
+
+- `BackendConnector` now refuses a request strategy that reads the frontend's
+  context, such as `TranscriptBackendRequestStrategy`, on a speech-to-speech
+  frontend, whose context lags the audio: `LLMWithBackend` raises `ValueError`.
+  Strategies mark this with the new `BackendRequestStrategy.requires_context`
+  attribute.
+  (PR [#6157](https://github.com/pipecat-ai/pipecat/pull/6157))
+
+- `BackendLLMWorker` sets `use_provider_thinking_default` on its LLM, so the
+  backend of an `LLMWithBackend` runs at its provider's default reasoning.
+  Reasoning configured in its settings still applies.
+  (PR [#6159](https://github.com/pipecat-ai/pipecat/pull/6159))
+
+- The eval harness reads the user's transcriptions from the bot's `user-input`
+  messages instead of the deprecated `user-transcription`. The
+  `user_transcription` scenario event is unchanged.
+  (PR [#6164](https://github.com/pipecat-ai/pipecat/pull/6164))
+
+- `PipelineWorker` now pushes the `StartFrame` while processors are still being
+  set up, and each processor holds it only until its own `setup()` is done. A
+  slow connection (e.g. the LLM's) no longer delays processors ahead of it: the
+  input transport starts reading audio right away and STT gets it as soon as
+  its own connection is up. `on_pipeline_started` still fires when the
+  `StartFrame` reaches the end of the pipeline, after every processor has been
+  set up and has handled it. `start_timeout_secs` now counts from when every
+  processor is set up. The input transport's `on_client_connected` can now fire
+  before later services have connected; use `on_pipeline_started` for anything
+  that needs them.
+  (PR [#6167](https://github.com/pipecat-ai/pipecat/pull/6167))
+
+- If a `PipelineWorker` is cancelled or its setup times out before the pipeline
+  has started, the processors still being set up never get the `StartFrame` and
+  never start. The pipeline is just cleaned up: no `CancelFrame` is sent, and
+  the processors that had already started are stopped by their `cleanup()`.
+  (PR [#6167](https://github.com/pipecat-ai/pipecat/pull/6167))
+
+- When Jev rejects a request, the `ClassifierError` from `JevClassifier` now
+  includes the reason Jev gave, such as `Jev rejected the request: HTTP 400:
+  Invalid image request.`
+  (PR [#6179](https://github.com/pipecat-ai/pipecat/pull/6179))
+
+- The eval judge's `reason` now points to what in the conversation supports the
+  classifier's verdict, so it never argues against that verdict. It doesn't say
+  how the classifier decided, since a classifier gives no reasons. Each verdict
+  also reports the classifier's `confidence` and `probabilities` in fields of
+  their own.
+  (PR [#6183](https://github.com/pipecat-ai/pipecat/pull/6183))
+
+- ⚠️ **Breaking change:** Services for OpenAI-compatible providers other than
+  OpenAI now raise `ValueError` when `api_key` is `None` or empty, and
+  `GroqSTTService` and `OpenRouterLLMService` now require `api_key` as an
+  argument. None of these services reads its provider's key from the
+  environment, so pass the key explicitly, e.g.
+  `GroqSTTService(api_key=os.environ["GROQ_API_KEY"])`. `NvidiaLLMService`
+  still accepts no key, for a local NIM.
+  (PR [#6193](https://github.com/pipecat-ai/pipecat/pull/6193))
+
+- Updated the bundled Silero VAD model to v6.2, which detects quiet, muted, and
+  unusual voices and lower-quality phone audio more reliably, and stays
+  accurate through long stretches of silence or noise. Speech stop events can
+  arrive slightly later than with v6.
+  (PR [#6202](https://github.com/pipecat-ai/pipecat/pull/6202))
+
+- The `daily` extra now requires `daily-python>=0.35.0`.
+  (PR [#6204](https://github.com/pipecat-ai/pipecat/pull/6204))
+
+- The `daily` extra now requires `daily-python>=0.36.0`, the first version with
+  the network connection status event.
+  (PR [#6211](https://github.com/pipecat-ai/pipecat/pull/6211))
+
+- `pipecat.services.aws.utils.resolve_credentials()` returns keys from its
+  parameters or the environment only. When neither supplies them, `access_key`
+  and `secret_key` are `None`, so the caller's AWS session can take them from
+  the default chain and renew them.
+  (PR [#6212](https://github.com/pipecat-ai/pipecat/pull/6212))
+
+- In `pipecat eval suite`, a manifest entry's `concurrency:` now caps only that
+  entry's runs. Before, entries for the same bot without a `name:` shared one
+  cap, the lowest any of them set. Each `EvalRun` carries its entry's position
+  in the manifest's `suite:` list as `entry`.
+  (PR [#6225](https://github.com/pipecat-ai/pipecat/pull/6225))
+
+- `bot-output` for text that isn't spoken now always has `spoken_status:
+  "new"`, since its only message is the first of its segment. That includes a
+  segment of a type in a TTS service's `skip_text_types` and a speech-to-speech
+  service's transcript, which had no `spoken_status` before.
+  (PR [#6227](https://github.com/pipecat-ai/pipecat/pull/6227))
+
+### Deprecated
+
+- The development runner's `-f/--folder` flag is renamed to
+  `--downloads-folder`; `--folder` remains as a deprecated alias.
+  (PR [#3415](https://github.com/pipecat-ai/pipecat/pull/3415))
+
+- `GoogleImageGenService.Settings.negative_prompt` is deprecated with no
+  replacement. Gemini image models do not accept a negative prompt, so the
+  value is ignored.
+  (PR [#5954](https://github.com/pipecat-ai/pipecat/pull/5954))
+
+- `SarvamRealtimeSTTService.Settings.language_code` is deprecated. Use
+  `language` instead, with `None` for auto-detection.
+  (PR [#6010](https://github.com/pipecat-ai/pipecat/pull/6010))
+
+- `pipecat.classifiers.jev.classifier` and `pipecat.classifiers.jev.client` are
+  deprecated. Use `pipecat.classifiers.typesafe.jev.classifier` and
+  `pipecat.classifiers.typesafe.jev.client` instead. The old paths still work
+  until 2.0.0.
+  (PR [#6017](https://github.com/pipecat-ai/pipecat/pull/6017))
+
+- The `jev` extra is deprecated. Use `typesafe` instead: `uv add
+  "pipecat-ai[typesafe]"`. The `jev` extra installs the same packages until
+  2.0.0.
+  (PR [#6017](https://github.com/pipecat-ai/pipecat/pull/6017))
+
+- Deprecated `get_transport_client_id()` in `pipecat.runner.utils`. Call
+  `transport.get_client_id(client)` instead.
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- Deprecated passing `framerate=0` to `capture_participant_video()` to capture
+  only the frames that answer image requests. Pass `on_request_only=True`
+  instead, as in `VideoInSourceParams`.
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- Deprecated `maybe_capture_participant_camera()` and
+  `maybe_capture_participant_screen()` in `pipecat.runner.utils`. List the
+  sources in `TransportParams.video_in_sources` to capture them as each user
+  connects, or call `BaseTransport.capture_participant_video()` to capture one
+  on demand.
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- Deprecated calling `SmallWebRTCTransport.capture_participant_video()` without
+  a participant id, as `capture_participant_video(video_source="camera")` or
+  `capture_participant_video("camera")`. Pass the peer's id first, as on other
+  transports: `capture_participant_video(client_id, framerate, video_source)`.
+  Calls without it keep passing on every frame unless a `framerate` is given.
+  (PR [#6056](https://github.com/pipecat-ai/pipecat/pull/6056))
+
+- `pipecat eval run`'s `--stop-bot` and `--trigger-disconnect`,
+  `EvalSessionParams.stop_bot` and `EvalSessionParams.trigger_disconnect`, and
+  the scenario field `trigger_disconnect:` are deprecated with no replacement.
+  The harness ends the bot's session after every run, and a bot fires
+  `on_client_disconnected` whenever the harness disconnects.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- The dev runner's `-t eval` is deprecated and ignored: run the bot without
+  `-t`, and the eval harness connects to its `/ws` route. `EvalRunnerArguments`
+  is deprecated in favor of `WebSocketRunnerArguments`, and the WebSocket
+  server `EvalTransport` in favor of `EvalFastAPIWebsocketTransport`. All are
+  removed in 2.0.0.
+  (PR [#6064](https://github.com/pipecat-ai/pipecat/pull/6064))
+
+- Deprecated `AggregationType`. Use `TextType` from
+  `pipecat.utils.text.base_text_aggregator` instead, which has the same
+  members. Importing `AggregationType` from there or from
+  `pipecat.frames.frames` still works and returns `TextType`.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Deprecated the `aggregation_type` argument of
+  `TTSService.add_text_transformer()`, `TTSService.remove_text_transformer()`,
+  `RTVIObserver.add_bot_output_transformer()` and
+  `RTVIObserver.remove_bot_output_transformer()`. Use `text_type` instead.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Deprecated the `aggregated_by` field of the RTVI `bot-output` message. Read
+  `text_type` instead, which carries the same value. The bot sends both fields.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Deprecated `aggregated_by` on `AggregatedTextFrame`, `TTSTextFrame` and
+  `AggregatedTextProgressFrame`. Use `text_type` instead, which means the same.
+  `aggregated_by` still works as a constructor argument and as an attribute:
+  reading it returns `text_type`, and assigning to it sets `text_type`.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Deprecated `skip_aggregator_types` on `TTSService` and `RTVIObserverParams`.
+  Use `skip_text_types` instead.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- `pipecat.utils.deprecation.warn_deprecated_read()` is deprecated. Use
+  `warn_deprecated(message, stacklevel=2)` from the same module instead, which
+  raises any hand-written deprecation warning, including one for a field read
+  through `__getattribute__`.
+  (PR [#6080](https://github.com/pipecat-ai/pipecat/pull/6080))
+
+- The RTVI `user-transcription`, `bot-llm-text` and `bot-tts-text` messages are
+  deprecated and will be removed in 2.0.0. Use `user-input` for what the user
+  said, or `stt-raw-text`, `llm-raw-text` and `tts-raw-text` for each
+  processor's raw output. They're still sent by default until then.
+  `RTVIObserverParams.user_transcription_enabled`, which only turns off
+  `user-transcription`, is deprecated with it.
+  (PR [#6104](https://github.com/pipecat-ai/pipecat/pull/6104))
+
+### Fixed
+
+- A plain-dict `TTSUpdateSettingsFrame` whose nested `prosody` sets only some
+  keys no longer resets the other prosody settings on `FishAudioTTSService`.
+  (PR [#5534](https://github.com/pipecat-ai/pipecat/pull/5534))
+
+- Fixed `OpenAIImageGenService` failing against OpenAI's GPT Image models.
+  Those models return the image inline as base64 rather than as a hosted URL,
+  which the service reported as `Image generation failed`; it now decodes the
+  inline data and emits the frame either way.
+  (PR [#5546](https://github.com/pipecat-ai/pipecat/pull/5546))
+
+- Fixed `DailyTransport` stopping a Daily room's transcription when the bot
+  joins. Daily reports `transcription-started` for every transcription in a
+  room, including ones started by the room or another participant, and the
+  transport replied with its own participant list. That list is empty when
+  `transcription_enabled` is False, and an empty list tells Daily to transcribe
+  nobody. The transport now leaves transcriptions it was not asked to manage
+  alone.
+  (PR [#5571](https://github.com/pipecat-ai/pipecat/pull/5571))
+
+- `TogetherTTSService` now sends its `language` setting to Together, resolved
+  to the ISO 639-1 or lowercase locale code the API accepts. The setting was
+  previously ignored, so every voice was synthesized in English.
+  (PR [#5581](https://github.com/pipecat-ai/pipecat/pull/5581))
+
+- `TogetherTTSService` now emits sample-aligned audio frames. Together's
+  WebSocket audio deltas can end mid-sample, and the odd-length frame that
+  resulted crashed the service's audio task when metrics were enabled, leaving
+  the turn without audio.
+  (PR [#5581](https://github.com/pipecat-ai/pipecat/pull/5581))
+
+- Fixed `BackendLLMWorker` carrying on with work its requester had let go of.
+  When `OpenAILiveLLMService` abandons a client delegation, because it timed
+  out or the conversation was reset, the worker's model kept running and any
+  tool call it was waiting on kept waiting, and their output could be reported
+  under a later delegation. The worker now interrupts its pipeline and cancels
+  its function calls in flight when its `attach` job is cancelled, and
+  `OpenAILiveLLMService` detaches and attaches again in both cases.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Tweaked the async-tool guidance given to LLMs (`ASYNC_TOOL_INSTRUCTIONS` and
+  the final-result message) so a result that lands after the model has already
+  answered the user is more reliably delivered on its own, without the model
+  repeating its previous reply first.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed Inworld Realtime sending a user's message twice when a function call
+  result arrived between the server's VAD turn and the aggregator writing that
+  message.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed a `PipelineWorker` whose pipeline ended on its own (an `EndFrame` it
+  queued, an idle timeout, a fatal error) leaving its child workers running,
+  which kept the `WorkerRunner` from exiting. The worker now cancels its
+  children as it finishes.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed a tool result asking for inference being dropped when another result
+  was queued behind it and that one asked for none: the assistant aggregator
+  now runs inference once the burst is in, whatever the last result asks for. A
+  run that starts meanwhile, such as the one the user's turn brings, settles
+  the owed push, since it sees the context as it stands; a turn with nothing in
+  it brings no run, so the push stays owed until the next result or append.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed an LLM service's built-in tools (the tools the framework adds on the
+  service's behalf, such as the `cancel_<tool>` tool for a tool registered with
+  `cancellable_by_llm=True`, or `LLMWithBackend`'s `delegate`) never reaching
+  the provider when the context advertised no tools of its own. That is the
+  case for a realtime service whose tools are given at construction, via
+  `tools=` or a session's properties, rather than through the context: a
+  cancellable tool given that way had no cancel tool at the provider. Fixed the
+  realtime services (OpenAI, Grok and Inworld Realtime, Gemini Live, Nova
+  Sonic) dropping those constructor-given tools whenever the context's only
+  tools were built-in ones. Built-in tools are now sent on every inference
+  alongside whatever tools the context or the service provides.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed `RTVIObserver` reporting a function call as stopped on each
+  intermediate result (`FunctionCallResultProperties(is_final=False)`). It now
+  reports the call stopped on the final result only.
+  (PR [#5689](https://github.com/pipecat-ai/pipecat/pull/5689))
+
+- Fixed `GoogleImageGenService` leaving its `genai.Client` async session open
+  at shutdown. It now closes the session in `cleanup()`.
+  (PR [#5762](https://github.com/pipecat-ai/pipecat/pull/5762))
+
+- Fixed `WhisperSTTService` decoding speech on the event loop, which blocked
+  other tasks, including transport audio, for the length of each transcription.
+  Decoding now runs in the worker thread.
+  (PR [#5931](https://github.com/pipecat-ai/pipecat/pull/5931))
+
+- Fixed `GoogleLLMService` leaving Gemini's thinking tokens out of
+  `completion_tokens`. Gemini reports them in `thoughts_token_count`, apart
+  from `candidates_token_count`, so with thinking on the output count was low
+  and `reasoning_tokens` could exceed `completion_tokens`. `completion_tokens`
+  now includes them, which is how the OpenAI services report reasoning.
+  (PR [#5932](https://github.com/pipecat-ai/pipecat/pull/5932))
+
+- `SpeechifyHttpTTSService` now pins Speechify's API version to `2026-09-30`
+  instead of leaving it to the workspace default. On earlier versions Speechify
+  answers the `pcm_16000` output format with 24 kHz audio, which the service
+  stamped as 16 kHz, so 16 kHz pipelines played Speechify speech at the wrong
+  rate.
+  (PR [#5937](https://github.com/pipecat-ai/pipecat/pull/5937))
+
+- `SpeechmaticsSTTService` now maps `Language.TL` and `Language.FIL` onto
+  Speechmatics' `tl` language pack. `Language.FIL` previously resolved to
+  `fil`, which Speechmatics rejects.
+  (PR [#5938](https://github.com/pipecat-ai/pipecat/pull/5938))
+
+- Fixed `DeepSeekLLMService` ignoring its own request parameters: it sent the
+  stock OpenAI ones instead, so `thinking` never reached DeepSeek (V4 models
+  ran a reasoning pass before every answer despite the `disabled` default) and
+  it sent `seed` and `max_completion_tokens`, which DeepSeek doesn't support.
+  (PR [#5939](https://github.com/pipecat-ai/pipecat/pull/5939))
+
+- Fixed `InceptionLLMService` dropping an `extra_body` passed through
+  `Settings.extra` when `realtime` is set, and `SarvamLLMService` writing
+  `wiki_grounding` into the `extra_body` of `Settings.extra`. In both, an
+  `extra_body` from `Settings.extra` now wins key by key over the service's own
+  fields.
+  (PR [#5939](https://github.com/pipecat-ai/pipecat/pull/5939))
+
+- `TogetherTTSService` now escapes the `voice` it sends to Together, so
+  Kokoro's blended voice names (`af_bella(2)+af_heart(1)`) reach the server
+  intact instead of being rejected as an unknown voice.
+  (PR [#5940](https://github.com/pipecat-ai/pipecat/pull/5940))
+
+- `GrokRealtimeLLMService` now accepts 11025 Hz PCM audio, which xAI's realtime
+  API supports but Pipecat rejected.
+  (PR [#5941](https://github.com/pipecat-ai/pipecat/pull/5941))
+
+- Fixed `TwilioFrameSerializer`, `TelnyxFrameSerializer` and
+  `ExotelFrameSerializer` ending the call when the carrier sent a malformed or
+  incomplete WebSocket message. Such messages are now logged and ignored, as in
+  the other telephony serializers.
+  (PR [#5946](https://github.com/pipecat-ai/pipecat/pull/5946))
+
+- Fixed `GoogleImageGenService` failing on every request with "This method is
+  only supported in Gemini Enterprise Agent Platform mode". Google shut down
+  the Imagen models the service used; it now generates images with Gemini image
+  models, defaults to `gemini-3.1-flash-image`, and emits RGB frames.
+  `number_of_images` makes one request per image.
+  (PR [#5954](https://github.com/pipecat-ai/pipecat/pull/5954))
+
+- Fixed Japanese sentence aggregation splitting Latin abbreviations such as
+  `Dr.` and `U.S.`.
+  (PR [#5961](https://github.com/pipecat-ai/pipecat/pull/5961))
+
+- Fixed `AnthropicLLMService` over-reporting token usage on every response:
+  `prompt_tokens` was double the real input count and `completion_tokens` was a
+  few tokens high. Anthropic's streamed usage counts are cumulative, and the
+  service added them up across events instead of taking the latest.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- Fixed `GrokLLMService` leaving reasoning tokens out of `completion_tokens`.
+  xAI reports them in `completion_tokens_details.reasoning_tokens` apart from
+  `completion_tokens`, so with a reasoning model the output count was low and
+  `reasoning_tokens` could exceed `completion_tokens`. `completion_tokens` now
+  includes them, which is how the OpenAI services report reasoning.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- Fixed `GoogleLLMService` and `GeminiLiveLLMService` leaving tool results out
+  of `prompt_tokens`. When Gemini runs code execution, reads a URL with URL
+  context, or (on some models) grounds with Google Search, the results fed back
+  to the model are billed as input but were reported only in `total_tokens`.
+  `prompt_tokens` now includes them, so it can rise sharply on those turns: a
+  URL-context turn can add several thousand input tokens.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- Fixed `GeminiLiveLLMService` leaving thinking tokens out of
+  `completion_tokens`, and reporting a `total_tokens` that could also leave
+  them out. Gemini Live reports thinking tokens in `thoughts_token_count`,
+  apart from `response_token_count`, and its own `total_token_count` sometimes
+  omits them. `completion_tokens` now includes them, and `total_tokens` is
+  `prompt_tokens` plus `completion_tokens`.
+  (PR [#5984](https://github.com/pipecat-ai/pipecat/pull/5984))
+
+- Fixed `MOQTransport` ending the call when a relay cancelled the peer's audio
+  subscription, which a relay does when the session publishing the peer's
+  broadcast ends: the peer's relay went away, or a reconnecting peer replaced
+  its broadcast with a fresh one. The cancel is now treated as the peer's
+  tracks ending, so the transport subscribes again or redials and follows the
+  peer to its new broadcast.
+  (PR [#5986](https://github.com/pipecat-ai/pipecat/pull/5986))
+
+- Fixed `DeepgramHttpTTSService` emitting audio frames that could end
+  mid-sample when the HTTP response was split there. With metrics enabled, this
+  crashed the audio playback task and left the bot mute for the rest of the
+  session (`buffer size must be a multiple of element size`). The service now
+  emits only whole 16-bit samples.
+  (PR [#5989](https://github.com/pipecat-ai/pipecat/pull/5989))
+
+- Fixed TTS services that could go silent for the rest of the session with
+  `buffer size must be a multiple of element size` when metrics were enabled. A
+  provider can split its audio stream mid-sample, and the odd-length audio
+  frames crashed the TTS playback task. Every TTS service now emits audio
+  frames that hold whole 16-bit samples, carrying a split sample over to the
+  next frame, and the time-to-first-audio scan ignores a trailing partial
+  sample.
+  (PR [#5992](https://github.com/pipecat-ai/pipecat/pull/5992))
+
+- Fixed non-ASCII text (Hindi, Japanese, etc.) being escaped as `\uXXXX` in
+  async tool result messages and in the conversation history the OpenAI, Grok
+  and Inworld realtime adapters pack into a single message.
+  (PR [#5995](https://github.com/pipecat-ai/pipecat/pull/5995))
+
+- Fixed `GradiumSTTService` with `enable_turn_detection=True` opening no turn
+  when the user kept talking after a turn ended mid-sentence, for example after
+  a hesitation. The rest of the sentence stayed in interim transcripts and
+  never reached the LLM until the user paused and spoke again. After a turn's
+  transcript is pushed, the next end-pointing reading below `eot_threshold` now
+  opens a turn.
+  (PR [#6007](https://github.com/pipecat-ai/pipecat/pull/6007))
+
+- Fixed websocket TTS services mishandling the rest of a bot turn after
+  reconnecting mid-turn. The remaining sentences reused the turn's context ID
+  on the new connection, which the provider had never seen, so
+  `InworldTTSService` could drop them without an error and
+  `ElevenLabsTTSService` could speak them without the configured voice
+  settings. Open audio contexts now close when the service replaces its
+  connection, and the rest of the turn continues under a new context ID.
+  (PR [#6008](https://github.com/pipecat-ai/pipecat/pull/6008))
+
+- Fixed `ResembleAITTSService` freezing the whole bot when the server closed
+  the connection cleanly. It now reconnects through the standard websocket
+  reconnect handling, with backoff.
+  (PR [#6008](https://github.com/pipecat-ai/pipecat/pull/6008))
+
+- Fixed TTS services going silent for the rest of the session when a
+  provider-specific cleanup step failed, for example `RimeTTSService` sending
+  `clear` while reconnecting. A failing `on_audio_context_completed` or
+  `on_audio_context_interrupted` override is now logged as a warning, and audio
+  playback continues.
+  (PR [#6008](https://github.com/pipecat-ai/pipecat/pull/6008))
+
+- Fixed `SonioxTTSService` rejecting text with "Stream not found" when the
+  stream's config hadn't reached the current connection, such as after a
+  reconnect. The config is now sent before a stream's first text.
+  (PR [#6008](https://github.com/pipecat-ai/pipecat/pull/6008))
+
+- Added missing Indian language locale members to `Language` and Sarvam STT
+  mappings. Base language values resolve to Sarvam locale codes, and
+  `SarvamRealtimeSTTService` sends a `language` string that is not a `Language`
+  value to Sarvam as-is.
+  (PR [#6010](https://github.com/pipecat-ai/pipecat/pull/6010))
+
+- Fixed websocket TTS services losing their keepalive partway through a
+  session. In `AsyncAITTSService`, `ElevenLabsTTSService`,
+  `ElevenLabsDialogueTTSService`, `InworldTTSService`, `NeuphonicTTSService`,
+  `SarvamTTSService`, `SmallestTTSService` and `SonioxTTSService`, a single
+  failed keepalive stopped all later ones, so the provider closed the
+  connection after every idle period and the service reconnected each time. A
+  failed keepalive is now logged and the next one is sent on schedule.
+  `NeuphonicTTSService` also no longer sends keepalives on a closed connection.
+  (PR [#6011](https://github.com/pipecat-ai/pipecat/pull/6011))
+
+- Fixed STT services losing their keepalive after a single failed send.
+  `NvidiaSTTService`, `SarvamSTTService` and `GeminiSTTService` (when its
+  keepalive is enabled) stopped sending keepalives for the rest of the session,
+  so an idle connection could be closed by the provider. Websocket STT services
+  such as `CartesiaSTTService`, `GladiaSTTService` and `SonioxSTTService` were
+  affected until their next reconnect. A failed keepalive is now logged and the
+  next one is sent on schedule.
+  (PR [#6012](https://github.com/pipecat-ai/pipecat/pull/6012))
+
+- The Deepgram SageMaker services (`DeepgramSageMakerSTTService`,
+  `DeepgramFluxSageMakerSTTService`, `DeepgramSageMakerTTSService`,
+  `DeepgramFluxSageMakerTTSService`) now handle a throttled or failed session
+  start:
+    - `SageMakerBidiClient.start_session()` retries throttling and transient
+      server failures with jittered backoff (`max_connect_attempts`, default 4),
+      and raises `SageMakerBidiSessionError` carrying the AWS error id and HTTP
+      status.
+    - The error is classified (`RATE_LIMIT`, `SERVER`, `CONNECTIVITY` or
+      `INVALID_REQUEST`) instead of `UNKNOWN`.
+    - A service that cannot start its session and has no way to reconnect is
+      marked unusable, so failover and `ProcessorUnusablePolicy` act on it
+      instead of the service dropping audio for the rest of the session.
+  (PR [#6019](https://github.com/pipecat-ai/pipecat/pull/6019))
+
+- `NvidiaSageMakerSTTService` no longer drops all audio for the rest of a
+  session after its SageMaker session fails to start. The failure is reported
+  as an error and the service is marked unusable, so failover and
+  `ProcessorUnusablePolicy` can act on it.
+    - `NvidiaSageMakerSTTService` and `NvidiaSageMakerTTSService` classify
+      SageMaker session failures (`RATE_LIMIT`, `SERVER`, `CONNECTIVITY` or
+      `INVALID_REQUEST`), so rejected credentials are reported as `CONNECTIVITY`
+      and a throttled start as `RATE_LIMIT`.
+    - `NvidiaSageMakerTTSService` reports a failed session start as an error
+      and stays usable, starting a new session on the next turn.
+  (PR [#6020](https://github.com/pipecat-ai/pipecat/pull/6020))
+
+- Fixed `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` failing
+  every request to `gpt-6.1-sol` when `reasoning` isn't configured. They sent
+  `reasoning.effort="none"`, which the model rejects; they now leave it at the
+  model's default effort.
+  (PR [#6023](https://github.com/pipecat-ai/pipecat/pull/6023))
+
+- Fixed `DailyTransport` leaving a function call waiting forever when it
+  requests an image from a participant or video source that isn't being
+  captured. The request is now answered with an error result, so the LLM can
+  tell the user.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Fixed bots generated by `pipecat init` with video input never receiving the
+  user's video on Daily or SmallWebRTC. They now capture the camera at 1 frame
+  per second through `video_in_sources`, with the screen share listed commented
+  out to enable when the bot should receive it.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Fixed `SmallWebRTCTransport` never delivering frames from a screen share of a
+  high-resolution, still screen, which left image requests for it unanswered.
+  Its keyframes were larger than aiortc's video receive buffer could hold, so
+  each was dropped and the next one was as large. The screen share receiver now
+  holds frames of about 600 KB, and the camera receiver keeps aiortc's default.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Fixed `SmallWebRTCTransport` never receiving the user's screen share. The
+  bot's peer connection now bundles every transceiver on one transport; with
+  aiortc's default bundle policy, the screen share's transceiver was left off
+  the bundled transport, so its packets were routed to the camera receiver.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Fixed `DailyTransport` passing on roughly twice the requested video framerate
+  for rates between 5 and 30 frames per second. Frames now follow a fixed
+  schedule that delivers the requested rate.
+  (PR [#6027](https://github.com/pipecat-ai/pipecat/pull/6027))
+
+- Fixed `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` failing
+  every request to `gpt-5`, `gpt-5-mini`, `gpt-5-nano` and the `-pro` models
+  when `reasoning` isn't configured. They sent `reasoning.effort="none"`, which
+  those models reject. `gpt-5`, `gpt-5-mini` and `gpt-5-nano` now get
+  `"minimal"`, their lowest effort, and the `-pro` models are left at the
+  provider default.
+  (PR [#6029](https://github.com/pipecat-ai/pipecat/pull/6029))
+
+- Fixed `SarvamRealtimeSTTService` ending transcription for the rest of the
+  session when its websocket dropped. It now reconnects with backoff
+  (`reconnect_on_error`, default `True`), closes the utterance in progress,
+  resends `speech_start` for an open manual-endpointing turn, and counts
+  `speech_end_audio_position_s` from the start of the new session.
+  (PR [#6031](https://github.com/pipecat-ai/pipecat/pull/6031))
+
+- Fixed websocket STT services staying usable but transcribing nothing for the
+  rest of the session when their first connect failed. A failed connect is now
+  retried like a dropped connection, with backoff, and reported as permanent
+  once the attempts run out, so a `ServiceSwitcher` can fail over. This applies
+  to `AssemblyAISTTService`, `AWSTranscribeSTTService`, `GladiaSTTService`,
+  `MetaSTTService`, `OpenAIRealtimeSTTService`, `SarvamRealtimeSTTService`,
+  `SonioxSTTService`, `TogetherSTTService` and `XAISTTService`.
+  (PR [#6032](https://github.com/pipecat-ai/pipecat/pull/6032))
+
+- Fixed `LiveKitTransport` mixing the audio of participants who speak at the
+  same time: each participant now has their own input resampler, released when
+  their audio track is unsubscribed.
+  (PR [#6033](https://github.com/pipecat-ai/pipecat/pull/6033))
+
+- `GradiumSTTService` no longer carries a dropped connection's text and turn
+  state into the reconnected one. Text from an utterance that had already ended
+  was prefixed to the next transcript, and a drop while a turn was ending could
+  stop server turn detection (`enable_turn_detection=True`) from opening any
+  further turns. The text received so far is now pushed as the transcript when
+  the connection drops, and a turn still in progress stays open.
+  (PR [#6039](https://github.com/pipecat-ai/pipecat/pull/6039))
+
+- `GradiumSTTService` now retries when its first connection fails, with the
+  same backoff as a dropped connection. A failed first connect used to leave
+  the service without a connection, and without transcripts, for the rest of
+  the session.
+  (PR [#6039](https://github.com/pipecat-ai/pipecat/pull/6039))
+
+- `GradiumSTTService` now transcribes audio at input sample rates other than 8,
+  16 or 24 kHz. At any other rate it declared 16 kHz while sending audio at the
+  real rate, so Gradium decoded it at the wrong speed; such audio is now
+  resampled to a rate Gradium accepts.
+  (PR [#6039](https://github.com/pipecat-ai/pipecat/pull/6039))
+
+- `CartesiaSTTService`, `ElevenLabsRealtimeSTTService` and `SmallestSTTService`
+  no longer stop transcribing after a dropped connection is reconnected. Audio
+  arriving during the reconnect could open a second connection alongside the
+  automatic one, leaving the service reading one socket while sending audio to
+  the other, so no transcripts arrived until the provider closed the idle
+  socket. The automatic reconnect is now the only one, audio arriving while the
+  connection is down is dropped, and a failed first connection is retried with
+  the same backoff.
+  (PR [#6048](https://github.com/pipecat-ai/pipecat/pull/6048))
+
+- Fixed `get_transport_client_id()` returning an empty string for
+  `LiveKitTransport`, so bots that passed the client id to their tools sent
+  requests for no participant. It returns the participant's identity.
+  (PR [#6055](https://github.com/pipecat-ai/pipecat/pull/6055))
+
+- Fixed a LiveKit user's screen share replacing their camera video, and
+  stopping the share leaving the bot with no video. `LiveKitTransport` receives
+  the camera and screen share side by side, and each `UserImageRawFrame` says
+  which one it came from (`transport_source` is `"camera"` or `"screenVideo"`).
+  (PR [#6055](https://github.com/pipecat-ai/pipecat/pull/6055))
+
+- Fixed image requests on `DailyTransport` and `SmallWebRTCTransport` that no
+  video frame would answer leaving the function call that made them waiting
+  forever, for example a `fetch_user_image` call while the user's camera is
+  off. A request for a video source the user isn't sending, and any request
+  still waiting when the user leaves or the transport disconnects, now
+  completes with an error result the LLM can act on. On Daily, so does a
+  request still waiting when the user turns that source off. `LiveKitTransport`
+  behaves like Daily.
+  (PR [#6055](https://github.com/pipecat-ai/pipecat/pull/6055))
+
+- Fixed `LiveKitTransport` not raising `on_participant_connected` and
+  `on_client_connected` for participants already in the room when the bot
+  connects, so a bot that set itself up in `on_client_connected` never did when
+  the user joined first. Participants already in the room now raise the same
+  events as those who join later.
+  (PR [#6055](https://github.com/pipecat-ai/pipecat/pull/6055))
+
+- Fixed the `DeprecationWarning` for a custom user turn start or stop strategy
+  that overrides the deprecated `reset()` never being shown under Python's
+  default warning filters. It now appears when the strategy class is defined,
+  pointing at that class's definition.
+  (PR [#6058](https://github.com/pipecat-ai/pipecat/pull/6058))
+
+- Fixed `SmallWebRTCTransport` leaving an image request waiting until the peer
+  disconnected when it was still waiting as the peer turned their camera or
+  screen share off, for example a `fetch_user_image` call made just as the user
+  turned their camera off. The request now completes with an error result the
+  LLM can act on, and the source is sampled again when it's turned back on.
+  (PR [#6063](https://github.com/pipecat-ai/pipecat/pull/6063))
+
+- A finished session's pipeline is no longer kept in memory for up to
+  `turn_end_timeout_secs` (2.5 s by default) after it ends.
+  `TurnTrackingObserver`, which `PipelineWorker` adds by default
+  (`enable_turn_tracking=True`), could leave its turn-end timer scheduled when
+  the pipeline was torn down before the observer saw the final `EndFrame` or
+  `CancelFrame`, and the timer's callback held the pipeline until it fired. A
+  garbage collection or memory release right after the session could not free
+  it.
+  (PR [#6070](https://github.com/pipecat-ai/pipecat/pull/6070))
+
+- Fixed RTVI `bot-output` messages giving a segment different `segment_id`s
+  when the TTS service doesn't report word timestamps. The `"completed"`
+  message carried the ID of the spoken text instead of the segment's, so
+  clients couldn't match it to the segment's `"new"` message.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Fixed `RTVIObserverParams.skip_text_types` not fully hiding text from the
+  client when the TTS service reports word timestamps (e.g. Cartesia,
+  ElevenLabs). The skipped text's `bot-output` message was dropped, but its
+  words were still sent as the bot spoke them.
+  (PR [#6072](https://github.com/pipecat-ai/pipecat/pull/6072))
+
+- Fixed observers receiving no frames when the first observer is added to a
+  `WorkerObserver` after `setup()`.
+  (PR [#6079](https://github.com/pipecat-ai/pipecat/pull/6079))
+
+- Fixed `TTSSpeakFrame` requests with `interruptible=False` being cancelled
+  during synthesis or losing their generated audio and text during playback
+  interruptions.
+  (PR [#6081](https://github.com/pipecat-ai/pipecat/pull/6081))
+
+- Fixed an observer whose `cleanup()` raises stopping a `PipelineWorker`'s
+  shutdown, so the remaining observers and the pipeline's processors were never
+  cleaned up. The error is logged and shutdown continues.
+  (PR [#6086](https://github.com/pipecat-ai/pipecat/pull/6086))
+
+- Fixed an observer that calls `PipelineWorker.remove_observer()` from its own
+  callback logging a warning and leaving its delivery task running for the rest
+  of the process.
+  (PR [#6086](https://github.com/pipecat-ai/pipecat/pull/6086))
+
+- Fixed `cleanup()` on a processor, service, transport or observer never
+  returning when called from one of that object's own event handlers.
+  (PR [#6086](https://github.com/pipecat-ai/pipecat/pull/6086))
+
+- Fixed `PipelineWorker.remove_observer()` not calling the removed observer's
+  `cleanup()`, so resources it held outlived it: a `TurnTrackingObserver` could
+  still fire `on_turn_ended` after removal, and an `RTVIObserver` with system
+  logs enabled stayed attached to the logger.
+  (PR [#6086](https://github.com/pipecat-ai/pipecat/pull/6086))
+
+- Fixed a worker's `@job` handlers running on after the worker stopped. A
+  handler still running when its worker stopped, such as one holding a
+  long-lived job open, was left as a live task: a `dangling tasks detected`
+  warning at shutdown, and in a long-lived host that adds and removes workers,
+  a leaked task for each. `BaseWorker.stop()` now cancels them, after answering
+  their jobs as cancelled.
+  (PR [#6087](https://github.com/pipecat-ai/pipecat/pull/6087))
+
+- Fixed `SonioxSTTService` and `SonioxTTSService` sending `nb` for
+  `Language.NB` and `Language.NB_NO`, which Soniox does not accept. Both now
+  map to Soniox's `no`.
+  (PR [#6094](https://github.com/pipecat-ai/pipecat/pull/6094))
+
+- Fixed `SonioxSTTService` ignoring the `language` setting, at construction and
+  in a settings update (and `set_language`): it connected with `language_hints`
+  alone. A `language` given without `language_hints` now becomes the single
+  language hint.
+  (PR [#6095](https://github.com/pipecat-ai/pipecat/pull/6095))
+
+- `LLMContext.add_image_frame_message()` and
+  `LLMContext.create_image_message()` now encode RGBA frames, which raised
+  `OSError: cannot write mode RGBA as JPEG`.
+  (PR [#6101](https://github.com/pipecat-ai/pipecat/pull/6101))
+
+- Fixed `AnthropicLLMService` requests to Claude Sonnet 5.5 failing with a 400
+  error when neither `thinking` nor `effort` is configured. The service now
+  sends `thinking` `between_tools`, the model's lowest thinking setting.
+  (PR [#6108](https://github.com/pipecat-ai/pipecat/pull/6108))
+
+- The eval harness ends a run at once when the bot closes the connection or
+  refuses it before sending `bot-ready`, instead of waiting out the bot-ready
+  timeout. A close is reported as the new `closed_before_ready` failure kind,
+  with the close code and reason (for example Pipecat Cloud's `1011 Concurrency
+  limit reached`), and a refused connection, such as an HTTP 403, as
+  `connect_failed`.
+  (PR [#6117](https://github.com/pipecat-ai/pipecat/pull/6117))
+
+- Fixed TTS services whose audio doesn't carry its request's context ID, such
+  as `FishAudioTTSService`, sometimes playing a request's audio as part of the
+  request before it.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed a TTS service playing no more audio after an interruption when an
+  uninterruptible request had already stopped because of a provider error.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed TTS services with word timestamps, when created with
+  `reuse_context_id_within_turn=False`, ending the assistant message after a
+  reply's first sentence: the rest of the reply was added to the next assistant
+  message. The reply's `LLMFullResponseEndFrame` now comes after its last word.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed the last words of a `TTSSpeakFrame` going missing from the context on
+  TTS services with word timestamps, when the provider didn't time those words
+  and the audio context ended by timing out.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed a `TTSSpeakFrame` spoken after an LLM reply not committing its text to
+  the context, on TTS services without word timestamps.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed TTS services with word timestamps dropping the
+  `LLMFullResponseEndFrame` of a reply that spoke no timed words, such as a
+  reply made only of text in `skip_text_types`.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+- Fixed `DeepgramSageMakerTTSService` ending a reply's audio context
+  `stop_frame_timeout_s` after its last audio, which delayed its
+  `TTSStoppedFrame`, instead of when Deepgram reports the flush.
+  (PR [#6119](https://github.com/pipecat-ai/pipecat/pull/6119))
+
+- Fixed `NvidiaSageMakerTTSService` reporting each request as completed with no
+  audio, and becoming unusable after three, because its audio skipped the
+  request's audio context.
+  (PR [#6120](https://github.com/pipecat-ai/pipecat/pull/6120))
+
+- `CartesiaTurnsSTTSettings` now documents Cartesia's current turn detection
+  ranges and defaults: `turn_eager_end_threshold` accepts 0.3–0.8 and defaults
+  to 0.6, `turn_end_threshold` defaults to 0.3, and the three thresholds must
+  stay in descending order.
+  (PR [#6123](https://github.com/pipecat-ai/pipecat/pull/6123))
+
+- Fixed `AzureTTSService` and `AzureHttpTTSService` logging an error about the
+  uninitialized `effect` setting every time the pipeline started.
+  (PR [#6126](https://github.com/pipecat-ai/pipecat/pull/6126))
+
+- Fixed an issue where ElevenLabs TTS services dropped the `language_code` when
+  using `eleven_v4`, which accepts the same languages as `eleven_v4_turbo`.
+  (PR [#6133](https://github.com/pipecat-ai/pipecat/pull/6133))
+
+- Fixed the `examples/update-settings/stt/stt-fal.py` settings update, which
+  passed a field `FalSTTService.Settings` does not define and raised a
+  `TypeError` mid-call. It now switches `language`, like the other STT settings
+  examples.
+  (PR [#6134](https://github.com/pipecat-ai/pipecat/pull/6134))
+
+- Fixed an error logged on every `OpenRouterLLMService` start reporting that
+  the `provider` setting was left uninitialized.
+  (PR [#6137](https://github.com/pipecat-ai/pipecat/pull/6137))
+
+- `NeuphonicTTSService` and `NeuphonicHttpTTSService` now send `hi` for
+  `Language.HI`, matching the language code Neuphonic documents and returns for
+  its Hindi voices.
+  (PR [#6139](https://github.com/pipecat-ai/pipecat/pull/6139))
+
+- Fixed the eval harness judging, as part of the bot's reply, what the bot was
+  still saying after the user's send talked over it and before the bot noticed.
+  (PR [#6146](https://github.com/pipecat-ai/pipecat/pull/6146))
+
+- Fixed a scripted eval turn without user input judging the previous reply's
+  last sentence as its response, when the bot had stopped speaking but that
+  sentence was still being transcribed.
+  (PR [#6146](https://github.com/pipecat-ai/pipecat/pull/6146))
+
+- Fixed a scripted eval turn with no `user:` ignoring what the bot said without
+  its LLM, such as a presence check pushed as a `TTSSpeakFrame`, when the turn
+  first had to wait for the bot's previous reply to end.
+  (PR [#6164](https://github.com/pipecat-ai/pipecat/pull/6164))
+
+- Fixed DTMF on Daily SIP dial-in calls. `OutputDTMFFrame` without an explicit
+  `session_id` now falls back to the active dial-in session when there is no
+  dial-out session, instead of silently sending nothing.
+  (PR [#6165](https://github.com/pipecat-ai/pipecat/pull/6165))
+
+- Fixed `PipelineWorker.cancel()` not taking effect until every processor
+  finished setting up (up to `setup_timeout_secs`), e.g. when a caller hung up
+  while a service was still connecting.
+  (PR [#6167](https://github.com/pipecat-ai/pipecat/pull/6167))
+
+- Fixed audio-mode eval simulations ending as soon as the persona called
+  `end_call` when it said goodbye in the same reply: the persona's last line
+  was left out of the conversation the judge reads, and the run didn't wait for
+  the bot's reply to it, so a flow's closing tool calls, such as an
+  `end_conversation`, were never made. The persona's `end_call` is now reported
+  after its last line has been spoken.
+  (PR [#6180](https://github.com/pipecat-ai/pipecat/pull/6180))
+
+- Fixed audio-mode eval simulations leaving out what the persona said before
+  the bot's speech cut it off: those words are now a persona turn in the
+  conversation the judge reads.
+  (PR [#6180](https://github.com/pipecat-ai/pipecat/pull/6180))
+
+- Fixed a `DailyTransport` bot that keeps running after its call ends without
+  `leave()` (the bot is ejected, or the room or meeting ends) raising thousands
+  of `ErrorFrame`s per second until the process is killed. A failed app message
+  raised an `ErrorFrame`, which `RTVIProcessor` (added by default with
+  `enable_rtvi=True`) turned into another app message. The transport now
+  reports the disconnect once, through `on_error`, and drops app messages until
+  it joins again.
+  (PR [#6186](https://github.com/pipecat-ai/pipecat/pull/6186))
+
+- Fixed `AssemblyAISTTService` ending the pipeline when AssemblyAI confirmed a
+  session termination. That confirmation arrives whenever the service
+  disconnects, including when an `STTUpdateSettingsFrame` changes a
+  connection-time setting and the service reconnects mid-call. The service no
+  longer pushes an `EndFrame` on Termination.
+  (PR [#6192](https://github.com/pipecat-ai/pipecat/pull/6192))
+
+- `FilterEnableFrame` now enables or disables the input transport's
+  `audio_in_filter`. Previously the input transport forwarded only
+  `FilterUpdateSettingsFrame` to its filter, so a `FilterEnableFrame` passed
+  downstream and toggled the output transport's filter instead.
+  (PR [#6194](https://github.com/pipecat-ai/pipecat/pull/6194))
+
+- `GeminiLiveLLMService` now sends a `Language` value set through `settings=`
+  or `LLMUpdateSettingsFrame` as Gemini's locale code, so `Language.ES` is sent
+  as `"es-ES"` instead of `"es"`. A string is still sent as given.
+  (PR [#6194](https://github.com/pipecat-ai/pipecat/pull/6194))
+
+- Sending a DTMF frame on `DailyTransport` (`DailyOutputDTMFFrame`,
+  `DailyOutputDTMFUrgentFrame` or `OutputDTMFFrame`) now pushes a non-fatal
+  `ErrorFrame` when the send fails, such as on a call with no dial-in or
+  dial-out session. Previously the failure was silently dropped.
+  (PR [#6194](https://github.com/pipecat-ai/pipecat/pull/6194))
+
+- `DailySIPReferFrame` and `DailyTransport.sip_refer()` now use the active
+  dial-out session, then the active dial-in session, when the settings have no
+  `sessionId`, matching SIP call transfer and DTMF. With no session, the REFER
+  fails with an error.
+  (PR [#6194](https://github.com/pipecat-ai/pipecat/pull/6194))
+
+- `RimeTTSService.INLINE_SPEED()` now sends one speed per bracketed span in
+  `inlineSpeedAlpha`. Previously the list started with an empty value
+  (`",0.5,1.5"`), so Rime received one more speed than there were spans.
+  (PR [#6195](https://github.com/pipecat-ai/pipecat/pull/6195))
+
+- `DailyTransport` now accepts handlers for `on_transcription_stopped` and
+  `on_transcription_error`. Previously both events were raised but never
+  registered, so adding a handler only logged "event handler ... not
+  registered" and the handler never ran.
+  (PR [#6195](https://github.com/pipecat-ai/pipecat/pull/6195))
+
+- Fixed `OpenAIRealtimeLLMService` sending user audio at the pipeline's input
+  sample rate while the session expects 24 kHz, so the model heard speech at
+  the wrong speed (1.5x fast at the default 16 kHz). Input audio is now
+  resampled to 24 kHz before it is appended, and the manual turn-detection
+  pre-roll replayed after an interruption holds 24 kHz audio too.
+  (PR [#6196](https://github.com/pipecat-ai/pipecat/pull/6196))
+
+- `AnthropicLLMService` now logs a warning naming Claude's `stop_reason` when a
+  response ends for a notable reason, for both streamed responses and
+  `run_inference()`: refused by a safety classifier (with the refusal
+  category), or truncated at `max_tokens` or the context window. Previously
+  these ended the turn, or the one-shot inference, with little or no text and
+  no indication why. Whatever text did arrive is still passed downstream or
+  returned, and responses ending normally are unaffected.
+  (PR [#6198](https://github.com/pipecat-ai/pipecat/pull/6198))
+
+- Fixed `SileroVADAnalyzer` sometimes reporting that the user stopped speaking
+  partway through a word, which could cut off the end of a transcript or close
+  the turn on incomplete audio. The analyzer reset the model's state every five
+  seconds of wall-clock time, and a reset during speech could drop the model's
+  confidence below the threshold. Resets now happen only during clear
+  non-speech and are timed by the audio processed, so they never land on speech
+  and the result no longer depends on wall-clock timing.
+  (PR [#6202](https://github.com/pipecat-ai/pipecat/pull/6202))
+
+- `GoogleLLMService.run_inference()` now logs a warning naming Gemini's
+  `finish_reason` when a reply ends for a notable reason, as streamed responses
+  already do. Previously a one-shot inference that was withheld for safety or
+  cut off at the output token limit returned `None` or partial text with no
+  indication why, which affected features built on it such as context
+  summarization and the LLM classifier. Partial text is still returned.
+  (PR [#6205](https://github.com/pipecat-ai/pipecat/pull/6205))
+
+- `CartesiaTurnsSTTService` gives up on a connection whose `connected` message
+  doesn't arrive within 10 seconds, instead of waiting indefinitely and holding
+  back incoming audio.
+  (PR [#6210](https://github.com/pipecat-ai/pipecat/pull/6210))
+
+- `DeepgramFluxSTTService` and `CartesiaTurnsSTTService` retry a failed first
+  connection when audio arrives, instead of transcribing nothing for the rest
+  of the session. If every attempt fails, the service reports a permanent
+  error, so a `ServiceSwitcher` using `ServiceSwitcherStrategyFailover`
+  switches to its next service.
+  (PR [#6210](https://github.com/pipecat-ai/pipecat/pull/6210))
+
+- Fixed `DailyTransport` sending app messages while its signalling connection
+  to Daily is interrupted, where every send failed and an `RTVIProcessor` could
+  turn each failure into another error message until signalling reconnected.
+  The transport now logs a warning and drops app messages until signalling
+  reconnects, and a failed app message is reported once until a send succeeds.
+  (PR [#6211](https://github.com/pipecat-ai/pipecat/pull/6211))
+
+- `AWSBedrockLLMService`, `AWSPollyTTSService`, `AWSAgentCoreProcessor` and
+  `AWSTranscribeSTTService` keep working past the expiry of temporary
+  credentials from the default AWS chain (IRSA, EKS Pod Identity, ECS task
+  roles, EC2 instance profiles, SSO). They used to copy those credentials once
+  at construction and fail with expired-token errors once the copy expired; the
+  AWS session now renews them, and Transcribe signs each connection with
+  current keys.
+  (PR [#6212](https://github.com/pipecat-ai/pipecat/pull/6212))
+
+- `FishAudioTTSService` keeps audio chunks of 1024 bytes or less, which it used
+  to drop, clipping the end of utterances.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `WhisperSTTServiceMLX` accepts a runtime language change instead of raising
+  `AttributeError`.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `DeepgramSageMakerSTTService` sends list settings such as `keyterm`,
+  `keywords`, `redact`, `replace` and `search` as one query parameter per item,
+  and URL-encodes every value. Lists used to be sent as their Python
+  representation, and values with spaces, `&` or `:` broke the query string.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `SmallWebRTCTransport`'s output processor is named with `output_name`. It
+  used to take `input_name`, so both processors appeared under one name in
+  logs, metrics and observers.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `RimeTTSService.PRONOUNCE()` wraps the phoneme in curly braces, so Rime reads
+  it as a custom pronunciation instead of speaking it as text.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `InworldRealtimeLLMService` applies a runtime `temperature` update to the
+  live session. It used to be stored but never sent.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `MistralLLMService` sends `seed=0` as `random_seed`. A seed of 0 used to be
+  dropped.
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `GoogleHttpTTSService` escapes text placed inside its SSML, so `&`, `<` and
+  `>` in LLM output no longer make requests fail for voices that use SSML
+  (Neural2, Wavenet, Standard).
+  (PR [#6214](https://github.com/pipecat-ai/pipecat/pull/6214))
+
+- `OpenAIResponsesHttpLLMService` and `OpenAIResponsesLLMService` now report
+  token usage for responses that end incomplete (e.g. at the output token
+  limit) or failed, which are billed but previously reported no usage. The
+  WebSocket service also reports the actual reason from `response.error` /
+  `response.incomplete_details` instead of a generic message.
+  (PR [#6215](https://github.com/pipecat-ai/pipecat/pull/6215))
+
+- Fixed `pipecat-ai` built from a source tree without git metadata, such as a
+  GitHub "Source code" release archive, leaving out its data files: the DTMF
+  tones, the Silero VAD and Smart Turn ONNX models, the Nova Sonic `ready.wav`,
+  the flow config schema and `frames.proto`. Wheels and sdists published to
+  PyPI were not affected.
+  (PR [#6223](https://github.com/pipecat-ai/pipecat/pull/6223))
+
+- Fixed `pipecat eval suite` running a bot's later manifest entry early, right
+  after the bot's first entry. Each entry's runs now start in their place in
+  manifest order, so the live dashboard no longer jumps to the bottom of the
+  list and back.
+  (PR [#6225](https://github.com/pipecat-ai/pipecat/pull/6225))
+
+- Fixed scripted `pipecat eval` scenarios waiting out a turn's whole timeout
+  after the bot ended the call, for example when its LLM rejected the API key.
+  The turn now fails right away with the new `bot_ended` failure kind, after
+  anything the bot said last has been transcribed. An `absent:` expectation
+  passes when the bot ends the call, since the event can no longer arrive.
+  (PR [#6225](https://github.com/pipecat-ai/pipecat/pull/6225))
+
+- Fixed `RTVIObserver` sending the `bot-output` of sentences an interruption
+  cut off before their audio started together with the bot's next speech, and
+  holding a following text-only reply behind them. An interruption now drops
+  that queued text, except for uninterruptible speech, whose audio still plays.
+  (PR [#6227](https://github.com/pipecat-ai/pipecat/pull/6227))
+
+- Fixed a reply that skips TTS, such as one to text sent with `audio_response:
+  false`, never reaching clients as `bot-output`, so clients that show the
+  bot's text from `bot-output` didn't show it. The TTS service now cuts the
+  LLM's text into sentences and pushes them as unspoken output, which
+  `RTVIObserver` sends as `bot-output`, one message per sentence, with
+  `will_be_spoken: false` and `spoken_status: "new"`. Processors after the TTS
+  service get these `AggregatedTextFrame`s for such a reply instead of its
+  `LLMTextFrame`s.
+  (PR [#6227](https://github.com/pipecat-ai/pipecat/pull/6227))
+
+- Fixed `RTVIObserver` holding `bot-output` for text the TTS service left out
+  of speech until the bot next started speaking, so a text-only reply, such as
+  one from a bot with an `LLMTextProcessor`, could wait for the next spoken
+  reply or never go out. The TTS service marks the text it leaves out with
+  `skip_tts`, and the observer sends that text right away, unless text queued
+  before it is still waiting for the bot to speak. Other text, such as a
+  speech-to-speech service's transcript, still waits for the bot to start
+  speaking.
+  (PR [#6227](https://github.com/pipecat-ai/pipecat/pull/6227))
+
+- Fixed `RTVIObserver` never sending spoken `bot-output` with
+  `bot_speaking_enabled=False`, since it only followed when the bot started and
+  stopped speaking while sending those messages. `bot_speaking_enabled` now
+  only decides whether `bot-started-speaking`, `bot-stopped-speaking` and
+  `bot-interrupted` are sent.
+  (PR [#6227](https://github.com/pipecat-ai/pipecat/pull/6227))
+
+- Fixed a scripted `pipecat eval` turn whose `send_after` waits for a bot event
+  waiting its whole 30 seconds after the bot ended the call and then failing
+  with `send_after_timeout`. It now fails right away with the `bot_ended`
+  failure kind.
+  (PR [#6230](https://github.com/pipecat-ai/pipecat/pull/6230))
+
+### Performance
+
+- `AnthropicLLMService` with `enable_prompt_caching` now adds a cache
+  breakpoint to the system prompt, so tools and system instructions are cached
+  once and reused across conversations.
+  (PR [#5887](https://github.com/pipecat-ai/pipecat/pull/5887))
+
+- LLM services no longer build the context for their DEBUG log line on every
+  inference when DEBUG logging is disabled or `PIPECAT_LOG_LLM_CONTEXT` is
+  `off`.
+  (PR [#6047](https://github.com/pipecat-ai/pipecat/pull/6047))
+
+### Security
+
+- Error messages no longer carry the credentials they quote. `ErrorFrame` masks
+  any API key, token, signed URL signature, auth header or URL password in its
+  `error` as `[REDACTED]` and keeps the rest of the message, so the ERROR log
+  line, observers such as `ErrorObserver`, `on_error` handlers and RTVI error
+  messages all get the masked text. Previously, for example, a rejected Sarvam
+  STT connection logged the API key (the Sarvam SDK's error prints the request
+  headers), and a file URL the LLM couldn't fetch was logged with its
+  signature.
+  (PR [#6178](https://github.com/pipecat-ai/pipecat/pull/6178))
+
+- Services for OpenAI-compatible providers no longer send `OPENAI_API_KEY` to
+  their provider when given no `api_key`. The OpenAI client they build on falls
+  back to that variable when given no key, so an application that set it for
+  OpenAI handed its OpenAI key to the other provider, including when an
+  `api_key=os.getenv(...)` read an unset variable. Affects `BasetenLLMService`,
+  `CerebrasLLMService`, `CrusoeLLMService`, `DeepSeekLLMService`,
+  `FireworksLLMService`, `GrokLLMService`, `GroqLLMService`, `GroqSTTService`,
+  `InceptionLLMService`, `MistralLLMService`, `NebiusLLMService`,
+  `NovitaLLMService`, `NvidiaLLMService`, `OpenRouterLLMService`,
+  `PerplexityLLMService`, `QwenLLMService`, `SambaNovaLLMService`,
+  `SarvamLLMService` and `TogetherLLMService`.
+  (PR [#6193](https://github.com/pipecat-ai/pipecat/pull/6193))
+
+### Other
+
+- Added `examples/image-generation/` bots for fal, Google, and OpenAI, and a
+  `generate_image` release-eval scenario that checks each one produces an
+  image.
+  (PR [#5956](https://github.com/pipecat-ai/pipecat/pull/5956))
+
+- `TTSService` audio context playback moved into `AudioContextManager`, and
+  word timestamp tracking into `WordTimestampTracker`, both in
+  `pipecat.utils.context`.
+  (PR [#6118](https://github.com/pipecat-ai/pipecat/pull/6118))
+
+## [1.12.0] - 2026-09-25
+
+### Added
+
+- TTS sentence aggregation follows `Settings.language`, defaulting to English
+  when unspecified. Language updates apply with TTS settings.
+  (PR [#5737](https://github.com/pipecat-ai/pipecat/pull/5737))
+
+- Added `TTSService.pronunciation_transform_ipa()`, which builds a text
+  transform from a word-to-IPA mapping so a voice says names and terms it would
+  otherwise guess from spelling. Each matched word is replaced with the
+  service's `format_pronunciation()` output, so one mapping works with any
+  service that supports pronunciation hints; a word the service cannot use is
+  reported once when the transform is built and spoken as written. Cartesia
+  writes IPA as inline phoneme blocks, ElevenLabs as SSML `<phoneme>` tags
+  (read by `eleven_flash_v2` and `eleven_turbo_v2`, and on the WebSocket
+  service only with `enable_ssml_parsing=True`; on any other setup the
+  transform is skipped with a warning and words are spoken as written), Eleven
+  v3 and Inworld as IPA between slashes, and Deepgram Aura-2 as an inline
+  pronunciation object. Deepgram Flux has no pronunciation markup, so its words
+  are spoken as written. `pipecat.utils.text.phonemes` holds the IPA parsing
+  and normalization the formatters share. Register the transform last in
+  `text_transforms`, so no later transform rewrites the markup it inserts.
+
+    ```python
+    pronounce = CartesiaTTSService.pronunciation_transform_ipa({"Metformin":
+  "mɛtˈfɔɹmɪn"})
+
+    tts = CartesiaTTSService(
+        text_transforms=[
+            ("*", strip_markdown),
+            ("*", pronounce),  # last, so nothing rewrites its markup
+        ],
+    )
+    ```
+  (PR [#5798](https://github.com/pipecat-ai/pipecat/pull/5798))
+
+- Added client-mode reconnect to `MOQTransport`: when the relay session drops,
+  the transport redials with backoff for as long as
+  `MOQParams.connection_timeout` allows the client to be missing, keeps its
+  broadcast across dials, and reports the client gone only when that time is
+  up. A relay that vanishes without closing the session is detected by watching
+  the connection's traffic counters, rather than waiting out the QUIC idle
+  timeout. Each side now sends a `session-ending` marker on its transcript
+  before leaving; a peer whose tracks end without it is treated as an outage
+  rather than a hangup. `on_disconnected` and `on_connected` now fire for each
+  relay session, so a redial shows up as a disconnect followed by a connect;
+  end the call from `on_client_disconnected`, which fires only once the client
+  is gone.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- Added `MOQRunnerArguments.relay_url` for dialing a relay by its full URL,
+  query string included. `host` and `port` are optional when it is set, and
+  `create_transport` passes it through to `MOQParams.relay_url`. When `host` or
+  `port` is given as well, `relay_url` wins and a warning is logged.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- Added `interruptible` to every frame: True by default and False by default
+  for `UninterruptibleFrame` subclasses, and what the frame queue, the
+  processor's interruption handling and the speculation gate decide by. Set it
+  on a frame before pushing it to keep that one frame through an interruption,
+  or to let one frame of a protected type be dropped, without a frame class of
+  your own.
+  (PR [#5835](https://github.com/pipecat-ai/pipecat/pull/5835))
+
+- `JudgeVerdict` now has a `confidence`, from 0 to 1, saying how sure the judge
+  is. With Jev the number is calibrated. With an LLM it is the LLM's own guess.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- The eval judge can now use a classifier. Put a `factory:` in the scenario's
+  `judge.eval:` block that returns a `BaseClassifier`, or an LLM service as
+  before. Our release evals judge with Jev this way, through `evals/judges.py`.
+  Jev answers each check in a few hundred milliseconds and says how sure it is.
+  It needs the `jev` extra and `TYPESAFE_API_KEY`.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- Added `allow_continue` to a scenario's `judge.eval:` block and to
+  `EvalJudge`. Set it to `false` when every reply you judge is a final answer.
+  The judge then answers yes or no and never `continue`, so it never waits for
+  more text that isn't coming.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- Added `LLMClassifier`, which answers classifier questions with any Pipecat
+  LLM service that supports `run_inference()`. All the questions about one
+  state go to the LLM in one call, and the LLM replies with one JSON object
+  holding an answer per question. It waits `timeout` seconds for the LLM, 10 by
+  default, and raises `ClassifierError` if the LLM does not answer in time or
+  the call fails.
+
+    ```python
+    classifier = LLMClassifier(llm=OpenAILLMService(model="gpt-4o-mini"))
+    results = await classifier.yes_no(
+        "Hi, you've reached Dana. Leave a message.",
+        {"voicemail": YesNoQuestion(instructions="is this a voicemail greeting?")},
+    )
+    results["voicemail"].is_yes  # True
+    results["voicemail"].probability  # 0.97
+    ```
+  (PR [#5863](https://github.com/pipecat-ai/pipecat/pull/5863))
+
+- Classifiers report metrics through an `on_metrics` event: after every call,
+  the time it took as `ProcessingMetricsData` and, for `JevClassifier`, the
+  tokens it used as `LLMUsageMetricsData`. A classifier cannot push frames, so
+  its owner puts the data in a `MetricsFrame`.
+  (PR [#5863](https://github.com/pipecat-ai/pipecat/pull/5863))
+
+- Added Pipecat Classifiers. A classifier is a small object that answers typed
+  questions about some state. A question is a `YesNoQuestion`, a
+  `ChoiceQuestion` among options, or a `ScoreQuestion` on a scale. Questions
+  are asked by name, several about one state at once. `ask()` takes any mix of
+  kinds, and `yes_no()`, `choice()` and `score()` take questions of one kind
+  and return typed results: a `YesNoResult` with the probability of yes and
+  `is_yes`, a `ChoiceResult` with the `choice` and a probability per option,
+  and a `ScoreResult` with the `score` on the scale and a probability per
+  level. `JevClassifier` answers them through Jev, TypeSafe's classification
+  model, in one request. A choice question can have at most 255 options, Jev's
+  limit (`JEV_MAX_CHOICE_OPTIONS`). Several classifiers can share one
+  `JevClient`, which handles the HTTP/2 connection, auth, retries and token
+  accounting. Install with `uv add "pipecat-ai[jev]"`.
+  `examples/features/features-classifiers.py` asks one question of each kind.
+
+    ```python
+    classifier = JevClassifier(api_key=os.getenv("TYPESAFE_API_KEY"))
+    results = await classifier.choice(
+        "I'd like to book a table for, um",
+        {
+            "turn": ChoiceQuestion(
+                instructions="is the user's turn over?",
+                options={
+                    "complete": "the user finished",
+                    "short": "a brief pause",
+                    "long": "asked for time",
+                },
+            )
+        },
+    )
+    results["turn"].choice  # "short"
+    ```
+  (PR [#5863](https://github.com/pipecat-ai/pipecat/pull/5863))
+
+- Added a read-only `settings` property to `AIService`, so code outside a
+  service can read its current settings, such as the model. Settings are still
+  changed through a `ServiceUpdateSettingsFrame`.
+  (PR [#5863](https://github.com/pipecat-ai/pipecat/pull/5863))
+
+- Added an optional `response_schema` argument to `LLMService.run_inference()`,
+  a JSON schema the reply must follow. OpenAI, Anthropic and Google have the
+  provider enforce it, so the reply is JSON text in that shape. A service or
+  model that cannot enforce one, such as Bedrock, DeepSeek or an OpenAI model
+  before gpt-4o-mini, ignores it with a warning, and `supports_response_schema`
+  says whether a service can at all.
+
+    ```python
+    reply = await llm.run_inference(context, response_schema=schema)
+    ```
+  (PR [#5876](https://github.com/pipecat-ai/pipecat/pull/5876))
+
+- Added `LLMUserAggregatorParams.empty_user_turn`, an `EmptyUserTurnConfig` for
+  user turns that end with no transcript, such as a cough, background noise, or
+  speech the STT could not recognize. It is on by default, even when
+  `empty_user_turn` isn't passed, and treats two cases differently:
+
+    - Interrupted: the turn cut the bot off. The bot would otherwise stay silent
+      mid-response, so the aggregator appends a developer message
+      (`interrupted_prompt`) and runs the LLM once, and the bot asks the user to
+      repeat or picks up where it left off. On by default.
+    - Idle: the bot had finished and was waiting for the user. The conversation
+      isn't stuck, and answering what may be noise would be intrusive, so these
+      turns get no answer unless `idle_prompt` is set.
+
+    ```python
+    LLMUserAggregatorParams(
+        empty_user_turn=EmptyUserTurnConfig(
+            idle_prompt=(
+                "The user may have said something, but it was not "
+                "recognized. Briefly ask them to repeat it."
+            ),
+        ),
+    )
+    ```
+
+  Setting `interrupted_prompt=None` turns off the interrupted case, and
+  `empty_user_turn=None` turns off both. `max_consecutive_recoveries` (default
+  1) limits how many empty turns in a row get an answer.
+  (PR [#5907](https://github.com/pipecat-ai/pipecat/pull/5907))
+
+- `UIWorker` can now use a classifier for small decisions about the screen,
+  with no LLM turn: which element the user means (`which_element`), whether
+  something is true on the screen (`check_screen`), which elements match a
+  description (`select_elements`), whether a UI event deserves a reply
+  (`should_respond`), and `act` on an element named in words. Pass a
+  `classifier`, for example a `JevClassifier`. If you don't, the worker's own
+  LLM answers through an `LLMClassifier`, which works but is slower.
+
+    ```python
+    worker = MyUIWorker("ui", llm=OpenAILLMService(api_key=...),
+  classifier=JevClassifier(api_key=...))
+    ref = await worker.which_element("the checkout button")
+    ```
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- A voice LLM can now ask a `UIWorker` about the screen without ever seeing it.
+  The worker has a built-in `screen` job with an `action`: `find` (which
+  element a description means), `check` (whether something is true on the
+  screen), `select` (which elements match a description), `list` (what is on
+  the screen), `selection` (the text the user has selected) and `click`,
+  `scroll_to`, `highlight`, `select_text` or `fill` (do that to the element a
+  description means). Every answer is short data, never the page.
+  `screen_tools("ui")` gives the voice LLM the tool that sends it.
+
+    ```python
+    context = LLMContext(tools=screen_tools("ui"))
+    ```
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- `UIWorker` now has a `snapshot` property with the latest page snapshot and a
+  `selection` property with the text the user has selected, so a subclass can
+  read the screen with plain code.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- Added `RTVIFunctionCallReportLevel.ARGUMENTS`, between `NAME` and `FULL`. It
+  reports the function name and the arguments, and no result.
+  (PR [#5918](https://github.com/pipecat-ai/pipecat/pull/5918))
+
+### Changed
+
+- `InworldRealtimeLLMService` now sends
+  `providerData.auto_tool_response=false`, leaving Pipecat responsible for
+  requesting continuation after submitting a tool result.
+  - `InworldRealtimeLLMService` now generates a unique session key for every
+  connection, including connections opened within the same millisecond.
+  (PR [#5116](https://github.com/pipecat-ai/pipecat/pull/5116))
+
+- Sentence aggregation uses self-contained sentencex rules without NLTK data
+  downloads or tokenizer warm-up. Language-specific sentence boundaries may
+  differ from Punkt.
+  (PR [#5737](https://github.com/pipecat-ai/pipecat/pull/5737))
+
+- `MOQTransport` numbers every transcript record with `seq` and `epoch` and
+  drops replayed records on subscribe, so a reconnect on either side no longer
+  redelivers the whole RTVI log and re-fires `client-ready`. Both fields are
+  stripped before the message reaches the pipeline; records without them pass
+  through unchanged, so older peers keep working.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- `MOQTransport` failures now reach the pipeline as an `ErrorFrame` with an
+  error category, in addition to the `on_error` event. A relay that refuses the
+  token, at the dial or by closing the session as unauthorized, is not retried
+  and marks the transport unusable, as does a relay that cannot be reached
+  within `connection_timeout`.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- The `moq` extra requires `moq-rs` 0.4.6 or later. `moq-rs` is the client
+  library `MOQTransport` dials a relay with; `moq-relay` is the separate
+  server. The transport is tested against `moq-relay` 0.14. A relay from an
+  incompatible release line can accept the connection and still drop the
+  transcript track without an error.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- `MOQParams.connection_timeout` is now the one limit on how long the client
+  may be missing, and defaults to 60 s (was 30 s). It bounds the wait for the
+  client to join and, in client mode, an outage: the time from the relay
+  session dropping until the client's data flows again, across every redial.
+  Set it longer than the time your load balancer takes to fail a dead relay
+  out.
+  (PR [#5800](https://github.com/pipecat-ai/pipecat/pull/5800))
+
+- `XAISTTService` now sends its `model` setting to xAI, and defaults to
+  `grok-voice-transcribe-2.0`. Previously no model was sent, so xAI used its
+  server default, `grok-voice-transcribe-1.0`. To keep the previous model, pass
+  `settings=XAISTTService.Settings(model="grok-voice-transcribe-1.0")`.
+  (PR [#5847](https://github.com/pipecat-ai/pipecat/pull/5847))
+
+- The `local-smart-turn` and `moondream` extras now require
+  `transformers>=5.10.0`. The `moondream` extra's `accelerate`, `einops`,
+  `pyvips` and `timm` pins are relaxed to a lower bound with a major-version
+  cap.
+  (PR [#5850](https://github.com/pipecat-ai/pipecat/pull/5850))
+
+- `EvalJudge` now decides every verdict with a classifier. By default that is
+  an `LLMClassifier` over the LLM the `judge.eval:` block names, so existing
+  scenarios work as before. A classifier gives no reasons, so the judge asks an
+  LLM, the explainer, for the reason behind every `no` and every verdict below
+  `explain_below`. The explainer is the judging LLM unless an `explainer:`
+  block names another one, and `explainer: false` turns reasons off. The
+  classifier's verdict always stands.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- `pipecat eval suite` now keeps `concurrency` runs going at all times, taking
+  the next run in manifest order. Before, each entry ran its scenarios one at a
+  time on one slot, so a manifest with fewer entries than slots left slots
+  idle, and one entry with ten scenarios ran them one by one. An entry whose
+  provider rate-limits sets its own `concurrency:` to cap its runs in flight,
+  as the turn-completion manifest does.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- The `mcp` extra now requires `mcp` 2 (`mcp[cli]>=2.1.1,<3`). `MCPClient`
+  works the same; it no longer runs on the 1.x SDK.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- An LLM judge now classifies instead of answering a prose prompt: it gets the
+  conversation as structured state and picks one of the outcomes. A borderline
+  reply can get a different verdict than before. A simulation is judged one bot
+  turn per call instead of the whole run in one call, so it costs more calls.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- `VoicemailDetector` now takes a `classifier` and is a single processor
+  instead of a parallel pipeline with its own LLM. It asks the classifier after
+  each transcription and acts once the caller has been quiet for
+  `decision_timeout` (default 1 s), when the latest answer decides. No verdict
+  acts on a fragment: "hi, this is Sam" is what a person says and how a
+  greeting starts, and only the silence that follows tells them apart. Then the
+  held-back speech is released or dropped as before. The
+  `on_voicemail_detected` and `on_conversation_detected` handlers receive the
+  detector itself.
+
+    ```python
+    # Before
+    detector = VoicemailDetector(llm=OpenAILLMService(api_key=...))
+
+    # After
+    detector = VoicemailDetector(classifier=JevClassifier(api_key=...))
+    ```
+  (PR [#5869](https://github.com/pipecat-ai/pipecat/pull/5869))
+
+- Observers created with `observe_every_push=False` are told about a frame
+  once, on its first push, instead of on every push by every processor that
+  passes it along. The built-in observers that handle a frame once do so, and
+  `FramePushed.first_push` tells the first push from the ones that follow for
+  the ones that observe every push.
+  (PR [#5908](https://github.com/pipecat-ai/pipecat/pull/5908))
+
+- A `UIWorker` now answers a `respond` job with the reply its LLM writes, so
+  the smallest UI worker is a `UIWorker` with an LLM and a system prompt. A
+  `@tool` that calls `respond_to_job` still answers instead when it needs to,
+  for example to speak the answer through TTS.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- `UI_SNAPSHOT_EVENT_NAME` and `UI_CANCEL_JOB_GROUP_EVENT_NAME` are now public
+  in `pipecat.bus.ui`. They are the bus event names of the client's screen
+  snapshot and of the client asking to cancel a job group.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+### Deprecated
+
+- Deprecated `UninterruptibleFrame`. A frame class that should be
+  uninterruptible by default declares `interruptible: bool =
+  field(default=False, init=False)` instead. The marker still sets the flag
+  until it is removed in 2.0.0.
+  (PR [#5835](https://github.com/pipecat-ai/pipecat/pull/5835))
+
+- Passing an LLM service to `EvalJudge`, as the first argument or as
+  `service=`, is deprecated and will be removed in 2.0.0. Pass
+  `EvalJudge(LLMClassifier(llm=service), explainer=service)` instead, which is
+  what the old form did.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- Deprecated the startup warming timings reported by `StartupTimingObserver`,
+  all removed in 2.0.0: the `StartupTimingReport.warmup` field,
+  `StartupWarmupTiming`, `StartupWarmup`, and the `on_startup_warmup()` hook on
+  `BaseObserver`, `WorkerObserver` and `StartupTimingObserver`. Pipecat warms
+  no deferred imports while the pipeline sets up, so `warmup` is always `None`
+  and the hook is never called. The rest of the report — the phase totals and
+  the per-processor timings — is unchanged.
+  (PR [#5859](https://github.com/pipecat-ai/pipecat/pull/5859))
+
+- `VoicemailDetector`'s `llm` and `custom_system_prompt` parameters are
+  deprecated. Pass a `classifier` instead. Until removal, the `llm` is wrapped
+  in an `LLMClassifier`, with the custom prompt in front of the classifier's
+  instructions.
+  (PR [#5869](https://github.com/pipecat-ai/pipecat/pull/5869))
+
+- The `max_frames` parameters of `TurnTrackingObserver` and
+  `UserBotLatencyObserver` are now deprecated, removed in 2.0.0. Observers no
+  longer keep a window of the frames they have seen.
+  (PR [#5908](https://github.com/pipecat-ai/pipecat/pull/5908))
+
+- `tts_speak` on `UIWorker.respond_to_job` is deprecated and will be removed in
+  2.0.0. A UI worker should not speak; respond with the answer and let the
+  voice LLM say it.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- `BaseUIWorker` is deprecated and will be removed in 2.0.0. Use `UIWorker`
+  instead. `UIWorker` now reports its job groups to the client on its own, so
+  instead of a separate `BaseUIWorker` dispatcher, dispatch job groups from a
+  `@job` handler in your `UIWorker`.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+- `ReplyToolMixin` is deprecated and will be removed in 2.0.0. Use
+  `screen_tools` instead: the voice LLM asks the UI worker through the `screen`
+  job and says the answer itself.
+  (PR [#5909](https://github.com/pipecat-ai/pipecat/pull/5909))
+
+### Removed
+
+- Removed `NotifierGate`, `ClassifierGate`, `ConversationGate` and
+  `ClassificationProcessor` from
+  `pipecat.extensions.voicemail.voicemail_detector`, and the
+  `CLASSIFIER_RESPONSE_INSTRUCTION` and `DEFAULT_SYSTEM_PROMPT` attributes of
+  `VoicemailDetector`. They were parts of the old parallel-pipeline detector
+  and its prompt.
+  (PR [#5869](https://github.com/pipecat-ai/pipecat/pull/5869))
+
+### Fixed
+
+- Fixed an `LLMService` regression where re-advertising a tool with the same
+  name but a different handler (for example, a per-node handler in Pipecat
+  Flows) silently kept the previous handler bound. Auto-registered handlers are
+  now rebound when the advertised handler changes, while explicit
+  `register_function` registrations are still left untouched.  (PR
+  [#4823](https://github.com/pipecat-ai/pipecat/pull/4823))
+
+- Fixed `InworldRealtimeLLMService` resending a server-VAD user transcript
+  after a fast tool result context update, which duplicated user turns and
+  responses.
+  (PR [#5116](https://github.com/pipecat-ai/pipecat/pull/5116))
+
+- `InworldRealtimeLLMService` now serializes Inworld extensions under
+  `providerData` instead of `provider_data`, allowing the server to apply them.
+  (PR [#5116](https://github.com/pipecat-ai/pipecat/pull/5116))
+
+- Applied NVIDIA STT settings changes to the running stream. `NvidiaSTTService`
+  rebuilt its recognition config on a settings update but never reconnected, so
+  the open gRPC stream kept transcribing with the previous settings while
+  `self._settings` reported the new ones.
+  (PR [#5632](https://github.com/pipecat-ai/pipecat/pull/5632))
+
+- Fixed Flows node transitions where an interruption could leave the LLM
+  running with the previous node's context and tools. The
+  `LLMMessagesAppendFrame` or `LLMMessagesUpdateFrame` and the
+  `LLMSetToolsFrame` a transition queues are now uninterruptible, so they are
+  still delivered.
+  (PR [#5837](https://github.com/pipecat-ai/pipecat/pull/5837))
+
+- `TelnyxFrameSerializer` now sends `OutputTransportMessageFrame` and
+  `OutputTransportMessageUrgentFrame` to the client as JSON, matching the other
+  telephony serializers. Previously these messages (including RTVI messages)
+  were silently dropped.
+  (PR [#5841](https://github.com/pipecat-ai/pipecat/pull/5841))
+
+- Fixed the eval harness treating the bot's earlier speech as its reply when a
+  scenario interrupts the bot. Speech from before the interruption is now
+  dropped.
+  (PR [#5846](https://github.com/pipecat-ai/pipecat/pull/5846))
+
+- Fixed `MoondreamService` with transformers 5: loading the model on a GPU or
+  Apple Silicon failed with `AttributeError: 'HfMoondream' object has no
+  attribute 'all_tied_weights_keys'`, and a model that did load produced
+  garbage descriptions.
+  (PR [#5856](https://github.com/pipecat-ai/pipecat/pull/5856))
+
+- Fixed a bridged `PipelineWorker` reporting every frame from its LLM twice
+  over RTVI, once in its own pipeline and once when the frame crossed the
+  bridge, which doubled every word of a bridged worker's reply in the client's
+  LLM text and in the evals. `enable_rtvi` now defaults to off for a bridged
+  pipeline worker, which has no client of its own; `LLMWorker` already did
+  this. Pass `enable_rtvi=True` to keep it.
+  (PR [#5857](https://github.com/pipecat-ai/pipecat/pull/5857))
+
+- Fixed TTS word tracking falling out of step on markdown-heavy replies. Most
+  word-timestamp events were dropped with "Dropping word ... not recognised by
+  any slot" warnings, and the rest of the reply arrived in large chunks, so
+  word highlighting stalled and then jumped ahead. Two token shapes triggered
+  it: the period Cartesia adds to the last token of a line (`images:.`,
+  `---.`), and a symbol a provider reports differently from the text
+  (ElevenLabs reports `→` as `-`) followed by more symbols such as `###` or
+  `**`.
+  (PR [#5866](https://github.com/pipecat-ai/pipecat/pull/5866))
+
+- Fixed `WorkerRunner` skipping a worker that another worker added while the
+  runner was still starting, for example a child worker added by a processor
+  during its setup.
+  (PR [#5872](https://github.com/pipecat-ai/pipecat/pull/5872))
+
+- Fixed `pcm_to_wav()` dropping complete samples when given a typed
+  `memoryview`.
+  (PR [#5879](https://github.com/pipecat-ai/pipecat/pull/5879))
+
+- Fixed `is_silence()` misclassifying full-scale negative int16 PCM samples as
+  silence.
+  (PR [#5881](https://github.com/pipecat-ai/pipecat/pull/5881))
+
+- Fixed `MOQTransport` ending the call when a relay refused a subscription to
+  the peer's broadcast with `dropped`, which a surviving relay in a mesh does
+  while it still holds a route through a relay that went away. The refusal is
+  now treated as the peer's tracks ending, so the transport retries and redials
+  as it does for any other relay loss.
+  (PR [#5892](https://github.com/pipecat-ai/pipecat/pull/5892))
+
+- Fixed `RTVIObserver` remembering the IDs of frames it does not handle, such
+  as every audio frame. Its memory still grows with the frames it handles, but
+  much more slowly.
+  (PR [#5906](https://github.com/pipecat-ai/pipecat/pull/5906))
+
+- Fixed `on_user_turn_idle` never firing after a user turn that ended with no
+  transcript, since that turn cancelled the idle timer and nothing restarted
+  it.
+  (PR [#5907](https://github.com/pipecat-ai/pipecat/pull/5907))
+
+- Fixed observers keeping the IDs of every frame they had seen for the life of
+  the session, the pipeline worker's idle detection included.
+  (PR [#5908](https://github.com/pipecat-ai/pipecat/pull/5908))
+
+- The `runner` extra now requires `pipecat-ai-prebuilt>=1.2.2`. The
+  conversation panel in the prebuilt client UI served by the development runner
+  now keeps autoscrolling while long bot replies stream in.
+  (PR [#5917](https://github.com/pipecat-ai/pipecat/pull/5917))
+
+### Performance
+
+- `RTVIObserver` now skips audio frames before checking anything else when
+  audio levels are not reported, instead of testing every condition on every
+  push.
+  (PR [#5906](https://github.com/pipecat-ai/pipecat/pull/5906))
+
+## [1.11.0] - 2026-09-17
+
+### Added
+
+- Added `BaseAudioResampler.flush()` and `BaseAudioResampler.reset()`, so
+  callers can mark stream boundaries themselves rather than relying on
+  `SOXRStreamAudioResampler`'s inactivity timeout. `flush()` returns the audio
+  the resampler is still holding, for a stream that has ended; `reset()`
+  discards it, for one that was abandoned. Both default to no-ops for
+  resamplers that keep no state between calls.
+  (PR [#5386](https://github.com/pipecat-ai/pipecat/pull/5386))
+
+- Scripted eval expectations on `function_call` accept an `eval:`: each matched
+  call is judged by name and arguments, under a judge prompt of its own, so a
+  scenario can check what `args:` cannot match verbatim ("a session about
+  OpenTelemetry tracing, submitted for Jennifer Smith"). A rejected call fails
+  the turn with kind `judge_no`. `EvalJudge` gains `evaluate_call()`.
+  (PR [#5713](https://github.com/pipecat-ai/pipecat/pull/5713))
+
+- `AWSTranscribeSTTService.Settings` gained `partial_results_stability`, which
+  selects AWS Transcribe's `"high"`, `"medium"` or `"low"` interim-result
+  stability. It still defaults to `"high"`.
+  (PR [#5743](https://github.com/pipecat-ai/pipecat/pull/5743))
+
+- Added an `effect` setting to `AzureTTSService` and `AzureHttpTTSService`,
+  which passes Azure's `<voice effect>` audio effect processor (`eq_car`,
+  `eq_telecomhp8k`) through to the synthesis request.
+  (PR [#5744](https://github.com/pipecat-ai/pipecat/pull/5744))
+
+- Added a `reasoning_effort` field to `GroqLLMService.Settings`, which passes
+  Groq's reasoning effort control through to the completion request. Accepted
+  values vary by model: `"low"`, `"medium"` and `"high"` on the GPT-OSS models
+  and `qwen/qwen3.8-27b`, `"none"` and `"default"` on the Qwen models. Setting
+  `"none"` also keeps a Qwen model's `<think>` reasoning out of the spoken
+  response.
+  (PR [#5748](https://github.com/pipecat-ai/pipecat/pull/5748))
+
+- Added a `delay` field to `OpenAIRealtimeSTTService.Settings`, OpenAI's
+  latency-versus-accuracy control for how long the model waits before emitting
+  transcription text (`minimal`, `low`, `medium`, `high`, `xhigh`). Supported
+  by `gpt-realtime-whisper`.
+  (PR [#5750](https://github.com/pipecat-ai/pipecat/pull/5750))
+
+- Added a `keywords` field to `OpenAISTTService.Settings`, which passes product
+  names, acronyms and other specialized terms to OpenAI's transcription request
+  as hints. Supported by `gpt-transcribe`.
+  (PR [#5750](https://github.com/pipecat-ai/pipecat/pull/5750))
+
+- Added `math_notation` to `SmallestTTSService.Settings`, Smallest's opt-in
+  flag for reading digit-flanked math operators as words (`2 + 2` as "two plus
+  two").
+  (PR [#5751](https://github.com/pipecat-ai/pipecat/pull/5751))
+
+- Added an `initial_prompt` field to `WhisperSTTService.Settings`, which gives
+  Faster Whisper preceding context for each segment, steering the transcript's
+  style, punctuation and spelling.
+  (PR [#5755](https://github.com/pipecat-ai/pipecat/pull/5755))
+
+- `SarvamRealtimeSTTService` now accepts Sarvam's second-generation realtime
+  model, `saaras:v4`, via
+  `settings=SarvamRealtimeSTTService.Settings(model="saaras:v4")`.  The default
+  remains `saaras:v3-realtime`.
+  (PR [#5758](https://github.com/pipecat-ai/pipecat/pull/5758))
+
+- Added video output to `LiveKitTransport`. With `video_out_enabled`, the
+  transport publishes a camera track from `RGB`, `RGBA`, `BGRA` or `ARGB`
+  frames. `video_out_codec` selects the codec, and the new
+  `LiveKitParams.video_out_max_bitrate` caps the bitrate together with
+  `video_out_framerate`.
+  (PR [#5770](https://github.com/pipecat-ai/pipecat/pull/5770))
+
+- Added a `bot-llm-marker` RTVI message that `RTVIObserver` sends when its new
+  `bot_llm_marker_enabled` parameter is on (off by default), reporting the
+  turn-completion marker the bot's LLM produced and what it meant: `complete`,
+  `short` or `long`.
+  (PR [#5777](https://github.com/pipecat-ai/pipecat/pull/5777))
+
+- Scripted eval scenarios can assert on the turn-completion marker the bot's
+  LLM produced with a new `llm_marker` event and a `marker:` field naming its
+  meaning: `complete`, `short`, `long`, or `incomplete` for either of the last
+  two. The bot reports its markers only when a scenario asks for them, so
+  clients never see them by default.
+
+    ```yaml
+    - user: "Let me think about it, hmmm"
+      expect:
+        - event: llm_marker
+          marker: incomplete
+    ```
+  (PR [#5777](https://github.com/pipecat-ai/pipecat/pull/5777))
+
+- A scenario file lists its scenarios under `scenarios:`, so one file can hold
+  many short cases of the same behavior. Any key a scenario can have may sit at
+  the top of the file as the default for all of them, and a scenario that sets
+  the same key replaces it whole. `turns:` at the top with one entry per judge
+  or modality runs the same conversation under each; `persona:` at the top with
+  a `goal:` per entry sends the same caller on different errands. Scripted and
+  simulated scenarios can share a file. Each scenario runs on its own, against
+  its own bot, and is named `<file>/<scenario>`; the suite's `-s` filter
+  accepts that name or either half of it. `EvalScenarioFile.load()` reads a
+  file and holds every scenario in it.
+
+    ```yaml
+    name: turn_completion
+    judge: !include ../judge_text.yaml
+
+    scenarios:
+      - name: short_answer
+        turns:
+          - user: "Japan."
+            expect:
+              - event: response
+      - name: cutoff
+        turns:
+          - user: "I'd go to Japan because"
+            expect:
+              - event: response
+                absent: true
+                within_ms: 3000
+    ```
+  (PR [#5780](https://github.com/pipecat-ai/pipecat/pull/5780))
+
+- `GeminiLiveLLMService` supports `gemini-3.8-live` and
+  `gemini-3.8-live-extended-thinking`, including `NON_BLOCKING` function
+  calling (the family's default). Synchronous tools are declared `BLOCKING` on
+  `gemini-3.8-live`; `gemini-3.8-live-extended-thinking` accepts only
+  `NON_BLOCKING` and logs a warning for them. The thinking model requires a
+  `thinking_level` and gets `LOW` when none is configured.
+  (PR [#5781](https://github.com/pipecat-ai/pipecat/pull/5781))
+
+- `GeminiLiveLLMService` holds the bot turn open while Gemini reports
+  `interaction_status: IN_PROGRESS`, so a reply that spans several
+  `turn_complete` messages is recorded as a single assistant turn. Requires
+  `google-genai>=2.19.0` (now the `google` extra's floor); older SDKs log a
+  warning.
+  (PR [#5781](https://github.com/pipecat-ai/pipecat/pull/5781))
+
+- Added `name:` to a manifest entry, its label in the display, the `-p` filter,
+  `results.jsonl` (a new `name` field beside `bot`) and the artifact file
+  names, which carry the bot path and then the name. It defaults to the `bot:`
+  path, for entries that share a bot and differ only in their `runner_body:`.
+  Two entries may no longer run the same scenario under one label.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- Added `concurrency:` to a manifest entry, capping how many runs of that bot
+  execute at once under the suite's own concurrency, for providers that
+  rate-limit concurrent connections.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- Added `text_excludes:` to a scripted scenario's expectations, the mirror of
+  `text_contains`: the event's text must not hold the given substring, for a
+  marker the LLM let slip into its reply. It fails with kind `text_present`.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- Added `data:` to a manifest entry's `runner_body:`, the bot's runner-args
+  body written inline as a mapping; the suite writes it to a file and passes it
+  as `--runner-body`. The runner reads a body file as YAML, so it may be YAML
+  or JSON.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- Added `EvalScriptTurnResult.expectations`, one `EvalExpectationResult` per
+  expectation the turn resolved, with whether it passed and what it matched
+  (the marker of an `llm_marker`, a function call's signature, a reply's text).
+  The suite's `results.jsonl` records carry it too.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- Added `LLMMarkerResponseFrame`, pushed by `UserTurnCompletionLLMServiceMixin`
+  when a response ends with the raw text the LLM produced, the marker it read
+  and the markers it recognizes. The RTVI observer sends it as `bot-llm-marker`
+  when `bot_llm_marker_enabled` is on, so the eval harness's `llm_marker` event
+  now carries `raw` and `markers`, and a scripted scenario can check the marker
+  protocol with `marker_first`, `markers` and `text_after` on an `llm_marker`
+  expectation.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+- `AssemblyAISTTService`'s `language_codes` steering now accepts Urdu,
+  Russian, Korean, Catalan, Galician, Romanian, Estonian, Persian, Cantonese,
+  Afrikaans, Marathi, Zulu, Xhosa, and Norwegian Nynorsk, matching the full
+  set `universal-3-5-pro` and `universal-3-6-pro` support.
+  (PR [#5808](https://github.com/pipecat-ai/pipecat/pull/5808))
+
+- Added `speed` to the eval harness's `speech:` block, Kokoro's rate
+  multiplier, so a scenario can make the synthesized user talk faster or
+  slower. Cached user audio is keyed by the speed too.
+  (PR [#5813](https://github.com/pipecat-ai/pipecat/pull/5813))
+
+### Changed
+
+- `BasetenLLMService` defaults to `zai-org/GLM-5.3`. Set
+  `settings=BasetenLLMService.Settings(model=...)` to use a different model.
+  (PR [#5730](https://github.com/pipecat-ai/pipecat/pull/5730))
+
+- `DeepgramFluxSTTService` now documents its default `url` as Deepgram's Flux
+  endpoint, `wss://api.deepgram.com/v2/listen`.
+  (PR [#5739](https://github.com/pipecat-ai/pipecat/pull/5739))
+
+- `DeepSeekLLMService` defaults to `deepseek-flash`, DeepSeek's current name for
+  V4.1 Flash. The previous default, `deepseek-v4-flash`, names a retired model
+  and is only temporarily routed to V4.1 Flash. Set
+  `settings=DeepSeekLLMService.Settings(model=...)` to use a different model.
+  (PR [#5746](https://github.com/pipecat-ai/pipecat/pull/5746))
+
+- Added a `mode` field to the OpenAI Responses `ReasoningConfig`, selecting the
+  `standard` or `pro` reasoning mode on models that offer one, such as gpt-5.6.
+  (PR [#5749](https://github.com/pipecat-ai/pipecat/pull/5749))
+
+- `SonioxTTSService` settings now include `client_reference_id`, the identifier
+  Soniox records with each request in its usage logs, matching the field
+  `SonioxSTTService` already exposes.
+  (PR [#5752](https://github.com/pipecat-ai/pipecat/pull/5752))
+
+- Added `max_session_duration` to `LiveAvatarNewSessionRequest`, capping a
+  HeyGen LiveAvatar session at a given number of seconds.
+  (PR [#5753](https://github.com/pipecat-ai/pipecat/pull/5753))
+
+- `InworldRealtimeLLMService` docstrings now use `openai/gpt-4.1-mini` in their
+  examples instead of `openai/gpt-4.1-nano`, which OpenAI shuts down on
+  2026-10-23.
+  (PR [#5754](https://github.com/pipecat-ai/pipecat/pull/5754))
+
+- `RimeHttpTTSService` now sends `noTextNormalization` to Rime, so the setting
+  takes effect on Mist requests.
+  (PR [#5756](https://github.com/pipecat-ai/pipecat/pull/5756))
+
+- `SarvamLLMService` accepts `deepseekv4-flash`, the DeepSeek V4 Flash model
+  Sarvam serves on `/v2` with a 1M-token context window, tool calling, and
+  reasoning.
+  (PR [#5757](https://github.com/pipecat-ai/pipecat/pull/5757))
+
+- `pipecat init` React clients (Vite and Next.js) now use [Pipecat
+  UI](https://ui.pipecat.ai) instead of `@pipecat-ai/voice-ui-kit`. The
+  generated client renders the Pipecat UI console: connect flow, transcript,
+  metrics, device and session info, and a live event stream. Components are
+  installed as source under `src/components/pipecat`, and `components.json`
+  points at the `@pipecat` registry, so `npx shadcn@latest add
+  @pipecat/<component>` adds more. The vanilla JavaScript client is restyled to
+  match.
+  (PR [#5767](https://github.com/pipecat-ai/pipecat/pull/5767))
+
+- `pipecat eval suite` now takes its queue round-robin across the manifest's
+  entries within each attempt, so a slow or rate-limited provider holds only
+  its share of the concurrency instead of every slot until its scenarios are
+  done.
+  (PR [#5768](https://github.com/pipecat-ai/pipecat/pull/5768))
+
+- Rewrote the default instructions that `filter_incomplete_user_turns` appends
+  to the system prompt, so weaker models follow the ●/◐/○ marker protocol more
+  reliably. Short answers such as "yes" or "Tuesday" are now called out as
+  complete, a mid-sentence fragment is explicitly not a request for help, a
+  continuation is judged together with the fragment before it, and the examples
+  are prose rather than arrows or a transcript, since small models reproduce
+  whatever shape they are shown. Bots that set
+  `UserTurnCompletionConfig.instructions` are unaffected.
+  (PR [#5768](https://github.com/pipecat-ai/pipecat/pull/5768))
+
+- `SpeechmaticsSTTService` now defaults `turn_detection_mode` to
+  `TurnDetectionMode.EXTERNAL`, so Pipecat's own VAD drives turn boundaries
+  through `finalize()`. Set
+  `settings=SpeechmaticsSTTService.Settings(turn_detection_mode=TurnDetectionMode.VAD)`
+  to keep letting the Speechmatics service run its own VAD and close turns
+  itself.
+  (PR [#5773](https://github.com/pipecat-ai/pipecat/pull/5773))
+
+- The `runner` extra now requires `pipecat-ai-prebuilt>=1.1.1`. The prebuilt
+  client UI served by the development runner moves to `@pipecat-ai/client-js`
+  1.13.1, `@pipecat-ai/daily-transport` 1.6.9,
+  `@pipecat-ai/small-webrtc-transport` 1.10.8, and
+  `@pipecat-ai/websocket-transport` 1.7.2.
+  (PR [#5776](https://github.com/pipecat-ai/pipecat/pull/5776))
+
+- The `runner` extra now requires `pipecat-ai-prebuilt>=1.2.1`. The prebuilt
+  client UI served by the development runner is built with [Pipecat
+  UI](https://ui.pipecat.ai) instead of `@pipecat-ai/voice-ui-kit`, shows the
+  bot video pane in the console, and follows the system light/dark theme on
+  load.
+  (PR [#5799](https://github.com/pipecat-ai/pipecat/pull/5799))
+
+- The `sagemaker` and `aws-nova-sonic` extras now require
+  `aws_sdk_sagemaker_runtime_http2>=0.6.0,<0.10` and
+  `aws_sdk_bedrock_runtime>=0.6.0,<0.10`. The two SDKs share `smithy-core`, so
+  they move together.
+  (PR [#5807](https://github.com/pipecat-ai/pipecat/pull/5807))
+
+- Async function calls (`cancel_on_interruption=False`) now keep settling as
+  ordinary tool results when only assistant output lands in the context while
+  they run, such as filler a tool handler speaks with `TTSSpeakFrame`.
+  Previously that filler turned the result into a deferred-result message,
+  while the same filler spoken from `on_function_calls_started` did not. The
+  result is still deferred when a user or developer message arrives first, or
+  when the call sent an intermediate update.
+  (PR [#5820](https://github.com/pipecat-ai/pipecat/pull/5820))
+
+- `resolve_language(..., use_base_code=True)` now resolves a regional variant
+  missing from the map to the map's code for its base language when the map has
+  one (`en-US` becomes `"eng"` for a map with `Language.EN: "eng"`), falling
+  back to the base code (`"en"`) otherwise. This changes the code sent for
+  unmapped regional variants by Meta STT, Pocket TTS, Rime TTS, Camb TTS,
+  Kokoro TTS, XTTS, Neuphonic TTS, and xAI TTS; for example, Rime sends `"ara"`
+  for `Language.AR_AE` instead of `"ar"`.
+  (PR [#5824](https://github.com/pipecat-ai/pipecat/pull/5824))
+
+- `pipecat eval suite` runs each manifest entry's scenarios back to back on one
+  concurrency slot, so an entry's next scenario starts as soon as its previous
+  one ends and a slow provider holds no more than one slot. A repeated sweep is
+  attempt-major, every entry's first attempt before any entry's second. An
+  entry's `concurrency:` now means how many slots it may hold at once, one by
+  default.
+  (PR [#5825](https://github.com/pipecat-ai/pipecat/pull/5825))
+
+### Deprecated
+
+- Deprecated `EvalSimulationDriver.transcript()`. No replacement: the driver
+  feeds the judge as the conversation happens. Will be removed in 2.0.0.
+  (PR [#5765](https://github.com/pipecat-ai/pipecat/pull/5765))
+
+- Deprecated the `transcript` parameter of `EvalJudge.evaluate_run()`. The
+  judge keeps the conversation it judges: feed it with `add_user_message`,
+  `add_assistant_message` and the new `add_tool_call`, and call
+  `evaluate_run(criteria, success)`. Will be removed in 2.0.0.
+  (PR [#5765](https://github.com/pipecat-ai/pipecat/pull/5765))
+
+- `EvalScriptScenario.load()` and `EvalSimulationScenario.load()` are
+  deprecated and will be removed in 2.0.0. Use `EvalScenarioFile.load()`, which
+  reads a scenario file of either kind.
+  (PR [#5780](https://github.com/pipecat-ai/pipecat/pull/5780))
+
+- `load_scenario_file()` is deprecated and will be removed in 2.0.0. Use
+  `EvalScenarioFile.load()`, which reads a file and holds every scenario in it.
+  (PR [#5780](https://github.com/pipecat-ai/pipecat/pull/5780))
+
+- A scenario file whose top level holds `turns:` or `persona:` instead of a
+  `scenarios:` list is deprecated and will stop loading in 2.0.0. It still
+  loads as one scenario under the file's name, with a `DeprecationWarning`.
+  Wrap the scenario in a `scenarios:` list with its own `name:`.
+  (PR [#5780](https://github.com/pipecat-ai/pipecat/pull/5780))
+
+- Deprecated a manifest entry's bare `runner_body: <file>`. Use `runner_body:
+  {path: <file>}` instead. Will be removed in 2.0.0.
+  (PR [#5786](https://github.com/pipecat-ai/pipecat/pull/5786))
+
+### Fixed
+
+- Fixed the output transport dropping speech whenever TTS pauses for more than
+  200 ms between chunks. This only affected pipelines where the TTS render rate
+  differs from the transport's output rate.
+  (PR [#5386](https://github.com/pipecat-ai/pipecat/pull/5386))
+
+- Fixed a word-timestamp event that belongs to no sentence being discarded with
+  nothing logged, in streaming mode (a TTS service using
+  `TextAggregationMode.TOKEN`). This comes up when a provider reports a
+  punctuation mark as its own event after the preceding word already took it.
+  Such an event used to sit in a buffer until the next turn began and was
+  thrown away there; it is now logged and dropped when its own turn ends.
+  (PR [#5681](https://github.com/pipecat-ai/pipecat/pull/5681))
+
+- Fixed `AggregatedFrameSequencer.force_complete` emitting the text it
+  force-completes as a `TTSTextFrame` without a matching
+  `AggregatedTextProgressFrame`, so the progress view stopped where the TTS
+  provider stopped reporting words while the word frames carried the rest of
+  the turn.
+  (PR [#5681](https://github.com/pipecat-ai/pipecat/pull/5681))
+
+- Fixed audio eval sessions remaining silent after a text-mode session on the
+  same bot by resetting `skip_tts` for each connection.
+  (PR [#5722](https://github.com/pipecat-ai/pipecat/pull/5722))
+
+- A failed `MCPClient` tool call now gives the LLM the error the call raised,
+  cut to 200 characters. The fixed line `Sorry, could not call the mcp tool`
+  remains only for a call that raised nothing and returned no text content.
+  Code that matched on the old text must read the new one.
+  (PR [#5734](https://github.com/pipecat-ai/pipecat/pull/5734))
+
+- `CartesiaSTTService` now sends `keyterm` for Cartesia's `ink-preview` models,
+  which support keyterms alongside `ink-2`.
+  (PR [#5738](https://github.com/pipecat-ai/pipecat/pull/5738))
+
+- Corrected the documented range of the Deepgram Flux TTS `speed` setting: Flux
+  accepts 0.5 to 1.5 in steps of 0.05, not 0.85 to 1.15.
+  (PR [#5740](https://github.com/pipecat-ai/pipecat/pull/5740))
+
+- Fixed `GoogleLLMService` failing every request with `gemini-3.8-flash`. That
+  model rejects the `minimal` thinking level Pipecat applies by default to
+  Gemini 3 Flash models, so it now gets `low`, the lowest level it accepts.
+  (PR [#5741](https://github.com/pipecat-ai/pipecat/pull/5741))
+
+- The Mem0 RAG example's local-configuration snippet now names
+  `claude-sonnet-4-6` instead of the retired `claude-3-5-sonnet-20240620`.
+  (PR [#5742](https://github.com/pipecat-ai/pipecat/pull/5742))
+
+- Corrected `MoonshineSTTService`'s licensing note: Moonshine's models are MIT
+  in every language and size, except the legacy non-streaming (`tiny`, `base`)
+  non-English models, which stay under the non-commercial Moonshine Community
+  License.
+  (PR [#5745](https://github.com/pipecat-ai/pipecat/pull/5745))
+
+- Updated the Fireworks update-settings example to use
+  `nemotron-3-ultra-nvfp4`; Fireworks retired `gpt-oss-20b` from serverless.
+  (PR [#5747](https://github.com/pipecat-ai/pipecat/pull/5747))
+
+- The OpenAI Responses services no longer send `reasoning.effort="none"` for
+  `gpt-6-astra`, which rejects that value. The model now works out of the box.
+  (PR [#5749](https://github.com/pipecat-ai/pipecat/pull/5749))
+
+- Fixed `HeyGenVideoService` avatar state logging, which watched for the
+  LiveAvatar LITE event `agent.state`. LiveAvatar renamed it to
+  `agent.state_updated`.
+  (PR [#5753](https://github.com/pipecat-ai/pipecat/pull/5753))
+
+- Fixed the `voice-sarvam` example's optional voice-switch line, which named
+  `anushka`, a `bulbul:v2` speaker that `bulbul:v3` rejects. It now names
+  `anand`, a `bulbul:v3` speaker.
+  (PR [#5759](https://github.com/pipecat-ai/pipecat/pull/5759))
+
+- Fixed per-tool `timeout_secs` (and global `function_call_timeout_secs`) being
+  disarmed by an intermediate `FunctionCallResultProperties(is_final=False)`
+  update. An async tool that reported progress no longer cancels its own
+  deadline; only a final result clears it.
+  (PR [#5760](https://github.com/pipecat-ai/pipecat/pull/5760))
+
+- `npm run lint` in a generated React client failed before linting any file,
+  because the ESLint config used a legacy plugin shape that ESLint 10 rejects.
+  The Vite template now uses the flat react-hooks config, and the Next.js
+  template pins ESLint 9 since `eslint-config-next` 16 does not run on 10.
+  (PR [#5767](https://github.com/pipecat-ai/pipecat/pull/5767))
+
+- Fixed `SambaNovaLLMService` ignoring `filter_incomplete_user_turns`. Its text
+  bypassed the turn-completion mixin, so incomplete turns were never held and
+  the marker character was spoken by TTS.
+  (PR [#5768](https://github.com/pipecat-ai/pipecat/pull/5768))
+
+- Fixed `LiveKitTransport` reporting a disconnect twice when it disconnected,
+  and reporting one for a connection attempt that failed.
+  (PR [#5770](https://github.com/pipecat-ai/pipecat/pull/5770))
+
+- Fixed `LiveKitTransport` leaving its audio track unpublished when a track
+  publish failed while connecting and the connection was retried.
+  (PR [#5770](https://github.com/pipecat-ai/pipecat/pull/5770))
+
+- Fixed `LiveKitTransport` not releasing its outgoing audio source when it
+  disconnected.
+  (PR [#5770](https://github.com/pipecat-ai/pipecat/pull/5770))
+
+- Fixed `GladiaSTTService` tearing down and reconnecting its websocket when
+  Gladia reports a translation addon failure, and silently ignoring rejected
+  audio chunks. Both are now reported upstream as non-fatal `ErrorFrame`s while
+  transcription continues on the same connection.
+  (PR [#5772](https://github.com/pipecat-ai/pipecat/pull/5772))
+
+- `MCPClient` now drops an MCP session that a tool call found dead. The next
+  tool call connects again. A client that was never started, or that its owner
+  closed, still raises on a tool call.
+  (PR [#5778](https://github.com/pipecat-ai/pipecat/pull/5778))
+
+- Fixed `ElevenLabsDialogueTTSService` closing its WebSocket with a `1008`
+  policy violation (`voices can only be set in the first message`), which lost
+  the rest of the turn. A context that had gone quiet was dropped locally while
+  ElevenLabs was still generating for it, so the next sentence of the turn
+  registered that context a second time.
+  (PR [#5795](https://github.com/pipecat-ai/pipecat/pull/5795))
+
+- Fixed `VADProcessor` ignoring its `speech_activity_period` while the user is
+  speaking.
+  (PR [#5805](https://github.com/pipecat-ai/pipecat/pull/5805))
+
+- Fixed SageMaker connections with a connection setting the endpoint rejects
+  (such as `language_hint` on `flux-general-en`) hanging until the Flux
+  connection timeout. `DeepgramFluxSageMakerSTTService` now reports SageMaker's
+  424 error through `on_connection_error` within a second. When the session
+  does time out, the error names the endpoint's CloudWatch log group, which
+  holds the container's error text.
+  (PR [#5807](https://github.com/pipecat-ai/pipecat/pull/5807))
+
+- `AssemblyAISTTService` now raises a clear error as soon as `prompt` is set
+  on a non-U3-Pro model, instead of forwarding it and letting the connection
+  fail server-side.
+  (PR [#5808](https://github.com/pipecat-ai/pipecat/pull/5808))
+
+- Fixed Gemini 3 rejecting a request with `Function call is missing a
+  thought_signature` when the context holds function calls Gemini did not
+  produce, such as those made by another LLM before switching to Gemini or ones
+  added by the application. `GeminiLLMAdapter` now sends Google's documented
+  placeholder signature for those calls.
+  (PR [#5809](https://github.com/pipecat-ai/pipecat/pull/5809))
+
+- Fixed a realtime service configured with its own tools (such as
+  `UltravoxRealtimeLLMService` with `one_shot_selected_tools`) answering a tool
+  call with the missing-function result when the model called the tool before
+  the first context frame reached the service. The handlers of a service's own
+  tools are now registered when the service starts.
+  (PR [#5812](https://github.com/pipecat-ai/pipecat/pull/5812))
+
+- Fixed `UltravoxRealtimeLLMService` never reporting an async tool's result
+  when the result arrived while the bot was still speaking. The result was sent
+  as a second `client_tool_result`, which Ultravox ignores after the
+  placeholder it already received; it is now delivered as user-side text like a
+  deferred result.
+  (PR [#5812](https://github.com/pipecat-ai/pipecat/pull/5812))
+
+- Fixed `SarvamSTTService` transcripts arriving with `finalized=False`, which
+  made the turn analyzer wait out its timeout for more transcript before ending
+  the user turn. Each transcript is now marked finalized, so the turn can end
+  as soon as the transcript arrives.
+  (PR [#5815](https://github.com/pipecat-ai/pipecat/pull/5815))
+
+- Fixed `GoogleLLMService` (and `GoogleVertexLLMService`) failing with a 400
+  (`Requests ending with a model turn are not supported.`) on newer Gemini
+  models, such as the default `gemini-3.6-flash`, when the context ends with an
+  assistant message. This happens when a tool handler speaks filler with
+  `TTSSpeakFrame` before its result arrives. A minimal `"."` user turn is now
+  appended to the request in that case, for every model not known to continue a
+  trailing model turn; the stored context is unchanged.
+  (PR [#5821](https://github.com/pipecat-ai/pipecat/pull/5821))
+
+- `MiniMaxHttpTTSService` now resolves a regional language variant to its base
+  language's name for `language_boost` (`Language.PT_BR` becomes
+  `"Portuguese"`) instead of sending the raw `pt-BR` code.
+  (PR [#5824](https://github.com/pipecat-ai/pipecat/pull/5824))
+
+- `ElevenLabsRealtimeSTTService` now converts its `language` setting to
+  ElevenLabs' language codes, so a regional variant such as `Language.EN_US`
+  connects with `language_code=eng` instead of being rejected with a 1008
+  `invalid_request` close. `ElevenLabsSTTService` also resolves regional
+  variants to their base language's code rather than sending `en-US`.
+  (PR [#5824](https://github.com/pipecat-ai/pipecat/pull/5824))
+
+- Fixed the eval harness scoring bot speech from before the user's turn as the
+  reply, or losing the reply behind it, when that speech was transcribed late.
+  A send now waits until everything the bot said is transcribed, and a turn
+  that talks over the bot drops the transcripts of what it was saying, by when
+  their audio began.
+  (PR [#5825](https://github.com/pipecat-ai/pipecat/pull/5825))
+
+- Fixed an `absent: true` response expectation failing on a later sentence of
+  the reply an earlier expectation had already matched. It now counts only a
+  reply the bot began after that match.
+  (PR [#5825](https://github.com/pipecat-ai/pipecat/pull/5825))
+
+### Performance
+
+- Reduced per-frame memory work for rolling audio volume tracking by retaining
+  the window in a mutable buffer.
+  (PR [#5811](https://github.com/pipecat-ai/pipecat/pull/5811))
+
+## [1.10.0] - 2026-09-11
+
+### Added
+
+- `SmallestTTSService` now uses Smallest AI's continuation API: text fragments
+  within the same LLM turn share a `context_id` so the server joins them into
+  one continuous generation instead of resetting prosody on each request. Added
+  an optional `max_buffer_delay_ms` setting to control the server-side
+  buffering window.
+  (PR [#5626](https://github.com/pipecat-ai/pipecat/pull/5626))
+
+- Added `LiveKitParams.audio_out_queue_size_ms` to configure the outgoing
+  `rtc.AudioSource` buffer size. Defaults to LiveKit's 1000 ms, so existing
+  behaviour is unchanged.
+  (PR [#5699](https://github.com/pipecat-ai/pipecat/pull/5699))
+
+- Added `enable_turn_detection` to `GradiumSTTService`. With it on, Gradium's
+  server-side end-pointing signal decides when user turns start and end instead
+  of the pipeline's VAD, and the service recommends
+  `ExternalUserTurnStrategies` to the user aggregator. The new `eot_horizon_s`,
+  `eot_threshold` and `post_flush_cooldown_frames` settings tune it.
+  (PR [#5706](https://github.com/pipecat-ai/pipecat/pull/5706))
+
+### Changed
+
+- ⚠️ **Behavior change:** Pipecat now supports the openai 3 SDK, and the
+  `openai` dependency is widened to `>=1.74.0,<4`, so a fresh resolve picks
+  openai 3. It builds its HTTP clients on `httpx2` instead of `httpx`, and TLS
+  certificates then verify against the operating system trust store rather than
+  `certifi`. Minimal container images without system CA certificates, and
+  environments behind a TLS-inspecting proxy, may need `SSL_CERT_FILE` or
+  `SSL_CERT_DIR` pointed at a CA bundle. Pin `openai<3` to stay on the previous
+  HTTP stack.
+
+      A `Timeout` passed to a service's `http_client` — `OpenAITTSService` and
+  the Whisper-based STT services — must come from the HTTP client family the
+  installed SDK uses: `httpx2` on openai 3, `httpx` before it.
+  (PR [#5620](https://github.com/pipecat-ai/pipecat/pull/5620))
+
+- Widened the `anthropic` dependency to `>=0.49.0,<2` to support the anthropic
+  1 SDK. `AnthropicLLMService` sends `temperature`, `top_k` and `top_p` through
+  the request's `extra_body`, since the Messages API methods dropped them as
+  parameters in anthropic 1. Requests reach the API unchanged, and the settings
+  keep their names and meaning.
+
+      If you pass your own Bedrock client, anthropic 1 requires an explicit
+  region — `AsyncAnthropicBedrock(aws_region=...)`, or `AWS_REGION` in the
+  environment — where it previously fell back to `us-east-1`.
+  (PR [#5623](https://github.com/pipecat-ai/pipecat/pull/5623))
+
+- Widened the `mcp` dependency to `mcp[cli]>=1.24.0,<3` so `MCPClient` works
+  with the MCP SDK's 2.x line as well as 1.x. The floor moves to 1.24.0, the
+  first release carrying the `streamable_http_client` transport that both lines
+  share.
+  (PR [#5624](https://github.com/pipecat-ai/pipecat/pull/5624))
+
+- `SpeechmaticsSTTService` reconnects with exponential backoff after a dropped
+  connection or a recoverable server error, buffering audio meanwhile. A
+  rejected credential, rejected session, request-rejecting server error, or
+  exhausted reconnect attempts are reported as a permanent error, leaving the
+  service unusable for the `PipelineWorker`'s `ProcessorUnusablePolicy` to act
+  on. A settings update that requires a reconnect gives a rejected session
+  another chance.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- ⚠️ **Breaking change:** `SpeechmaticsSTTService` now targets Speechmatics
+  Agent STT (`/v2/agent`) through the `speechmatics-agent-stt` SDK, which
+  replaces `speechmatics-voice[smart]` in the `speechmatics` extra. The service
+  cannot connect to the legacy real-time endpoint. The default
+  `turn_detection_mode` is now `TurnDetectionMode.VAD`, so Speechmatics closes
+  turns server-side and the service recommends `ExternalUserTurnStrategies`;
+  pass `turn_detection_mode=TurnDetectionMode.EXTERNAL` to keep driving turns
+  from Pipecat's own VAD. The default model is `linden-1`, selected by the new
+  `model` setting. `Settings.include_partials` is renamed `enable_partials`.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- The `pipecat eval suite` live dashboard now shows a repeated (bot, scenario)
+  row's pass rate while its attempts are still running, beside how many are
+  left, instead of only once every attempt is in. A pass rate, on the dashboard
+  and in the piped summary, is green while every finished attempt passed and
+  red once one has failed; the yellow middle band is gone.
+  (PR [#5704](https://github.com/pipecat-ai/pipecat/pull/5704))
+
+- The `recording` line in `pipecat eval suite`'s settings now says which of the
+  selected runs will actually record. Only an audio-mode run produces audio, so
+  with recording on it reads `on (3 of 6 runs; text mode skipped)` when the
+  selection is mixed and `off (all runs text mode)` when nothing will be
+  recorded. `pipecat eval run -a` prints the same line.
+  (PR [#5707](https://github.com/pipecat-ai/pipecat/pull/5707))
+
+- `DeepSeekLLMService` now defaults `thinking` to disabled. DeepSeek's V4
+  models otherwise reason before every answer, which delays the first spoken
+  token. Pass `thinking=DeepSeekLLMService.ThinkingConfig(type="enabled")` to
+  turn it on, or `thinking=None` to use DeepSeek's own default.
+  (PR [#5710](https://github.com/pipecat-ai/pipecat/pull/5710))
+
+### Deprecated
+
+- Deprecated `SpeechmaticsSTTService` `operating_point` on `Settings` and
+  `InputParams`; use `model` instead. Passing it still selects the model and
+  emits a `DeprecationWarning`. It will be removed in 2.0.0.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+### Removed
+
+- ⚠️ **Breaking change:** Agent STT has no speaker focus, so
+  `SpeechmaticsSTTService` no longer exports `SpeakerFocusMode` or
+  `SpeakerFocusConfig`, and `UpdateParams` and `update_params()` are removed.
+  The `Settings` and `InputParams` fields `focus_speakers`, `ignore_speakers`,
+  `focus_mode`, `speaker_passive_format`, `max_delay`,
+  `end_of_utterance_silence_trigger`, `end_of_utterance_max_delay`,
+  `split_sentences`, `include_results`, and `extra_params` are removed, as are
+  `TurnDetectionMode.FIXED`, `ADAPTIVE`, and `SMART_TURN`. `OperatingPoint` is
+  replaced by `Model`.
+  (PR [#5631](https://github.com/pipecat-ai/pipecat/pull/5631))
+
+- ⚠️ Removed `LmntTTSService`. LMNT has shut down and is no longer available.
+  (PR [#5698](https://github.com/pipecat-ai/pipecat/pull/5698))
+
+### Fixed
+
+- Fixed the WebSocket transports treating an audio frame as unsent whenever the
+  serializer emitted no payload for it. A serializer that resamples through a
+  stream resampler buffers audio across calls and emits it in a later one, so
+  on a pipeline whose output sample rate differs from the wire rate most frames
+  took that path. Those frames are now paced and pushed downstream like any
+  other, so the output queue drains at playback speed again and
+  `BotStoppedSpeakingFrame` and the `EndFrame` behind it are no longer reached
+  early, which matters most where the serializer hangs up the call on the
+  `EndFrame`.
+  (PR [#5593](https://github.com/pipecat-ai/pipecat/pull/5593))
+
+  Fixed `PIPECAT_SETUP_FILES` parsing on platforms whose path separator is not a
+  colon.
+  (PR [#5638](https://github.com/pipecat-ai/pipecat/pull/5638))
+
+- Fixed the `pipecat eval suite` live dashboard showing a repeated (bot,
+  scenario) row as idle while a finished attempt's bot was still being stopped.
+  The row now keeps spinning until its concurrency slot is released. `EvalRun`
+  gains a `stopping` flag for that window.
+  (PR [#5704](https://github.com/pipecat-ai/pipecat/pull/5704))
+
+- Async function calls (`cancel_on_interruption=False`) whose result arrives
+  before the conversation moves on are now recorded as ordinary tool results,
+  without the deferred-result message that asks the LLM to convey them. The
+  deferred delivery still applies when the LLM has responded, a new message has
+  landed, or the call sent an intermediate update in the meantime.
+  (PR [#5705](https://github.com/pipecat-ai/pipecat/pull/5705))
+
+- Fixed `DeepSeekLLMService` failing every request after a tool call in
+  thinking mode with a 400 (`The reasoning_content in the thinking mode must be
+  passed back to the API`). DeepSeek requires `reasoning_content` on each
+  assistant message of the current turn once a tool call is involved; the new
+  `DeepSeekLLMAdapter` supplies an empty one on assistant messages that have
+  none.
+  (PR [#5710](https://github.com/pipecat-ai/pipecat/pull/5710))
+
+## [1.9.0] - 2026-09-10
+
+### Added
+
+- Added `LatencyBreakdown.contributions`, a timeline of the user-to-bot
+  interval whose durations sum to the measured latency. It names the time no
+  service reports — VAD silence, turn detection, turn-completion markers and
+  holds, sentence aggregation, and function handlers — and attributes time a
+  setting governs to that setting rather than to the service it runs inside.
+
+  The first thing the bot says is measured too, from where
+  `StartupTimingObserver` stops — the pipeline ready with a client on it — so
+  the two reports meet rather than overlap. Waiting to be asked is usually most
+  of that wait, and no service reports it.
+
+  Each part carries a stable `key` and an `owner_kind` — service, setting, bot
+  or pipeline — so data keyed on them survives a label being reworded, and the
+  breakdown says what it was `measured_from` alongside the `total_secs` it
+  measured. Print it with `LatencyBreakdown.turn_contribution_lines()`;
+  `UserBotLatencyObserver(min_contribution_secs=...)` sets how brief a part
+  must be before it rolls into a single `pipeline` entry.
+
+      ```
+      0.200s  endpointing wait     [config: VAD stop_secs]
+      0.125s  transcription        [DeepgramSTTService#0]
+      0.336s  LLM inference        [OpenAILLMService#0]
+      0.024s  turn completion      [config: filter_incomplete_user_turns]
+      0.359s  speech synthesis     [CartesiaTTSService#0]
+      1.044s  TOTAL
+      ```
+  (PR [#5445](https://github.com/pipecat-ai/pipecat/pull/5445))
+
+- Eval scenario turns can play an audio file as the user instead of
+  synthesizing text. A turn's `audio:` names a recording, resolved relative to
+  the scenario file, in any format `soundfile` reads (WAV, MP3, FLAC, OGG,
+  ...); multi-channel audio is downmixed to mono and the file keeps its own
+  sample rate. `user:` is required alongside it and is what the recording says,
+  so the judge and `text_contains` still have the turn's input. A scenario
+  whose audio turns all name a file needs no `user.speech:` block.
+  (PR [#5473](https://github.com/pipecat-ai/pipecat/pull/5473))
+
+- Added a `cancellable_by_llm` argument to `LLMSwitcher.register_function()`,
+  which forwards it to every LLM the switcher fronts. Tools registered through
+  a switcher can now opt into LLM-side cancellation, matching what
+  `LLMService.register_function()` accepts.
+  (PR [#5474](https://github.com/pipecat-ai/pipecat/pull/5474))
+
+- Added `AssemblyAISyncSTTService`, a segmented speech-to-text service backed
+  by AssemblyAI's Sync API: pipeline VAD segments the audio and each segment
+  (up to 120 seconds) is transcribed in one HTTP request, with no streaming
+  session to manage. It takes an `aiohttp_session`, `base_url` selects a
+  data-residency endpoint, and `Settings` supports `model`, `language`,
+  `prompt`, `keyterms_prompt`, and `conversation_context`.
+
+  Recent user and agent turns are sent automatically as `conversation_context`
+  on each request, bounded by `max_context_turns` (`0` disables) and
+  `max_context_chars`; setting `conversation_context` yourself replaces that
+  buffer. The connection is pre-warmed when the user starts speaking so the
+  transcription request skips the handshake (`enable_prewarming`).
+  (PR [#5488](https://github.com/pipecat-ai/pipecat/pull/5488))
+
+- `AzureSTTService.Settings` gained `segmentation_silence_timeout_ms`, which
+  sets how much silence (100–5000 ms) Azure allows inside a phrase before it
+  emits a final transcript. Azure's default of 500 ms applies when it's unset.
+  (PR [#5511](https://github.com/pipecat-ai/pipecat/pull/5511))
+
+- Added `on_progress` and `on_update` event handlers to the eval framework.
+  `EvalSession` and `EvalSuite` are now `BaseObject`s, so eval progress is
+  observed the same way as every other Pipecat event. `EvalSuite`'s `on_update`
+  handlers run synchronously and should return promptly, since an `EvalRun` is
+  mutated in place as it executes; `EvalSession`'s `on_progress` handlers run
+  as tasks, and `EvalSession.run()` waits for them before it returns.
+
+        @session.event_handler("on_progress")
+        async def on_progress(session, progress):
+            print(progress.event_name, progress.status)
+  (PR [#5520](https://github.com/pipecat-ai/pipecat/pull/5520))
+
+- Added a `voice_parameters` setting to `AzureTTSService` and
+  `AzureHttpTTSService`, which passes SSML's `parameters` attribute on
+  `<voice>` through to Azure so HD voices can be tuned (`temperature`, `top_p`,
+  `top_k`, `cfg_scale`, `enhancePronunciation`).
+  (PR [#5522](https://github.com/pipecat-ai/pipecat/pull/5522))
+
+- Added `profanity_filter` and `redact` to `DeepgramFluxSTTService.Settings`
+  and `DeepgramFluxSageMakerSTTService.Settings`, exposing Flux's profanity
+  masking and number redaction.
+  (PR [#5523](https://github.com/pipecat-ai/pipecat/pull/5523))
+
+- Added a `version` field to `DeepgramSTTService.Settings` (and
+  `DeepgramSageMakerSTTService.Settings`), pinning transcription to a specific
+  Deepgram model version instead of whichever one `latest` currently resolves
+  to. Previously reachable only as an untyped `extra` key, which continues to
+  work.
+  (PR [#5527](https://github.com/pipecat-ai/pipecat/pull/5527))
+
+- Added `thinking` to `DeepSeekLLMService.Settings`, which controls DeepSeek's
+  thinking mode: `settings=DeepSeekLLMService.Settings(thinking={"type":
+  "disabled"})` turns off the reasoning pass that V4 models run by default.
+  (PR [#5528](https://github.com/pipecat-ai/pipecat/pull/5528))
+
+- `CartesiaTurnsSTTSettings` gained `turn_start_threshold`,
+  `turn_eager_end_threshold`, `turn_end_threshold` and `turn_end_timeout_ms`,
+  Cartesia's turn detection tuning parameters. Unset by default, so the
+  server's own defaults apply.
+  (PR [#5533](https://github.com/pipecat-ai/pipecat/pull/5533))
+
+- Added a `denoiser_config` setting to `GoogleSTTService`, which passes
+  Google's Chirp 3 background-noise removal (`denoise_audio`, `snr_threshold`)
+  through to the recognition request.
+  (PR [#5536](https://github.com/pipecat-ai/pipecat/pull/5536))
+
+- Added a `temperature` field to `HumeTTSService.Settings`, passing Hume's
+  sampling temperature through to the synthesis request. Higher values increase
+  variation, lower values increase consistency; when unset, Hume applies its
+  own per-model default.
+  (PR [#5540](https://github.com/pipecat-ai/pipecat/pull/5540))
+
+- Added a `speed` setting to `DeepgramTTSService` and `DeepgramHttpTTSService`,
+  passing Deepgram's Aura speech-rate multiplier (0.7 to 1.5) through to
+  `/v1/speak`.
+  (PR [#5552](https://github.com/pipecat-ai/pipecat/pull/5552))
+
+- Added a `no_verbatim` setting to `ElevenLabsSTTService` and
+  `ElevenLabsRealtimeSTTService`, which asks Scribe to drop filler words, false
+  starts and non-speech sounds from the transcript.
+  (PR [#5555](https://github.com/pipecat-ai/pipecat/pull/5555))
+
+- Added a `hotwords` field to `WhisperSTTService.Settings`, which biases Faster
+  Whisper's transcription towards the words or phrases it names, such as
+  product names or domain jargon.
+  (PR [#5558](https://github.com/pipecat-ai/pipecat/pull/5558))
+
+- Added a `reduce_silence` setting to `SonioxTTSService`, which shortens the
+  pauses between words on models that support silence reduction.
+  (PR [#5567](https://github.com/pipecat-ai/pipecat/pull/5567))
+
+- Added an `include_results` setting to `SpeechmaticsSTTService`, which asks
+  Speechmatics to include word-level results in transcript messages.
+  (PR [#5568](https://github.com/pipecat-ai/pipecat/pull/5568))
+
+- `WebsocketService` now accepts `reconnect_backoff_min_wait` and
+  `reconnect_backoff_max_wait` to configure the wait between reconnection
+  attempts. Defaults (4s / 10s) preserve the previous hardcoded behavior.
+  (PR [#5586](https://github.com/pipecat-ai/pipecat/pull/5586))
+
+- Added `MetaSTTService`, a streaming speech-to-text service using Meta's
+  `muse-voice-transcribe-1.0` model over the Muse Voice realtime API. Install
+  it with `pipecat-ai[meta]`, or pick Meta when scaffolding with `pipecat
+  init`. `MetaSTTService.Settings` takes `language` or `language_bias` to bias
+  recognition across the 25 supported languages, `keywords` for domain-specific
+  terms, and `mode` to select the model's own endpointing, client-delimited
+  turns, or diarization.
+  (PR [#5587](https://github.com/pipecat-ai/pipecat/pull/5587))
+
+- Added `universal-3-6-pro` as a supported `AssemblyAISTTService` model. It is
+  `universal-3-5-pro` upgraded — the same model with the same feature set — and
+  is recognized as part of the Universal-3 Pro family, so every `u3-rt-pro`
+  feature (built-in turn detection, prompting, continuous partials,
+  `interruption_delay`, context carryover, and voice focus) applies to it as
+  well. `universal-3-5-pro` remains supported and stays the default.
+  (PR [#5598](https://github.com/pipecat-ai/pipecat/pull/5598))
+
+- `StartupTimingReport.warmup` reports what warming Pipecat's deferred imports
+  cost startup, which no processor accounts for and which is often the largest
+  single contributor to a cascaded bot's start. `warmup.duration_secs` is how
+  long warming took and `warmup.blocking_duration_secs` is what it added beyond
+  the slowest processor — zero for a pipeline whose services take longer to
+  connect than warming takes to load. Observers can also handle the new
+  `BaseObserver.on_startup_warmup()` event directly.
+  (PR [#5600](https://github.com/pipecat-ai/pipecat/pull/5600))
+
+- `StartupTimingReport` now accounts for the whole of a pipeline's startup, so
+  a slow start can be read off the report rather than inferred.
+  `setup_phase_secs` and `start_phase_secs` split the span into the two phases
+  that compose differently: processors are set up concurrently, so the longest
+  single piece of work decides that phase, while the `StartFrame` reaches them
+  one at a time, so what each spends on it adds up.
+  `ProcessorStartupTiming.start_duration_secs` reports the latter per processor
+  alongside the existing `setup_duration_secs`.
+  (PR [#5600](https://github.com/pipecat-ai/pipecat/pull/5600))
+
+- Added `language_codes` and `timestamps` settings to
+  `AssemblyAISyncSTTService`, aligning it with the Sync API's config surface.
+  `language_codes` (e.g. `[Language.EN, Language.ES]`) declares the audio's
+  languages for multilingual or code-switching audio, and is bound in
+  preference to the single `language` when both are set; regional variants
+  resolve to their base code and duplicates are dropped, preserving declaration
+  order. `timestamps` requests per-word `start`/`end` timings on the
+  transcription result, and is unset by default so the API default of `False`
+  applies.
+  (PR [#5603](https://github.com/pipecat-ai/pipecat/pull/5603))
+
+- Added `ServiceMetricsObserver`, which reports each metric a service publishes
+  as a record rather than a log line. `on_service_latency` carries time to
+  first byte, first audio and first answer token, with the parts each
+  decomposes into; `on_service_usage` carries speech-to-text audio seconds,
+  text-to-speech characters, and the token counts an LLM reports. One record
+  per metric, never summed, so a consumer groups them by turn, session or
+  model.
+  (PR [#5607](https://github.com/pipecat-ai/pipecat/pull/5607))
+
+- Added `SpeakingObserver`, which reports a conversation's speaking lifecycle
+  through `on_speech_event`: `user_speech_started` / `user_speech_stopped` as
+  the detector heard them, `user_turn_started` / `user_turn_stopped` as the
+  turn strategy ruled on them, `bot_speech_started` / `bot_speech_stopped`, and
+  `interruption`. Speech is timed to where it began and ended rather than to
+  where the detector confirmed it, and a moment that closes a stretch of speech
+  names its `started_at`, so an interval reads whole from one record.
+  (PR [#5612](https://github.com/pipecat-ai/pipecat/pull/5612))
+
+- Added `ErrorObserver`, which reports every error a pipeline raises through
+  `on_error` as an `ErrorEvent`: the `message`, the `category` it was
+  attributed to, the `exception_type` behind it, the `processor` that raised
+  it, and whether that processor can still do its job (`processor_usable`).
+  Errors are read where they are raised, so ones a processor answers for itself
+  — a `ServiceSwitcher` failing over, or a service it holds in reserve — are
+  reported too; `PipelineWorker`'s `on_pipeline_error` sees only the errors
+  that reach the top of the pipeline.
+  (PR [#5618](https://github.com/pipecat-ai/pipecat/pull/5618))
+
+- Added `FunctionCallObserver`, which reports each function call through
+  `on_function_call_event` as a `FunctionCallEvent`: `function_call_started`
+  when the LLM asks for it, `function_call_in_progress` when it begins running,
+  and one of `function_call_completed`, `function_call_failed`,
+  `function_call_timed_out` or `function_call_cancelled` when it settles. Each
+  moment names the one before it, so the wait to run and the time spent running
+  each read from one record. Arguments travel by default and results do not;
+  `include_arguments` and `include_results` change either.
+  (PR [#5622](https://github.com/pipecat-ai/pipecat/pull/5622))
+
+- `DeepgramFluxSTTService`, `DeepgramFluxSageMakerSTTService` and
+  `CartesiaTurnsSTTService` push an `EagerTranscriptionFrame` when they predict
+  an end of turn and an `EagerEndOfTurnCancelFrame` when they withdraw it,
+  which `EagerUserTurnStrategies` acts on. Both frames are emitted only while
+  `enable_eager_end_of_turn` is on.
+  (PR [#5625](https://github.com/pipecat-ai/pipecat/pull/5625))
+
+- Added support for answering an eager end of turn: a response is generated
+  from a service's predicted end of turn and held until the turn is confirmed,
+  so the gap before the committed end of turn is spent generating rather than
+  waiting. Turn it on with `enable_eager_end_of_turn=True` on
+  `DeepgramFluxSTTService`, `DeepgramFluxSageMakerSTTService` or
+  `CartesiaTurnsSTTService`, which then recommend `EagerUserTurnStrategies` in
+  place of `ExternalUserTurnStrategies`. The LLM service holds the response, so
+  no extra processor is needed. The response is discarded if the user resumes
+  speaking or if the committed transcript differs from the predicted one, per
+  the strategy's `match_policy` (`NormalizedMatch` by default, which ignores
+  the capitalization and punctuation services commonly add when committing a
+  transcript, or `ExactMatch` to require the two to be identical). An
+  unconfirmed turn never reaches the user or the LLM context, and tool calls
+  are never executed for one.
+  (PR [#5625](https://github.com/pipecat-ai/pipecat/pull/5625))
+
+- Added `FlowConfig`, which describes a Pipecat Flows conversation as data so a
+  bot can load its flow at runtime. A config names the initial node and, for
+  each node, its messages, the tools it offers, and where each tool leads. Load
+  it with `FlowConfig.from_file()`, `from_yaml()`, or `from_json()`, construct
+  a `Flow` from it and the module holding your direct functions and action
+  handlers, or a list of modules, and hand that to `FlowManager`.
+
+    Tools stay in Python and return `(result, TRANSITION_IN_YAML)`; a function
+  that only moves the conversation is written in the config alone, as a
+  `transition_only` entry with a `description`. The config picks the next node,
+  by name or with a branch table keyed on a field of the result, where case
+  keys may be strings, booleans, or numbers. Constructing the `Flow` reports
+  every tool, handler, or variable the config names but cannot resolve,
+  together, as a `FlowReferenceError`. Actions use the built-in `tts_say`,
+  `end_conversation`, and `function` types, or a custom type registered in code
+  or given a `handler` name in the config. Prompts may use `{{ key }}`
+  placeholders, which `FlowManager` fills from its `state` on entering the
+  node, and a YAML config can keep long prompts in their own files with
+  `!include path`, resolved relative to the config. The format's JSON Schema is
+  kept in the repository at `src/pipecat/flows/flow_config.schema.json` for
+  editors and other tools to vendor.
+
+    ```yaml
+    initial_node: greet
+    nodes:
+      greet:
+        role_message: You take food orders for {{ restaurant_name }}.
+        task_messages:
+          - role: developer
+            content: Greet the caller and ask: pizza or sushi?
+        functions:
+          - name: choose_pizza
+            transition_only: true
+            description: The caller wants pizza.
+            transition_to: pizza
+      pizza:
+        task_messages:
+          - role: developer
+            content: Take the pizza order.
+        functions:
+          - name: select_pizza_order
+            transition_to:
+              field: status
+              cases:
+                ok: confirm
+                unavailable: pizza
+    ```
+
+    ```python
+    import handlers  # direct functions: select_pizza_order, ...; action
+  handlers
+
+    config = FlowConfig.from_file("flow.yaml")
+    flow = Flow(config, handlers=handlers)
+    flow_manager = FlowManager(
+        worker=worker,
+        llm=llm,
+        context_aggregator=context_aggregator,
+        global_functions=flow.global_functions,
+    )
+    flow_manager.state["restaurant_name"] = "Luigi's"  # fills {{
+  restaurant_name }}
+    await flow_manager.initialize(flow.initial_node)
+    ```
+
+    The flows examples are grouped by form: `examples/flows/yaml/` holds a
+  folder per YAML flow with `bot.py`, `flow.yaml`, and `handlers.py`
+  (hello_world, food_ordering, restaurant_reservation, patient_intake,
+  insurance_quote, and podcast_interview), and `examples/flows/python/` holds
+  the flows that show what needs code. The README says when to write a flow in
+  each form.
+  (PR [#5628](https://github.com/pipecat-ai/pipecat/pull/5628))
+
+- Added `pipecat.utils.yaml.include_loader()`, which returns a
+  `yaml.SafeLoader` subclass that resolves `!include <relative-path>` tags
+  against a base directory. Flow configs and eval scenarios use it; any
+  YAML-based configuration can.
+  (PR [#5628](https://github.com/pipecat-ai/pipecat/pull/5628))
+
+- A suite manifest lists scripted and simulated scenarios side by side under
+  `scenarios:`, and `pipecat eval suite -k simulation` (or `-k script`) runs
+  only one kind.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- Simulations for `pipecat eval`: give a scenario a `persona:` and a `goal:`
+  instead of scripted turns, and an LLM plays the caller, holding the whole
+  conversation with your bot, in text or over synthesized speech, and hanging
+  up once it has what it came for. A judge then reads the transcript, the bot's
+  tool calls in place, and decides whether the bot did its job (`success:`) and
+  how every reply scored on your `metrics:`, judged per turn (`criterion`, with
+  `min_score` as the share of turns that must pass) or measured from the run
+  (`measure: turns`, `duration`, `words`, or `latency` against a range, or
+  `function_calls` against the list of calls the bot should make, `[]` for
+  none). `pipecat eval run` plays one; a suite runs it `runs:` times and every
+  run must pass.
+    ```yaml
+    persona: "Jamie, booking dinner for two tonight."
+    goal: "Book a table for two at 6 PM, then end the call."
+    success: "the bot confirmed a reservation for two at 6 PM"
+    metrics:
+      - name: politeness
+        criterion: "the reply is courteous, never curt or dismissive"
+        min_score: 1
+      - measure: latency
+        max_value: 5
+    runs: 3
+    ```
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- `RTVIClientTransport` and `RTVIClientSerializer` let a Pipecat pipeline join
+  a bot as an RTVI client. The eval harness now runs on them: its STT, TTS,
+  persona, and recording are stages of a pipeline of its own, and each suite
+  run gets its own process.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- Added `require_given()` to `pipecat.utils.types`. It narrows a settings value
+  past `NOT_GIVEN` and `None` like `assert_given()`, and also rejects the empty
+  string, raising `ValueError("<what> must be specified")` for settings a
+  service cannot run without.
+  (PR [#5670](https://github.com/pipecat-ai/pipecat/pull/5670))
+
+- A simulation's results tell judge trouble from bot trouble: a turn the judge
+  left unanswered carries `verdict: none`, a failed metric carries a
+  `failure_kind` (`judge_no`, `judge_no_verdict`, `out_of_range`,
+  `function_calls`), and a judge that gives no verdict on the goal makes the
+  run an error with kind `judge_no_verdict`, kept out of the suite's pass rate.
+  A failed `latency` measure's reason says what was timed, the first token in
+  text mode or the first spoken sentence in audio mode.
+  (PR [#5678](https://github.com/pipecat-ai/pipecat/pull/5678))
+
+- A simulation ends as soon as it is going nowhere: `silence` when neither side
+  does anything for `max_silence_s` (30 s by default), and an error the moment
+  the harness's own pipeline fails, the persona LLM first among them, instead
+  of waiting out `max_duration_s`.
+  (PR [#5678](https://github.com/pipecat-ai/pipecat/pull/5678))
+
+- A simulation's `simulator:` block is optional: without one the persona runs
+  on the same local Ollama model as the default judge, `gemma4:12b`, so a
+  simulation needs no API key. The release-eval simulations use it.
+  (PR [#5678](https://github.com/pipecat-ai/pipecat/pull/5678))
+
+- Added `BackendLLMWorker` and `BackendOutput` (`pipecat.workers.llm`): a
+  worker that runs any LLM service, with its own context and multi-step tool
+  calling, as the backend `OpenAILiveLLMService` client delegation hands work
+  to. Everything the backend produces comes back as a `BackendOutput` saying
+  what it is and whether the user may hear it, and `transform_output` decides
+  that per output, or rewrites the text on its way out — see
+  `examples/realtime/realtime-openai-live-client-delegation-speaking-policy.py`.
+  (PR [#5688](https://github.com/pipecat-ai/pipecat/pull/5688))
+
+- Added `OpenAILiveLLMService`, a speech-to-speech service for the OpenAI Live
+  API (`gpt-live-1`). The live model is full-duplex — it listens and speaks at
+  the same time and handles being interrupted itself — and delegates search,
+  reasoning and tool use to a backend model while the conversation continues.
+  Both delegation modes are supported:
+  `OpenAILiveLLMService.ResponsesDelegation` lets OpenAI host the backend
+  (Responses API) model, with its function calls executed by the pipeline's
+  registered tool handlers; `OpenAILiveLLMService.ClientDelegation` runs any
+  Pipecat LLM service as the backend through a `BackendLLMWorker`. See
+  `examples/realtime/realtime-openai-live-responses-delegation.py` and
+  `examples/realtime/realtime-openai-live-client-delegation.py`, plus
+  `examples/realtime/realtime-openai-live-client-delegation-speaking-policy.py`
+  for a backend that chooses what the user hears.
+  (PR [#5688](https://github.com/pipecat-ai/pipecat/pull/5688))
+
+### Changed
+
+- ⚠️ **Behavior change:** `DeepgramSTTService` and
+  `DeepgramSageMakerSTTService` no longer send `profanity_filter`, so
+  Deepgram's own default of off applies. Deepgram's filter rewrites the words
+  it matches rather than tagging them, so a false positive silently corrupts a
+  transcript that may be stored, analyzed, or sent downstream. To keep the
+  previous behavior, pass
+  `settings=DeepgramSTTService.Settings(profanity_filter=True)`.
+  (PR [#5462](https://github.com/pipecat-ai/pipecat/pull/5462))
+
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now default to `sonic-3.6`,
+  Cartesia's current Sonic model. Pass `model="sonic-3.5"` to stay on the
+  previous default.
+  (PR [#5472](https://github.com/pipecat-ai/pipecat/pull/5472))
+
+- `soundfile` is now a required dependency instead of an optional extra, so
+  `SoundfileMixer` and the eval harness can load audio files with no extra
+  install step. The `pipecat-ai[soundfile]` extra still resolves and is now a
+  no-op, so existing installs keep working unchanged.
+  (PR [#5473](https://github.com/pipecat-ai/pipecat/pull/5473))
+
+- `text_contains` on a `user_transcription` eval expectation now accumulates
+  the STT's final transcription segments within the turn before checking, so an
+  STT that finalizes an utterance in pieces can still satisfy a phrase.
+  Substring checks also ignore whitespace differences between the expected text
+  and the event's text.
+  (PR [#5473](https://github.com/pipecat-ai/pipecat/pull/5473))
+
+- Raised the `pipecat-ai[cli]` Context Hub floor to `pipecat-ai-context-hub`
+  0.6.0, which registers its MCP server with Claude Code for every directory
+  rather than only the one `install` ran in. A project scaffolded after the hub
+  was set up now has the server without re-running `install`.
+  (PR [#5480](https://github.com/pipecat-ai/pipecat/pull/5480))
+
+- Bots scaffolded by `pipecat init` build their `WorkerRunner` before wiring up
+  event handlers, so handlers can end the session with `await runner.cancel()`.
+  The runner takes `handle_sigint=runner_args.handle_sigint`, letting a bot run
+  directly install its own signal handler while a hosted one leaves signals to
+  its host.
+  (PR [#5482](https://github.com/pipecat-ai/pipecat/pull/5482))
+
+- The AssemblyAI STT examples and docs now name `universal-3-5-pro`,
+  AssemblyAI's current Universal-3 Pro streaming model. The `u3-rt-pro` names
+  are legacy aliases AssemblyAI redirects to it and are still accepted by
+  `AssemblyAISTTService`.
+  (PR [#5507](https://github.com/pipecat-ai/pipecat/pull/5507))
+
+- `AWSTranscribeSTTService` now maps 46 more AWS Transcribe streaming
+  languages, including Turkish, Hungarian, Tamil, Telugu, Swahili, Mexican
+  Spanish and Welsh. Passing one of these as a `Language` enum previously sent
+  a bare base code such as `tr`, which AWS Transcribe rejects.
+  (PR [#5509](https://github.com/pipecat-ai/pipecat/pull/5509))
+
+- `AWSPollyTTSService` now maps `Language.EN_IE` and `Language.EN_SG` to
+  Polly's `en-IE` and `en-SG` locales, so Irish and Singaporean English no
+  longer log an unverified-language warning.
+  (PR [#5510](https://github.com/pipecat-ai/pipecat/pull/5510))
+
+- Raised the `pipecat-ai[cli]` Context Hub floor to `pipecat-ai-context-hub`
+  0.7.0, whose `refresh` indexes the framework at its newest release tag rather
+  than tracking its default branch. Hub answers stop mixing in unreleased APIs
+  stamped with the previous release's number, which `version_compatibility`
+  reported as compatible to anyone running that release.
+
+  Pass `--framework-version head` to index the default branch — the right
+  choice when developing Pipecat itself or building against unreleased code. A
+  `--framework-version` tag that does not exist now fails the refresh instead
+  of logging a warning and exiting 0.
+  (PR [#5513](https://github.com/pipecat-ai/pipecat/pull/5513))
+
+- `SarvamTTSService` and `SarvamHttpTTSService` now default to `bulbul:v3`,
+  Sarvam's current TTS model. Sarvam's API no longer serves `bulbul:v2` and
+  rejects requests for it, so the previous default could not synthesize. The v3
+  defaults come with it: `shubh` as the speaker and a 24000 Hz sample rate.
+  (PR [#5517](https://github.com/pipecat-ai/pipecat/pull/5517))
+
+- `SmallestTTSService` now maps all 31 languages the Waves Lightning API
+  accepts, and no longer maps `Language.HE`, which the API rejects.
+  (PR [#5519](https://github.com/pipecat-ai/pipecat/pull/5519))
+
+- `FireworksLLMService` now defaults to
+  `accounts/fireworks/models/nemotron-3-ultra-nvfp4`. Fireworks no longer
+  serves the previous default, `accounts/fireworks/models/firefunction-v2`, on
+  its serverless endpoint, so requests using it returned a 404.
+  (PR [#5524](https://github.com/pipecat-ai/pipecat/pull/5524))
+
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now map `Language.OR`
+  (Odia) and `Language.UR` (Urdu), the two languages Sonic 3.6 added.
+  (PR [#5532](https://github.com/pipecat-ai/pipecat/pull/5532))
+
+- Added a `turn_coverage` setting to `GeminiLiveLLMService.Settings`, which
+  selects how much of the realtime input stream a user turn covers (for example
+  `TURN_INCLUDES_ONLY_ACTIVITY` to keep video frames outside detected audio
+  activity out of the turn).
+  (PR [#5535](https://github.com/pipecat-ai/pipecat/pull/5535))
+
+- `GroqTTSService` now supports a variety of sample rates, defaulting to 24khz.
+  (PR [#5538](https://github.com/pipecat-ai/pipecat/pull/5538))
+
+- `LiveAvatarNewSessionRequest` now defaults to `H264` video encoding, matching
+  the LiveAvatar API's own default. LiveAvatar has deprecated `VP8`; pass
+  `video_settings=VideoSettings(encoding=VideoEncoding.VP8)` to keep the
+  previous encoding while it lasts.
+  (PR [#5539](https://github.com/pipecat-ai/pipecat/pull/5539))
+
+- `KokoroTTSService.Settings` has a `speed` field, kokoro-onnx's speech rate
+  multiplier (0.5 to 2.0, default 1.0), settable at construction and at
+  runtime.
+  (PR [#5543](https://github.com/pipecat-ai/pipecat/pull/5543))
+
+- `OpenAIResponsesLLMService`'s `service_tier` documentation now lists OpenAI's
+  full set of tiers, including `fast` — the low-latency tier that replaced the
+  `priority` name.
+  (PR [#5548](https://github.com/pipecat-ai/pipecat/pull/5548))
+
+- The OpenAI server-side turn detection example now uses `gpt-transcribe`,
+  replacing `gpt-4o-transcribe`, which shuts down on 2027-02-26.
+  (PR [#5549](https://github.com/pipecat-ai/pipecat/pull/5549))
+
+- `OpenAISTTService` now defaults to `gpt-transcribe`, OpenAI's replacement for
+  `gpt-4o-transcribe`, which shuts down on 2027-02-26. With
+  `include_prob_metrics=True`, GPT transcription models now request `logprobs`
+  alongside a `json` response; only Whisper models use `verbose_json`.
+  (PR [#5549](https://github.com/pipecat-ai/pipecat/pull/5549))
+
+- `PocketTTSService` now loads pocket-tts's distilled models for German,
+  Spanish, Italian and Portuguese instead of the 24-layer variants, which are
+  too slow to synthesize in real time on a typical CPU.
+  (PR [#5553](https://github.com/pipecat-ai/pipecat/pull/5553))
+
+- `FalImageGenService.Settings` now accepts `negative_prompt` and
+  `guidance_scale`, passed through to Fal's image generation request when set.
+  (PR [#5556](https://github.com/pipecat-ai/pipecat/pull/5556))
+
+- `MoonshineSTTService` now maps `Language.DE` (German) and `Language.TL` /
+  `Language.FIL` (Tagalog/Filipino), the languages Moonshine added to its model
+  catalogue.
+  (PR [#5557](https://github.com/pipecat-ai/pipecat/pull/5557))
+
+- `TogetherLLMService` now defaults to `zai-org/GLM-5.2`. The previous default,
+  `zai-org/GLM-5.1`, has been retired from Together's serverless inference and
+  returns `model_not_available`. Pass
+  `settings=TogetherLLMService.Settings(model=...)` to choose a different
+  model.
+  (PR [#5570](https://github.com/pipecat-ai/pipecat/pull/5570))
+
+- `NeuphonicTTSService` and `NeuphonicHttpTTSService` now accept `temperature`
+  in their settings, passing Neuphonic's synthesis randomness control (0.0–1.0)
+  through to the API. Left unset, Neuphonic's own default applies.
+  (PR [#5578](https://github.com/pipecat-ai/pipecat/pull/5578))
+
+- `NvidiaLLMService` now defaults to `nvidia/nemotron-3-super-120b-a12b`. The
+  previous default, `nvidia/nemotron-3-nano-30b-a3b`, reached end of life on
+  NVIDIA's NIM cloud endpoint and now returns HTTP 410.a
+  (PR [#5579](https://github.com/pipecat-ai/pipecat/pull/5579))
+
+- ⚠️ **Behavior change:** A word-timestamp event that matches nothing left to
+  speak is now dropped instead of being emitted as a `TTSTextFrame`. Passing it
+  through put text the LLM never wrote into the conversation context. Nothing
+  is lost: the text that word should have covered is carried by the word that
+  puts the sentence back in step, or emitted when the audio context ends.
+  (PR [#5585](https://github.com/pipecat-ai/pipecat/pull/5585))
+
+- ⚠️ `Mem0MemoryService` now adds retrieved memories with the `"developer"`
+  role instead of `"system"` when `add_as_system_message` is set. Memories are
+  extra guidance for the model, not a system prompt. Services without a
+  `"developer"` role receive them as `"user"` — the same treatment non-OpenAI
+  services already gave the `"system"` message.
+  (PR [#5596](https://github.com/pipecat-ai/pipecat/pull/5596))
+
+- `SegmentedSTTService` now appends 0.5 s of silence to each speech segment
+  before transcribing it, so the model hears the end of speech and finishes the
+  last word instead of dropping or garbling it. This applies to every service
+  built on it, such as `WhisperSTTService`, `OpenAISTTService`,
+  `GroqSTTService` and `MoonshineSTTService`. The padding is submitted to the
+  provider, so it counts toward STT usage metrics. Pass
+  `trailing_silence_secs=0` to the service to disable it, or another value to
+  tune it.
+  (PR [#5621](https://github.com/pipecat-ai/pipecat/pull/5621))
+
+- `FunctionCallResultFrame` now carries an `error` field, set when a call ends
+  because its handler raised, so a failed call can be told apart from a
+  successful one. The `result` is unchanged: it remains the stand-in message
+  the LLM reads.
+  (PR [#5622](https://github.com/pipecat-ai/pipecat/pull/5622))
+
+- ⚠️ **Behavior change:** the Deepgram Flux services no longer push their eager
+  end-of-turn transcript as an `InterimTranscriptionFrame`. That transcript is
+  a prediction the service may withdraw, and it now travels as an
+  `EagerTranscriptionFrame`, emitted only under `enable_eager_end_of_turn`, so
+  it is no longer surfaced to clients as partial user speech. Flux emits no
+  interim transcriptions as a result; subscribe to `on_update` for incremental
+  transcript text.
+  (PR [#5625](https://github.com/pipecat-ai/pipecat/pull/5625))
+
+- The `on_user_turn_inference_triggered` event emitted by `UserTurnController`
+  and by `BaseUserTurnStopStrategy` now carries a `UserTurnSpeculation | None`
+  as its last argument, set when the inference answers a turn that hasn't ended
+  yet and carrying the turn text it was run against. A custom stop strategy
+  requests one by passing it to `trigger_user_turn_inference_triggered()`. The
+  events of the same name on `LLMUserAggregator` and `UserTurnProcessor` are
+  unchanged, so handlers registered on those keep their signature.
+
+      ```python
+      @controller.event_handler("on_user_turn_inference_triggered")
+      async def on_user_turn_inference_triggered(controller, strategy,
+  speculation): ...
+      ```
+  (PR [#5625](https://github.com/pipecat-ai/pipecat/pull/5625))
+
+- `LLMContextFrame` carries a `speculation` flag marking an inference as
+  speculative, so the response it produces is held until the turn it answers is
+  confirmed.
+  (PR [#5625](https://github.com/pipecat-ai/pipecat/pull/5625))
+
+- The `AGENTS.md` that `pipecat init` writes now describes Pipecat Flows as
+  part of Pipecat (`pipecat.flows`) and directs coding agents to build a new
+  flow as a `FlowConfig` YAML file plus a Python tools module, reserving
+  Python-built flows for routing or prompts that need code.
+  (PR [#5628](https://github.com/pipecat-ai/pipecat/pull/5628))
+
+- Eval suite `results.jsonl` records carry `scenario` and `kind` (`script` or
+  `simulation`), and a repeated sweep (`--repeat`) reports pass rates and exits
+  0.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- `pipecat eval` loads the nearest `.env` (walking up from the working
+  directory, shell variables winning) before running, so a simulation's persona
+  LLM and a hosted judge find their credentials the way the bots do.
+  `python-dotenv` is now a core dependency.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- `CrusoeLLMService` now defaults to `openai/gpt-oss-120b`. The previous
+  default was `zai/GLM-5.2`. Pass
+  `settings=CrusoeLLMService.Settings(model=...)` to choose a different model.
+  (PR [#5656](https://github.com/pipecat-ai/pipecat/pull/5656))
+
+- The Speechify service now sends the standard `Speechify-Caller-Version`
+  attribution header (valued from `pipecat_version()`), replacing the
+  non-standard `X-Pipecat-Version` header.
+  (PR [#5668](https://github.com/pipecat-ai/pipecat/pull/5668))
+
+- The `runner` extra now requires `pipecat-ai-prebuilt>=1.1.0`. The prebuilt
+  client UI served by the development runner gains a LiveKit option in its
+  transport selector, backed by `@pipecat-ai/livekit-transport` 1.0.0, and
+  moves to `@pipecat-ai/voice-ui-kit` 0.14.0.
+  (PR [#5675](https://github.com/pipecat-ai/pipecat/pull/5675))
+
+- `EvalSession.from_scenario()` builds the session for a loaded scenario of
+  either kind, an `EvalScriptSession` for a scripted scenario or an
+  `EvalSimulationSession` for a simulation, and `EvalSession` is the base class
+  of both. Constructing `EvalSession(...)` directly is no longer supported; use
+  the kind's own class.
+  (PR [#5676](https://github.com/pipecat-ai/pipecat/pull/5676))
+
+- `EvalClientParams` holds only what the scenario asks of the bot, and
+  `EvalClient` takes it together with the run's `EvalSessionParams` and the
+  services. `EvalClient.for_scenario()` and `EvalClient.for_simulation()` are
+  gone; the sessions construct the client.
+  (PR [#5676](https://github.com/pipecat-ai/pipecat/pull/5676))
+
+- The eval sessions and `EvalSuite.run()` take how a run behaves as one
+  `EvalSessionParams` (`connect_timeout_s`, `default_timeout_ms`,
+  `record_path`, `cache_dir`, `use_cache`, `stop_bot`, `trigger_disconnect`),
+  and the services a run uses (`judge`, `user_tts`, `bot_stt`, and a
+  simulation's `persona_llm`) as keyword arguments on both `from_scenario()`
+  and the constructors.
+  (PR [#5676](https://github.com/pipecat-ai/pipecat/pull/5676))
+
+- Cartesia word timestamps for Chinese and Japanese now keep one token per
+  reported entry, each with its own start time, instead of joining a whole
+  `word_timestamps` message into a single token.
+  (PR [#5679](https://github.com/pipecat-ai/pipecat/pull/5679))
+
+- `PiperTTSService` downloads voice models to `~/.cache/pipecat/piper` by
+  default, the same cache location `KokoroTTSService` uses, instead of the
+  current working directory. Pass `download_dir` to keep models elsewhere; a
+  model already downloaded into a working directory is fetched again into the
+  cache on first use.
+  (PR [#5687](https://github.com/pipecat-ai/pipecat/pull/5687))
+
+### Deprecated
+
+- Deprecated `LatencyBreakdown.chronological_events()`. Use
+  `LatencyBreakdown.turn_contribution_lines()` instead, which names every part
+  of the interval rather than the services that happened to report a metric,
+  and whose lines sum to the measured latency. Will be removed in 2.0.0.
+  (PR [#5445](https://github.com/pipecat-ai/pipecat/pull/5445))
+
+- Deprecated `SarvamTTSModel.BULBUL_V2`. Sarvam's API rejects `bulbul:v2` on
+  both the REST and the WebSocket endpoint, so it cannot synthesize; use
+  `SarvamTTSModel.BULBUL_V3`. Constructing `SarvamTTSService` or
+  `SarvamHttpTTSService` with it still resolves a model config and now emits a
+  `DeprecationWarning`. It will be removed in 2.0.0.
+  (PR [#5517](https://github.com/pipecat-ai/pipecat/pull/5517))
+
+- Deprecated the `on_progress` parameter of `EvalSession()` and
+  `EvalSession.from_scenario()`, and the `on_update` parameter of
+  `EvalSuite.run()`. Use the event handlers of the same name instead. Passing a
+  callback still works, keeps its existing signature, and emits a
+  `DeprecationWarning`. They will be removed in 2.0.0.
+  (PR [#5520](https://github.com/pipecat-ai/pipecat/pull/5520))
+
+- Setting the system prompt as a `"system"` message at the start of
+  `LLMContext` is deprecated and will stop working in 2.0.0. Set it on the LLM
+  service instead:
+
+      ```python
+      # Before
+      context = LLMContext([{"role": "system", "content": "Be helpful."}])
+
+      # After
+      llm = OpenAILLMService(api_key=..., system_instruction="Be helpful.")
+      context = LLMContext()
+      ```
+
+  To change the prompt at runtime, push an `LLMUpdateSettingsFrame`
+  carrying `LLMSettings(system_instruction=...)` instead of rewriting the first
+  context message.
+  (PR [#5596](https://github.com/pipecat-ai/pipecat/pull/5596))
+
+- `EvalScenario`, `EvalResult`, `EvalTurn`, `EvalTurnResult`, and
+  `EvalTurnProgress` are now `EvalScriptScenario`, `EvalScriptResult`,
+  `EvalScriptTurn`, `EvalScriptTurnResult`, and `EvalScriptTurnProgress`, the
+  scripted kind of scenario. The old names remain as aliases until 2.0.0.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- `pipecat.evals.harness` moved to `pipecat.evals.script_session`. The old
+  module path remains until 2.0.0.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- `RTVIEvalSerializer` is now `EvalSerializer`, the serializer of the bot's
+  `EvalTransport`; its client-side counterpart is `EvalClientSerializer`. The
+  old name remains as an alias until 2.0.0.
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+- Deprecated the `connect_timeout_s`, `default_timeout_ms`, `record_path`,
+  `cache_dir`, `use_cache`, `stop_bot`, and `trigger_disconnect` keyword
+  arguments of `EvalSession.from_scenario()` and
+  `EvalScriptSession.from_scenario()`, and the `use_cache` and
+  `default_timeout_ms` keyword arguments of `EvalSuite.run()`. Pass
+  `params=EvalSessionParams(...)` instead. The old arguments still work,
+  override the `params` field of the same name, and emit a
+  `DeprecationWarning`. They will be removed in 2.0.0.
+  `EvalSimulationSession.from_scenario()` is new and takes `params` only.
+  (PR [#5676](https://github.com/pipecat-ai/pipecat/pull/5676))
+
+- Deprecated `service: openai` in a scenario's `judge.eval:` and `simulator:`
+  blocks and `service: cartesia` in its `user.speech:` block, along with the
+  `openai_service()` and `cartesia_service()` builders behind them. The
+  built-in names are the local, keyless services (Ollama, Kokoro, Moonshine,
+  Whisper); any other provider is a `factory:`, a dotted path to a callable
+  that takes the block and returns the service, documented with examples in
+  `pipecat.evals.services`. The old names still work and emit a
+  `DeprecationWarning`; they will be removed in 2.0.0.
+  (PR [#5678](https://github.com/pipecat-ai/pipecat/pull/5678))
+
+### Removed
+
+- Removed `SEND_CHUNK_MS` from `pipecat.evals.harness`. The harness now sends
+  the user's audio through its own output transport, which paces it like any
+  Pipecat transport does.\n
+  (PR [#5646](https://github.com/pipecat-ai/pipecat/pull/5646))
+
+### Fixed
+
+- Fixed `AsyncAITTSService` ignoring runtime `model`, `voice` and `language`
+  updates. Those three are sent only in the websocket init message and never
+  repeated per utterance, so a change to any of them now opens a new session
+  instead of being stored and warned about.
+  (PR [#5464](https://github.com/pipecat-ai/pipecat/pull/5464))
+
+- Deepgram Flux STT now applies a `model` or `numerals` update by reconnecting,
+  since Flux reads those only from the connection URL. The reconnect waits
+  until the user stops speaking, and settings Flux accepts on a live connection
+  (`keyterm`, `eot_threshold`, `eager_eot_threshold`, `eot_timeout_ms`,
+  `language_hints`) are still sent without dropping it.
+  (PR [#5477](https://github.com/pipecat-ai/pipecat/pull/5477))
+
+- A Deepgram Flux `FatalError` now reports the code and description Flux sends,
+  instead of a generic `Unknown error`.
+  (PR [#5477](https://github.com/pipecat-ai/pipecat/pull/5477))
+
+- Deepgram Flux STT now fails instead of hanging when a connection cannot be
+  established. A connection setting the endpoint rejects leaves the SageMaker
+  session opening forever and produces no confirmation on either transport, so
+  both the session handshake and the wait for Flux to confirm it are now
+  bounded and reported through `on_connection_error`.
+  (PR [#5498](https://github.com/pipecat-ai/pipecat/pull/5498))
+
+- Deepgram Flux STT now marks itself unusable once it can no longer transcribe
+  — after a fatal error from Flux, or a connection that never establishes — so
+  the failure reaches the pipeline instead of the service staying connected and
+  silent.
+  (PR [#5498](https://github.com/pipecat-ai/pipecat/pull/5498))
+
+- Fixed `GladiaSTTService` dropping Gladia's `stop_recording` message on a
+  graceful end. The websocket closed before the message was sent, so sessions
+  ended by dropping the connection rather than closing cleanly, and the
+  service's `on_disconnected` event fired twice.
+  (PR [#5499](https://github.com/pipecat-ai/pipecat/pull/5499))
+
+- Fixed the pipeline idle timeout cancelling a live session while the user is
+  still talking, on pipelines that get their turns from a provider instead of
+  local VAD. `idle_timeout_frames` now counts `UserStartedSpeakingFrame`,
+  `TranscriptionFrame` and `InterimTranscriptionFrame` as user activity,
+  alongside `BotSpeakingFrame` and the VAD-driven `UserSpeakingFrame`.
+  (PR [#5502](https://github.com/pipecat-ai/pipecat/pull/5502))
+
+- Corrected the Nova Sonic region lists in `AWSNovaSonicLLMService`'s docstring
+  and example: `eu-north-1` is a supported region for both Nova 2 Sonic and
+  Nova Sonic.
+  (PR [#5508](https://github.com/pipecat-ai/pipecat/pull/5508))
+
+- Fixed the Vonage-Google package conflict so it no longer prevents
+  `GeminiSTTService` usage in environments where the Vonage connector can't be
+  installed anyway, such as development environments on macOS.
+    The repo lockfile resolved `google-genai` to 2.8.0 — below the 2.9.0 the
+  service needs — for every Python 3.13 environment, to satisfy
+  `vonage-video-connector`'s `pydantic<2.12` pin, though the connector is
+  installable only on Python 3.13 Linux. That environment is now resolved apart
+  from every other. Installs from PyPI were never affected.
+  (PR [#5512](https://github.com/pipecat-ai/pipecat/pull/5512))
+
+- Fixed `SarvamHttpTTSService` ignoring its `sample_rate`. It named the field
+  `sample_rate` in the request body where Sarvam's REST API reads
+  `speech_sample_rate`, so synthesis always came back at the model's default
+  rate while the audio frames were tagged with the requested one — audio played
+  back at the wrong speed for any other rate.
+  (PR [#5517](https://github.com/pipecat-ai/pipecat/pull/5517))
+
+- Fixed the Fireworks function-calling example, which named
+  `accounts/fireworks/models/gpt-oss-20b`. Fireworks retired that model from
+  its serverless endpoint, so the example now uses
+  `accounts/fireworks/models/nemotron-3-ultra-nvfp4`.
+  (PR [#5524](https://github.com/pipecat-ai/pipecat/pull/5524))
+
+- Fixed the `examples/flows/llm_switching.py` Bedrock service, which pinned a
+  Claude model Bedrock has retired and a latency mode Bedrock does not offer
+  for its replacement. It now uses
+  `us.anthropic.claude-haiku-4-5-20251001-v1:0`.
+  (PR [#5525](https://github.com/pipecat-ai/pipecat/pull/5525))
+
+- Corrected `GeminiTTSService`'s documented model names: they differ between
+  the Cloud Text-to-Speech and Gemini API backends, and the docstrings named
+  only Cloud Text-to-Speech's `gemini-2.5-flash-tts` / `gemini-2.5-pro-tts`,
+  which the Gemini API rejects with a 404.
+  (PR [#5526](https://github.com/pipecat-ai/pipecat/pull/5526))
+
+- Fixed Deepgram STT settings passed through `extra` being discarded when the
+  key matched a declared settings field (for example `extra={"diarize":
+  True}`). Such keys are now promoted to their field and sent to Deepgram.
+  (PR [#5527](https://github.com/pipecat-ai/pipecat/pull/5527))
+
+- Fixed `GeminiTTSService` ignoring its `language` setting on the Gemini API
+  (GenAI) backend. The configured language is now sent as the speech config's
+  `language_code`, as it already is on the Cloud Text-to-Speech backend.
+  (PR [#5537](https://github.com/pipecat-ai/pipecat/pull/5537))
+
+- `LmntTTSService` now maps all 31 languages LMNT's Blizzard model speaks,
+  adding Assamese, Bengali, Czech, Danish, Finnish, Malayalam, Marathi, Slovak,
+  Tamil and Telugu. These languages already reached the API through the
+  base-code fallback, which logged a "not verified" warning for each of them.
+  (PR [#5544](https://github.com/pipecat-ai/pipecat/pull/5544))
+
+- Fixed an `OpenAISTTService` error where `include_prob_metrics=True` sent a
+  request that diarization models reject. Those models report no per-token or
+  per-segment probabilities, so the service now transcribes without requesting
+  them and warns once.
+  (PR [#5549](https://github.com/pipecat-ai/pipecat/pull/5549))
+
+- Fixed the `examples/voice/voice-pockettts.py` import of `PocketTTSService`,
+  which named a module that does not exist.
+  (PR [#5553](https://github.com/pipecat-ai/pipecat/pull/5553))
+
+- Fixed an issue where `ElevenLabsRealtimeSTTService` ignored the realtime
+  API's `quota_exceeded`, `unaccepted_terms` and `invalid_request` messages
+  instead of reporting them as errors.
+  (PR [#5555](https://github.com/pipecat-ai/pipecat/pull/5555))
+
+- Fixed the PCM sample rates `GrokRealtimeLLMService` accepts: the Grok Voice
+  Agent API's 22050 Hz option is now allowed, and 21050 Hz — which the API
+  rejects — is not.
+  (PR [#5560](https://github.com/pipecat-ai/pipecat/pull/5560))
+
+- Fixed the Rime TTS services' language mapping: Arabic, Italian, Japanese and
+  Portuguese — all served by Rime's `coda` model — now resolve to Rime's
+  language codes, and a region-qualified language such as `Language.EN_US`
+  falls back to a base code Rime accepts instead of a BCP-47 tag that made Rime
+  close the connection without synthesizing.
+  (PR [#5564](https://github.com/pipecat-ai/pipecat/pull/5564))
+
+- `SambaNovaLLMService` now sends the `frequency_penalty`, `presence_penalty`
+  and `seed` settings, which SambaNova's chat completions API accepts. They
+  were previously dropped from the request.
+  (PR [#5565](https://github.com/pipecat-ai/pipecat/pull/5565))
+
+- Fixed a `SpeechmaticsSTTService` error where setting `split_sentences` raised
+  `ValueError: "VoiceAgentConfig" object has no field "split_sentences"` and
+  the service failed to construct.
+  (PR [#5568](https://github.com/pipecat-ai/pipecat/pull/5568))
+
+- Fixed `SpeechmaticsTTSService` reporting the `speechmatics-rt` SDK version,
+  rather than Pipecat's, in the `sm-app` tag it sends to Speechmatics. The tag
+  now carries the Pipecat version, matching `SpeechmaticsSTTService`.
+  (PR [#5569](https://github.com/pipecat-ai/pipecat/pull/5569))
+
+- Fixed the NVIDIA examples `update-settings/llm/llm-nvidia.py` and
+  `voice/voice-nvidia-sagemaker.py`, which requested Llama models that NVIDIA's
+  NIM cloud endpoint no longer serves.
+  (PR [#5579](https://github.com/pipecat-ai/pipecat/pull/5579))
+
+- Corrected the `model` docstring in `OneShotInputParams` for
+  `UltravoxRealtimeLLMService`: the field defaults to `None`, which lets
+  Ultravox pick its current default model, rather than to the legacy
+  `fixie-ai/ultravox` alias.
+  (PR [#5582](https://github.com/pipecat-ai/pipecat/pull/5582))
+
+- Fixed word-level tracking stalling for the rest of a sentence when a TTS
+  service reports a word-timestamp event that doesn't match what is being
+  spoken. The next correctly reported word is now matched past the gap and
+  carries the text that was never reported, so `TTSTextFrame`s and RTVI
+  progress keep pace with the audio. Previously the sentence stayed stuck at
+  the first unmatched word, every word after it went unmatched too, and the
+  remainder arrived as a single frame once the audio context ended.
+  (PR [#5585](https://github.com/pipecat-ai/pipecat/pull/5585))
+
+- Fixed `NvidiaLLMService` emitting reasoning frames before TTFB metrics, so
+  observers receive TTFB before reasoning output for structured reasoning
+  fields and inline `<think>` blocks.
+  (PR [#5589](https://github.com/pipecat-ai/pipecat/pull/5589))
+
+- The LLM usage debug log now includes cache creation tokens alongside cache
+  reads.
+  (PR [#5602](https://github.com/pipecat-ai/pipecat/pull/5602))
+
+- OpenAI-compatible LLM services now report prompt-cache write tokens as
+  `LLMTokenUsage.cache_creation_input_tokens`, so usage-based cost tracking
+  accounts for them. Covers `BaseOpenAILLMService` and the services inheriting
+  it, `OpenAIResponsesLLMService`, and `SambaNovaLLMService`. Providers that do
+  not report the count leave the field unset.
+  (PR [#5602](https://github.com/pipecat-ai/pipecat/pull/5602))
+
+- `OutputAudioRawFrame`s pushed from upstream of an STT service (for example a
+  sound effect or a recording played into the pipeline before the STT) now
+  reach the output transport untouched. STT services only transcribe
+  `InputAudioRawFrame`s. Previously any audio frame was treated as user speech,
+  so the audio was sent to the transcription provider and, with
+  `audio_passthrough=False`, never reached the transport.
+  (PR [#5609](https://github.com/pipecat-ai/pipecat/pull/5609))
+
+- `VoicemailDetector` no longer swallows `EndWorkerFrame` travelling upstream
+  through a closed gate, so a handler that ends the call reaches
+  `PipelineWorker`. Closed classifier and conversation gates already admitted
+  `CancelWorkerFrame` (a system frame) but dropped other worker lifecycle
+  frames.
+  (PR [#5614](https://github.com/pipecat-ai/pipecat/pull/5614))
+
+- `SegmentedSTTService` (Whisper, Moonshine, and the other segmented STT
+  services) now transcribes each speech segment in a background task.
+  Previously the transcription blocked the service's input audio frames, so a
+  VAD downstream could not analyze them until it finished. Transcripts are
+  still pushed in segment order.
+  (PR [#5630](https://github.com/pipecat-ai/pipecat/pull/5630))
+
+- A punctuation mark reported as its own word-timestamp entry no longer shifts
+  the text around it or records the mark twice. Trailing punctuation is
+  attributed to the word before it, so the mark's own event arrived with
+  nothing left to account for and spent a character of the following word
+  instead — no text was lost and the cursors resynced a word later, but the
+  words in between were recorded with the break misplaced (`"Yeah"`, `","`,
+  `"I"` gave `"Yeah, I c an help"`), and a turn ending inside that window kept
+  the misplaced split. Where a service forwards raw tokens
+  (`pre_merge_tokens=False`) the mark was also written to the context a second
+  time. Most visible for languages reported one character at a time, where
+  every mark is affected, though not specific to them.
+  (PR [#5633](https://github.com/pipecat-ai/pipecat/pull/5633))
+
+- `LLMService` now logs the composed system instruction only when it changes.
+  Previously every tool sync recomposed it, so the full prompt was logged once
+  per turn.
+  (PR [#5635](https://github.com/pipecat-ai/pipecat/pull/5635))
+
+- Fixed `LLMContextSummarizer`'s message-count trigger
+  (`max_unsummarized_messages`), which never reset after a summary was applied
+  and counted the injected summary message as a new conversation turn.
+  (PR [#5642](https://github.com/pipecat-ai/pipecat/pull/5642))
+
+- Bots scaffolded by `pipecat init` with Sarvam, Whisper, or Moonshine STT,
+  Sarvam TTS, or Google STT no longer crash at startup. Sarvam and Google STT
+  now use each service's default model or location, and Whisper and Moonshine
+  read an optional `WHISPER_MODEL` or `MOONSHINE_MODEL` variable that falls
+  back to the default model. Previously the generated code read a variable the
+  generated `.env.example` never listed, and the unset variable arrived as an
+  explicit `None` that overrode the working default and failed validation.
+  (PR [#5661](https://github.com/pipecat-ai/pipecat/pull/5661))
+
+- The generated `.env.example` now lists every variable the scaffolded bot
+  reads. This adds entries for ElevenLabs realtime STT, Gemini STT and TTS,
+  Mistral STT, xAI STT, Soniox TTS, Deepgram Flux TTS, Deepgram Flux SageMaker
+  TTS, and the NVIDIA TTS voice ID, names the Fal key `FAL_API_KEY` to match
+  the generated code, and reads the AWS Transcribe session token from
+  `AWS_SESSION_TOKEN` instead of the misspelled `AWS_AWS_SESSION_TOKEN`.
+  (PR [#5661](https://github.com/pipecat-ai/pipecat/pull/5661))
+
+- Fixed `WhisperSTTService` raising `ValueError` at construction when
+  `Settings(language=None)` is paired with a multilingual model. `None` asks
+  Whisper to detect the language itself, which every model supports; the
+  language check previously looked `None` up in the model's supported-language
+  list.
+  (PR [#5669](https://github.com/pipecat-ai/pipecat/pull/5669))
+
+- Fixed the `Model.DISTIL_LARGE_V2` and `MLXModel.DISTIL_LARGE_V3` Whisper
+  models being documented as multilingual. Every Distil-Whisper release is
+  English-only.
+  (PR [#5669](https://github.com/pipecat-ai/pipecat/pull/5669))
+
+- Local STT and TTS services now reject a missing or blank model or voice at
+  startup with a "must be specified" error. Piper, Pocket TTS, Kokoro, and XTTS
+  check the voice in the constructor (Pocket TTS before loading its model, and
+  Kokoro also against the loaded voices file), and Whisper, Whisper MLX, and
+  Moonshine check the model. Previously a blank value, which is what a copied
+  `.env.example` produces, reached the underlying library and failed with an
+  unrelated message, sometimes only on the first utterance. XTTS also reports
+  an unknown studio speaker as an error frame instead of raising a `KeyError`.
+  (PR [#5670](https://github.com/pipecat-ai/pipecat/pull/5670))
+
+- Fixed `XAISTTService` emitting each utterance's text twice. xAI sends a chunk
+  final for every locked segment and then an utterance final that restates the
+  whole utterance, and both were pushed as `TranscriptionFrame`, so LLM context
+  aggregators and other consumers that accumulate finals saw the text
+  duplicated. Chunk finals are now pushed as `InterimTranscriptionFrame` and
+  only the utterance final becomes a `TranscriptionFrame`, always with
+  `finalized=True`.
+  (PR [#5673](https://github.com/pipecat-ai/pipecat/pull/5673))
+
+- Fixed `SonioxSTTService` dropping Soniox's end-of-audio frame on a graceful
+  end. The websocket closed before it was sent, so sessions ended by dropping
+  the connection rather than closing cleanly, and the service's
+  `on_disconnected` event fired twice.
+  (PR [#5682](https://github.com/pipecat-ai/pipecat/pull/5682))
+
+- Fixed `SarvamSTTService` mislabeling every transcript as Hindi when no
+  language was detected, the default behavior in `transcribe` mode. Unresolved
+  languages now stay `None`, and `ur-IN`, `mai-IN`, `sd-IN`, and `kok-IN` are
+  now correctly mapped.
+  (PR [#5692](https://github.com/pipecat-ai/pipecat/pull/5692))
+
+- The `pipecat eval suite` dashboard fits the terminal: rows are windowed to
+  the active runs, including in a repeated sweep, and never wrap, so the tally
+  at the bottom is always on screen. A running row's spinner animates and each
+  row carries a clock, from its first attempt's start to its last attempt's
+  end; the failures list is set apart from its header by a blank line.
+  (PR [#5694](https://github.com/pipecat-ai/pipecat/pull/5694))
+
+### Other
+
+- `CartesiaSTTService`, `DeepgramFluxSTTService`, and
+  `DeepgramFluxSageMakerSTTService` now log the provider's request ID when the
+  connection is established, so a session can be traced in provider-side
+  diagnostics.
+  (PR [#5475](https://github.com/pipecat-ai/pipecat/pull/5475))
+
+- Documented `SonioxSTTService`'s `context` setting as accepting either a
+  `SonioxContextObject` or a plain string of background text on any current
+  Soniox model, along with the 8k-token cap Soniox applies to the context
+  object.
+  (PR [#5566](https://github.com/pipecat-ai/pipecat/pull/5566))
+
 ## [1.8.1] - 2026-08-27
 
 ### Fixed

@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -59,6 +60,9 @@ class LemonSliceNewSessionRequest(BaseModel):
         agent_prompt: A high-level system prompt that subtly influences the avatar's movements,
             expressions, and emotional demeanor.
         idle_timeout: Idle timeout in seconds.
+        audio_sample_rate: Sample rate the avatar captures your audio at and plays it back at.
+            One of 16000, 22050, 24000, 44100 or 48000.
+        model: The LemonSlice model to run the avatar on. Uses the default model when unset.
         daily_room_url: Daily room URL to use for the session.
         daily_token: Daily token for authenticating with the room.
         lemonslice_properties: Additional connection properties to pass to the session.
@@ -72,6 +76,8 @@ class LemonSliceNewSessionRequest(BaseModel):
     agent_image: Image.Image | None = None
     agent_prompt: str | None = None
     idle_timeout: int | None = None
+    audio_sample_rate: int = 24000
+    model: str | None = None
     daily_room_url: str | None = None
     daily_token: str | None = None
     lemonslice_properties: dict | None = None
@@ -176,6 +182,8 @@ class LemonSliceTransportClient:
             agent_image=self._session_request.agent_image,
             agent_prompt=self._session_request.agent_prompt,
             idle_timeout=self._session_request.idle_timeout,
+            audio_sample_rate=self._session_request.audio_sample_rate,
+            model=self._session_request.model,
             daily_room_url=self._session_request.daily_room_url,
             daily_token=self._session_request.daily_token,
             connection_properties=connection_properties if connection_properties else None,
@@ -218,6 +226,9 @@ class LemonSliceTransportClient:
                 on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
                 on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
                 on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
+                on_network_connection_status_updated=partial(
+                    self._on_handle_callback, "on_network_connection_status_updated"
+                ),
                 on_participant_joined=self._callbacks.on_participant_joined,
                 on_participant_left=self._callbacks.on_participant_left,
                 on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
@@ -588,6 +599,18 @@ class LemonSliceOutputTransport(BaseOutputTransport):
 
         # This is the custom track destination expected by LemonSlice
         self._transport_destination: str | None = "stream"
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The LemonSlice avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.

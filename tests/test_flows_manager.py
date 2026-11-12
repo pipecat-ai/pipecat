@@ -25,6 +25,7 @@ from pipecat.flows.exceptions import FlowError, FlowTransitionError
 from pipecat.flows.manager import FlowManager, NodeConfig
 from pipecat.flows.types import (
     NO_RESPONSE,
+    TRANSITION_IN_YAML,
     FlowArgs,
     FlowResult,
     FlowsFunctionSchema,
@@ -642,6 +643,39 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
         )
         await transition_func(params)
         self.assertTrue(callback_called, "Result callback was not called")
+
+    async def test_transition_in_yaml_rejected_outside_a_configured_flow(self):
+        """A node built in Python has nothing to decide a deferred transition."""
+        flow_manager = FlowManager(
+            worker=self.mock_worker,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        await flow_manager.initialize()
+
+        async def defers(args, flow_manager):
+            return {"ok": True}, TRANSITION_IN_YAML
+
+        transition_func = await flow_manager._create_transition_func("defers", defers)
+        results = []
+
+        async def result_callback(result, *, properties=None):
+            results.append(result)
+
+        await transition_func(
+            FunctionCallParams(
+                function_name="defers",
+                tool_call_id="id",
+                arguments={},
+                llm=None,
+                pipeline_worker=self.mock_worker,
+                context=None,
+                result_callback=result_callback,
+            )
+        )
+        self.assertEqual(results[0]["status"], "error")
+        self.assertIn("TRANSITION_IN_YAML", results[0]["error"])
+        self.assertIn("not built from a flow config", results[0]["error"])
 
     async def test_node_validation_edge_cases(self):
         """Test edge cases in node validation."""

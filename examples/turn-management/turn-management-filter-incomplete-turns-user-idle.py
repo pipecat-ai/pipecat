@@ -45,6 +45,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -60,6 +61,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -157,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {
                 "role": "developer",
-                "content": "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go and why?'",
+                "content": "Please introduce yourself to the user, asking them a question that will require a complete response. To start, say 'Let me start with a fun one. If you could travel anywhere in the world right now, where would you go?'",
             }
         )
         await worker.queue_frames([LLMRunFrame()])

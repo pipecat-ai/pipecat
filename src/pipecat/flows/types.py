@@ -28,8 +28,8 @@ from typing import (
     TypedDict,
 )
 
-from pipecat.adapters.schemas.direct_function import BaseDirectFunctionWrapper, tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.direct_function import BaseDirectFunctionWrapper, tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.flows.exceptions import InvalidFunctionError
 from pipecat.utils.deprecation import deprecated
 
@@ -254,6 +254,23 @@ response will be triggered by something else, like a user utterance.
 
 For functions that transition to another node,
 ``NodeConfig.respond_immediately`` provides the equivalent control.
+"""
+
+
+class _TransitionInYaml:
+    """Type of the :data:`TRANSITION_IN_YAML` sentinel."""
+
+    def __repr__(self) -> str:
+        return "TRANSITION_IN_YAML"
+
+
+TRANSITION_IN_YAML = _TransitionInYaml()
+"""Function return value (in the "next node" slot) deferring the transition to a flow config.
+
+Return ``(result, TRANSITION_IN_YAML)`` from a tool that a
+:class:`~pipecat.flows.FlowConfig` names: the config's ``transition_to`` for
+that entry decides the next node. Only a flow built from a config accepts it;
+a node built in Python rejects it, since nothing there can decide.
 """
 
 

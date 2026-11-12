@@ -7,9 +7,21 @@
 import numpy as np
 import pytest
 
-from pipecat.audio.filters.rnnoise_filter import RNNoiseFilter
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
+
+pytestmark = pytest.mark.filterwarnings("ignore:`SOXR.*is deprecated:DeprecationWarning")
+
+
+def test_soxr_audio_resampler_emits_deprecation_warning():
+    with pytest.warns(DeprecationWarning, match="`SOXRAudioResampler` is deprecated"):
+        SOXRAudioResampler()
+
+
+def test_soxr_stream_audio_resampler_emits_deprecation_warning():
+    with pytest.warns(DeprecationWarning, match="`SOXRStreamAudioResampler` is deprecated"):
+        SOXRStreamAudioResampler()
 
 
 @pytest.mark.asyncio
@@ -102,24 +114,64 @@ async def test_soxr_stream_audio_resampler_defaults_to_vhq(monkeypatch):
     assert calls["quality"] == "VHQ"
 
 
+def _tone(samples: int, rate: int = 16000) -> bytes:
+    t = np.arange(samples) / rate
+    return (np.sin(2 * np.pi * 300 * t) * 10000).astype(np.int16).tobytes()
+
+
 @pytest.mark.asyncio
-async def test_rnnoise_default_resampler_quality_is_forwarded(monkeypatch):
-    qualities = []
+async def test_soxr_stream_audio_resampler_flush_returns_the_held_audio():
+    resampler = SOXRStreamAudioResampler()
+    audio = _tone(640)
 
-    class RNNoise:
-        def __init__(self, sample_rate):
-            self.sample_rate = sample_rate
+    resampled = await resampler.resample(audio, 16000, 8000)
+    flushed = await resampler.flush()
 
-    class Resampler:
-        def __init__(self, quality):
-            qualities.append(quality)
+    # The filter holds audio back, so a chunk on its own comes up short; the
+    # flush makes up the difference.
+    assert len(resampled) < 640
+    assert (len(resampled) + len(flushed)) // 2 == 320
 
-    monkeypatch.setattr("pipecat.audio.filters.rnnoise_filter.RNNoise", RNNoise)
-    monkeypatch.setattr(
-        "pipecat.audio.resamplers.soxr_stream_resampler.SOXRStreamAudioResampler", Resampler
-    )
 
-    rnnoise_filter = RNNoiseFilter()
-    await rnnoise_filter.start(16000)
+@pytest.mark.asyncio
+async def test_soxr_stream_audio_resampler_is_reusable_after_flush():
+    resampler = SOXRStreamAudioResampler()
+    audio = _tone(640)
 
-    assert qualities == ["QQ", "QQ"]
+    await resampler.resample(audio, 16000, 8000)
+    await resampler.flush()
+
+    resampled = await resampler.resample(audio, 16000, 8000)
+    flushed = await resampler.flush()
+
+    assert (len(resampled) + len(flushed)) // 2 == 320
+
+
+@pytest.mark.asyncio
+async def test_soxr_stream_audio_resampler_reset_drops_the_held_audio():
+    resampler = SOXRStreamAudioResampler()
+
+    await resampler.resample(_tone(640), 16000, 8000)
+    await resampler.reset()
+
+    assert await resampler.flush() == b""
+
+
+@pytest.mark.asyncio
+async def test_soxr_stream_audio_resampler_flush_and_reset_before_any_audio():
+    resampler = SOXRStreamAudioResampler()
+
+    assert await resampler.flush() == b""
+    await resampler.reset()
+
+
+@pytest.mark.asyncio
+async def test_base_audio_resampler_flush_and_reset_default_to_no_ops():
+    class Passthrough(BaseAudioResampler):
+        async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
+            return audio
+
+    resampler = Passthrough()
+
+    assert await resampler.flush() == b""
+    await resampler.reset()

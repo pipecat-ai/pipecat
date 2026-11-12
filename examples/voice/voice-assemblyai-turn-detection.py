@@ -23,10 +23,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.assemblyai.tts import AssemblyAITTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -44,6 +45,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -56,9 +61,9 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """AssemblyAI u3-rt-pro with Built-in Turn Detection
+    """AssemblyAI Universal-3 Pro with Built-in Turn Detection
 
-    This example demonstrates using AssemblyAI's u3-rt-pro Speech-to-Text model
+    This example demonstrates using AssemblyAI's Universal-3 Pro Speech-to-Text model
     with AssemblyAI's built-in turn detection for more natural conversation flow.
 
     Key features:
@@ -82,7 +87,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     4. Speaker Diarization (Optional)
        - Enable with `speaker_labels=True`
        - Automatically identifies different speakers in multi-party conversations
-       - TranscriptionFrame includes speaker_id field (e.g., "Speaker A", "Speaker B")
+       - TranscriptionFrame includes the speaker in `speaker` (label "A", "B", ...)
 
     5. Language Detection (Optional, multilingual model only)
        - Enable with `language_detection=True`
@@ -97,7 +102,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
             # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default
@@ -108,10 +112,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
+    tts = AssemblyAITTSService(
+        api_key=os.environ["ASSEMBLYAI_API_KEY"],
+        settings=AssemblyAITTSService.Settings(
+            voice="49c443a4-8a1d-5f7e-b70b-98bdbd9823c3",  # Audrey
         ),
     )
 

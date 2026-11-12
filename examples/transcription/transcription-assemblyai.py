@@ -21,6 +21,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -48,6 +49,7 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(audio_in_enabled=True),
+    "livekit": lambda: LiveKitParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
     "webrtc": lambda: TransportParams(audio_in_enabled=True),
 }
@@ -56,12 +58,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = AssemblyAISTTService(
-        api_key=os.environ["ASSEMBLYAI_API_KEY"],
-        settings=AssemblyAISTTService.Settings(
-            model="u3-rt-pro",
-        ),
-    )
+    stt = AssemblyAISTTService(api_key=os.environ["ASSEMBLYAI_API_KEY"])
 
     tl = TranscriptionLogger()
 

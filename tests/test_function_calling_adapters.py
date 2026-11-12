@@ -12,15 +12,15 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.responses.function_tool_param import FunctionToolParam
 from openai.types.responses.tool_search_tool_param import ToolSearchToolParam
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
-from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.llm.services.bedrock_adapter import AWSBedrockLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 
 
 class TestFunctionAdapters(unittest.TestCase):

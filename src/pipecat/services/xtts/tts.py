@@ -22,7 +22,6 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -34,7 +33,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import assert_given
+from pipecat.utils.types import assert_given, require_given
 
 # The server below can connect to XTTS through a local running docker
 #
@@ -151,7 +150,9 @@ class XTTSService(TTSService):
             self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if language is not None:
-            self._warn_init_param_moved_to_settings("language", "language")
+            self._warn_init_param_moved_to_settings(
+                "language", "language", deprecated_since="0.0.106"
+            )
             default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
@@ -168,13 +169,13 @@ class XTTSService(TTSService):
             **kwargs,
         )
 
+        require_given(self._settings.voice, "XTTS voice")
+
         # Init-only fields (not runtime-updatable)
         self._base_url = base_url
 
         self._studio_speakers: dict[str, Any] | None = None
         self._aiohttp_session = aiohttp_session
-
-        self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -231,8 +232,8 @@ class XTTSService(TTSService):
             return
 
         voice = assert_given(self._settings.voice)
-        if voice is None:
-            yield ErrorFrame(error="XTTS voice must be specified")
+        if not voice or voice not in self._studio_speakers:
+            yield ErrorFrame(error=f"XTTS voice '{voice}' is not one of the studio speakers")
             return
         embeddings = self._studio_speakers[voice]
 
@@ -255,40 +256,8 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            CHUNK_SIZE = self.chunk_size
-
-            buffer = bytearray()
-            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+            async for chunk in r.content.iter_chunked(self.chunk_size):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    # Append new chunk to the buffer.
-                    buffer.extend(chunk)
-
-                    # Check if buffer has enough data for processing.
-                    while (
-                        len(buffer) >= 48000
-                    ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                        # Process the buffer up to a safe size for resampling.
-                        process_data = buffer[:48000]
-                        # Remove processed data from buffer.
-                        buffer = buffer[48000:]
-
-                        # XTTS uses 24000 so we need to resample to our desired rate.
-                        resampled_audio = await self._resampler.resample(
-                            bytes(process_data), 24000, self.sample_rate
-                        )
-                        # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(
-                            resampled_audio, self.sample_rate, 1, context_id=context_id
-                        )
-                        yield frame
-
-            # Process any remaining data in the buffer.
-            if len(buffer) > 0:
-                resampled_audio = await self._resampler.resample(
-                    bytes(buffer), 24000, self.sample_rate
-                )
-                frame = TTSAudioRawFrame(
-                    resampled_audio, self.sample_rate, 1, context_id=context_id
-                )
-                yield frame
+                    # XTTS streams 24 kHz audio.
+                    yield TTSAudioRawFrame(chunk, 24000, 1, context_id=context_id)

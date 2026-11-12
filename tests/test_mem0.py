@@ -60,7 +60,7 @@ class TestMem0EnhanceContext(unittest.IsolatedAsyncioTestCase):
 
         injected = [m for m in ctx.get_messages() if "I recall" in str(m.get("content", ""))]
         self.assertEqual(len(injected), 1)
-        self.assertEqual(injected[0]["role"], "system")
+        self.assertEqual(injected[0]["role"], "developer")
         self.assertIn("User likes coffee", injected[0]["content"])
         self.assertIn("User is in Lisbon", injected[0]["content"])
 

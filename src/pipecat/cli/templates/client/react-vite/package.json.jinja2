@@ -10,23 +10,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^1.12.0",
-    "@pipecat-ai/client-react": "^1.7.1",
-{%- for transport in transports %}
-{%- if transport.value == 'daily' %}
-    "@pipecat-ai/daily-transport": "^1.6.7",
-{%- elif transport.value == 'smallwebrtc' %}
-    "@pipecat-ai/small-webrtc-transport": "^1.10.5",
-{%- elif transport.value == 'websocket' %}
-    "@pipecat-ai/websocket-transport": "^1.7.0",
-{%- endif %}
+{%- for name, version in ui_dependencies.items() %}
+    "{{ name }}": "{{ version }}",
 {%- endfor %}
-    "@pipecat-ai/voice-ui-kit": "^0.11.0",
+    "@fontsource-variable/geist": "^5.3.0",
+{%- for name, version in transport_packages.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
     "@eslint/js": "^10",
+    "@tailwindcss/vite": "^4",
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",

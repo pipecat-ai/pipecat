@@ -27,12 +27,17 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
 )
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
     FluxConnectionNotConfirmedError,
 )
+from pipecat.utils.errors import ErrorCategory
 
 
 @dataclass
@@ -102,6 +107,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         tag: list | None = None,
         should_interrupt: bool = True,
         watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -123,6 +129,15 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 recommendation and this setting with it. Defaults to True.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. The response
+                is discarded if the user resumes speaking or the committed
+                transcript differs from the predicted one. Off by default: it
+                spends an inference on every prediction, including the ones Flux
+                withdraws. Turning it on sets ``eager_eot_threshold`` to 0.5
+                when the settings leave it unset, since Flux reports no
+                prediction without it.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent STTService.
         """
@@ -139,6 +154,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
         )
 
         # Apply settings delta
@@ -151,6 +167,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             tag=tag,
             should_interrupt=should_interrupt,
             watchdog_min_timeout=watchdog_min_timeout,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
             sample_rate=sample_rate,
             **kwargs,
@@ -161,6 +178,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
 
         self._client: SageMakerBidiClient | None = None
         self._response_task: asyncio.Task | None = None
+        # Set while the service is stopping, so the session it closes doesn't
+        # end the turn in progress.
+        self._disconnecting = False
 
     # ------------------------------------------------------------------
     # Transport interface implementation
@@ -180,6 +200,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             return
         await self._client.send_json(message)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify Flux protocol failures, then SageMaker session failures."""
+        return super()._classify_error(exception) or classify_sagemaker_bidi_error(exception)
+
     def _transport_is_active(self) -> bool:
         return self._client is not None and self._client.is_active
 
@@ -195,6 +219,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         """
         logger.debug("Connecting to Deepgram Flux on SageMaker...")
 
+        self._disconnecting = False
         self._connection_established_event.clear()
 
         self._client = SageMakerBidiClient(
@@ -205,8 +230,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         )
 
         try:
-            # A connection setting the endpoint rejects leaves start_session
-            # blocked indefinitely rather than raising, so it is bounded too.
+            # A rejected connection setting raises a generic 424 from
+            # start_session; the timeout guards against a session that never opens.
             await self._start_session_within_timeout()
 
             # Start response processor first so we can receive the Connected message
@@ -225,7 +250,13 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self._call_event_handler("on_connected")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Nothing reconnects after a failed session start, so the service
+            # can't do any more work in this session.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
             await self._call_event_handler("on_connection_error", str(e))
 
     async def _start_session_within_timeout(self):
@@ -241,11 +272,13 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         except TimeoutError:
             raise FluxConnectionNotConfirmedError(
                 f"SageMaker session did not open within {self._CONNECTION_TIMEOUT}s; "
-                "the endpoint may not accept the current connection settings"
+                "the endpoint may not accept the current connection settings (see "
+                f"CloudWatch log group /aws/sagemaker/Endpoints/{self._endpoint_name})"
             ) from None
 
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
+        self._disconnecting = True
         self._connection_established_event.clear()
         # Discard any in-flight/pending Configure — the connection is going
         # away, so it can no longer be acked or sent.
@@ -319,3 +352,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             logger.debug("Response processor stopped")
+            # A turn lives in one session, so it ends when the session does,
+            # unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()

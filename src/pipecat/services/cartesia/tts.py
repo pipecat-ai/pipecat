@@ -9,10 +9,8 @@
 import base64
 import json
 import re
-import warnings
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
 import aiohttp
@@ -20,6 +18,10 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaEmotion,
+    CartesiaExpressionAdapter,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -30,6 +32,8 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -45,11 +49,10 @@ def _resolve_cartesia_version(cartesia_version: str | None) -> str:
     if cartesia_version is None:
         return _CARTESIA_API_VERSION
 
-    warnings.warn(
+    warn_deprecated(
         "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
         "No replacement. The service sends the API version it is written against, "
         "so overriding it can break request and response handling.",
-        DeprecationWarning,
         stacklevel=3,
     )
     return cartesia_version
@@ -75,6 +78,14 @@ class GenerationConfig(BaseModel):
     emotion: str | None = None
 
 
+def _generation_config(
+    config: GenerationConfig | None, expression: dict[str, Any]
+) -> dict[str, Any] | None:
+    """A request's generation config: the settings', with what its expression asks for."""
+    values = config.model_dump(exclude_none=True) if config else {}
+    return {**values, **expression} or None
+
+
 def language_to_cartesia_language(language: Language) -> str:
     """Convert a Language enum to Cartesia language code.
 
@@ -82,125 +93,148 @@ def language_to_cartesia_language(language: Language) -> str:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding service language code. If ``language`` is not in
-        the verified mapping, falls back to the base language code (e.g.,
-        ``en`` from ``en-US``) and logs a warning (via
-        ``resolve_language(..., use_base_code=True)``).
+        The corresponding service language code. Regional codes Cartesia
+        supports (e.g., ``es-MX``) are kept. Any other ``language`` falls back
+        to the base language code (e.g., ``de`` from ``de-CH``) and logs a
+        warning (via ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
         Language.BG: "bg",
+        Language.BG_BG: "bg-BG",
         Language.BN: "bn",
+        Language.BN_IN: "bn-IN",
         Language.CS: "cs",
+        Language.CS_CZ: "cs-CZ",
         Language.DA: "da",
+        Language.DA_DK: "da-DK",
         Language.DE: "de",
-        Language.EN: "en",
+        Language.DE_AT: "de-AT",
+        Language.DE_DE: "de-DE",
         Language.EL: "el",
+        Language.EL_GR: "el-GR",
+        Language.EN: "en",
+        Language.EN_AU: "en-AU",
+        Language.EN_CA: "en-CA",
+        Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
+        Language.EN_IN: "en-IN",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
+        Language.EN_US: "en-US",
+        Language.EN_ZA: "en-ZA",
         Language.ES: "es",
+        Language.ES_AR: "es-AR",
+        Language.ES_CL: "es-CL",
+        Language.ES_CO: "es-CO",
+        Language.ES_DO: "es-DO",
+        Language.ES_ES: "es-ES",
+        Language.ES_MX: "es-MX",
+        Language.ES_PA: "es-PA",
+        Language.ES_PE: "es-PE",
+        Language.ES_PR: "es-PR",
+        Language.ES_US: "es-US",
         Language.FI: "fi",
+        Language.FI_FI: "fi-FI",
         Language.FR: "fr",
+        Language.FR_BE: "fr-BE",
+        Language.FR_CA: "fr-CA",
+        Language.FR_FR: "fr-FR",
         Language.GU: "gu",
+        Language.GU_IN: "gu-IN",
         Language.HE: "he",
+        Language.HE_IL: "he-IL",
         Language.HI: "hi",
+        Language.HI_IN: "hi-IN",
         Language.HR: "hr",
+        Language.HR_HR: "hr-HR",
         Language.HU: "hu",
+        Language.HU_HU: "hu-HU",
         Language.ID: "id",
+        Language.ID_ID: "id-ID",
         Language.IT: "it",
+        Language.IT_IT: "it-IT",
         Language.JA: "ja",
+        Language.JA_JP: "ja-JP",
         Language.KA: "ka",
+        Language.KA_GE: "ka-GE",
         Language.KN: "kn",
+        Language.KN_IN: "kn-IN",
         Language.KO: "ko",
+        Language.KO_KR: "ko-KR",
         Language.ML: "ml",
+        Language.ML_IN: "ml-IN",
         Language.MR: "mr",
+        Language.MR_IN: "mr-IN",
         Language.MS: "ms",
+        Language.MS_MY: "ms-MY",
         Language.NL: "nl",
+        Language.NL_BE: "nl-BE",
+        Language.NL_NL: "nl-NL",
+        Language.NB: "no",
         Language.NO: "no",
+        Language.NB_NO: "no-NO",
         Language.OR: "or",
+        Language.OR_IN: "or-IN",
         Language.PA: "pa",
+        Language.PA_IN: "pa-IN",
         Language.PL: "pl",
+        Language.PL_PL: "pl-PL",
         Language.PT: "pt",
+        Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
         Language.RO: "ro",
+        Language.RO_RO: "ro-RO",
         Language.RU: "ru",
+        Language.RU_RU: "ru-RU",
         Language.SK: "sk",
+        Language.SK_SK: "sk-SK",
         Language.SV: "sv",
+        Language.SV_SE: "sv-SE",
         Language.TA: "ta",
+        Language.TA_IN: "ta-IN",
         Language.TE: "te",
+        Language.TE_IN: "te-IN",
         Language.TH: "th",
+        Language.TH_TH: "th-TH",
+        Language.FIL: "tl",
         Language.TL: "tl",
+        Language.FIL_PH: "tl-PH",
         Language.TR: "tr",
+        Language.TR_TR: "tr-TR",
         Language.UK: "uk",
+        Language.UK_UA: "uk-UA",
         Language.UR: "ur",
+        Language.UR_IN: "ur-IN",
         Language.VI: "vi",
+        Language.VI_VN: "vi-VN",
         Language.ZH: "zh",
+        Language.ZH_CN: "zh-CN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-class CartesiaEmotion(StrEnum):
-    """Predefined Emotions supported by Cartesia."""
+def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as Cartesia inline phonemes.
 
-    # Primary emotions supported by Cartesia
-    NEUTRAL = "neutral"
-    ANGRY = "angry"
-    EXCITED = "excited"
-    CONTENT = "content"
-    SAD = "sad"
-    SCARED = "scared"
-    # Additional emotions supported by Cartesia
-    HAPPY = "happy"
-    ENTHUSIASTIC = "enthusiastic"
-    ELATED = "elated"
-    EUPHORIC = "euphoric"
-    TRIUMPHANT = "triumphant"
-    AMAZED = "amazed"
-    SURPRISED = "surprised"
-    FLIRTATIOUS = "flirtatious"
-    JOKING_COMEDIC = "joking/comedic"
-    CURIOUS = "curious"
-    PEACEFUL = "peaceful"
-    SERENE = "serene"
-    CALM = "calm"
-    GRATEFUL = "grateful"
-    AFFECTIONATE = "affectionate"
-    TRUST = "trust"
-    SYMPATHETIC = "sympathetic"
-    ANTICIPATION = "anticipation"
-    MYSTERIOUS = "mysterious"
-    MAD = "mad"
-    OUTRAGED = "outraged"
-    FRUSTRATED = "frustrated"
-    AGITATED = "agitated"
-    THREATENED = "threatened"
-    DISGUSTED = "disgusted"
-    CONTEMPT = "contempt"
-    ENVIOUS = "envious"
-    SARCASTIC = "sarcastic"
-    IRONIC = "ironic"
-    DEJECTED = "dejected"
-    MELANCHOLIC = "melancholic"
-    DISAPPOINTED = "disappointed"
-    HURT = "hurt"
-    GUILTY = "guilty"
-    BORED = "bored"
-    TIRED = "tired"
-    REJECTED = "rejected"
-    NOSTALGIC = "nostalgic"
-    WISTFUL = "wistful"
-    APOLOGETIC = "apologetic"
-    HESITANT = "hesitant"
-    INSECURE = "insecure"
-    CONFUSED = "confused"
-    RESIGNED = "resigned"
-    ANXIOUS = "anxious"
-    PANICKED = "panicked"
-    ALARMED = "alarmed"
-    PROUD = "proud"
-    CONFIDENT = "confident"
-    DISTANT = "distant"
-    SKEPTICAL = "skeptical"
-    CONTEMPLATIVE = "contemplative"
-    DETERMINED = "determined"
+    Cartesia reads ``<<…>>`` blocks of ``|``-separated IPA phones, with stress
+    marks directly before the vowel they stress. Each word of the IPA becomes its
+    own block.
+
+    Args:
+        word: The word being pronounced (unused: the block replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The inline phoneme blocks, e.g. ``<<m|ɛ|t|f|ˈ|ɔ|ɹ|m|ɪ|n>>``, or None for an
+        empty pronunciation.
+    """
+    blocks = [
+        "<<" + "|".join(stress_before_vowels(ipa_phones(w))) + ">>"
+        for w in normalize_ipa(ipa).split()
+    ]
+    return " ".join(blocks) or None
 
 
 @dataclass
@@ -208,13 +242,33 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
+        accent: Accent a multilingual voice speaks the language with (e.g. ``british``).
+            The value must be one the voice itself supports, as listed in the ``accents``
+            field of Cartesia's Get Voice response. Unset lets Cartesia pick the closest
+            accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
+        normalization: How Cartesia reads numbers, dates and phone numbers in the
+            transcript. ``"auto"`` (Cartesia's default) follows the request's language,
+            and a language or locale code such as ``"en-GB"`` reads them in that
+            convention whatever language is spoken. ``"off"`` skips normalization and
+            is only for text that is already spelled out: digits and symbols left in
+            the text come out garbled or not at all. Word timestamps, and so the LLM
+            context, carry the original text in every mode.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
+    accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -228,6 +282,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
@@ -331,8 +386,10 @@ class CartesiaTTSService(WebsocketTTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -398,6 +455,21 @@ class CartesiaTTSService(WebsocketTTSService):
         self._max_buffer_delay_ms = max_buffer_delay_ms
 
         self._receive_task = None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -484,42 +556,22 @@ class CartesiaTTSService(WebsocketTTSService):
         """Normalize raw word timestamps from Cartesia before further processing.
 
         Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
-        and drops entries that become empty after stripping.
-
-        For Chinese and Japanese, Cartesia groups related characters in the same timestamp
-        message.
-        For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-        We combine these into single words so the downstream aggregator can add natural
-        spacing between meaningful units rather than individual characters.
-
-        For other languages, words are already properly separated and are used as-is.
+        and drops entries that become empty after stripping. Each entry keeps its own
+        start time, so one entry in is at most one token out, whatever the language.
 
         Args:
             words: List of words/characters from Cartesia.
             starts: List of start timestamps for each word/character.
 
         Returns:
-            List of (word, start_time) tuples processed for the language.
+            List of (word, start_time) tuples.
         """
-        current_language = assert_given(self._settings.language)
-
-        # Check if this is a Chinese/Japanese language (if language is None, treat as other)
-        if current_language and self._is_chinese_or_japanese_language(current_language):
-            # For Chinese/Japanese, combine all characters in this message into one word
-            # using the first character's start time.
-            if words and starts:
-                combined_word = "".join(self._strip_cartesia_tags(w) for w in words)
-                first_start = starts[0]
-                return [(combined_word, first_start)] if combined_word else []
-            else:
-                return []
-        else:
-            result = []
-            for word, start in zip(words, starts):
-                cleaned = self._strip_cartesia_tags(word)
-                if cleaned:
-                    result.append((cleaned, start))
-            return result
+        result = []
+        for word, start in zip(words, starts):
+            cleaned = self._strip_cartesia_tags(word)
+            if cleaned:
+                result.append((cleaned, start))
+        return result
 
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
@@ -558,12 +610,20 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._settings.language:
             msg["language"] = self._settings.language
 
-        generation_config = assert_given(self._settings.generation_config)
+        if assert_given(self._settings.accent):
+            msg["accent"] = self._settings.accent
+
+        generation_config = _generation_config(
+            assert_given(self._settings.generation_config), self.expression_settings
+        )
         if generation_config:
-            msg["generation_config"] = generation_config.model_dump(exclude_none=True)
+            msg["generation_config"] = generation_config
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+        if assert_given(self._settings.normalization):
+            msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
 
@@ -623,7 +683,6 @@ class CartesiaTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -716,12 +775,15 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
+                # Cartesia reports Chinese and Japanese one character at a time, with
+                # each punctuation mark as its own token. Merging attaches the mark to
+                # the character before it ("す", "。" -> "す。").
+                cjk = self._word_timestamps_include_inter_frame_spaces()
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
-                    includes_inter_frame_spaces=(
-                        True if self._word_timestamps_include_inter_frame_spaces() else None
-                    ),
+                    includes_inter_frame_spaces=True if cjk else None,
+                    pre_merge_tokens=cjk,
                 )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(
@@ -795,6 +857,7 @@ class CartesiaHttpTTSService(TTSService):
 
     Settings = CartesiaTTSSettings
     _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.
@@ -872,8 +935,10 @@ class CartesiaHttpTTSService(TTSService):
             model="sonic-3.6",
             voice=None,
             language=Language.EN,
+            accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -919,6 +984,21 @@ class CartesiaHttpTTSService(TTSService):
 
         self._session: aiohttp.ClientSession | None = aiohttp_session
         self._owns_session = aiohttp_session is None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -995,12 +1075,20 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.language:
                 payload["language"] = self._settings.language
 
-            generation_config = assert_given(self._settings.generation_config)
+            if assert_given(self._settings.accent):
+                payload["accent"] = self._settings.accent
+
+            generation_config = _generation_config(
+                assert_given(self._settings.generation_config), self.expression_settings
+            )
             if generation_config:
-                payload["generation_config"] = generation_config.model_dump(exclude_none=True)
+                payload["generation_config"] = generation_config
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+            if assert_given(self._settings.normalization):
+                payload["normalization"] = self._settings.normalization
 
             headers = {
                 "Cartesia-Version": self._cartesia_version,

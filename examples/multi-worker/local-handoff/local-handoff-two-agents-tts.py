@@ -51,6 +51,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
@@ -65,6 +66,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -112,10 +117,14 @@ class AcmeTTSWorker(LLMWorker):
         """
         logger.info(f"Worker '{self.name}': transferring to '{agent}' ({reason})")
         await params.result_callback(f"Transferring to {agent} agent.")
+        message = (
+            f"The {self.name} agent transferred the user to you. Take over the "
+            f"conversation and help them. Reason for the transfer: {reason}"
+        )
         await self.activate_worker(
             agent,
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": reason}],
+                messages=[{"role": "developer", "content": message}],
             ),
             deactivate_self=True,
         )

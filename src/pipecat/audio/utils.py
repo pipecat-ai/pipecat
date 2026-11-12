@@ -11,7 +11,6 @@ format conversion, volume calculation, and codec transformations for
 various audio formats used in Pipecat pipelines.
 """
 
-import audioop
 import io
 import wave
 
@@ -19,8 +18,9 @@ import loudness
 import numpy as np
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
-from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
+from pipecat.audio.resamplers.sinc_resampler import SincAudioResampler
+from pipecat.audio.resamplers.sinc_stream_resampler import SincStreamAudioResampler
+from pipecat.utils.deprecation import deprecated
 
 # Normal speech usually results in many samples between ±500 to ±5000, depending on loudness and mic gain.
 # So we are using a threshold that is well below what real speech produces.
@@ -30,25 +30,30 @@ SPEAKING_THRESHOLD = 20
 def create_file_resampler(**kwargs) -> BaseAudioResampler:
     """Create an audio resampler instance for batch processing of complete audio files.
 
+    Each call resamples a whole clip, and the output lines up with the input.
+
     Args:
         **kwargs: Additional keyword arguments passed to the resampler constructor.
 
     Returns:
-        A configured SOXRAudioResampler instance.
+        A configured SincAudioResampler instance.
     """
-    return SOXRAudioResampler(**kwargs)
+    return SincAudioResampler(**kwargs)
 
 
 def create_stream_resampler(**kwargs) -> BaseAudioResampler:
     """Create a stream audio resampler instance.
 
+    Its output keeps pace with its input, so audio that has already been paced
+    stays evenly paced after resampling.
+
     Args:
         **kwargs: Additional keyword arguments passed to the resampler constructor.
 
     Returns:
-        A configured SOXRStreamAudioResampler instance.
+        A configured SincStreamAudioResampler instance.
     """
-    return SOXRStreamAudioResampler(**kwargs)
+    return SincStreamAudioResampler(**kwargs)
 
 
 def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
@@ -80,6 +85,23 @@ def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
     mixed_audio = np.clip(mixed_audio, -32768, 32767).astype(np.int16)
 
     return mixed_audio.astype(np.int16).tobytes()
+
+
+def scale_audio(audio: bytes, factor: float) -> bytes:
+    """Scale the volume of an audio stream by multiplying its samples.
+
+    The audio is assumed to be 16-bit signed integer PCM data.
+
+    Args:
+        audio: Audio as raw bytes (16-bit signed integers).
+        factor: The multiplier for every sample: 1.0 leaves the audio
+            unchanged, 0.5 halves it.
+
+    Returns:
+        Scaled audio data as raw bytes with samples clipped to 16-bit range.
+    """
+    data = np.frombuffer(audio, dtype=np.int16).astype(np.float32) * factor
+    return np.clip(data, -32768, 32767).astype(np.int16).tobytes()
 
 
 def interleave_stereo_audio(left_audio: bytes, right_audio: bytes) -> bytes:
@@ -130,6 +152,7 @@ def pcm_to_wav(
     Returns:
         A complete in-memory WAV file as bytes.
     """
+    pcm = memoryview(pcm).cast("B")
     block_align = 2 * num_channels
     remainder = len(pcm) % block_align
     if remainder:
@@ -160,7 +183,7 @@ def normalize_value(value, min_value, max_value):
     return normalized_clamped
 
 
-def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
+def calculate_audio_volume(audio: bytes | bytearray | memoryview, sample_rate: int) -> float:
     """Calculate the loudness level of audio data using ITU-R BS.1770.
 
     Args:
@@ -205,10 +228,18 @@ def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
 
 
+@deprecated(
+    "`pipecat.audio.utils.ulaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+    "Use `pipecat.audio.g711.ulaw_to_pcm` instead."
+)
 async def ulaw_to_pcm(
     ulaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
-):
+) -> bytes:
     """Convert μ-law encoded audio to PCM and optionally resample.
+
+    .. deprecated:: 1.16.0
+        Use :func:`pipecat.audio.g711.ulaw_to_pcm` instead, followed by a stream
+        resampler when the rate changes. Will be removed in 2.0.0.
 
     Args:
         ulaw_bytes: μ-law encoded audio data as raw bytes.
@@ -219,17 +250,23 @@ async def ulaw_to_pcm(
     Returns:
         PCM audio data as raw bytes at the specified output rate.
     """
-    # Convert μ-law to PCM
-    in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
+    from pipecat.audio import g711
 
-    # Resample
-    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
-
-    return out_pcm_bytes
+    return await resampler.resample(g711.ulaw_to_pcm(ulaw_bytes), in_rate, out_rate)
 
 
-async def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+@deprecated(
+    "`pipecat.audio.utils.pcm_to_ulaw` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+    "Use `pipecat.audio.g711.pcm_to_ulaw` instead."
+)
+async def pcm_to_ulaw(
+    pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
+) -> bytes:
     """Convert PCM audio to μ-law encoding and optionally resample.
+
+    .. deprecated:: 1.16.0
+        Use :func:`pipecat.audio.g711.pcm_to_ulaw` instead, after a stream
+        resampler when the rate changes. Will be removed in 2.0.0.
 
     Args:
         pcm_bytes: PCM audio data as raw bytes (16-bit signed integers).
@@ -240,19 +277,23 @@ async def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     Returns:
         μ-law encoded audio data as raw bytes at the specified output rate.
     """
-    # Resample
-    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
+    from pipecat.audio import g711
 
-    # Convert PCM to μ-law
-    out_ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
-
-    return out_ulaw_bytes
+    return g711.pcm_to_ulaw(await resampler.resample(pcm_bytes, in_rate, out_rate))
 
 
+@deprecated(
+    "`pipecat.audio.utils.alaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+    "Use `pipecat.audio.g711.alaw_to_pcm` instead."
+)
 async def alaw_to_pcm(
     alaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
 ) -> bytes:
     """Convert A-law encoded audio to PCM and optionally resample.
+
+    .. deprecated:: 1.16.0
+        Use :func:`pipecat.audio.g711.alaw_to_pcm` instead, followed by a stream
+        resampler when the rate changes. Will be removed in 2.0.0.
 
     Args:
         alaw_bytes: A-law encoded audio data as raw bytes.
@@ -263,17 +304,23 @@ async def alaw_to_pcm(
     Returns:
         PCM audio data as raw bytes at the specified output rate.
     """
-    # Convert a-law to PCM
-    in_pcm_bytes = audioop.alaw2lin(alaw_bytes, 2)
+    from pipecat.audio import g711
 
-    # Resample
-    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
-
-    return out_pcm_bytes
+    return await resampler.resample(g711.alaw_to_pcm(alaw_bytes), in_rate, out_rate)
 
 
-async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+@deprecated(
+    "`pipecat.audio.utils.pcm_to_alaw` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+    "Use `pipecat.audio.g711.pcm_to_alaw` instead."
+)
+async def pcm_to_alaw(
+    pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
+) -> bytes:
     """Convert PCM audio to A-law encoding and optionally resample.
+
+    .. deprecated:: 1.16.0
+        Use :func:`pipecat.audio.g711.pcm_to_alaw` instead, after a stream
+        resampler when the rate changes. Will be removed in 2.0.0.
 
     Args:
         pcm_bytes: PCM audio data as raw bytes (16-bit signed integers).
@@ -284,13 +331,9 @@ async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     Returns:
         A-law encoded audio data as raw bytes at the specified output rate.
     """
-    # Resample
-    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
+    from pipecat.audio import g711
 
-    # Convert PCM to μ-law
-    out_alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
-
-    return out_alaw_bytes
+    return g711.pcm_to_alaw(await resampler.resample(pcm_bytes, in_rate, out_rate))
 
 
 def is_silence(pcm_bytes: bytes) -> bool:
@@ -317,7 +360,7 @@ def is_silence(pcm_bytes: bytes) -> bool:
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
 
     # Check the maximum absolute amplitude in the frame
-    max_value = np.abs(audio_data).max()
+    max_value = np.abs(audio_data.astype(np.int32)).max()
 
     # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
     return max_value <= SPEAKING_THRESHOLD
@@ -367,7 +410,8 @@ def detect_speech_onset(
     if sample_rate <= 0:
         return None
 
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    # A trailing partial sample can't be read as int16; ignore it.
+    samples = np.frombuffer(pcm_bytes[: len(pcm_bytes) & ~1], dtype=np.int16)
     if samples.size == 0:
         return None
 

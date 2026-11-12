@@ -337,7 +337,8 @@ def _build_context_hub_index() -> bool:
         # pipe while we poll, and a chatty failure would then deadlock the build. The
         # reader is a second handle because the child's descriptor is a dup of the
         # writer's and shares its offset — seeking to read would move where it writes.
-        with open(log_path, "w") as sink, open(log_path, errors="replace") as reader:
+        # The child writes the log in its own locale encoding, so both handles use it too.
+        with open(log_path, "w") as sink, open(log_path, errors="replace") as reader:  # noqa: PLW1514
             process = subprocess.Popen(
                 [sys.executable, "-m", "pipecat_context_hub", "--log-level", "INFO", "refresh"],
                 stdout=sink,
@@ -726,8 +727,8 @@ def init_command(
     enable_eval: bool = typer.Option(
         False,
         "--eval/--no-eval",
-        help="Add an 'eval' transport so the bot is runnable with `-t eval` for "
-        "behavioral evals (see `pipecat eval`). Off by default.",
+        help="Add an 'eval' transport so `pipecat eval` can drive the bot for "
+        "behavioral evals. Off by default.",
         rich_help_panel=_PANEL_FEATURES,
     ),
     dry_run: bool = typer.Option(

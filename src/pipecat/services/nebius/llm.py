@@ -34,6 +34,7 @@ class NebiusLLMService(OpenAILLMService):
 
     Settings = NebiusLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,

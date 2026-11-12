@@ -15,7 +15,6 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -26,7 +25,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, require_given
 
 try:
     import requests
@@ -211,7 +210,9 @@ class KokoroTTSService(TTSService):
 
         self._kokoro = Kokoro(str(model_file), str(voices))
 
-        self._resampler = create_stream_resampler()
+        voice = require_given(self._settings.voice, "Kokoro TTS voice")
+        if voice not in self._kokoro.voices:
+            raise ValueError(f"Kokoro TTS voice '{voice}' is not in the voices file")
 
     def can_generate_metrics(self) -> bool:
         """Indicate that this service supports TTFB and usage metrics."""
@@ -242,12 +243,8 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_tts_usage_metrics(text)
 
-            voice = assert_given(self._settings.voice)
-            if voice is None:
-                raise ValueError("Kokoro TTS voice must be specified")
-            lang = assert_given(self._settings.language)
-            if lang is None:
-                raise ValueError("Kokoro TTS language must be specified")
+            voice = require_given(self._settings.voice, "Kokoro TTS voice")
+            lang = require_given(self._settings.language, "Kokoro TTS language")
             speed = assert_given(self._settings.speed)
             stream = self._kokoro.create_stream(text, voice=voice, lang=lang, speed=speed)
 
@@ -255,13 +252,10 @@ class KokoroTTSService(TTSService):
                 await self.stop_ttfb_metrics()
 
                 audio_int16 = (samples * 32767).astype(np.int16).tobytes()
-                audio_data = await self._resampler.resample(
-                    audio_int16, sample_rate, self.sample_rate
-                )
 
                 yield TTSAudioRawFrame(
-                    audio=audio_data,
-                    sample_rate=self.sample_rate,
+                    audio=audio_int16,
+                    sample_rate=sample_rate,
                     num_channels=1,
                     context_id=context_id,
                 )

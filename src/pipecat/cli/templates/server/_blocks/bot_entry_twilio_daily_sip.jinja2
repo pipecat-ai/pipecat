@@ -26,8 +26,8 @@
             )
         else:
             # Local testing: no call to handle, so create_transport builds the
-            # transport for the local run instead{% if enable_eval %} (e.g. `pipecat eval` with
-            # `-t eval`){% endif %}. {% if 'twilio_daily_sip_dialout' in transports %}No outbound call is placed in this mode.{% else %}No Twilio call is forwarded in this mode.{% endif %}
+            # transport for the local run instead{% if enable_eval %} (e.g. a
+            # `pipecat eval` run){% endif %}. {% if 'twilio_daily_sip_dialout' in transports %}No outbound call is placed in this mode.{% else %}No Twilio call is forwarded in this mode.{% endif %}
 
 {{ transport_setup.transport_params(transports, enable_krisp, enable_eval, video_input, video_output) | indent(12, first=True) }}
 

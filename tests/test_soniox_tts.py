@@ -4,16 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+
+import pytest
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
-    AggregationType,
+    TextType,
+    TTSStoppedFrame,
     TTSTextFrame,
 )
 from pipecat.services.settings import TTSSettings
-from pipecat.services.soniox.tts import SonioxTTSService
+from pipecat.services.soniox.tts import SonioxTTSService, language_to_soniox_tts_language
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -42,6 +47,27 @@ def test_soniox_english_characters_assemble_into_words():
     assert service._to_word_times("s1", _timestamps("Hi world. ")) == [
         ("Hi", 0.0),
         ("world.", 0.3),
+    ]
+
+
+def test_soniox_audio_tag_is_one_word_with_its_spaces():
+    service = _service("en")
+
+    assert [
+        w for w, _ in service._to_word_times("s1", _timestamps("7. [neutral][long pause] Hi "))
+    ] == [
+        "7.",
+        "[neutral][long pause]",
+        "Hi",
+    ]
+
+
+def test_soniox_stressed_word_is_reported_without_its_asterisks():
+    service = _service("en")
+
+    assert [w for w, _ in service._to_word_times("s1", _timestamps("*Really* good "))] == [
+        "Really",
+        "good",
     ]
 
 
@@ -167,12 +193,13 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
         )
         # Applying a settings delta reports the service usable again.
         service._is_usable = True
+        service._expression_formatter = None
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)
         service._aggregated_frame_sequencer = seq
         service._turn_context_id = old_ctx
         for token in ("Hi", " there"):
-            frame = AggregatedTextFrame(token, AggregationType.SENTENCE, raw_text=token)
+            frame = AggregatedTextFrame(token, TextType.SENTENCE, raw_text=token)
             await seq.register_spoken(frame, old_ctx, token, append_to_context=True)
         assert seq._slots == []  # nothing promoted — sentence has no boundary yet
 
@@ -223,3 +250,163 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
 
         self.assertEqual([s.frame.text for s in seq._slots], ["Hi there"])
         self.assertEqual(service._turn_context_id, "ctx-new")
+
+
+class _FakeWebsocket:
+    state = State.OPEN
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    async def send(self, message: str):
+        self.sent.append(json.loads(message))
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_configures_a_stream_it_has_not_opened():
+    # A stream ID first seen on this connection (e.g. after a reconnect) must
+    # be configured before its text, or Soniox rejects it.
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = _FakeWebsocket()
+
+    async for _ in service.run_tts("Hello.", "stream-1"):
+        pass
+    async for _ in service.run_tts("Again.", "stream-1"):
+        pass
+
+    sent = service._websocket.sent
+    assert [m.get("stream_id") for m in sent] == ["stream-1"] * 3
+    assert "text" not in sent[0]
+    assert [m.get("text") for m in sent[1:]] == ["Hello.", "Again."]
+
+
+class _FakeReceivingWebsocket(_FakeWebsocket):
+    def __init__(self, messages: list[dict]):
+        super().__init__()
+        self._messages = messages
+
+    async def __aiter__(self):
+        for message in self._messages:
+            yield json.dumps(message)
+
+
+@pytest.mark.asyncio
+async def test_soniox_error_code_sets_category(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [
+            {"error_code": 402, "error_type": "organization_balance_exhausted"},
+            {"error_code": 401, "error_type": "unauthorized"},
+            {"error_code": "oops"},
+        ]
+    )
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
+
+
+def _stream_not_found(stream_id: str) -> dict:
+    return {
+        "stream_id": stream_id,
+        "error_code": 400,
+        "error_type": "invalid_stream_state",
+        "error_message": f"Stream {stream_id} not found. Send a start message first.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_soniox_cancel_crossing_the_stream_end_is_not_an_error(monkeypatch):
+    # The stream ends on Soniox's side as the interruption cancels it: Soniox's
+    # `terminated` is on its way, and the cancel then finds no stream.
+    service = SonioxTTSService(api_key="test-key")
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append(kwargs)
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [{"stream_id": "stream-1", "terminated": True}, _stream_not_found("stream-1")]
+    )
+
+    await service._send_config("stream-1")
+    await service.on_audio_context_interrupted("stream-1")
+    await service._receive_messages()
+
+    assert service._websocket.sent[-1] == {"stream_id": "stream-1", "cancel": True}
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_soniox_stream_not_found_for_a_stream_not_cancelled_is_an_error(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket([_stream_not_found("stream-1")])
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.INVALID_REQUEST]
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_send_failure_yields_error_with_exception(monkeypatch):
+    from pipecat.frames.frames import ErrorFrame
+
+    class _FailingWebsocket(_FakeWebsocket):
+        async def send(self, message: str):
+            raise ConnectionError("socket closed")
+
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = _FailingWebsocket()
+
+    async def fake_noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(service, "_connect", fake_noop)
+    monkeypatch.setattr(service, "_disconnect", fake_noop)
+
+    frames = [frame async for frame in service.run_tts("Hello.", "stream-1")]
+
+    assert isinstance(frames[0], ErrorFrame)
+    assert isinstance(frames[0].exception, ConnectionError)
+    assert isinstance(frames[1], TTSStoppedFrame)
+
+
+@pytest.mark.asyncio
+async def test_soniox_run_tts_connect_failure_yields_error_with_exception(monkeypatch):
+    from pipecat.frames.frames import ErrorFrame
+
+    service = SonioxTTSService(api_key="test-key")
+    service._websocket = None
+
+    async def failing_connect(*args, **kwargs):
+        raise TimeoutError("no answer")
+
+    monkeypatch.setattr(service, "_connect", failing_connect)
+
+    frames = [frame async for frame in service.run_tts("Hello.", "stream-1")]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert isinstance(frames[0].exception, TimeoutError)
+
+
+@pytest.mark.parametrize("language", [Language.NB, Language.NB_NO])
+def test_norwegian_bokmal_maps_to_soniox_norwegian(language):
+    assert language_to_soniox_tts_language(language) == "no"

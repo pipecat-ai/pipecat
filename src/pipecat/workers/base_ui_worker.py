@@ -4,19 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""BaseUIWorker: a worker whose jobs and job groups surface on the client UI.
+"""A worker whose job groups surface on the client UI.
 
-Every group a ``BaseUIWorker`` dispatches streams its lifecycle -- start,
-per-worker progress, and completion -- to the UI client as ``ui-job-group``
-envelopes, and the client's reserved ``__cancel_job_group`` event is honored
-for groups dispatched as cancellable. ``JobGroupParams.label`` titles the
-client's progress card. Dispatch from a plain ``BaseWorker`` instead when the
-work should stay invisible.
-
-No LLM is involved: ``BaseUIWorker`` is instantiable as-is (its inherited
-``run()`` is a bus-only loop), so a plain pipeline app can register one on the
-runner as a dispatcher and call it from tools. ``UIWorker`` inherits this class
-and adds the LLM-driven page interaction (snapshots, UI events, commands).
+.. deprecated:: 1.12.0
+    Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its
+    job groups to the client itself; dispatch from one of its ``@job``
+    handlers where a ``BaseUIWorker`` was used as a dispatcher. Will be
+    removed in 2.0.0.
 """
 
 import time
@@ -32,7 +26,7 @@ from pipecat.bus.messages import (
     BusMessage,
 )
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
     BusUIEventMessage,
     BusUIJobCompletedMessage,
     BusUIJobGroupCompletedMessage,
@@ -44,11 +38,20 @@ from pipecat.pipeline.job_context import (
     JobGroupResponse,
     JobStatus,
 )
+from pipecat.utils.deprecation import deprecated
 from pipecat.workers.base_worker import BaseWorker
 
 
+@deprecated(
+    "`BaseUIWorker` is deprecated since 1.12.0 and will be removed in 2.0.0. "
+    "Use `UIWorker` instead."
+)
 class BaseUIWorker(BaseWorker):
     """Worker that surfaces its jobs and job groups on the client UI.
+
+    .. deprecated:: 1.12.0
+        Use :class:`~pipecat.workers.ui.UIWorker` instead, which reports its
+        job groups to the client itself. Will be removed in 2.0.0.
 
     Every group this worker dispatches is registered for lifecycle
     forwarding: a ``group_started`` envelope is published at dispatch,
@@ -140,7 +143,7 @@ class BaseUIWorker(BaseWorker):
         await super().on_bus_message(message)
         if (
             isinstance(message, BusUIEventMessage)
-            and message.event_name == _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            and message.event_name == UI_CANCEL_JOB_GROUP_EVENT_NAME
         ):
             await self._handle_cancel_job_event(message)
 
@@ -254,7 +257,7 @@ class BaseUIWorker(BaseWorker):
         job_id = payload.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             logger.warning(
-                f"Worker '{self.name}': received {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} "
+                f"Worker '{self.name}': received {UI_CANCEL_JOB_GROUP_EVENT_NAME} "
                 "with no job_id; ignoring"
             )
             return
@@ -266,6 +269,6 @@ class BaseUIWorker(BaseWorker):
         )
         if not cancelled:
             logger.debug(
-                f"Worker '{self.name}': {_UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME} for "
+                f"Worker '{self.name}': {UI_CANCEL_JOB_GROUP_EVENT_NAME} for "
                 f"unknown or non-cancellable group {job_id}; ignoring"
             )

@@ -9,7 +9,7 @@
 import dotenv
 import pytest
 
-from pipecat.utils.deprecation import _warned_read_sites
+from pipecat.utils.deprecation import _warned_sites
 
 
 def pytest_configure(config):
@@ -30,9 +30,9 @@ def pytest_configure(config):
 def reset_deprecated_read_warnings():
     """Let every test see a deprecated field read for the first time.
 
-    ``warn_deprecated_read()`` warns once per call site for the life of the
+    ``warn_deprecated()`` warns once per call site for the life of the
     process. Tests that assert on those warnings reach them through shared
     source lines — a fixture processor's ``setup()``, say — so each test starts
     from an empty record.
     """
-    _warned_read_sites.clear()
+    _warned_sites.clear()

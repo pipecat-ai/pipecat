@@ -1,0 +1,3 @@
+# Runner-args body for the vision bots: what a /start request would carry.
+image_path: ../assets/cat.jpg
+question: Describe this image.

@@ -249,3 +249,35 @@ class TestSTTLanguageUpdate:
             assert svc._settings.language == "klingon"
             mock_logger.debug.assert_called_once()
             assert "klingon" in mock_logger.debug.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# resolve_language tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveLanguage:
+    """Test resolve_language fallbacks for languages missing from the map."""
+
+    _CODED_MAP = {Language.EN: "eng", Language.ES: "spa"}
+
+    def test_mapped_language(self):
+        """A language in the map resolves to its mapped code."""
+        assert resolve_language(Language.EN, self._CODED_MAP) == "eng"
+
+    def test_regional_variant_uses_mapped_base_code(self):
+        """A regional variant resolves to the map's code for its base language."""
+        assert resolve_language(Language.EN_US, self._CODED_MAP) == "eng"
+        assert resolve_language(Language.ES_MX, self._CODED_MAP) == "spa"
+
+    def test_regional_variant_without_mapped_base(self):
+        """A regional variant whose base isn't mapped resolves to the base code."""
+        assert resolve_language(Language.FR_FR, self._CODED_MAP) == "fr"
+
+    def test_base_code_not_a_language(self):
+        """A base code with no Language member resolves to the base code."""
+        assert resolve_language(Language.IU_CANS, self._CODED_MAP) == "iu"
+
+    def test_full_code_ignores_base_language(self):
+        """With use_base_code=False, a regional variant passes through unchanged."""
+        assert resolve_language(Language.EN_US, self._CODED_MAP, use_base_code=False) == "en-US"

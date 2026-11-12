@@ -31,7 +31,9 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -69,6 +71,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -102,7 +108,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(tools=[get_current_weather, get_restaurant_recommendation])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+            user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+        ),
     )
 
     pipeline = Pipeline(
@@ -153,8 +162,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Every processor is set up, so listing them all gives the pipeline it
         # ran against, which is what the phase totals below are spread over.
         logger.info(f"  Setup (concurrent): {report.setup_phase_secs:.3f}s")
-        if report.warmup:
-            logger.info(f"    warming deferred imports: {report.warmup.duration_secs:.3f}s")
         for timing in report.processor_timings:
             logger.info(f"    {timing.processor_name}: {timing.setup_duration_secs:.3f}s")
 
@@ -185,8 +192,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @latency_observer.event_handler("on_latency_breakdown")
     async def on_latency_breakdown(observer, breakdown):
-        for event in breakdown.chronological_events():
-            logger.info(f"  {event}")
+        # Each line is one part of the turn, in the order it happened, and the
+        # lines sum to the latency `UserBotLatencyObserver` reports through
+        # `on_latency_measured`. A `config:` owner means the time is governed
+        # by a setting rather than by how fast a service answered.
+        for line in breakdown.turn_contribution_lines():
+            logger.info(f"  {line}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

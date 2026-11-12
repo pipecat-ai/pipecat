@@ -114,7 +114,7 @@ class HeyGenVideoService(AIService):
         self._session = session
         self._client: HeyGenClient | None = None
         self._send_task: asyncio.Task | None = None
-        self._resampler = create_stream_resampler()
+        self._resampler = create_stream_resampler(clear_after_secs=None)
         self._is_interrupting = False
         self._session_request = session_request
         self._service_type = service_type
@@ -311,6 +311,7 @@ class HeyGenVideoService(AIService):
         self._is_interrupting = True
         await self._client.interrupt(self._event_id)
         await self._cancel_send_task()
+        await self._resampler.reset()
         self._is_interrupting = False
         await self._create_send_task()
         await self._client.start_agent_listening()
@@ -403,6 +404,7 @@ class HeyGenVideoService(AIService):
                 # Bot has stopped speaking
                 if self._event_id is not None:
                     # Flush any remaining buffered audio
+                    audio_buffer.extend(await self._resampler.flush())
                     if len(audio_buffer) > 0:
                         await self._client.agent_speak(bytes(audio_buffer), self._event_id)
                         audio_buffer.clear()

@@ -35,7 +35,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SERVICES_DIR = REPO_ROOT / "src" / "pipecat" / "services"
-MANIFEST = REPO_ROOT / "scripts" / "release-evals" / "manifest.yaml"
+MANIFEST = REPO_ROOT / "evals" / "release" / "manifest.yaml"
 ENV_EXAMPLE = REPO_ROOT / "env.example"
 README = REPO_ROOT / "README.md"
 
@@ -48,6 +48,10 @@ FOLDED_SUBPACKAGES = {"sagemaker"}
 
 # Subpackages whose classes are realtime (speech-to-speech) services.
 REALTIME_SUBPACKAGES = {"realtime", "gemini_live", "nova_sonic"}
+
+# Realtime subpackages naming a product line distinct from the provider's other
+# realtime service, kept as the unit's variant so the two stay separate units.
+REALTIME_PRODUCT_SUBPACKAGES = {"voice_live", "live"}
 
 MODULE_TYPES = {
     "llm": "llm",
@@ -68,6 +72,7 @@ THIN_WRAPPER_BASES = {
     "OpenAIRealtimeLLMService",
     "BaseWhisperSTTService",
     "GoogleLLMService",
+    "GoogleInteractionsLLMService",
     "GeminiLiveLLMService",
 }
 
@@ -193,7 +198,7 @@ def _dataclass_fields(cls: ast.ClassDef) -> list[str]:
 
 
 def _scan_module(path: Path) -> list[ServiceClass]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     constants = _module_constants(tree)
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
     module = ".".join(path.relative_to(REPO_ROOT / "src").with_suffix("").parts)
@@ -257,7 +262,8 @@ def _classify(rel_parts: tuple[str, ...], cls: ServiceClass) -> tuple[str, str |
     subpackages = [p for p in rel_parts[1:-1] if p not in FOLDED_SUBPACKAGES]
     unit_type = MODULE_TYPES[stem]
     if unit_type == "llm" and (
-        any(p in REALTIME_SUBPACKAGES for p in subpackages) or "Realtime" in cls.name
+        any(p in REALTIME_SUBPACKAGES | REALTIME_PRODUCT_SUBPACKAGES for p in subpackages)
+        or "Realtime" in cls.name
     ):
         unit_type = "realtime"
         subpackages = [p for p in subpackages if p not in REALTIME_SUBPACKAGES]
@@ -341,13 +347,15 @@ def _registry_by_class() -> dict[str, dict]:
 def _manifest_bots() -> list[str]:
     if not MANIFEST.exists():
         return []
-    return sorted(set(re.findall(r"^\s*-\s*bot:\s*(\S+)", MANIFEST.read_text(), re.MULTILINE)))
+    return sorted(
+        set(re.findall(r"^\s*-\s*bot:\s*(\S+)", MANIFEST.read_text(encoding="utf-8"), re.MULTILINE))
+    )
 
 
 def _env_example_vars() -> list[str]:
     if not ENV_EXAMPLE.exists():
         return []
-    return re.findall(r"^([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(), re.MULTILINE)
+    return re.findall(r"^([A-Z][A-Z0-9_]*)=", ENV_EXAMPLE.read_text(encoding="utf-8"), re.MULTILINE)
 
 
 def _docs_links() -> dict[tuple[str, str], str]:
@@ -357,7 +365,7 @@ def _docs_links() -> dict[tuple[str, str], str]:
     pattern = r"https://docs\.pipecat\.ai/api-reference/server/services/([a-z0-9-]+)/([a-z0-9-]+)"
     return {
         (seg, slug): f"https://docs.pipecat.ai/api-reference/server/services/{seg}/{slug}"
-        for seg, slug in re.findall(pattern, README.read_text())
+        for seg, slug in re.findall(pattern, README.read_text(encoding="utf-8"))
     }
 
 

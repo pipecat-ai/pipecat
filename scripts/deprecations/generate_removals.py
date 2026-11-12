@@ -70,6 +70,9 @@ def compute_removals(
     deprecation record (its ``location`` is intentionally dropped — it points at
     source that no longer exists). Already-recorded subjects are left untouched, so
     repeated runs are idempotent.
+
+    A subject the current registry still records members of (``X`` when
+    ``X.member`` is present) was re-recorded at a finer granularity, not removed.
     """
     prev = subjects_of(prev_registry) if prev_registry else {}
     current = set(subjects_of(current_registry))
@@ -78,6 +81,8 @@ def compute_removals(
     removals = list(existing)
     for subject, rec in prev.items():
         if subject in current or subject in known:
+            continue
+        if any(s.startswith(f"{subject}.") for s in current):
             continue
         removals.append(
             {

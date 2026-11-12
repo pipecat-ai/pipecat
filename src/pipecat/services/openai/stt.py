@@ -9,7 +9,7 @@
 Provides two STT services:
 
 - ``OpenAISTTService``: REST-based transcription using the Audio API
-  (Whisper / GPT-4o).
+  (Whisper / GPT transcription models).
 - ``OpenAIRealtimeSTTService``: WebSocket-based streaming transcription
   using the Realtime API in transcription-only mode.
 """
@@ -24,7 +24,6 @@ from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -52,11 +51,25 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
+def _is_diarization_model(model: str) -> bool:
+    return "diarize" in model
+
+
 @dataclass
 class OpenAISTTSettings(BaseWhisperSTTService.Settings):
-    """Settings for the OpenAI STT service."""
+    """Settings for the OpenAI STT service.
 
-    pass
+    Parameters:
+        keywords: Words or phrases that guide transcription of the input audio, such
+            as product names or acronyms. Supported by ``"gpt-transcribe"``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
+    """
+
+    keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -64,6 +77,14 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    With ``include_prob_metrics=True``, GPT transcription models report per-token
+    logprobs and Whisper models report per-segment logprobs. Diarization models
+    support neither, so they report no probabilities.
+
+    Diarization models (e.g. ``"gpt-4o-transcribe-diarize"``) label each speaker:
+    every contiguous speaker run of a segment is emitted as its own frame with
+    OpenAI's speaker label (e.g. ``"A"``) as ``speaker.label``.
     """
 
     Settings = OpenAISTTSettings
@@ -85,7 +106,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         """Initialize OpenAI STT service.
 
         Args:
-            model: Model to use — either gpt-4o or Whisper.
+            model: Transcription model to use. Defaults to ``"gpt-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
@@ -120,10 +141,12 @@ class OpenAISTTService(BaseWhisperSTTService):
         # --- 1. Hardcoded defaults ---
         _language = language or Language.EN
         default_settings = self.Settings(
-            model="gpt-4o-transcribe",
+            model="gpt-transcribe",
             language=_language,
             prompt=None,
             temperature=None,
+            keywords=None,
+            speaker_format=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -151,24 +174,45 @@ class OpenAISTTService(BaseWhisperSTTService):
             **kwargs,
         )
 
+        # Model already reported as unable to supply probabilities, so that
+        # warning is logged once per model rather than once per utterance.
+        self._prob_metrics_warned_model: str | None = None
+
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._settings.language is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
 
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self._settings.model,
+            "model": model,
             "language": self._settings.language,
         }
 
+        if _is_diarization_model(model):
+            # Speakers come back only in "diarized_json", and diarization models
+            # require a chunking strategy for audio longer than 30 seconds.
+            kwargs["response_format"] = "diarized_json"
+            kwargs["chunking_strategy"] = "auto"
+
         if self._include_prob_metrics:
-            # GPT-4o-transcribe models only support logprobs (not verbose_json)
-            if self._settings.model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+            # GPT transcription models return logprobs alongside a "json" response;
+            # Whisper models carry per-segment logprobs in "verbose_json" instead.
+            # Diarization models support neither and reject the logprobs request.
+            if model.startswith("whisper"):
+                kwargs["response_format"] = "verbose_json"
+            elif _is_diarization_model(model):
+                if self._prob_metrics_warned_model != model:
+                    self._prob_metrics_warned_model = model
+                    logger.warning(
+                        f"{self}: {model} does not support probability metrics; "
+                        "transcription results will carry no probability."
+                    )
+            else:
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]
-            else:
-                # Whisper models support verbose_json
-                kwargs["response_format"] = "verbose_json"
 
         if self._settings.prompt is not None:
             kwargs["prompt"] = self._settings.prompt
@@ -176,7 +220,20 @@ class OpenAISTTService(BaseWhisperSTTService):
         if self._settings.temperature is not None:
             kwargs["temperature"] = self._settings.temperature
 
+        if self._settings.keywords:
+            kwargs["keywords"] = self._settings.keywords
+
         return await self._client.audio.transcriptions.create(**kwargs)
+
+    def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
+        """Return a diarized response's ``(segment text, speaker)`` pairs."""
+        # A diarized response's segments carry a speaker; Whisper's verbose
+        # segments don't. Read it by attribute so older openai releases, which
+        # lack the diarized response type, still work.
+        segments = getattr(response, "segments", None)
+        if not segments or getattr(segments[0], "speaker", None) is None:
+            return None
+        return [(segment.text.strip(), getattr(segment, "speaker", None)) for segment in segments]
 
 
 @dataclass
@@ -189,10 +246,15 @@ class OpenAIRealtimeSTTSettings(STTSettings):
         noise_reduction: Noise reduction mode. ``"near_field"`` for close
             microphones, ``"far_field"`` for distant microphones, or ``None``
             to disable.
+        delay: How long the model waits before emitting transcription text, trading
+            latency for accuracy. Only supported by ``"gpt-realtime-whisper"``.
     """
 
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     noise_reduction: Literal["near_field", "far_field"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -217,7 +279,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     server detects them, and recommends the external user turn strategies that resolve
     those proposals into turn frames. Do **not** use a separate VAD processor in the
     pipeline in this mode. Requires a model that supports turn detection —
-    ``gpt-4o-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
+    ``gpt-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
 
     Audio is sent as 24 kHz 16-bit mono PCM as required by the OpenAI Realtime
     API. If the pipeline runs at a different sample rate (e.g. 16 kHz for Silero
@@ -258,8 +320,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             api_key: OpenAI API key for authentication.
             model: Transcription model. For low-latency streaming
                 transcription, use ``"gpt-realtime-whisper"``. Other
-                supported transcription models include
-                ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
+                supported transcription models include ``"gpt-transcribe"``
+                and ``"gpt-live-transcribe"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
@@ -322,6 +384,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             language=Language.EN,
             prompt=None,
             noise_reduction=None,
+            delay=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -335,7 +398,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if noise_reduction is not None:
-            self._warn_init_param_moved_to_settings("noise_reduction", "noise_reduction")
+            self._warn_init_param_moved_to_settings(
+                "noise_reduction", "noise_reduction", deprecated_since="0.0.106"
+            )
             default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---
@@ -360,7 +425,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._session_ready = False
-        self._resampler = create_stream_resampler()
 
         # Server-side VAD is disabled by default (turn_detection=False).
         # Set to None or a dict to enable server-side VAD.
@@ -399,6 +463,15 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             True, as this service supports metrics generation.
         """
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 24 kHz the Realtime API takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return OPENAI_SAMPLE_RATE
 
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when server-side VAD drives turns.
@@ -507,7 +580,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Connect to the transcription endpoint and start receiving."""
         await super()._connect()
         await self._connect_websocket()
-        if self._websocket and not self._receive_task:
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -593,6 +668,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if self._settings.prompt:
             transcription["prompt"] = self._settings.prompt
 
+        if self._settings.delay:
+            transcription["delay"] = self._settings.delay
+
         input_audio: dict = {
             "format": {
                 "type": "audio/pcm",
@@ -628,12 +706,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _send_audio(self, audio: bytes):
         """Send audio data via ``input_audio_buffer.append``.
 
-        Resamples from the pipeline sample rate to 24 kHz if needed.
-
         Args:
-            audio: Raw audio bytes at the pipeline sample rate.
+            audio: Raw audio bytes at 24 kHz.
         """
-        audio = await self._resampler.resample(audio, self.sample_rate, OPENAI_SAMPLE_RATE)
         if not audio:
             return
         payload = base64.b64encode(audio).decode("utf-8")
@@ -662,10 +737,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
-        # `_connect` only starts the receive task after `_websocket` is set,
-        # and reconnects re-establish it before the next iteration, so this
-        # invariant should always hold when this method runs.
-        assert self._websocket is not None
+        if not self._websocket:
+            raise Exception("Websocket not connected")
         async for message in self._websocket:
             try:
                 evt = json.loads(message)
@@ -722,8 +795,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
 
-        For ``gpt-realtime-whisper``, ``gpt-4o-transcribe``, and
-        ``gpt-4o-mini-transcribe``, deltas contain low-latency streaming
+        For ``gpt-realtime-whisper``, ``gpt-live-transcribe``, and
+        ``gpt-transcribe``, deltas contain low-latency streaming
         partial text.
 
         Args:

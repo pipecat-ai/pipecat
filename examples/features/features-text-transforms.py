@@ -11,11 +11,16 @@ using the VoiceFormatter bundle, giving fine-grained control over which
 transforms are applied and in what order.
 
 Each transform is an async callable with the signature:
-    async def transform(text: str, aggregation_type: str) -> str
+    async def transform(text: str, text_type: str) -> str
 
 Transforms are registered via text_transforms on the TTS service as a list of
-(aggregation_type, callable) pairs. The aggregation_type string controls which
+(text_type, callable) pairs. The text_type string controls which
 frames the transform applies to ("*" means all frames).
+
+The same pairs registered on LLMTextProcessor rewrite the text for everyone
+downstream (the voice, the context and the client) rather than for the voice
+alone. This example strips emoji there, so the LLM never sees its own emoji in
+the context and keeps adding more.
 
 This example shows a billing-assistant scenario where several transforms are
 composed:
@@ -53,6 +58,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
@@ -60,6 +66,7 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.text.transforms import (
     email_to_speech,
@@ -81,6 +88,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -111,9 +122,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             (r"\bSt\.", "Street"),
             (r"\bApt\.", "Apartment"),
             (r"\bvs\b", "versus"),
-            # IPA phoneme tags are only supported on ElevenLabs v2 models, and you need to set enable_ssml_parsing=True.
-            # More details here: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices#phoneme-tags-for-v2-models
-            # (r"(?i)\bSiobhan\b", '<phoneme alphabet="ipa" ph="ʃəˈvɔːn">Siobhan</phoneme>'),
             # This is an alternative that works on all models.
             (r"(?i)\bSiobhan\b", "shi-VAWN"),
         ]
@@ -129,6 +137,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ("*", expand_percentages),
         ("*", custom_subs),
     ]
+
+    # Transforms on the LLM text processor rewrite what everyone sees: the voice,
+    # the context and the client. Emoji removed here never reach the context, so
+    # the LLM does not see its own emoji and keep adding more.
+    strip_emoji = replace_text([(r"[\U0001F300-\U0001FAFF☀-➿]️?", "")])
+    llm_text_processor = LLMTextProcessor(text_transforms=[("*", strip_emoji)])
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
@@ -168,6 +182,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,
             llm,
+            llm_text_processor,
             tts,
             transport.output(),
             assistant_aggregator,

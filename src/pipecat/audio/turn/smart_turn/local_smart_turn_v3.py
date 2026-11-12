@@ -14,8 +14,8 @@ from typing import Any, cast
 
 import numpy as np
 import onnxruntime as ort
-import soxr
 from loguru import logger
+from pipecat_resampler import Resampler
 
 from pipecat.audio.turn.smart_turn._whisper_features import compute_whisper_log_mel_features
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
@@ -44,6 +44,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         super().__init__(**kwargs)
 
         self._log_data = env_truthy("PIPECAT_SMART_TURN_LOG_DATA", default=False)
+        self._resampler: Resampler | None = None
 
         if not smart_turn_model_path:
             # Load bundled model
@@ -124,7 +125,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         """Resample audio to the model's expected sample rate (16 kHz).
 
         Args:
-            audio_array: Audio data as a float32 numpy array.
+            audio_array: Audio data as a float32 numpy array, normalized to [-1, 1].
 
         Returns:
             Resampled audio array at 16 kHz.
@@ -133,7 +134,13 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         if actual_rate == _MODEL_SAMPLE_RATE:
             return audio_array
 
-        return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="HQ")
+        resampler = self._resampler
+        if not resampler or resampler.in_rate != actual_rate:
+            resampler = self._resampler = Resampler(actual_rate, _MODEL_SAMPLE_RATE)
+        # The audio comes from int16 samples, so it converts back to them exactly.
+        audio_int16 = np.clip(np.rint(audio_array * 32768), -32768, 32767).astype(np.int16)
+        resampled = np.frombuffer(resampler.resample(audio_int16), dtype=np.int16)
+        return resampled.astype(np.float32) / 32768.0
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""

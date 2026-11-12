@@ -141,3 +141,57 @@ async def test_chunks_without_finish_reason_log_no_warning():
 
     assert [f.text for f in frames if isinstance(f, LLMTextFrame)] == ["Partial", " text."]
     assert warnings == []
+
+
+async def _run_inference(*, parts=None, finish_reason=None):
+    """Run a one-shot inference against a canned, complete response.
+
+    Returns:
+        The returned text and any warnings logged during the call.
+    """
+    service = GoogleLLMService(api_key="test-key")
+
+    async def generate_content(**kwargs):
+        return _chunk(parts=parts, finish_reason=finish_reason)
+
+    with (
+        patch.object(service._client.aio.models, "generate_content", generate_content),
+        _captured_warnings() as warnings,
+    ):
+        result = await service.run_inference(LLMContext())
+
+    return result, warnings
+
+
+@pytest.mark.asyncio
+async def test_run_inference_normal_stop_logs_no_warning():
+    """A one-shot reply that ended normally is returned without a warning."""
+    result, warnings = await _run_inference(
+        parts=[Part(text="Hello there.")], finish_reason=FinishReason.STOP
+    )
+
+    assert result == "Hello there."
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", [FinishReason.SAFETY, FinishReason.PROHIBITED_CONTENT])
+async def test_run_inference_withheld_reply_logs_the_reason(finish_reason):
+    """A withheld one-shot reply returns None and logs why."""
+    result, warnings = await _run_inference(parts=None, finish_reason=finish_reason)
+
+    assert result is None
+    assert len(warnings) == 1
+    assert finish_reason.name in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_run_inference_truncated_reply_is_returned_with_a_warning():
+    """A reply cut off at the output token limit is still returned, with a warning."""
+    result, warnings = await _run_inference(
+        parts=[Part(text="The conversation so far cove")], finish_reason=FinishReason.MAX_TOKENS
+    )
+
+    assert result == "The conversation so far cove"
+    assert len(warnings) == 1
+    assert "MAX_TOKENS" in warnings[0]

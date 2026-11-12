@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
@@ -101,7 +102,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         await controller.cleanup()
 
     async def test_speech_activity_event(self):
-        """Test that on_speech_activity event is triggered while speaking."""
+        """Test that speech activity is limited to one event per activity period."""
         analyzer = MockVADAnalyzer()
         controller = VADController(analyzer)
 
@@ -115,12 +116,14 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         await controller.setup(frame_processor_setup(self.task_manager))
 
         audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
-
-        # Activity events fire while in SPEAKING state
         analyzer.set_next_state(VADState.SPEAKING)
-        await controller.process_frame(audio_frame)
-        await controller.process_frame(audio_frame)
-        self.assertEqual(activity_count, 2)
+
+        times = iter([1.0, 1.0, *(1.0 + i * 0.02 for i in range(1, 10))])
+        with patch("pipecat.audio.vad.vad_controller.time.time", side_effect=times):
+            for _ in range(10):
+                await controller.process_frame(audio_frame)
+
+        self.assertEqual(activity_count, 1)
         await controller.cleanup()
 
     async def test_push_frame_event(self):

@@ -16,17 +16,33 @@ When to use the SOXRAudioResampler:
 """
 
 import numpy as np
-import soxr
+from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler, SoxrQuality
+from pipecat.utils.deprecation import deprecated
+
+try:
+    import soxr
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use SOXRAudioResampler, you need to `uv add "pipecat-ai[soxr]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`SOXRAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use "
+    "`SincAudioResampler` instead."
+)
 class SOXRAudioResampler(BaseAudioResampler):
     """Audio resampler implementation using the SoX resampler library.
 
     This resampler uses the SoX resampler library configured for very high
     quality (VHQ) resampling by default, providing excellent audio quality at
     the cost of additional computational overhead.
+
+    .. deprecated:: 1.16.0
+        Use :class:`~pipecat.audio.resamplers.sinc_resampler.SincAudioResampler` instead.
+        Will be removed in 2.0.0.
     """
 
     def __init__(self, *, quality: SoxrQuality = "VHQ", **kwargs):

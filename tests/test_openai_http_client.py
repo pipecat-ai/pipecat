@@ -8,15 +8,15 @@
 
 import unittest
 
-import httpx
 from openai import DefaultAsyncHttpxClient
 
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
+from tests.openai_http_helpers import ASYNC_CLIENT, http
 
 # The SDK adopts a caller-supplied client as-is and derives its request timeout from it.
-CUSTOM_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+CUSTOM_TIMEOUT = http.Timeout(60.0, connect=10.0)
 
 
 def make_http_client() -> DefaultAsyncHttpxClient:
@@ -43,10 +43,10 @@ class TestOpenAIHttpClient(unittest.IsolatedAsyncioTestCase):
 
     async def test_openai_tts_defaults_to_sdk_client(self):
         service = OpenAITTSService(api_key="test-key")
-        self.assertIsInstance(service._client._client, httpx.AsyncClient)
+        self.assertIsInstance(service._client._client, ASYNC_CLIENT)
         self.assertNotEqual(service._client.timeout, CUSTOM_TIMEOUT)
 
     async def test_openai_stt_defaults_to_sdk_client(self):
         service = OpenAISTTService(api_key="test-key")
-        self.assertIsInstance(service._client._client, httpx.AsyncClient)
+        self.assertIsInstance(service._client._client, ASYNC_CLIENT)
         self.assertNotEqual(service._client.timeout, CUSTOM_TIMEOUT)

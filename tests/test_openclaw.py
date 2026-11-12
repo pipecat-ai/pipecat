@@ -310,6 +310,17 @@ class TestOpenClawGatewayClient(unittest.IsolatedAsyncioTestCase):
         await self.gateway.chat(run.run_id, "final", "back")
         self.assertEqual((await self._next(events)).text, "back")
 
+    async def test_websocket_settings_apply_to_the_connection(self):
+        """The websocket timeouts passed to the client bound its socket."""
+        client = OpenClawGatewayClient(
+            url=self.gateway.url, token="test-token", ws_close_timeout=0.5, ws_send_timeout=1.5
+        )
+        self.addAsyncCleanup(client.disconnect)
+        await client.connect()
+
+        self.assertEqual(client._websocket.close_timeout, 0.5)
+        self.assertEqual(client._websocket.send_timeout, 1.5)
+
     async def test_a_request_that_never_leaves_is_not_left_waiting(self):
         """A send that fails settles the request instead of stranding it."""
 

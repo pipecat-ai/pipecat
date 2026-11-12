@@ -197,6 +197,36 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names.count("ProposedUserStartedSpeakingFrame"), 0)
         self.assertEqual(names.count("ProposedUserStoppedSpeakingFrame"), 0)
 
+    async def test_user_turn_resumed(self):
+        user_turn_processor = UserTurnProcessor(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=1.0)],
+            )
+        )
+        resumes = []
+
+        @user_turn_processor.event_handler("on_user_turn_resumed")
+        async def on_user_turn_resumed(processor, params):
+            resumes.append(params.inference_triggered)
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Book a flight", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(),
+            # The turn is still open, so speaking again resumes it.
+            VADUserStartedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        await run_test(
+            Pipeline([user_turn_processor]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+        )
+
+        self.assertEqual(resumes, [False])
+
 
 if __name__ == "__main__":
     unittest.main()

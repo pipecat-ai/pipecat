@@ -12,7 +12,8 @@ from typing import Literal
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.deepseek_adapter import DeepSeekLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
@@ -36,8 +37,11 @@ class DeepSeekLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for DeepSeekLLMService.
 
     Parameters:
-        thinking: Thinking mode configuration. When unset, DeepSeek's own
-            default applies: thinking enabled at "high" reasoning effort.
+        thinking: Thinking mode configuration. The service defaults this to
+            disabled: DeepSeek's V4 models otherwise run a reasoning pass before
+            every answer, which delays the first spoken token. Set
+            ``DeepSeekThinkingConfig(type="enabled")`` to turn it on, or
+            ``None`` to leave the choice to DeepSeek's own default.
     """
 
     thinking: DeepSeekThinkingConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -58,10 +62,16 @@ class DeepSeekLLMService(OpenAILLMService):
     # DeepSeek doesn't support the "developer" message role.
     # This value is used by BaseOpenAILLMService when calling the adapter.
     supports_developer_role = False
+    supports_response_schema = False
+
+    # Supplies the `reasoning_content` DeepSeek requires on assistant messages
+    # in thinking mode.
+    adapter_class = DeepSeekLLMAdapter
 
     Settings = DeepSeekLLMSettings
     ThinkingConfig = DeepSeekThinkingConfig
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -77,7 +87,7 @@ class DeepSeekLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-            model: The model identifier to use. Defaults to "deepseek-v4-flash".
+            model: The model identifier to use. Defaults to "deepseek-flash".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
@@ -88,7 +98,9 @@ class DeepSeekLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="deepseek-v4-flash", thinking=None)
+        default_settings = self.Settings(
+            model="deepseek-flash", thinking=DeepSeekThinkingConfig(type="disabled")
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
@@ -117,7 +129,7 @@ class DeepSeekLLMService(OpenAILLMService):
         logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def _build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for DeepSeek chat completion request.
 
         DeepSeek doesn't support some OpenAI parameters like seed and max_completion_tokens.
@@ -141,14 +153,13 @@ class DeepSeekLLMService(OpenAILLMService):
             "max_tokens": self._settings.max_tokens,
         }
 
-        # `thinking` is DeepSeek's own field, so it travels in the OpenAI
-        # client's `extra_body` rather than as a client keyword argument.
-        thinking = assert_given(self._settings.thinking)
-        if thinking:
-            params["extra_body"] = {"thinking": thinking.model_dump(exclude_none=True)}
-
         # Messages, tools, tool_choice
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        thinking = assert_given(self._settings.thinking)
+        if thinking is not None:
+            self._merge_extra_body(params, {"thinking": thinking.model_dump(exclude_none=True)})
+
         return params

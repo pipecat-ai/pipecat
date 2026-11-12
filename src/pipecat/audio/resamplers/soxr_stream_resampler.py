@@ -20,11 +20,27 @@ When to use the SOXRStreamAudioResampler:
 import time
 
 import numpy as np
-import soxr
+from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler, SoxrQuality
+from pipecat.utils.deprecation import deprecated
+
+try:
+    import soxr
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use SOXRStreamAudioResampler, you need to `uv add "pipecat-ai[soxr]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
+_EMPTY_AUDIO = np.array([], dtype=np.int16)
 
 
+@deprecated(
+    "`SOXRStreamAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use "
+    "`SincStreamAudioResampler` instead."
+)
 class SOXRStreamAudioResampler(BaseAudioResampler):
     """Audio resampler implementation using the SoX ResampleStream library.
 
@@ -36,6 +52,10 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
     Notes:
         - Only supports mono audio (1 channel).
         - Input must be 16-bit signed PCM audio as raw bytes.
+
+    .. deprecated:: 1.16.0
+        Use :class:`~pipecat.audio.resamplers.sinc_stream_resampler.SincStreamAudioResampler`
+        instead. Will be removed in 2.0.0.
     """
 
     def __init__(
@@ -115,3 +135,24 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
         resampled_audio = stream.resample_chunk(audio_data)
         result = resampled_audio.astype(np.int16).tobytes()
         return result
+
+    async def flush(self) -> bytes:
+        """Emit the audio held in the filter and reset it for the next stream.
+
+        Returns:
+            The remaining resampled audio as raw bytes, empty if no audio has
+            been resampled yet.
+        """
+        if not self._soxr_stream:
+            return b""
+
+        tail = self._soxr_stream.resample_chunk(_EMPTY_AUDIO, last=True)
+        self._soxr_stream.clear()
+        self._last_resample_time = time.time()
+        return tail.astype(np.int16).tobytes()
+
+    async def reset(self):
+        """Discard the audio held in the filter and reset it for the next stream."""
+        if self._soxr_stream:
+            self._soxr_stream.clear()
+            self._last_resample_time = time.time()

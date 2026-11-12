@@ -23,10 +23,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.assemblyai.tts import AssemblyAITTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -41,6 +42,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -61,15 +66,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = AssemblyAISTTService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
         settings=AssemblyAISTTService.Settings(
-            model="universal-3-5-pro",
             prompt="Transcribe this.",
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
+    tts = AssemblyAITTSService(
+        api_key=os.environ["ASSEMBLYAI_API_KEY"],
+        settings=AssemblyAITTSService.Settings(
+            voice="49c443a4-8a1d-5f7e-b70b-98bdbd9823c3",  # Audrey
         ),
     )
 
@@ -119,7 +123,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {
                 "role": "developer",
-                "content": "Contact center flow. Ask a question where they need to answer A, B, or C.",
+                "content": "Please introduce yourself to the user.",
             }
         )
         await worker.queue_frames([LLMRunFrame()])

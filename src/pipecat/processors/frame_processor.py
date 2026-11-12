@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
-import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -40,18 +39,18 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TTSAudioRawFrame,
-    UninterruptibleFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData, STTUsage
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.deprecation import deprecated, warn_deprecated_read
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.errors import ErrorCategory, classify_http_exception
 from pipecat.utils.frame_queue import FrameQueue
 
 if TYPE_CHECKING:
+    from pipecat.expressive.policy import ExpressionPolicy
     from pipecat.pipeline.worker import PipelineWorker
     from pipecat.utils.tracing.tracing_context import TracingContext
     from pipecat.workers.runner import WorkerRunner
@@ -80,9 +79,15 @@ class FrameProcessorSetup:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         clock: The clock instance for timing operations.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.enable_expressive_conversation`.
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them (alpha). See
+            :attr:`~pipecat.pipeline.worker.PipelineParams.expression_policy`.
         pipeline_worker: The :class:`~pipecat.pipeline.worker.PipelineWorker` running this pipeline. Stored
             on each processor as ``self.pipeline_worker`` so processors can
             reach task-scoped state (e.g. ``self.pipeline_worker.app_resources``).
@@ -105,9 +110,11 @@ class FrameProcessorSetup:
     pipeline_worker: PipelineWorker
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
+    expression_policy: ExpressionPolicy | None = None
     observer: BaseObserver | None = None
     report_only_initial_ttfb: bool = False
     tracing_context: TracingContext | None = None
@@ -121,9 +128,10 @@ class FrameProcessorSetup:
         if name == "tool_resources":
             value = object.__getattribute__(self, "tool_resources")
             if value is not None:
-                warn_deprecated_read(
-                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
-                    "read `setup.pipeline_worker.app_resources` instead."
+                warn_deprecated(
+                    "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0 and will "
+                    "be removed in 2.0.0. Use `setup.pipeline_worker.app_resources` instead.",
+                    stacklevel=2,
                 )
             return value
         return object.__getattribute__(self, name)
@@ -274,6 +282,12 @@ class FrameProcessor(BaseObject):
         # Watches the readiness condition passed to
         # pause_processing_all_frames_until() and lifts the pause it took.
         self.__pause_watcher_task: asyncio.Task | None = None
+        # Clear while a pipeline is setting this processor up. The StartFrame
+        # is held until it is set, so a processor never starts before its own
+        # setup is done, while the ones ahead of it in the pipeline can.
+        self.__setup_done = asyncio.Event()
+        self.__setup_done.set()
+        self.__start_received = False
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -652,6 +666,18 @@ class FrameProcessor(BaseObject):
         if self._metrics is not None:
             await self._metrics.setup(self.task_manager)
 
+    def _setup_started(self):
+        """Hold the StartFrame until :meth:`_setup_finished` is called.
+
+        Called by the pipeline before setting this processor up.
+        """
+        self.__setup_done.clear()
+
+    def _setup_finished(self):
+        """Let this processor start, once its own setup() has returned."""
+        self.__setup_done.set()
+        self.__maybe_create_input_task()
+
     async def cleanup(self):
         """Release this processor's resources at teardown.
 
@@ -715,17 +741,20 @@ class FrameProcessor(BaseObject):
             return
 
         if self._enable_direct_mode:
+            if isinstance(frame, StartFrame):
+                await self.__setup_done.wait()
             await self.__process_frame(frame, direction, callback)
             return
 
         await self.__input_queue.put((frame, direction, callback))
 
-        # Nothing drains the queue until the StartFrame arrives, so a processor
-        # never acts on a frame before it has been started. Frames pushed
-        # between setup and the StartFrame simply wait, and the StartFrame is
-        # dequeued ahead of them.
+        # Nothing drains the queue until the StartFrame arrives and this
+        # processor is set up, so a processor never acts on a frame before it
+        # has been started. Frames pushed before that simply wait, and the
+        # StartFrame is dequeued ahead of them.
         if isinstance(frame, StartFrame):
-            self.__create_input_task()
+            self.__start_received = True
+            self.__maybe_create_input_task()
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
@@ -926,19 +955,17 @@ class FrameProcessor(BaseObject):
             ```
         """
         if fatal:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
-                    "in 2.0.0. If the error leaves its originating processor unable to do "
-                    "its job, pass `force_treat_as_permanent=True` instead: that marks the "
-                    "processor unusable, and the PipelineWorker acts on it according to its "
-                    "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
-                    "`fatal=True` did). Otherwise, drop `fatal` and push an "
-                    "`EndWorkerFrame` after the error to end the pipeline.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warn_deprecated(
+                "`push_error(fatal=True)` is deprecated since 1.8.0 and will be removed "
+                "in 2.0.0. Use `force_treat_as_permanent=True` or an `EndWorkerFrame` "
+                "instead. If the error leaves its originating processor unable to do its "
+                "job, `force_treat_as_permanent=True` marks the processor unusable, and the "
+                "PipelineWorker acts on it according to its "
+                "`processor_unusable_policy` (`ProcessorUnusablePolicy.CANCEL` does what "
+                "`fatal=True` did). Otherwise, drop `fatal` and push an "
+                "`EndWorkerFrame` after the error to end the pipeline.",
+                stacklevel=2,
+            )
 
         error_frame = ErrorFrame(
             error=error_msg,
@@ -957,7 +984,11 @@ class FrameProcessor(BaseObject):
         else:
             await self.push_error_frame(error=error_frame)
 
-    async def push_error_frame(self, error: ErrorFrame, force_treat_as_permanent: bool = False):
+    async def push_error_frame(
+        self,
+        error: ErrorFrame,
+        force_treat_as_permanent: bool = False,
+    ):
         """Push an error frame upstream.
 
         Args:
@@ -1130,9 +1161,8 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            current_is_uninterruptible = isinstance(
-                self.__process_current_frame, UninterruptibleFrame
-            )
+            current = self.__process_current_frame
+            current_is_uninterruptible = current is not None and not current.interruptible
             if current_is_uninterruptible:
                 # The frame currently being processed is uninterruptible, so we
                 # must not cancel it. Just flush non-uninterruptible frames from
@@ -1156,6 +1186,28 @@ class FrameProcessor(BaseObject):
                 # all, so its cause can't be attributed.
                 category=ErrorCategory.UNKNOWN,
             )
+
+    async def _cancel_frame_in_progress(self, frame: Frame) -> bool:
+        """Stop processing a frame if it is the one in progress, leaving the queue as it is.
+
+        Unlike :meth:`_start_interruption`, this drops nothing else: the frames
+        queued behind the cancelled one, interruptible or not, are processed
+        next. The cancelled frame's callback, if any, is not called.
+
+        Call it from a system frame's processing, as interruptions are, so it
+        runs on the input task and never overlaps an interruption.
+
+        Args:
+            frame: The frame to stop processing.
+
+        Returns:
+            Whether ``frame`` was in progress and its processing was cancelled.
+        """
+        if self.__process_current_frame is not frame or not self.__process_frame_task:
+            return False
+        await self.__cancel_process_task()
+        self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
+        return True
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         """Internal method to push frames to adjacent processors.
@@ -1201,6 +1253,20 @@ class FrameProcessor(BaseObject):
                 category=ErrorCategory.UNKNOWN,
             )
 
+    def __maybe_create_input_task(self):
+        """Create the input task once the StartFrame is here and setup is done."""
+        if not self.__start_received or not self.__setup_done.is_set():
+            return
+        if not self._task_manager:
+            # Setting up was cut short before FrameProcessor.setup() ran, so
+            # there is no task manager to start processing frames with.
+            logger.error(
+                f"{self}: can't start, setup ended before FrameProcessor.setup() was "
+                "called (call super().setup() before anything that can block)"
+            )
+            return
+        self.__create_input_task()
+
     def __create_input_task(self):
         """Create the frame input processing task."""
         if self._enable_direct_mode:
@@ -1241,15 +1307,14 @@ class FrameProcessor(BaseObject):
         """Reset non-system frame processing queue."""
         self.__process_queue.reset()
 
-    def has_queued_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
+    def has_queued_frame(self, frame_type: type[Frame]) -> bool:
         """Return True if a frame of the given type is waiting in the processing queue.
 
         Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
-        enqueued types) with no queue scanning.  ``frame_type`` may be any
-        ``Frame`` subclass or ``UninterruptibleFrame`` (a mixin).
+        enqueued types) with no queue scanning.
 
         Args:
-            frame_type: The frame class (or mixin) to look for.
+            frame_type: The frame class to look for.
 
         Returns:
             True if at least one matching frame is queued.

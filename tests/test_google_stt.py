@@ -45,10 +45,10 @@ def result(*, transcript: str, is_final: bool):
     )
 
 
-@pytest.mark.asyncio
-async def test_google_final_result_emits_finalized_transcription_frame():
+def stt_service(*, elapsed_ms: int = 0):
+    """A service whose stream started ``elapsed_ms`` ago."""
     service = object.__new__(GoogleSTTService)
-    service._stream_start_time = int(time.time() * 1000)
+    service._stream_start_time = int(time.time() * 1000) - elapsed_ms
     service._user_id = "user"
     service._last_transcript_was_final = False
     service._get_language_codes = lambda: ["en-US"]
@@ -66,6 +66,12 @@ async def test_google_final_result_emits_finalized_transcription_frame():
 
     service.push_frame = push_frame
     service._handle_transcription = handle_transcription
+    return service, frames, transcriptions
+
+
+@pytest.mark.asyncio
+async def test_google_final_result_emits_finalized_transcription_frame():
+    service, frames, transcriptions = stt_service()
 
     responses = AsyncResponses(
         [
@@ -80,6 +86,28 @@ async def test_google_final_result_emits_finalized_transcription_frame():
     assert isinstance(frames[1], TranscriptionFrame)
     assert frames[1].finalized is True
     assert transcriptions == [("hello", True, "en-US")]
+
+
+@pytest.mark.asyncio
+async def test_google_results_past_the_streaming_limit_reach_the_pipeline():
+    """Everything Google delivers is pushed, including past the streaming limit.
+
+    The final is produced by the request stream half-closing at the limit, so it
+    arrives after the limit and behind any interim still in flight.
+    """
+    service, frames, _ = stt_service(elapsed_ms=GoogleSTTService.STREAMING_LIMIT + 1)
+
+    responses = AsyncResponses(
+        [
+            SimpleNamespace(results=[result(transcript="hel", is_final=False)]),
+            SimpleNamespace(results=[result(transcript="hello there", is_final=True)]),
+        ]
+    )
+
+    await service._process_responses(responses)
+
+    assert [f.text for f in frames] == ["hel", "hello there"]
+    assert frames[1].finalized is True
 
 
 def test_normalize_speech_adaptation_accepts_native_message():
@@ -153,11 +181,12 @@ async def test_google_stt_rejects_invalid_runtime_adaptation_before_commit():
     assert service._settings.adaptation is None
 
 
-async def connected_recognition_config(adaptation, model="latest_long"):
+async def connected_recognition_config(adaptation, model="latest_long", denoiser_config=None):
     """Run _connect() on a bare service and return the config it built."""
     service = object.__new__(GoogleSTTService)
     service._settings = GoogleSTTService.Settings(
         model=model,
+        denoiser_config=denoiser_config,
         enable_automatic_punctuation=True,
         enable_spoken_punctuation=False,
         enable_spoken_emojis=False,
@@ -201,6 +230,22 @@ async def test_google_connect_omits_adaptation_for_the_telephony_model(model):
     config = await connected_recognition_config({"phrase_sets": [phrase_set]}, model=model)
 
     assert "adaptation" not in config
+
+
+@pytest.mark.asyncio
+async def test_google_connect_sends_denoiser_config():
+    config = await connected_recognition_config(
+        None, model="chirp_3", denoiser_config={"denoise_audio": True}
+    )
+
+    assert config.denoiser_config.denoise_audio is True
+
+
+@pytest.mark.asyncio
+async def test_google_connect_leaves_denoiser_config_unset_when_not_configured():
+    config = await connected_recognition_config(None)
+
+    assert "denoiser_config" not in config
 
 
 @pytest.mark.asyncio

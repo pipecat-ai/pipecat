@@ -10,12 +10,16 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+import websockets
 
 import pipecat.transports.websocket.client as websocket_client
+from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.websocket.client import (
     WebsocketClientCallbacks,
     WebsocketClientParams,
     WebsocketClientSession,
+    WebsocketClientTransport,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager
 
@@ -95,3 +99,49 @@ async def test_the_websocket_outlives_the_first_transport_to_disconnect(monkeypa
 
     await session.disconnect()
     assert opened[0].closed
+
+
+class _CoalescingSerializer(FrameSerializer):
+    """Emits one coalesced payload every third frame, buffering the two before it."""
+
+    def __init__(self):
+        super().__init__()
+        self._seen = 0
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Emit the accumulated block on every third audio frame."""
+        if not isinstance(frame, OutputAudioRawFrame):
+            return None
+        self._seen += 1
+        if self._seen % 3:
+            return None
+        return frame.audio * 3
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Unused; only the output transport is exercised here."""
+        return None
+
+
+@pytest.mark.asyncio
+async def test_every_frame_is_paced_when_payloads_are_coalesced():
+    """Tests for issue #5592.
+
+    A serializer that buffers audio across calls emits no payload on most of
+    them. Those frames have still been written, so pacing follows the frames
+    taken rather than the payloads that go out.
+    """
+    params = WebsocketClientParams(serializer=_CoalescingSerializer(), audio_out_enabled=True)
+    output = WebsocketClientTransport(uri="ws://localhost:1", params=params).output()
+    output._sample_rate = 16000
+    output._write_audio_sleep = AsyncMock()
+
+    connection = AsyncMock()
+    connection.state = websockets.State.OPEN
+    output._session._websocket = connection
+
+    frame = OutputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+    written = [await output.write_audio_frame(frame) for _ in range(9)]
+
+    assert written == [True] * 9
+    assert output._write_audio_sleep.await_count == 9
+    assert connection.send.await_count == 3

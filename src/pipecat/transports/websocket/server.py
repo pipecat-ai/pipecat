@@ -376,7 +376,8 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        bytes_per_second = self.sample_rate * self._params.audio_out_channels * 2
+        self._send_interval = self.audio_chunk_size / bytes_per_second
 
         if self._params.serializer:
             await self._params.serializer.setup(setup)
@@ -483,23 +484,25 @@ class SingleClientWebsocketServerOutputTransport(BaseOutputTransport):
         """Serialize and send a frame to the WebSocket client.
 
         Returns:
-            Whether the frame was sent.
+            Whether the transport took the frame. A serializer that emits no
+            payload has still taken it; see :meth:`FrameSerializer.serialize`.
         """
         if not self._params.serializer:
             return False
 
-        success = False
+        success = True
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
                 await self._websocket.send(payload)
-                success = True
         except websockets.ConnectionClosed:
             # The client went away mid-send (a normal race on disconnect, e.g.
             # while still streaming TTS audio). Not an error.
             logger.debug(f"{self}: client disconnected while sending")
+            success = False
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
+            success = False
 
         return success
 

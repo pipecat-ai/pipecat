@@ -1,0 +1,6 @@
+name: aside_while_waiting
+user: !include ../../../release/scenarios/user_audio.yaml
+judge: !include ../../../release/scenarios/judge_audio.yaml
+scenarios:
+  - name: audio
+    turns: !include ../turns/aside_while_waiting.yaml

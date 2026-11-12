@@ -1,0 +1,6 @@
+name: cancel_and_replace
+user: !include ../../../release/scenarios/user_audio.yaml
+judge: !include ../../../release/scenarios/judge_audio.yaml
+scenarios:
+  - name: audio
+    turns: !include ../turns/cancel_and_replace.yaml

@@ -6,12 +6,8 @@
 
 """Audio files played as a user's turn.
 
-A scenario turn's ``audio:`` names a recording to play instead of synthesizing
-the turn's text (see :attr:`pipecat.evals.scenario.EvalTurn.audio`). Reading it
-goes through ``soundfile``, so every format libsndfile supports works -- WAV,
-MP3, FLAC, OGG -- and the result matches what
-:meth:`pipecat.evals.speech.EvalSpeech.generate` produces, so both reach the bot
-the same way.
+A turn's ``audio:`` names a recording to play instead of synthesizing its
+text. Any format libsndfile reads works: WAV, MP3, FLAC, OGG.
 """
 
 import asyncio
@@ -25,9 +21,7 @@ __all__ = ["load_user_audio"]
 async def load_user_audio(path: str) -> tuple[bytes, int]:
     """Read an audio file as the PCM a user turn is sent as.
 
-    The file keeps its own sample rate: each ``raw-audio`` message carries the
-    rate it was recorded at, and the bot resamples on its way in, so a recording
-    does not have to match the bot's input rate.
+    The file keeps its own sample rate; the bot resamples on its way in.
 
     Args:
         path: Path to the audio file.

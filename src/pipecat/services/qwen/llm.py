@@ -34,6 +34,7 @@ class QwenLLMService(OpenAILLMService):
 
     Settings = QwenLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,

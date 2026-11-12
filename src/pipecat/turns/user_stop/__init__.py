@@ -5,7 +5,10 @@
 #
 
 from .base_user_turn_stop_strategy import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from .classifier_user_turn_stop_strategy import ClassifierUserTurnStopStrategy
 from .deferred_user_turn_stop_strategy import DeferredUserTurnStopStrategy, deferred
+from .eager_match_policy import EagerMatchPolicy, ExactMatch, NormalizedMatch
+from .eager_user_turn_stop_strategy import EagerUserTurnStopStrategy
 from .external_user_turn_completion_stop_strategy import ExternalUserTurnCompletionStopStrategy
 from .external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 from .llm_turn_completion_user_turn_stop_strategy import LLMTurnCompletionUserTurnStopStrategy
@@ -14,10 +17,15 @@ from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrat
 
 __all__ = [
     "BaseUserTurnStopStrategy",
+    "ClassifierUserTurnStopStrategy",
     "DeferredUserTurnStopStrategy",
+    "EagerMatchPolicy",
+    "EagerUserTurnStopStrategy",
+    "ExactMatch",
     "ExternalUserTurnCompletionStopStrategy",
     "ExternalUserTurnStopStrategy",
     "LLMTurnCompletionUserTurnStopStrategy",
+    "NormalizedMatch",
     "SpeechTimeoutUserTurnStopStrategy",
     "UserTurnStoppedParams",
     "TurnAnalyzerUserTurnStopStrategy",

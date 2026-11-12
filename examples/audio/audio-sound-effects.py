@@ -35,6 +35,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -48,7 +49,7 @@ script_dir = os.path.dirname(__file__)
 
 for file in sound_files:
     # Build the full path to the image file
-    full_path = os.path.join(script_dir, "assets", file)
+    full_path = os.path.join(script_dir, "..", "assets", file)
     # Get the filename without the extension to use as the dictionary key
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
@@ -90,6 +91,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -162,9 +167,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        # Kick off the conversation.
-        await worker.queue_frame(TTSSpeakFrame("Hi, I'm listening!"))
-        await transport.send_audio(sounds["ding1.wav"])
+        # Kick off the conversation. The ding follows the greeting through the
+        # pipeline, so it plays once the greeting finishes.
+        await worker.queue_frames([TTSSpeakFrame("Hi, I'm listening!"), sounds["ding1.wav"]])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
