@@ -162,6 +162,11 @@ def test_interruption_delay_out_of_range_raises(value):
         ("u3-rt-pro-beta-1", True),
         ("universal-3-5-pro", True),
         ("universal-3-6-pro", True),
+        ("assemblyai-stt-3-7-realtime-agent", True),
+        # Not intended for voice-agent use cases.
+        ("assemblyai-stt-3-7-realtime", False),
+        # The Sync/async name is not a streaming model.
+        ("assemblyai-stt-3-7", False),
         ("universal-streaming-english", False),
         ("universal-streaming-multilingual", False),
         (None, False),
@@ -310,6 +315,79 @@ def test_update_agent_context_works_for_universal_3_6_pro():
     asyncio.run(service.update_agent_context("hello"))
 
     assert sent == [{"agent_context": "hello"}]
+
+
+# --- assemblyai-stt-3-7-realtime-agent (U3 Pro family; Universal-3.7 voice agents) ---
+
+
+def test_u3_pro_features_sent_for_assemblyai_stt_3_7_realtime_agent():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="assemblyai-stt-3-7-realtime-agent",
+            prompt="Outbound call to a health insurance payer.",
+            agent_context="May I take your order?",
+            previous_context_n_turns=5,
+            interruption_delay=300,
+            language_codes=[Language.EN],
+        ),
+    )
+    q = _query(service)
+    assert q["speech_model"] == ["assemblyai-stt-3-7-realtime-agent"]
+    assert q["prompt"] == ["Outbound call to a health insurance payer."]
+    assert q["agent_context"] == ["May I take your order?"]
+    assert q["previous_context_n_turns"] == ["5"]
+    assert q["interruption_delay"] == ["300"]
+    assert q["continuous_partials"] == ["true"]
+    assert q["language_codes"] == [json.dumps(["en"])]
+
+
+def test_assemblyai_stt_3_7_realtime_agent_allows_assemblyai_turn_detection_mode():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="assemblyai-stt-3-7-realtime-agent"),
+        vad_force_turn_endpoint=False,
+    )
+    assert is_u3_pro_model(service._settings.model)
+
+
+def test_update_agent_context_works_for_assemblyai_stt_3_7_realtime_agent():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model="assemblyai-stt-3-7-realtime-agent"),
+    )
+    sent = []
+
+    async def fake_send(**fields):
+        sent.append(fields)
+
+    service._send_update_configuration = fake_send
+    asyncio.run(service.update_agent_context("hello"))
+
+    assert sent == [{"agent_context": "hello"}]
+
+
+def test_deprecated_connection_params_accept_assemblyai_stt_3_7_realtime_agent():
+    with pytest.warns(DeprecationWarning):
+        service = AssemblyAISTTService(
+            api_key="test-key",
+            connection_params=AssemblyAIConnectionParams(
+                speech_model="assemblyai-stt-3-7-realtime-agent"
+            ),
+        )
+    assert _query(service)["speech_model"] == ["assemblyai-stt-3-7-realtime-agent"]
+    assert is_u3_pro_model(service._settings.model)
+
+
+def test_assemblyai_stt_3_7_realtime_is_not_a_voice_agent_model():
+    # Not intended for voice-agent use cases, so AssemblyAI's built-in turn
+    # detection is rejected for it.
+    with pytest.raises(ValueError, match="requires a U3 Pro model"):
+        AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(model="assemblyai-stt-3-7-realtime"),
+            vad_force_turn_endpoint=False,
+        )
 
 
 # --- agent_context (context carryover) connection parameter ---
