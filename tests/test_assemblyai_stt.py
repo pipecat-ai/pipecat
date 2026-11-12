@@ -72,22 +72,23 @@ def test_explicit_sample_rate_overrides_setup(monkeypatch):
     assert _query(service)["sample_rate"] == ["16000"]
 
 
-def test_default_model_is_universal_3_6_pro():
-    # universal-3-6-pro is the default model sent to AssemblyAI.
+def test_default_model_is_assemblyai_stt_3_7_realtime_agent():
+    # assemblyai-stt-3-7-realtime-agent is the default model sent to AssemblyAI.
     service = AssemblyAISTTService(api_key="test-key")
-    assert _query(service)["speech_model"] == ["universal-3-6-pro"]
+    assert _query(service)["speech_model"] == ["assemblyai-stt-3-7-realtime-agent"]
 
 
-def test_deprecated_connection_params_default_to_universal_3_6_pro():
+def test_deprecated_connection_params_default_to_assemblyai_stt_3_7_realtime_agent():
     with pytest.warns(DeprecationWarning):
         service = AssemblyAISTTService(
             api_key="test-key", connection_params=AssemblyAIConnectionParams()
         )
-    assert _query(service)["speech_model"] == ["universal-3-6-pro"]
+    assert _query(service)["speech_model"] == ["assemblyai-stt-3-7-realtime-agent"]
 
 
 def test_continuous_partials_defaults_to_true_for_u3_pro():
-    # universal-3-6-pro is the default U3 Pro model; continuous_partials should be on by default.
+    # assemblyai-stt-3-7-realtime-agent is the default U3 Pro model; continuous_partials
+    # should be on by default.
     service = AssemblyAISTTService(api_key="test-key")
     assert _query(service)["continuous_partials"] == ["true"]
 
