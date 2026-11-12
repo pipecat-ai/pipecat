@@ -40,6 +40,7 @@ from pipecat.evals.serializer import (
     EvalAudioCapabilities,
     EvalAudioLimitError,
     EvalConnectionFlags,
+    _bounded_json,
     _check_audio_message_size,
     _checked_audio_limit,
     eval_connect_message,
@@ -599,15 +600,11 @@ class EvalClientTransport(RTVIClientTransport):
         if self._max_bot_audio_bytes is not None:
             try:
                 _check_audio_message_size(message)
+                if not self.bot_ready:
+                    _bounded_json(message)
             except EvalAudioLimitError as exc:
                 await self.input().fail_audio(str(exc))
                 return
-            if not self.bot_ready:
-                try:
-                    json.loads(message)
-                except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
-                    await self.input().fail_audio("The eval target sent an invalid message")
-                    return
         if not self.bot_ready and self._read_capabilities(message):
             return
         try:

@@ -102,6 +102,10 @@ EVAL_STT_SAMPLE_RATE = 16000
 # Matches the WebSocket client's message-size ceiling, including direct serializer use.
 _MAX_BOT_AUDIO_MESSAGE_BYTES = 1 << 20
 
+# The deepest nesting of arrays and objects a bounded message may have. Explicit,
+# because the interpreter's own limit differs between Python versions.
+_MAX_MESSAGE_DEPTH = 128
+
 
 class EvalAudioLimitError(ValueError):
     """A fixed, content-free reason that invalidates bounded eval audio."""
@@ -119,6 +123,27 @@ def _check_audio_message_size(data: str | bytes) -> None:
             raise EvalAudioLimitError("The eval target sent an invalid message") from None
         if size > _MAX_BOT_AUDIO_MESSAGE_BYTES:
             raise EvalAudioLimitError("The eval target audio message exceeded its byte limit")
+
+
+def _bounded_json(data: str | bytes) -> Any:
+    """Parse a bounded message, refusing one nested deeper than ``_MAX_MESSAGE_DEPTH``."""
+    try:
+        message = json.loads(data)
+    except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
+        raise EvalAudioLimitError("The eval target sent an invalid message") from None
+    pending = [(message, 1)]
+    while pending:
+        value, depth = pending.pop()
+        if isinstance(value, dict):
+            children = value.values()
+        elif isinstance(value, list):
+            children = value
+        else:
+            continue
+        if depth > _MAX_MESSAGE_DEPTH:
+            raise EvalAudioLimitError("The eval target sent an invalid message")
+        pending.extend((child, depth + 1) for child in children)
+    return message
 
 
 def _checked_audio_limit(value: int | None) -> int | None:
@@ -504,12 +529,12 @@ class EvalClientSerializer(RTVIClientSerializer):
         """
         if self._max_bot_audio_bytes is not None:
             _check_audio_message_size(data)
-        try:
-            message = json.loads(data)
-        except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
-            if self._max_bot_audio_bytes is not None:
-                raise EvalAudioLimitError("The eval target sent an invalid message") from None
-            return await super().deserialize(data)
+            message = _bounded_json(data)
+        else:
+            try:
+                message = json.loads(data)
+            except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
+                return await super().deserialize(data)
 
         if isinstance(message, dict) and message.get("label") == RTVI.MESSAGE_LABEL:
             msg_type = message.get("type")
