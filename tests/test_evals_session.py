@@ -2974,6 +2974,48 @@ class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(failure.event_name, "<harness>")
                     self.assertIn(named, failure.reason)
 
+    async def test_only_a_connection_error_from_the_bot_connection_is_connect_failed(self):
+        # A bug in the harness's own transport code is the harness's error, not the bot's.
+        from pipecat.evals.client_transport import EvalClientInputTransport
+
+        async def silent(ws):
+            await ws.wait_closed()
+
+        cases = (
+            (OSError("connection reset"), "connect_failed", "<connect>"),
+            (ValueError("bad frame"), "error", "<harness>"),
+        )
+        for exception, kind, event_name in cases:
+            with self.subTest(exception=exception):
+                start = EvalClientInputTransport.start
+
+                async def failing_start(transport, frame, exception=exception, start=start):
+                    await start(transport, frame)
+                    await transport.push_error(f"{transport}: {exception}", exception=exception)
+
+                with patch.object(EvalClientInputTransport, "start", failing_start):
+                    result, elapsed = await self._run(silent, bot_ready_timeout_s=30.0)
+                self.assertLess(elapsed, 2)
+                self.assertEqual(
+                    [(f.kind, f.event_name) for f in result.failures], [(kind, event_name)]
+                )
+                self.assertIn(str(exception), result.failures[0].reason)
+
+    async def test_the_first_startup_failure_is_the_one_reported(self):
+        # The voice fails as the run starts; the bot closes before bot-ready after.
+        async def close_after_a_moment(ws):
+            await ws.recv()  # client-ready
+            await asyncio.sleep(0.3)
+            await ws.close(1011, "Concurrency limit reached")
+
+        voice = _VoiceThatConnects("ws://unused", RuntimeError("bad voice"))
+        result, _elapsed = await self._run(close_after_a_moment, user_tts=voice)
+
+        self.assertEqual(
+            [(f.kind, f.event_name) for f in result.failures], [("error", "<harness>")]
+        )
+        self.assertIn("bad voice", result.failures[0].reason)
+
 
 class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
     """``on_progress`` handlers see every turn and expectation, in order."""

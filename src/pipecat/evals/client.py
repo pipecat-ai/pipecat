@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 from loguru import logger
 from pydantic import BaseModel, Field
 from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -617,10 +618,13 @@ class EvalClient:
         async def _on_pipeline_error(_worker, frame):
             # An error before bot-ready ends the handshake. The transport connects
             # to the bot as it starts, so a refused connection (an HTTP 403 for a
-            # spent token, nothing listening) surfaces here. Any other is a harness
-            # service failing, such as the caller's voice refused by its provider.
-            if frame.processor in bot_connection:
-                self._refuse("connect_failed", str(frame.exception or frame.error))
+            # spent token, nothing listening) surfaces here. Any other error is the
+            # harness's: a service failing, such as the caller's voice refused by
+            # its provider, or a bug in the harness's own transport code.
+            if frame.processor in bot_connection and isinstance(
+                frame.exception, (InvalidHandshake, OSError, ConnectionClosed)
+            ):
+                self._refuse("connect_failed", str(frame.exception))
             else:
                 self._refuse("error", str(frame.error))
             self._stream.harness_failed(str(frame.error))
