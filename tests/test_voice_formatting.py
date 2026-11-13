@@ -195,6 +195,19 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         for text, expected in cases.items():
             self.assertEqual(await strip_markdown(text, "*"), expected, text)
 
+    async def test_blockquote_markers(self):
+        cases = {
+            "> A quote.": "A quote.",
+            "> **Note:** a quote.": "Note: a quote.",
+            "> - item one\n> - item two": "item one\nitem two",
+            "> # Heading": "Heading",
+            "> > Nested quote.": "Nested quote.",
+            ">> Nested quote.": "Nested quote.",
+            "> 1. First": "1. First",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
 
 class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
     async def test_dashes(self):
