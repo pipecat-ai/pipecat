@@ -809,6 +809,19 @@ class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
             with self.subTest(text=text):
                 self.assertEqual(await transform(text, "*"), expected)
 
+    async def test_dotted_number_sequence_left_alone(self):
+        # A version or an IP address is not a decimal. Like expand_currency ("$1.2.3"),
+        # leave it whole rather than reading "1.2" as a decimal and keeping ".3".
+        transform = expand_numbers(digit_cutoff=None)
+        cases = {
+            "Update to version 1.2.3 today.": "Update to version 1.2.3 today.",
+            "Connect to 192.168.1.1 now": "Connect to 192.168.1.1 now",
+            "It costs 3.5.": "It costs three point five.",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await transform(text, "*"), expected)
+
 
 class TestUnitsAndNumbersComposition(unittest.IsolatedAsyncioTestCase):
     """``expand_units`` and ``expand_numbers`` have to agree on decimal quantities.
