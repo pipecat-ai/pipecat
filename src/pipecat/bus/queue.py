@@ -32,6 +32,9 @@ class BusMessageQueue(asyncio.PriorityQueue):
     def put_nowait(self, item) -> None:
         """Add a message to the queue with automatic priority assignment.
 
+        ``put()``, inherited from ``asyncio.Queue``, enqueues through this
+        method too.
+
         Args:
             item: The bus message to enqueue.
         """
@@ -41,19 +44,6 @@ class BusMessageQueue(asyncio.PriorityQueue):
         else:
             self._low_counter += 1
             super().put_nowait((LOW_PRIORITY, self._low_counter, item))
-
-    async def put(self, item) -> None:
-        """Add a message to the queue with automatic priority assignment.
-
-        Args:
-            item: The bus message to enqueue.
-        """
-        if isinstance(item, BusSystemMessage):
-            self._high_counter += 1
-            await super().put((HIGH_PRIORITY, self._high_counter, item))
-        else:
-            self._low_counter += 1
-            await super().put((LOW_PRIORITY, self._low_counter, item))
 
     async def get(self) -> Any:
         """Get the next message, with system messages prioritized."""
