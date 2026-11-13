@@ -666,6 +666,23 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await expand_currency("¥40 thousand", "*"), "forty thousand yen")
 
+    async def test_leading_minus_is_read_as_minus(self):
+        # "-$5" used to expand to "-five dollars", leaving a bare hyphen that
+        # TTS often skips or reads as "dash". A Unicode minus is the same.
+        # A range such as "$10-$20" must keep the hyphen (it is not a negative).
+        self.assertEqual(await expand_currency("-$5", "*"), "minus five dollars")
+        self.assertEqual(
+            await expand_currency("Your balance is -$2.50", "*"),
+            "Your balance is minus two dollars and fifty cents",
+        )
+        self.assertEqual(await expand_currency("−€3", "*"), "minus three euros")
+        self.assertEqual(await expand_currency("(-$5)", "*"), "(minus five dollars)")
+        self.assertEqual(await expand_currency("$10-$20", "*"), "ten dollars-twenty dollars")
+        self.assertEqual(
+            await VoiceFormatter()("charged -$5 last month", "*"),
+            "charged minus five dollars last month",
+        )
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
