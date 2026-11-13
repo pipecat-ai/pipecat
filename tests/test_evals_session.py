@@ -2104,6 +2104,25 @@ class _FailingTTS(TTSService):
         yield ErrorFrame(error=f"{self} error: synthesis failed")
 
 
+class _VoiceThatConnects(CachingTTSService):
+    """A user voice that connects to its provider as it starts, as websocket TTSs do."""
+
+    def __init__(self, provider_url: str, failure: Exception | None = None):
+        super().__init__(_FailingTTS(), cache_key="unused", use_cache=False)
+        self._provider_url = provider_url
+        self._failure = failure
+
+    async def start(self, frame):
+        await super().start(frame)
+        try:
+            if self._failure is not None:
+                raise self._failure
+            async with websockets.connect(self._provider_url):
+                pass
+        except Exception as e:
+            await self.push_error(f"{self} connection failed: {e}", exception=e)
+
+
 class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.server = _FakeRTVIServer(_free_port())
@@ -2878,10 +2897,11 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
 class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
     """A bot that refuses the run, or never answers, before ``bot-ready``."""
 
-    async def _run(self, handler, process_request=None, bot_ready_timeout_s=5.0):
+    async def _run(self, handler, process_request=None, bot_ready_timeout_s=5.0, user_tts=None):
         """Run a one-turn scenario against ``handler``; return the result and how long it took."""
         scenario = EvalScriptScenario(
             name="refused",
+            user_audio=user_tts is not None,
             turns=[EvalScriptTurn(user="x", expect=[EvalExpectation(event="llm_started")])],
         )
         port = _free_port()
@@ -2891,6 +2911,7 @@ class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
                 scenario,
                 f"ws://localhost:{port}",
                 params=EvalSessionParams(bot_ready_timeout_s=bot_ready_timeout_s),
+                user_tts=user_tts,
             ).run()
             return result, time.monotonic() - started
 
@@ -2928,6 +2949,30 @@ class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
 
         result, _elapsed = await self._run(silent, bot_ready_timeout_s=0.5)
         self.assertEqual(result.failures[0].kind, "handshake_timeout")
+
+    async def test_a_harness_service_failing_before_bot_ready_is_the_harness_error_at_once(self):
+        # The bot never says ready, so only the voice's failure can end the run early.
+        async def silent(ws):
+            await ws.wait_closed()
+
+        def out_of_credits(connection, request):
+            return connection.respond(HTTPStatus.PAYMENT_REQUIRED, "insufficient credits\n")
+
+        async with websockets.serve(silent, "localhost", 0, process_request=out_of_credits) as p:
+            provider = f"ws://localhost:{p.sockets[0].getsockname()[1]}"
+            # A provider's refusal is a connection error too, but not the bot's.
+            for failure, named in ((None, "HTTP 402"), (RuntimeError("bad voice"), "bad voice")):
+                with self.subTest(named=named):
+                    voice = _VoiceThatConnects(provider, failure)
+                    result, elapsed = await self._run(
+                        silent, bot_ready_timeout_s=30.0, user_tts=voice
+                    )
+                    self.assertLess(elapsed, 2)
+                    self.assertEqual(len(result.failures), 1)
+                    failure = result.failures[0]
+                    self.assertEqual(failure.kind, "error")
+                    self.assertEqual(failure.event_name, "<harness>")
+                    self.assertIn(named, failure.reason)
 
 
 class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
