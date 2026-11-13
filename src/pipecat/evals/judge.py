@@ -132,7 +132,7 @@ When a call fails:
 A question that times out, can't connect, or comes back unusable is asked
 once more. A second failure fails the question: its verdict is a ``none``
 (the verdict the harness reports as not given), with the reason "judge call
-failed".
+failed: " and the error, such as the provider refusing the call.
 
 Lifecycle:
 
@@ -178,6 +178,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.security.redaction import redact_secrets
 
 _R = TypeVar("_R")
 
@@ -404,6 +405,8 @@ class EvalJudge:
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
         self._setup_task: asyncio.Task | None = None
+        # The last failed question's error, for the reason of the verdict it fails.
+        self._call_error = ""
 
     @classmethod
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
@@ -636,6 +639,8 @@ class EvalJudge:
             ),
         )
 
+        # The questions ran at once and share the judge's last error, so a failed
+        # verdict's reason may give another question's: they ask the same provider.
         failed = self._failed("none")
         verdicts = RunVerdicts(
             goal=self._yes_no_verdict(goal_answer) if goal_answer else failed,
@@ -739,6 +744,7 @@ class EvalJudge:
                     logger.warning(f"Judge question failed, asking again: {e}")
                 else:
                     logger.error(f"Judge question failed: {e}")
+                    self._call_error = redact_secrets(str(e))
         return None
 
     @staticmethod
@@ -838,10 +844,10 @@ class EvalJudge:
         """The probability of each outcome, as a verdict's reason."""
         return ", ".join(f"P({k})={v:.2f}" for k, v in probabilities.items())
 
-    @staticmethod
-    def _failed(verdict: str) -> JudgeVerdict:
-        """The verdict a failed call gives."""
-        return JudgeVerdict(verdict=verdict, reason="judge call failed", raw_response="")
+    def _failed(self, verdict: str) -> JudgeVerdict:
+        """The verdict a failed call gives, with the call's error as its reason."""
+        reason = f"judge call failed: {self._call_error}"
+        return JudgeVerdict(verdict=verdict, reason=reason, raw_response="")
 
     @staticmethod
     def _with_reason(verdict: JudgeVerdict, reason: str) -> JudgeVerdict:

@@ -217,15 +217,24 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
         self.assertEqual(verdict.verdict, "none")
-        self.assertEqual(verdict.reason, "judge call failed")
+        self.assertEqual(verdict.reason, "judge call failed: boom")
         self.assertEqual(len(classifier.asked), 2)
+
+    async def test_a_failed_questions_reason_masks_credentials(self):
+        judge, _ = _judge(
+            [ClassifierError("401: invalid key sk-proj-abcdefghijklmnopqrstuvwxyz123456")] * 2
+        )
+        judge.add_assistant_message("anything")
+        verdict = await judge.evaluate("anything")
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", verdict.reason)
+        self.assertIn("[REDACTED]", verdict.reason)
 
     async def test_an_answer_of_the_wrong_type_fails_the_question(self):
         judge, _ = _judge([{"verdict": YesNoResult(probability=0.9)}] * 2)
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
         self.assertEqual(verdict.verdict, "none")
-        self.assertEqual(verdict.reason, "judge call failed")
+        self.assertTrue(verdict.reason.startswith("judge call failed: "), verdict.reason)
 
 
 class TestJudgeExplainer(unittest.IsolatedAsyncioTestCase):
