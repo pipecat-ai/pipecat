@@ -2930,6 +2930,72 @@ class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.failures[0].kind, "handshake_timeout")
 
 
+class TestAudioSupportCheck(unittest.IsolatedAsyncioTestCase):
+    """An audio run checks the audio the bot's ``bot-ready`` reports its transport carries."""
+
+    async def _run(self, capabilities: dict | None, check: str | None = "when_advertised"):
+        """Run an audio scenario that expects the bot's greeting; return the result and how long it took."""
+
+        async def bot(ws):
+            async for raw in ws:
+                if json.loads(raw).get("type") == "client-ready":
+                    data = {"version": RTVI.PROTOCOL_VERSION}
+                    if capabilities is not None:
+                        data["capabilities"] = capabilities
+                    await ws.send(_rtvi("bot-ready", data))
+                    await ws.send(_rtvi("bot-llm-started"))
+                    await ws.send(_rtvi("bot-llm-text", {"text": "Welcome!"}))
+                    await ws.send(_rtvi("bot-llm-stopped"))
+
+        scenario = EvalScriptScenario(
+            name="greeting",
+            bot_audio=False,
+            user_audio=True,
+            turns=[
+                EvalScriptTurn(
+                    user=None, expect=[EvalExpectation(event="llm_response", within_ms=2000)]
+                )
+            ],
+        )
+        # The caller never speaks; the voice only makes the run an audio run.
+        user_tts = CachingTTSService(_FailingTTS(), cache_key="unused", use_cache=False)
+        params = (
+            EvalSessionParams() if check is None else EvalSessionParams(audio_support_check=check)
+        )
+        port = _free_port()
+        async with websockets.serve(bot, "localhost", port):
+            started = time.monotonic()
+            result = await EvalScriptSession.from_scenario(
+                scenario, f"ws://localhost:{port}", params=params, user_tts=user_tts
+            ).run()
+            return result, time.monotonic() - started
+
+    async def test_a_bot_whose_transport_drops_caller_audio_is_refused_at_once(self):
+        result, elapsed = await self._run({"audio_in": False, "audio_out": True})
+
+        self.assertLess(elapsed, 2)
+        self.assertEqual([f.kind for f in result.failures], ["audio_unsupported"])
+        self.assertEqual(result.failures[0].event_name, "<bot-ready>")
+        self.assertIn("audio_in_enabled", result.failures[0].reason)
+        self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_a_bot_that_reports_caller_audio_on_runs(self):
+        result, _ = await self._run({"audio_in": True, "audio_out": True})
+
+        self.assertTrue(result.passed, [str(f) for f in result.failures])
+
+    async def test_a_bot_that_reports_no_capabilities_runs_unchecked(self):
+        # Bots on Pipecat before 1.13 send bot-ready without capabilities.
+        result, _ = await self._run(None)
+
+        self.assertTrue(result.passed, [str(f) for f in result.failures])
+
+    async def test_the_check_is_off_by_default(self):
+        result, _ = await self._run({"audio_in": False, "audio_out": True}, check=None)
+
+        self.assertTrue(result.passed, [str(f) for f in result.failures])
+
+
 class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
     """``on_progress`` handlers see every turn and expectation, in order."""
 

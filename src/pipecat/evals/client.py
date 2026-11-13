@@ -77,6 +77,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -456,7 +457,7 @@ class EvalClientParams(BaseModel):
 
 
 class EvalBotUnavailableError(Exception):
-    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
+    """The bot refused the connection, closed it before ``bot-ready``, or can't carry the run's audio."""
 
     def __init__(self, kind: str, reason: str):
         """Initialize the error.
@@ -464,7 +465,9 @@ class EvalBotUnavailableError(Exception):
         Args:
             kind: The failure kind the run records: ``connect_failed`` when the
                 bot refused the connection, ``closed_before_ready`` when it
-                closed the connection before ``bot-ready``.
+                closed the connection before ``bot-ready``,
+                ``audio_unsupported`` when its ``bot-ready`` reported that its
+                transport is off for audio the run uses.
             reason: What happened, with the close code and reason when there
                 was one.
         """
@@ -634,8 +637,9 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
-            EvalBotUnavailableError: If the bot refuses the connection or closes
-                it before sending ``bot-ready``.
+            EvalBotUnavailableError: If the bot refuses the connection, closes
+                it before sending ``bot-ready``, or reports that its transport
+                is off for audio the run uses.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
@@ -835,6 +839,25 @@ class EvalClient:
         )
         await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
 
+    def _check_audio_support(self, capabilities: BotCapabilities | None) -> None:
+        """Refuse the run if the bot reports its transport is off for audio the run uses.
+
+        A transport that drops the caller's audio, or never sends the bot's,
+        would otherwise pass for a bot ignoring the caller and use up the run's
+        turn budget. A bot that reports nothing (``None``) runs unchecked.
+        """
+        if self._session_params.audio_support_check == "off" or capabilities is None:
+            return
+        off = []
+        if self.sends_user_audio and capabilities.audio_in is False:
+            off.append("receive the caller's audio (audio_in_enabled)")
+        if self._params.bot_audio and capabilities.audio_out is False:
+            off.append("send its audio (audio_out_enabled)")
+        if off:
+            self._refuse(
+                "audio_unsupported", f"The bot's eval transport is set not to {' or '.join(off)}"
+            )
+
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
         if not self._handshake_over.is_set():
@@ -906,6 +929,7 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
+            self._check_audio_support(_transport.bot_capabilities)
             self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
