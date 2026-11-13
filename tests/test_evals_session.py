@@ -649,6 +649,26 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
         assert failure is not None
         self.assertEqual(failure.kind, "judge_no")
 
+    async def test_a_failed_judge_call_is_no_verdict_at_once(self):
+        # A provider out of credits, say: nothing was decided about the reply.
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge, bot_audio=True)
+        await s._stream.append({"type": "response", "text": "I like turtles."})
+        failure = await self._match(s)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none: (none)", failure.reason)
+
+    async def test_a_failed_judge_call_on_a_single_event_is_no_verdict(self):
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge)
+        await s._stream.append({"type": "user_transcription", "text": "hello"})
+        exp = EvalExpectation(event="user_transcription", eval="says hello")
+        failure = await s.match(exp, time.monotonic(), 1000, 0, 0)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none — (none)", failure.reason)
+
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):
     """The bot's finished spoken turn is the reply only once its LLM has answered the input."""
@@ -1173,6 +1193,15 @@ class TestFunctionCallEval(unittest.IsolatedAsyncioTestCase):
         assert failure is not None
         self.assertEqual(failure.kind, "judge_no")
         self.assertIn("judge said continue", failure.reason)
+
+    async def test_a_failed_judge_call_is_no_verdict(self):
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge)
+        await s._stream.append(_call("submit_session_suggestion", self.ARGS))
+        failure = await self._match(s, self._exp("submit_session_suggestion"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none — (none)", failure.reason)
 
     async def test_every_listed_call_is_judged(self):
         judge = _FakeJudge(["yes", "no"])
@@ -2176,6 +2205,22 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([f.kind for f in result.failures], ["error"])
         self.assertIn("synthesis failed", result.failures[0].reason)
+
+    async def test_a_user_voice_that_fails_on_a_turn_expecting_nothing_is_the_runs_error(self):
+        # Nothing waits on the turn, so the failure only surfaces as the run ends.
+        scenario = EvalScriptScenario(
+            name="voice", bot_audio=False, user_audio=True, turns=[EvalScriptTurn(user="hi")]
+        )
+        user_tts = CachingTTSService(_FailingTTS(), cache_key="failing", use_cache=False)
+
+        result = await EvalScriptSession.from_scenario(
+            scenario, self.server.url, user_tts=user_tts
+        ).run()
+
+        self.assertFalse(result.passed)
+        self.assertEqual([f.kind for f in result.failures], ["error"])
+        self.assertIn("synthesis failed", result.failures[0].reason)
+        self.assertEqual(result.turns[0].status, "failed")
 
     async def test_one_event_aggregates_past_filler(self):
         # First bot response is filler; the answer arrives in a second segment.
@@ -3299,6 +3344,42 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("HTTP 403", result.error or "")
         self.assertEqual(result.failure_kind, "connect_failed")
+
+    async def test_a_harness_error_while_judging_fails_the_run(self):
+        # The conversation is over; the caller's voice fails as the judge decides.
+        class _FailingWhileJudging(_YesJudge):
+            stream = None
+
+            async def evaluate_run(self, criteria, success):
+                self.stream.harness_failed("the caller voice failed")
+                return await super().evaluate_run(criteria, success)
+
+        self.server.greeting = [
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Hello!"}),
+            _rtvi("bot-llm-stopped"),
+        ]
+        persona = _ScriptedPersonaLLM({"Hello!": ("end_call", {"success": True, "reason": "ok"})})
+        simulation = EvalSimulationScenario(
+            name="greeting",
+            persona="A caller.",
+            goal="Be greeted.",
+            simulator={"service": "scripted"},
+            success="the bot greeted the caller",
+            max_turns=3,
+            max_duration_s=10.0,
+        )
+        judge = _FailingWhileJudging()
+        session = EvalSimulationSession(
+            simulation, self.server.url, persona_llm=persona, judge=judge
+        )
+        judge.stream = session._stream
+
+        result = await session.run()
+
+        self.assertFalse(result.succeeded)
+        self.assertEqual(result.error, "the caller voice failed")
+        self.assertEqual(result.failure_kind, "error")
 
     async def test_the_bot_hanging_up_ends_the_run(self):
         self.server.greeting = [

@@ -19,7 +19,7 @@ import time
 from loguru import logger
 
 from pipecat.evals.events import EvalBotEndedError, EvalEventStream
-from pipecat.evals.judge import EvalJudge
+from pipecat.evals.judge import EvalJudge, JudgeVerdict
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace
 from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 
@@ -193,6 +193,8 @@ class ExpectationMatcher:
                 self._judge.add_assistant_message(delta)
             status, reason = await self._evaluate_aggregate(aggregate, expectation)
             self._trace.log(f"eval: {status} (aggregate={aggregate.strip()!r}) {reason}")
+            if status == "no_verdict":
+                return self._failure(expectation, turn_idx, exp_idx, reason, "judge_no_verdict")
             if status == "pass":
                 unmatched = self._text_unmatched(aggregate, expectation, turn_idx, exp_idx)
                 if unmatched is not None:
@@ -402,7 +404,7 @@ class ExpectationMatcher:
             exp_idx,
             f"eval {expectation.eval!r} on {self._match_summary(event)}: "
             f"judge said {verdict.verdict} — {verdict.reason}",
-            "judge_no",
+            _judge_failure_kind(verdict),
         )
 
     async def _evaluate_aggregate(
@@ -410,7 +412,8 @@ class ExpectationMatcher:
     ) -> tuple[str, str]:
         """Check the accumulated reply text: ``pass``, ``fail``, or ``continue`` for more text.
 
-        A missing substring is ``continue``; only the judge can ``fail``.
+        A missing substring is ``continue``; only the judge can ``fail``, and a
+        failed judge call is ``no_verdict``.
         """
         if expectation.text_contains is not None and not self._text_contains(
             aggregate, expectation.text_contains
@@ -426,6 +429,8 @@ class ExpectationMatcher:
                 # The reply segments were added to the judge's conversation in the
                 # aggregation loop; the judge evaluates that context, not `aggregate`.
                 verdict = await self._judge.evaluate(expectation.eval)
+            if verdict.verdict == "none":
+                return ("no_verdict", f"judge said none: {verdict.reason}")
             if verdict.verdict == "no":
                 return ("fail", f"judge said no: {verdict.reason}")
             if verdict.verdict == "continue":
@@ -553,8 +558,9 @@ class ExpectationMatcher:
                 expectation,
                 turn_idx,
                 exp_idx,
-                f"eval {expectation.eval!r}: judge said no — {verdict.reason}",
-                "judge_no",
+                f"eval {expectation.eval!r}: judge said "
+                f"{'none' if verdict.verdict == 'none' else 'no'} — {verdict.reason}",
+                _judge_failure_kind(verdict),
             )
 
         return None
@@ -611,3 +617,8 @@ class ExpectationMatcher:
     def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring spacing."""
         return " ".join(needle.split()) in " ".join(content.split())
+
+
+def _judge_failure_kind(verdict: JudgeVerdict) -> str:
+    """The kind of a check the judge didn't pass: a ``no``, or no verdict when its call failed."""
+    return "judge_no_verdict" if verdict.verdict == "none" else "judge_no"

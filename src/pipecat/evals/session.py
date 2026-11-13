@@ -454,7 +454,7 @@ class EvalSession(BaseObject, Generic[R]):
         """
         await self._client.start()
         try:
-            return await self._converse()
+            failures = await self._converse()
         except Exception as e:
             return [self._error_failure(e)]
         finally:
@@ -462,6 +462,16 @@ class EvalSession(BaseObject, Generic[R]):
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
+        # A harness service can fail once nothing is waiting on it, such as the
+        # caller's voice on a last turn that expects nothing. Stopping the client
+        # lets the failure surface; a run that otherwise passed is then no evidence.
+        error = self._stream.harness_error
+        if error is not None and not failures:
+            self._trace.log(f"FAIL: harness: {error}")
+            failure = self._failure("<harness>", error, "error")
+            self._driver.record_failure(failure)
+            failures = [failure]
+        return failures
 
     async def _converse(self) -> list[EvalAssertionFailure]:
         """Run the handshake, then the driver; a bot that never says ready is a failure."""
