@@ -3211,6 +3211,7 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         ).run()
 
         self.assertIsNone(result.error, result.debug_log)
+        self.assertIsNone(result.failure_kind)
         self.assertTrue(result.succeeded)
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.end_call, {"success": True, "reason": "I learned it"})
@@ -3232,6 +3233,30 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(judge.run_criteria, {"politeness": "stayed polite"})
         # Two bot turns, the greeting and the answer, reached the judge.
         self.assertEqual(sum(1 for e in judge.transcript if e["role"] == "assistant"), 2)
+
+    async def test_a_simulation_keeps_the_kind_of_the_failure_that_ended_it(self):
+        def forbid(connection, request):
+            return connection.respond(HTTPStatus.FORBIDDEN, "forbidden\n")
+
+        simulation = EvalSimulationScenario(
+            name="refused",
+            persona="A caller.",
+            goal="Book a table.",
+            simulator={"service": "scripted"},
+            success="the bot booked a table",
+            max_turns=1,
+            max_duration_s=5.0,
+        )
+        async with websockets.serve(lambda ws: None, "localhost", 0, process_request=forbid) as bot:
+            result = await EvalSimulationSession(
+                simulation,
+                f"ws://localhost:{bot.sockets[0].getsockname()[1]}",
+                persona_llm=_ScriptedPersonaLLM({}),
+                judge=_YesJudge(),
+            ).run()
+
+        self.assertIn("HTTP 403", result.error or "")
+        self.assertEqual(result.failure_kind, "connect_failed")
 
     async def test_the_bot_hanging_up_ends_the_run(self):
         self.server.greeting = [
@@ -3408,6 +3433,7 @@ class TestAudioSupportCheck(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.succeeded)
         self.assertIn("audio_in_enabled", result.error or "")
+        self.assertEqual(result.failure_kind, "audio_unsupported")
         self.assertEqual(persona.seen, [])
 
 
