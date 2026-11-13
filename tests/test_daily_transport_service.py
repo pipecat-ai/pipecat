@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -90,3 +90,7 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
         camera.write_frame.assert_called_with(b"test")
         mic.write_frames.assert_called()
     """
+
+
+if __name__ == "__main__":
+    unittest.main()

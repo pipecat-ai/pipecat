@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-from typing import Callable, Coroutine, List, Optional
+from collections.abc import Callable, Coroutine, Sequence
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -98,15 +98,15 @@ class Pipeline(BasePipeline):
 
     def __init__(
         self,
-        processors: List[FrameProcessor],
+        processors: Sequence[FrameProcessor],
         *,
-        source: Optional[FrameProcessor] = None,
-        sink: Optional[FrameProcessor] = None,
+        source: FrameProcessor | None = None,
+        sink: FrameProcessor | None = None,
     ):
         """Initialize the pipeline with a list of processors.
 
         Args:
-            processors: List of frame processors to connect in sequence.
+            processors: Sequence of frame processors to connect in sequence.
             source: An optional pipeline source processor.
             sink: An optional pipeline sink processor.
         """
@@ -116,7 +116,7 @@ class Pipeline(BasePipeline):
         # downstream outside of the pipeline.
         self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
         self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
-        self._processors: List[FrameProcessor] = [self._source] + processors + [self._sink]
+        self._processors: list[FrameProcessor] = [self._source, *processors, self._sink]
 
         self._link_processors()
 
@@ -137,7 +137,7 @@ class Pipeline(BasePipeline):
         return self._processors
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list["FrameProcessor"]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor
@@ -173,12 +173,15 @@ class Pipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-        await self._setup_processors(setup)
+        # This pipeline is set up, so let the StartFrame in: each processor
+        # holds it until its own setup is done.
+        self._setup_finished()
+        await self._setup_processors(self._processors, setup)
 
     async def cleanup(self):
         """Clean up the pipeline and all contained processors."""
         await super().cleanup()
-        await self._cleanup_processors()
+        await self._cleanup_processors(self._processors)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames by routing them through the pipeline.
@@ -193,16 +196,6 @@ class Pipeline(BasePipeline):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
             await self._sink.queue_frame(frame, FrameDirection.UPSTREAM)
-
-    async def _setup_processors(self, setup: FrameProcessorSetup):
-        """Set up all processors in the pipeline."""
-        for p in self._processors:
-            await p.setup(setup)
-
-    async def _cleanup_processors(self):
-        """Clean up all processors in the pipeline."""
-        for p in self._processors:
-            await p.cleanup()
 
     def _link_processors(self):
         """Link all processors in sequence and set their parent."""

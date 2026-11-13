@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,6 @@ when a user has finished speaking in a conversation.
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -44,7 +43,7 @@ class BaseTurnAnalyzer(ABC):
     while still defining an abstract interface through abstract methods.
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None):
+    def __init__(self, *, sample_rate: int | None = None):
         """Initialize the turn analyzer.
 
         Args:
@@ -108,7 +107,7 @@ class BaseTurnAnalyzer(ABC):
         pass
 
     @abstractmethod
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         """Analyzes if an end of turn has occurred based on the audio input.
 
         Returns:
@@ -116,7 +115,23 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Update the VAD start trigger time.
+
+        The turn analyzer may choose to change its buffer size depending
+        on this value.
+
+        Args:
+            vad_start_secs (float): The number of seconds of voice activity
+                before triggering the user speaking event.
+        """
+        pass
+
     @abstractmethod
     def clear(self):
         """Reset the turn analyzer to its initial state."""
+        pass
+
+    async def cleanup(self):
+        """Cleanup the turn analyzer."""
         pass

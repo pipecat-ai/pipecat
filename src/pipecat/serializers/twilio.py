@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,13 +8,13 @@
 
 import base64
 import json
-from typing import Optional
+from typing import Any, cast
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -25,9 +25,34 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import warn_deprecated
+
+
+def _build_call_resource_url(
+    account_sid: str,
+    call_sid: str,
+    *,
+    base_url: str | None = None,
+    region: str | None = None,
+    edge: str | None = None,
+) -> str:
+    """Build the REST URL for a Call resource (used by auto hang-up).
+
+    When ``base_url`` is provided it is used verbatim as the API root (scheme +
+    host, e.g. ``https://api.twilio.com``), which lets the serializer target a
+    Twilio-API-compatible backend or a self-hosted server. Otherwise the host is
+    derived from Twilio's ``region``/``edge`` FQDN format, preserving the prior
+    default behavior.
+    """
+    if base_url:
+        root = base_url.rstrip("/")
+    else:
+        region_prefix = f"{region}." if region else ""
+        edge_prefix = f"{edge}." if edge else ""
+        root = f"https://api.{edge_prefix}{region_prefix}twilio.com"
+    return f"{root}/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
 
 
 class TwilioFrameSerializer(FrameSerializer):
@@ -39,31 +64,75 @@ class TwilioFrameSerializer(FrameSerializer):
 
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Twilio call when an EndFrame or CancelFrame is processed, but requires Twilio
-    credentials to be provided.
+    credentials: either auth_token or an API key (api_key_sid + api_key_secret).
+    Credentials must belong to the configured region: each Twilio region has its own
+    Auth Token and API keys.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for TwilioFrameSerializer.
 
         Parameters:
-            twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Twilio sends, defaults to 8000 Hz.
+            audio_out_sample_rate: Sample rate of the audio sent to Twilio, defaults to 8000 Hz.
+            twilio_sample_rate: Sample rate used by Twilio.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
-        twilio_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        audio_in_sample_rate: int = 8000
+        audio_out_sample_rate: int = 8000
+        twilio_sample_rate: int | None = None
+        sample_rate: int | None = None
         auto_hang_up: bool = True
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("twilio_sample_rate") is not None:
+                warn_deprecated(
+                    "`TwilioFrameSerializer.InputParams.twilio_sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["twilio_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["twilio_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`TwilioFrameSerializer.InputParams.sample_rate` is deprecated since 1.16.0 "
+                    "and will be removed in 2.0.0. Use `PipelineParams.audio_in_sample_rate` "
+                    "instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(
         self,
         stream_sid: str,
-        call_sid: Optional[str] = None,
-        account_sid: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        region: Optional[str] = None,
-        edge: Optional[str] = None,
-        params: Optional[InputParams] = None,
+        call_sid: str | None = None,
+        account_sid: str | None = None,
+        auth_token: str | None = None,
+        region: str | None = None,
+        edge: str | None = None,
+        base_url: str | None = None,
+        params: InputParams | None = None,
+        *,
+        api_key_sid: str | None = None,
+        api_key_secret: str | None = None,
     ):
         """Initialize the TwilioFrameSerializer.
 
@@ -71,12 +140,22 @@ class TwilioFrameSerializer(FrameSerializer):
             stream_sid: The Twilio Media Stream SID.
             call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
             account_sid: Twilio account SID (required for auto hang-up).
-            auth_token: Twilio auth token (required for auto hang-up).
+            auth_token: Twilio Auth Token for auto hang-up. Mutually exclusive with
+                api_key_sid/api_key_secret.
+            api_key_sid: Twilio API key SID (starts with "SK"). Alternative to
+                auth_token for auto hang-up. Must be provided with api_key_secret.
+            api_key_secret: Twilio API key secret. Must be provided with api_key_sid.
             region: Twilio region (e.g., "au1", "ie1"). Must be specified with edge.
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
+            base_url: Optional REST API base URL (scheme + host, e.g.
+                ``https://api.twilio.com``) used for auto hang-up. Defaults to the
+                host derived from region/edge. Set this to target a Twilio-API-
+                compatible backend or a self-hosted server.
             params: Configuration parameters.
         """
-        self._params = params or TwilioFrameSerializer.InputParams()
+        params = params or TwilioFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: TwilioFrameSerializer.InputParams = params
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -86,16 +165,34 @@ class TwilioFrameSerializer(FrameSerializer):
                 missing_credentials.append("call_sid")
             if not account_sid:
                 missing_credentials.append("account_sid")
-            if not auth_token:
-                missing_credentials.append("auth_token")
+            if not auth_token and not api_key_sid and not api_key_secret:
+                missing_credentials.append("auth_token or api_key_sid + api_key_secret")
 
             if missing_credentials:
                 raise ValueError(
                     f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
                 )
 
-            # Validate region and edge are both provided if either is specified
-            if (region and not edge) or (edge and not region):
+            # Reject an auth_token alongside any part of an API key. Accepting both
+            # would let a leftover auth_token stay deployed without anyone noticing.
+            if auth_token and (api_key_sid or api_key_secret):
+                raise ValueError(
+                    "Provide either auth_token or api_key_sid + api_key_secret, not both."
+                )
+
+            # Validate the API key pair is complete. auth_token is ruled out above,
+            # so this only sees a lone api_key_sid or api_key_secret.
+            if (api_key_sid and not api_key_secret) or (api_key_secret and not api_key_sid):
+                missing = "api_key_secret" if api_key_sid else "api_key_sid"
+                raise ValueError(
+                    "Both api_key_sid and api_key_secret parameters are required if one is set. "
+                    f"Missing: {missing}"
+                )
+
+            # Validate region and edge are both provided if either is specified.
+            # Only applies when deriving Twilio's FQDN host; base_url is used
+            # verbatim and ignores region/edge, so the pairing requirement is moot.
+            if not base_url and ((region and not edge) or (edge and not region)):
                 raise ValueError(
                     "Both edge and region parameters are required if one is set. "
                     f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
@@ -106,32 +203,13 @@ class TwilioFrameSerializer(FrameSerializer):
         self._call_sid = call_sid
         self._account_sid = account_sid
         self._auth_token = auth_token
+        self._api_key_sid = api_key_sid
+        self._api_key_secret = api_key_secret
         self._region = region
         self._edge = edge
+        self._base_url = base_url
 
-        self._twilio_sample_rate = self._params.twilio_sample_rate
-        self._sample_rate = 0  # Pipeline input rate
-
-        self._input_resampler = create_stream_resampler()
-        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
-
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
-
-    async def setup(self, frame: StartFrame):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            frame: The StartFrame containing pipeline configuration.
-        """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Twilio WebSocket format.
@@ -154,20 +232,15 @@ class TwilioFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
-            data = frame.audio
-
-            # Output: Convert PCM at frame's rate to 8kHz μ-law for Twilio
-            serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._twilio_sample_rate, self._output_resampler
-            )
-            if serialized_data is None or len(serialized_data) == 0:
-                # Ignoring in case we don't have audio
+            data = await self._resample_audio_out(frame)
+            if not data:
                 return None
 
-            payload = base64.b64encode(serialized_data).decode("utf-8")
+            payload = base64.b64encode(g711.pcm_to_ulaw(data)).decode("utf-8")
             answer = {
                 "event": "media",
                 "streamSid": self._stream_sid,
@@ -176,6 +249,8 @@ class TwilioFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             return json.dumps(frame.message)
 
         # Return None for unhandled frames
@@ -186,20 +261,29 @@ class TwilioFrameSerializer(FrameSerializer):
         try:
             import aiohttp
 
-            account_sid = self._account_sid
-            auth_token = self._auth_token
-            call_sid = self._call_sid
-            region = self._region
-            edge = self._edge
+            # __init__ guarantees account_sid, call_sid and exactly one credential type
+            # (auth_token or the API key pair) are set whenever auto_hang_up is True,
+            # which is the only path that reaches this method.
+            account_sid = cast(str, self._account_sid)
+            call_sid = cast(str, self._call_sid)
+            # REST endpoint for updating the call. Derived from base_url when set
+            # (Twilio-API-compatible / self-hosted), else Twilio's region/edge FQDN.
+            endpoint = _build_call_resource_url(
+                account_sid,
+                call_sid,
+                base_url=self._base_url,
+                region=self._region,
+                edge=self._edge,
+            )
 
-            region_prefix = f"{region}." if region else ""
-            edge_prefix = f"{edge}." if edge else ""
-
-            # Twilio API endpoint for updating calls
-            endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
-
-            # Create basic auth from account_sid and auth_token
-            auth = aiohttp.BasicAuth(account_sid, auth_token)
+            # Basic Auth pair: account_sid + auth_token, or api_key_sid + api_key_secret.
+            if self._auth_token:
+                login = account_sid
+                password = cast(str, self._auth_token)
+            else:
+                login = cast(str, self._api_key_sid)
+                password = cast(str, self._api_key_secret)
+            auth = aiohttp.BasicAuth(login, password)
 
             # Parameters to set the call status to "completed" (hang up)
             params = {"Status": "completed"}
@@ -218,7 +302,7 @@ class TwilioFrameSerializer(FrameSerializer):
                             if error_data.get("code") == 20404:
                                 logger.debug(f"Twilio call {call_sid} was already terminated")
                                 return
-                        except:
+                        except Exception:
                             pass  # Fall through to log the raw error
 
                         # Log other 404 errors
@@ -236,7 +320,7 @@ class TwilioFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Twilio call: {e}")
+            logger.error(f"Failed to hang up Twilio call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Twilio WebSocket data to Pipecat frames.
@@ -249,30 +333,29 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             A Pipecat frame corresponding to the Twilio event, or None if unhandled.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data}")
+            return None
 
-        if message["event"] == "media":
-            payload_base64 = message["media"]["payload"]
+        if message.get("event") == "media":
+            payload_base64 = message.get("media", {}).get("payload")
+            if not payload_base64:
+                return None
             payload = base64.b64decode(payload_base64)
 
-            # Input: Convert Twilio's 8kHz μ-law to PCM at pipeline input rate
-            deserialized_data = await ulaw_to_pcm(
-                payload, self._twilio_sample_rate, self._sample_rate, self._input_resampler
-            )
-            if deserialized_data is None or len(deserialized_data) == 0:
-                # Ignoring in case we don't have audio
+            audio = await self._resample_audio_in(g711.ulaw_to_pcm(payload))
+            if not audio:
                 return None
 
-            audio_frame = InputAudioRawFrame(
-                audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
-            )
-            return audio_frame
-        elif message["event"] == "dtmf":
+            return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
+        elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
             try:
                 return InputDTMFFrame(KeypadEntry(digit))
-            except ValueError as e:
+            except ValueError:
                 # Handle case where string doesn't match any enum value
                 return None
         else:

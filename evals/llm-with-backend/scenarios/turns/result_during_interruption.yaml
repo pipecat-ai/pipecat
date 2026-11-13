@@ -1,0 +1,26 @@
+# A result that lands while the bot is speaking, and the user then cuts the
+# bot off. The interruption clears the speech; the result still has to be
+# recorded and reported.
+- expect:
+    - event: response
+      eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+# The lookup takes the backend some fifteen seconds; the story takes the bot a
+# minute to say, so the result lands while the story is being spoken. The
+# story itself is not judged: a long reply is judged only once it has been
+# said in full, and the next turn has to land while it is still being said.
+- user: "Tell me a long bedtime story about a dragon who learns to program, at least twelve sentences. And while you tell it, look up what the on-call runbook says to do about upstream timeouts."
+  expect:
+    - event: function_call
+      calls:
+        - name: delegate
+
+# Sent while the story is still being spoken, so the interruption lands on
+# speech the backend's result is queued behind.
+- user: "Okay, that's enough of the story, thanks."
+  send_after:
+    delay_ms: 35000
+  expect:
+    - event: response
+      within_ms: 90000
+      eval: "reports what the on-call runbook says about upstream timeouts (check the upstream's status page, then the retry dashboard for a spike in exhausted retries) (if the bot has only acknowledged the stop, or only says it is still looking, answer continue, not no: the report has not come yet)"

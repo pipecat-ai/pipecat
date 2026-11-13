@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,20 +15,18 @@ import asyncio
 import time
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
-from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
+from pipecat.metrics.metrics import MetricsData, TurnMetricsData
 
 # Default timing parameters
 STOP_SECS = 3
-PRE_SPEECH_MS = 0
+PRE_SPEECH_MS = 500
 MAX_DURATION_SECONDS = 8  # Max allowed segment duration
-USE_ONLY_LAST_VAD_SEGMENT = True
 
 
 class SmartTurnParams(BaseTurnParams):
@@ -43,8 +41,6 @@ class SmartTurnParams(BaseTurnParams):
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
     max_duration_secs: float = MAX_DURATION_SECONDS
-    # not exposing this for now yet until the model can handle it.
-    # use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
 
 
 class SmartTurnTimeoutException(Exception):
@@ -61,9 +57,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
     implement the specific model prediction logic.
     """
 
-    def __init__(
-        self, *, sample_rate: Optional[int] = None, params: Optional[SmartTurnParams] = None
-    ):
+    def __init__(self, *, sample_rate: int | None = None, params: SmartTurnParams | None = None):
         """Initialize the smart turn analyzer.
 
         Args:
@@ -79,9 +73,11 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = 0
-        # Thread executor that will run the model. We only need one thread per
-        # analyzer because one analyzer just handles one audio stream.
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        # Thread that will run the model, built on demand by `_model_executor`.
+        # One thread per analyzer is enough, since one analyzer handles one
+        # audio stream.
+        self._executor: ThreadPoolExecutor | None = None
+        self._vad_start_secs: float = 0.0
 
     @property
     def speech_triggered(self) -> bool:
@@ -111,10 +107,15 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         Returns:
             Current end-of-turn state after processing the audio.
         """
-        # Convert raw audio to float32 format and append to the buffer
+        # Append the raw int16 PCM view to the buffer. Conversion to float32 is
+        # deferred until _process_speech_segment, where it runs once per turn
+        # on the concatenated segment instead of once per ~20 ms audio frame.
+        # Safe because InputAudioRawFrame.audio is typed `bytes` (immutable in
+        # Python); audio filters and mixers that "modify" a frame's audio do
+        # so by reassigning frame.audio to a new bytes object, never by
+        # mutating the buffer this view points at.
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
-        audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
-        self._audio_buffer.append((time.time(), audio_float32))
+        self._audio_buffer.append((time.monotonic(), audio_int16))
 
         state = EndOfTurnState.INCOMPLETE
 
@@ -123,7 +124,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             self._silence_ms = 0
             self._speech_triggered = True
             if self._speech_start_time == 0:
-                self._speech_start_time = time.time()
+                self._speech_start_time = time.monotonic()
         else:
             if self._speech_triggered:
                 chunk_duration_ms = len(audio_int16) / (self._sample_rate / 1000)
@@ -143,13 +144,14 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                     + self._params.max_duration_secs
                 )
                 while (
-                    self._audio_buffer and self._audio_buffer[0][0] < time.time() - max_buffer_time
+                    self._audio_buffer
+                    and self._audio_buffer[0][0] < time.monotonic() - max_buffer_time
                 ):
                     self._audio_buffer.pop(0)
 
         return state
 
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         """Analyze the current audio state to determine if turn has ended.
 
         Returns:
@@ -158,16 +160,41 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         """
         loop = asyncio.get_running_loop()
         state, result = await loop.run_in_executor(
-            self._executor, self._process_speech_segment, self._audio_buffer
+            self._model_executor, self._process_speech_segment, self._audio_buffer
         )
-        if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
+        if state == EndOfTurnState.COMPLETE:
             self._clear(state)
         logger.debug(f"End of Turn result: {state}")
         return state, result
 
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Store the new vad_start_secs value."""
+        self._vad_start_secs = vad_start_secs
+
     def clear(self):
         """Reset the turn analyzer to its initial state."""
         self._clear(EndOfTurnState.COMPLETE)
+
+    @property
+    def _model_executor(self) -> ThreadPoolExecutor:
+        """The thread the model runs on, started the first time it is needed."""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1)
+        return self._executor
+
+    async def cleanup(self):
+        """Release the analyzer's resources, including the thread the model runs on.
+
+        The analyzer stays usable: cleaning up is not only teardown here, since
+        a turn strategy is cleaned up and re-applied whenever the strategies are
+        updated, so the thread is started again when the next turn needs it.
+        """
+        try:
+            await super().cleanup()
+        finally:
+            if self._executor is not None:
+                self._executor.shutdown(wait=False)
+                self._executor = None
 
     def _clear(self, turn_state: EndOfTurnState):
         """Clear internal state based on turn completion status."""
@@ -177,7 +204,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_start_time = 0
         self._silence_ms = 0
 
-    def _process_speech_segment(self, audio_buffer) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    def _process_speech_segment(self, audio_buffer) -> tuple[EndOfTurnState, MetricsData | None]:
         """Process accumulated audio segment using ML model."""
         state = EndOfTurnState.INCOMPLETE
 
@@ -185,7 +212,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             return state, None
 
         # Extract recent audio segment for prediction
-        start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
+        effective_pre_speech_ms = self._params.pre_speech_ms + (self._vad_start_secs * 1000)
+        start_time = self._speech_start_time - (effective_pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:
@@ -194,9 +222,12 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
         end_index = len(audio_buffer) - 1
 
-        # Extract the audio segment
-        segment_audio_chunks = [chunk for _, chunk in audio_buffer[start_index : end_index + 1]]
-        segment_audio = np.concatenate(segment_audio_chunks)
+        # Extract the audio segment. The buffer holds int16 PCM views; defer
+        # the float32 conversion until after concatenation so it runs once
+        # per turn instead of once per appended frame.
+        segment_chunks_int16 = [chunk for _, chunk in audio_buffer[start_index : end_index + 1]]
+        segment_audio_int16 = np.concatenate(segment_chunks_int16)
+        segment_audio = segment_audio_int16.astype(np.float32) / 32768.0
 
         # Limit maximum duration
         max_samples = int(self._params.max_duration_secs * self.sample_rate)
@@ -220,18 +251,11 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                 # Calculate processing time
                 e2e_processing_time_ms = (end_time - start_time) * 1000
 
-                # Extract metrics from the nested structure
-                metrics = result.get("metrics", {})
-                inference_time = metrics.get("inference_time", 0)
-                total_time = metrics.get("total_time", 0)
-
                 # Prepare the result data
-                result_data = SmartTurnMetricsData(
+                result_data = TurnMetricsData(
                     processor="BaseSmartTurn",
                     is_complete=result["prediction"] == 1,
                     probability=result["probability"],
-                    inference_time_ms=inference_time * 1000,
-                    server_total_time_ms=total_time * 1000,
                     e2e_processing_time_ms=e2e_processing_time_ms,
                 )
 
@@ -239,8 +263,6 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                     f"Prediction: {'Complete' if result_data.is_complete else 'Incomplete'}"
                 )
                 logger.trace(f"Probability of complete: {result_data.probability:.4f}")
-                logger.trace(f"Inference time: {result_data.inference_time_ms:.2f}ms")
-                logger.trace(f"Server total time: {result_data.server_total_time_ms:.2f}ms")
                 logger.trace(f"E2E processing time: {result_data.e2e_processing_time_ms:.2f}ms")
             except SmartTurnTimeoutException:
                 logger.debug(
@@ -255,6 +277,6 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result_data
 
     @abstractmethod
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using ML model from audio data."""
         pass

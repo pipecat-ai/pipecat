@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,20 +7,24 @@
 """Tests for PiperTTSService."""
 
 import asyncio
+import unittest
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 import pytest
 from aiohttp import web
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     ErrorFrame,
+    LLMAssistantPushAggregationFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.piper.tts import PiperHttpTTSService
 from pipecat.tests.utils import run_test
 
 
@@ -66,34 +70,50 @@ async def test_run_piper_tts_success(aiohttp_client):
     base_url = str(client.make_url("")).rstrip("/")
 
     async with aiohttp.ClientSession() as session:
-        # Instantiate PiperTTSService with our mock server
-        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
+        # Instantiate PiperHttpTTSService with our mock server
+        tts_service = PiperHttpTTSService(
+            base_url=base_url, aiohttp_session=session, sample_rate=24000
+        )
 
         frames_to_send = [
             TTSSpeakFrame(text="Hello world."),
         ]
 
-        expected_returned_frames = [
-            TTSStartedFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSStoppedFrame,
-            TTSTextFrame,
-        ]
-
         frames_received = await run_test(
             tts_service,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
         )
         down_frames = frames_received[0]
+        frame_types = [type(f) for f in down_frames]
+
+        # Verify key frames are present
+        assert AggregatedTextFrame in frame_types
+        assert TTSStartedFrame in frame_types
+        assert TTSStoppedFrame in frame_types
+        assert TTSTextFrame in frame_types
+
+        # Verify ordering: Started → audio → Stopped → Text
+        started_idx = frame_types.index(TTSStartedFrame)
+        stopped_idx = frame_types.index(TTSStoppedFrame)
+        text_idx = frame_types.index(TTSTextFrame)
+        assert started_idx < text_idx < stopped_idx, (
+            "Expected: TTSStartedFrame < TTSTextFrame < TTSStoppedFrame"
+        )
+
+        # Frames between Started and Stopped must all be audio or text. A
+        # LLMAssistantPushAggregationFrame is also expected here: TTSSpeakFrame
+        # defaults to append_to_context=True, so the service emits one at the end
+        # of the utterance to commit the spoken text to the LLM context.
+        for i in range(started_idx + 1, stopped_idx):
+            assert frame_types[i] in (
+                TTSAudioRawFrame,
+                TTSTextFrame,
+                LLMAssistantPushAggregationFrame,
+            ), f"Unexpected frame type between Started and Stopped: {frame_types[i]}"
+
+        # All audio frames have correct sample rate
         audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
+        assert len(audio_frames) >= 1, "Expected at least one audio frame"
         for a_frame in audio_frames:
             assert a_frame.sample_rate == 24000, "Sample rate should match the default (24000)"
 
@@ -115,15 +135,18 @@ async def test_run_piper_tts_error(aiohttp_client):
     base_url = str(client.make_url("")).rstrip("/")
 
     async with aiohttp.ClientSession() as session:
-        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
+        tts_service = PiperHttpTTSService(
+            base_url=base_url, aiohttp_session=session, sample_rate=24000
+        )
 
         frames_to_send = [
-            TTSSpeakFrame(text="Error case."),
+            TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [TTSStoppedFrame, TTSTextFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSStoppedFrame]
 
-        expected_up_frames = [ErrorFrame]
+        # The 404, then the context completing with no audio.
+        expected_up_frames = [ErrorFrame, ErrorFrame]
 
         frames_received = await run_test(
             tts_service,
@@ -137,3 +160,76 @@ async def test_run_piper_tts_error(aiohttp_client):
         assert "status: 404" in up_frames[0].error, (
             "ErrorFrame should contain details about the 404"
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+@pytest.mark.parametrize("voice", [None, ""], ids=["none", "blank"])
+def test_local_piper_rejects_a_missing_or_blank_voice_before_downloading(voice):
+    pytest.importorskip("piper")
+    from pipecat.services.piper.tts import PiperTTSService
+
+    with pytest.raises(ValueError, match="Piper TTS voice must be specified"):
+        PiperTTSService(settings=PiperTTSService.Settings(voice=voice))
+
+
+SYNTHESIS_SETTINGS = {
+    "speaker_id": 2,
+    "length_scale": 1.3,
+    "noise_scale": 0.5,
+    "noise_w_scale": 0.6,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("synthesis", [SYNTHESIS_SETTINGS, {}], ids=["set", "unset"])
+async def test_http_piper_sends_synthesis_settings_only_when_set(aiohttp_client, synthesis):
+    bodies = []
+
+    async def handler(request):
+        bodies.append(await request.json())
+        return web.Response(status=200, body=b"\x00\x00" * 2400)
+
+    app = web.Application()
+    app.router.add_post("/synthesize", handler)
+    client = await aiohttp_client(app)
+
+    async with aiohttp.ClientSession() as session:
+        tts_service = PiperHttpTTSService(
+            base_url=str(client.make_url("/synthesize")),
+            aiohttp_session=session,
+            sample_rate=24000,
+            settings=PiperHttpTTSService.Settings(voice="en_US-ryan-high", **synthesis),
+        )
+        await run_test(
+            tts_service, frames_to_send=[TTSSpeakFrame(text="Hello.", append_to_context=False)]
+        )
+
+    assert bodies == [{"text": "Hello.", "voice": "en_US-ryan-high", **synthesis}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("synthesis", [SYNTHESIS_SETTINGS, {}], ids=["set", "unset"])
+async def test_local_piper_passes_synthesis_settings_to_the_voice(tmp_path, synthesis):
+    pytest.importorskip("piper")
+    from pipecat.services.piper.tts import PiperTTSService
+
+    (tmp_path / "en_US-ryan-high.onnx").touch()
+    voice = MagicMock()
+    voice.config.sample_rate = 22050
+    voice.synthesize.return_value = iter([])
+
+    with patch("pipecat.services.piper.tts.PiperVoice.load", return_value=voice):
+        tts_service = PiperTTSService(
+            download_dir=tmp_path,
+            settings=PiperTTSService.Settings(voice="en_US-ryan-high", **synthesis),
+        )
+    await run_test(
+        tts_service, frames_to_send=[TTSSpeakFrame(text="Hello.", append_to_context=False)]
+    )
+
+    syn_config = voice.synthesize.call_args.kwargs["syn_config"]
+    for name in ("speaker_id", "length_scale", "noise_scale", "noise_w_scale"):
+        assert getattr(syn_config, name) == synthesis.get(name)

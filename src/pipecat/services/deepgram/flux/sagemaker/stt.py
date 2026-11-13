@@ -1,0 +1,358 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Deepgram Flux speech-to-text service for AWS SageMaker (HTTP/2 BiDi transport)."""
+
+import asyncio
+import json
+import time
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+
+from loguru import logger
+
+try:
+    from aws_sdk_sagemaker_runtime_http2.models import ResponseStreamEventPayloadPart
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use Deepgram Flux on SageMaker, you need to `uv add "pipecat-ai[sagemaker]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+)
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
+from pipecat.services.deepgram.flux.stt_base import (
+    DeepgramFluxSTTBase,
+    DeepgramFluxSTTSettings,
+    FluxConnectionNotConfirmedError,
+)
+from pipecat.utils.errors import ErrorCategory
+
+
+@dataclass
+class DeepgramFluxSageMakerSTTSettings(DeepgramFluxSTTSettings):
+    """Settings for the Deepgram Flux SageMaker STT service.
+
+    Inherits all fields from :class:`DeepgramFluxSTTSettings`.
+    """
+
+    pass
+
+
+class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
+    """Deepgram Flux speech-to-text service for AWS SageMaker.
+
+    Provides real-time speech recognition using Deepgram Flux models deployed on
+    AWS SageMaker endpoints. Uses HTTP/2 bidirectional streaming for low-latency
+    transcription with advanced turn detection (StartOfTurn, EndOfTurn,
+    EagerEndOfTurn, TurnResumed).
+
+    Unlike the Nova-based SageMaker STT service, Flux handles turn detection
+    natively, so no external VAD is needed for turn boundaries. The service
+    requests ``ExternalUserTurnStrategies`` automatically (at start, via the
+    ``STTMetadataFrame`` it broadcasts); pass your own ``user_turn_strategies`` only to
+    override that.
+
+    Requirements:
+
+    - AWS credentials configured (via environment variables, AWS CLI, or instance metadata)
+    - A deployed SageMaker endpoint with Deepgram Flux model
+
+    Event handlers available:
+
+    - on_connected: Called when the SageMaker session is established
+    - on_disconnected: Called when the session is closed
+    - on_connection_error: Called on connection failure
+    - on_start_of_turn: Deepgram Flux detected start of speech
+    - on_end_of_turn: Deepgram Flux detected end of turn
+    - on_eager_end_of_turn: Deepgram Flux predicted end of turn
+    - on_turn_resumed: User resumed speaking after EagerEndOfTurn
+    - on_update: Interim transcript update during a turn
+
+    Example::
+
+        stt = DeepgramFluxSageMakerSTTService(
+            endpoint_name="my-deepgram-flux-endpoint",
+            region="us-east-2",
+            settings=DeepgramFluxSageMakerSTTService.Settings(
+                model="flux-general-en",
+                eot_threshold=0.7,
+                eager_eot_threshold=0.5,
+            ),
+        )
+    """
+
+    Settings = DeepgramFluxSageMakerSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        endpoint_name: str,
+        region: str,
+        encoding: str = "linear16",
+        sample_rate: int | None = None,
+        mip_opt_out: bool | None = None,
+        tag: list | None = None,
+        should_interrupt: bool = True,
+        watchdog_min_timeout: float = 0.5,
+        enable_eager_end_of_turn: bool = False,
+        settings: Settings | None = None,
+        **kwargs,
+    ):
+        """Initialize the Deepgram Flux SageMaker STT service.
+
+        Args:
+            endpoint_name: Name of the SageMaker endpoint with Deepgram Flux model
+                deployed (e.g., "my-deepgram-flux-endpoint").
+            region: AWS region where the endpoint is deployed (e.g., "us-east-2").
+            encoding: Audio encoding format. Defaults to "linear16".
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
+            mip_opt_out: Opt out of Deepgram model improvement program.
+            tag: Tags to label requests for identification during usage reporting.
+            should_interrupt: Whether to interrupt the bot when Flux detects that
+                the user is speaking. Passed along to the user turn strategies
+                this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
+            watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
+                sends silence to prevent dangling turns. Defaults to 0.5.
+            enable_eager_end_of_turn: Whether to answer Flux's predicted end
+                of turn ahead of the committed one, so the gap between the two
+                is spent generating a response rather than waiting. The response
+                is discarded if the user resumes speaking or the committed
+                transcript differs from the predicted one. Off by default: it
+                spends an inference on every prediction, including the ones Flux
+                withdraws. Turning it on sets ``eager_eot_threshold`` to 0.5
+                when the settings leave it unset, since Flux reports no
+                prediction without it.
+            settings: Runtime-updatable settings.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
+        # Initialize default settings
+        default_settings = self.Settings(
+            model="flux-general-en",
+            language=None,
+            eager_eot_threshold=None,
+            eot_threshold=None,
+            eot_timeout_ms=None,
+            keyterm=[],
+            min_confidence=None,
+            language_hints=None,
+            numerals=None,
+            profanity_filter=None,
+            redact=None,
+            redact_usage=None,
+        )
+
+        # Apply settings delta
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            encoding=encoding,
+            mip_opt_out=mip_opt_out,
+            tag=tag,
+            should_interrupt=should_interrupt,
+            watchdog_min_timeout=watchdog_min_timeout,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
+            settings=default_settings,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
+
+        self._endpoint_name = endpoint_name
+        self._region = region
+
+        self._client: SageMakerBidiClient | None = None
+        self._response_task: asyncio.Task | None = None
+        # Set while the service is stopping, so the session it closes doesn't
+        # end the turn in progress.
+        self._disconnecting = False
+
+    # ------------------------------------------------------------------
+    # Transport interface implementation
+    # ------------------------------------------------------------------
+
+    async def _transport_send_audio(self, audio: bytes):
+        if (
+            self._client is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
+        await self._client.send_audio_chunk(audio)
+
+    async def _transport_send_json(self, message: dict):
+        if (
+            self._client is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
+        await self._client.send_json(message)
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify Flux protocol failures, then SageMaker session failures."""
+        return super()._classify_error(exception) or classify_sagemaker_bidi_error(exception)
+
+    def _transport_is_active(self) -> bool:
+        return self._client is not None and self._client.is_active
+
+    # ------------------------------------------------------------------
+    # Connection management
+    # ------------------------------------------------------------------
+
+    async def _connect(self):
+        """Connect to the SageMaker endpoint and start the BiDi session.
+
+        Starts the HTTP/2 session and waits for the Flux ``Connected`` message
+        before returning, ensuring audio is not sent before the model is ready.
+        """
+        logger.debug("Connecting to Deepgram Flux on SageMaker...")
+
+        self._disconnecting = False
+        self._connection_established_event.clear()
+
+        self._client = SageMakerBidiClient(
+            endpoint_name=self._endpoint_name,
+            region=self._region,
+            model_invocation_path="v2/listen",
+            model_query_string=self._build_query_string(),
+        )
+
+        try:
+            # A rejected connection setting raises a generic 424 from
+            # start_session; the timeout guards against a session that never opens.
+            await self._start_session_within_timeout()
+
+            # Start response processor first so we can receive the Connected message
+            self._response_task = self.create_task(self._process_responses())
+
+            # Wait for Flux to confirm the connection is ready
+            logger.debug("SageMaker session started, waiting for Flux connection confirmation...")
+            await self._await_connection_established()
+
+            # Note: Flux does not support KeepAlive messages (only CloseStream,
+            # ForceEndTurn and Configure are valid). The watchdog task handles
+            # keeping the connection alive by sending silence when needed.
+            self._watchdog_task = self.create_task(self._watchdog_task_handler())
+
+            logger.debug("Connected to Deepgram Flux on SageMaker")
+            await self._call_event_handler("on_connected")
+
+        except Exception as e:
+            # Nothing reconnects after a failed session start, so the service
+            # can't do any more work in this session.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
+            await self._call_event_handler("on_connection_error", str(e))
+
+    async def _start_session_within_timeout(self):
+        """Open the SageMaker session, failing if it does not open in time.
+
+        Raises:
+            FluxConnectionNotConfirmedError: If the session does not open within
+                ``_CONNECTION_TIMEOUT``.
+        """
+        assert self._client is not None
+        try:
+            await asyncio.wait_for(self._client.start_session(), timeout=self._CONNECTION_TIMEOUT)
+        except TimeoutError:
+            raise FluxConnectionNotConfirmedError(
+                f"SageMaker session did not open within {self._CONNECTION_TIMEOUT}s; "
+                "the endpoint may not accept the current connection settings (see "
+                f"CloudWatch log group /aws/sagemaker/Endpoints/{self._endpoint_name})"
+            ) from None
+
+    async def _disconnect(self):
+        """Disconnect from the SageMaker endpoint."""
+        self._disconnecting = True
+        self._connection_established_event.clear()
+        # Discard any in-flight/pending Configure — the connection is going
+        # away, so it can no longer be acked or sent.
+        self._reset_configure_state()
+
+        if self._client and self._client.is_active:
+            logger.debug(f"{self}: Disconnecting from Deepgram Flux on SageMaker...")
+
+            await self._send_close_stream()
+
+            if self._watchdog_task and not self._watchdog_task.done():
+                await self.cancel_task(self._watchdog_task)
+                self._watchdog_task = None
+                self._last_stt_time = None
+
+            if self._response_task and not self._response_task.done():
+                await self.cancel_task(self._response_task)
+
+            await self._client.close_session()
+
+            logger.debug("Disconnected from Deepgram Flux on SageMaker")
+            await self._call_event_handler("on_disconnected")
+
+    # ------------------------------------------------------------------
+    # Audio sending and response receiving
+    # ------------------------------------------------------------------
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Send audio data to Deepgram Flux for transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (transcription results come via BiDi stream callbacks).
+        """
+        if not self._connection_established_event.is_set():
+            return
+
+        if self._client and self._client.is_active:
+            try:
+                self._last_stt_time = time.monotonic()
+                self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
+                await self._client.send_audio_chunk(audio)
+            except Exception as e:
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        yield None
+
+    async def _process_responses(self):
+        """Process streaming responses from Deepgram Flux on SageMaker."""
+        try:
+            while self._client and self._client.is_active:
+                result = await self._client.receive_response()
+
+                if result is None:
+                    break
+
+                if isinstance(result, ResponseStreamEventPayloadPart):
+                    if result.value.bytes_:
+                        response_data = result.value.bytes_.decode("utf-8")
+
+                        try:
+                            parsed = json.loads(response_data)
+                            await self._handle_message(parsed)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Non-JSON response: {response_data}")
+
+        except asyncio.CancelledError:
+            logger.debug("Response processor cancelled")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        finally:
+            logger.debug("Response processor stopped")
+            # A turn lives in one session, so it ends when the session does,
+            # unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()

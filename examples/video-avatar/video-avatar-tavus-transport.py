@@ -1,0 +1,147 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import asyncio
+import os
+import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.expressive.expression import CORE_DELIVERY, ExpressionDelivery
+from pipecat.expressive.policy import ExpressionPolicy
+from pipecat.frames.frames import LLMRunFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.transports.tavus.transport import TavusParams, TavusTransport
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
+
+async def main():
+    async with aiohttp.ClientSession() as session:
+        transport = TavusTransport(
+            bot_name="Pipecat bot",
+            api_key=os.environ["TAVUS_API_KEY"],
+            replica_id=os.environ["TAVUS_REPLICA_ID"],
+            session=session,
+            params=TavusParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                microphone_out_enabled=False,
+                audio_out_faster_than_realtime=True,
+            ),
+        )
+
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+
+        tts = ElevenLabsDialogueTTSService(
+            api_key=os.environ["ELEVENLABS_API_KEY"],
+            settings=ElevenLabsDialogueTTSService.Settings(
+                voice=os.environ["ELEVENLABS_VOICE_ID"],
+                model="eleven_v4_turbo",
+            ),
+        )
+
+        llm = OpenAIResponsesLLMService(
+            api_key=os.environ["OPENAI_API_KEY"],
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-5.6-luna",
+                system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            ),
+        )
+
+        context = LLMContext()
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
+
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,  # STT
+                user_aggregator,  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                assistant_aggregator,  # Assistant spoken responses
+            ]
+        )
+
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=16000,
+                audio_out_sample_rate=24000,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                # The LLM writes expression tags into its responses, the TTS
+                # performs them, and the replica's face follows their emotion.
+                # It's offered the core deliveries, plus one for each emotion the
+                # replica shows that the core has none for.
+                enable_expressive_conversation=True,
+                expression_policy=ExpressionPolicy(
+                    delivery=[
+                        *CORE_DELIVERY,
+                        ExpressionDelivery.ANGRY,
+                        ExpressionDelivery.SCARED,
+                        ExpressionDelivery.DISGUSTED,
+                        ExpressionDelivery.CONTEMPTUOUS,
+                    ]
+                ),
+            ),
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
+        )
+
+        runner = WorkerRunner()
+
+        await runner.add_workers(worker)
+
+        @transport.event_handler("on_connected")
+        async def on_connected(transport, data):
+            # Extract the room name to build the conversation URL. Share this
+            # URL with a frontend client so it can join the same Daily room.
+            room_name = data.get("callConfig", {}).get("roomName")
+            conversation_url = f"https://tavus.daily.co/{room_name}"
+            logger.info(f"Conversation URL: {conversation_url}")
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, participant):
+            logger.info("Client connected")
+            # Kick off the conversation.
+            context.add_message(
+                {
+                    "role": "developer",
+                    "content": "Start by greeting the user and ask how you can help.",
+                }
+            )
+            await worker.queue_frames([LLMRunFrame()])
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, participant):
+            logger.info("Client disconnected")
+            await runner.cancel()
+
+        await runner.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,19 +10,173 @@ These types are used by the development runner to pass transport-specific
 information to bot functions.
 """
 
+import argparse
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from fastapi import WebSocket
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
+
+from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.file_storage import FileStorage
+
+if TYPE_CHECKING:
+    from fastapi import WebSocket
+
+
+class DialinSettings(BaseModel):
+    """Dial-in settings from the Daily webhook.
+
+    This model matches the structure sent by Pipecat Cloud and Daily.co webhooks
+    for incoming PSTN/SIP calls.
+
+    Parameters:
+        call_id: Unique identifier for the call (UUID representing sessionId in SIP Network)
+        call_domain: Daily domain for the call (UUID representing Daily Domain on SIP Network)
+        To: The dialed phone number (optional)
+        From: The caller's phone number (optional)
+        sip_headers: Optional SIP headers from the call
+    """
+
+    call_id: str
+    call_domain: str
+    To: str | None = None
+    From: str | None = None
+    sip_headers: dict[str, str] | None = None
+
+
+class DailyDialinRequest(BaseModel):
+    """Request data for Daily PSTN dial-in requests.
+
+    This is the structure passed in runner_args.body for dial-in calls.
+    It matches the payload structure from Pipecat Cloud's dial-in webhook handler.
+
+    Parameters:
+        dialin_settings: Dial-in configuration including call_id, call_domain, To, From
+        daily_api_key: Daily API key for pinlessCallUpdate (required for dial-in)
+        daily_api_url: Daily API URL (staging or production)
+    """
+
+    dialin_settings: DialinSettings
+    daily_api_key: str
+    daily_api_url: str
+
+
+class CallData(BaseModel):
+    """Parsed telephony handshake data from the provider's first WebSocket messages.
+
+    Populated by :func:`pipecat.runner.utils.parse_telephony_websocket` and exposed on
+    ``WebSocketRunnerArguments.call_data`` by ``create_transport``. Gives typed
+    attribute access — ``call_data.to_number``, ``call_data.call_id`` — while staying
+    dict-compatible (``call_data["call_id"]``, ``call_data.get("body", {})``) so bots
+    written against the old dict keep working.
+
+    Fields are populated per provider; absent ones stay ``None``. Provider-specific keys
+    not modeled here remain accessible (``extra="allow"``).
+
+    This base holds the fields common to all providers. Provider-specific fields live
+    on subclasses (:class:`TelnyxCallData`, :class:`ExotelCallData`), which
+    ``parse_telephony_websocket`` / ``create_transport`` construct per provider.
+
+    Parameters:
+        stream_id: Provider media-stream identifier.
+        call_id: Provider call identifier, normalized across providers (Twilio
+            ``callSid``, Plivo ``callId``, Exotel ``call_sid``, Telnyx
+            ``call_control_id``).
+        from_number: Caller's number. Wire key ``from``.
+        to_number: Dialed number. Wire key ``to``.
+        body: Custom parameters sent by the provider (e.g. Twilio TwiML stream
+            parameters).
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    stream_id: str | None = None
+    call_id: str | None = None
+    from_number: str | None = Field(default=None, alias="from")
+    to_number: str | None = Field(default=None, alias="to")
+    body: dict = Field(default_factory=dict)
+
+    def _wire_dict(self) -> dict:
+        """The original provider dict shape (wire/alias keys, including extras)."""
+        return self.model_dump(by_alias=True)
+
+    def __getitem__(self, key: str):
+        """Dict-style access, e.g. ``call_data["call_id"]``."""
+        return self._wire_dict()[key]
+
+    def __contains__(self, key: str) -> bool:
+        """``"call_id" in call_data`` — True only when the provider set the value."""
+        wire = self._wire_dict()
+        return key in wire and wire[key] is not None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-style ``.get`` returning ``default`` when the key is missing or unset."""
+        value = self._wire_dict().get(key, default)
+        return default if value is None else value
+
+
+class TelnyxCallData(CallData):
+    """Telnyx-specific parsed telephony handshake data.
+
+    Parameters:
+        outbound_encoding: Telnyx outbound media encoding.
+    """
+
+    outbound_encoding: str | None = None
+
+
+class ExotelCallData(CallData):
+    """Exotel-specific parsed telephony handshake data.
+
+    Parameters:
+        account_sid: Exotel account sid.
+        custom_parameters: Exotel custom parameters.
+    """
+
+    account_sid: str | None = None
+    custom_parameters: str | dict | None = None
 
 
 @dataclass
 class RunnerArguments:
-    """Base class for runner session arguments."""
+    """Base class for runner session arguments.
 
-    handle_sigint: bool = field(init=False)
-    handle_sigterm: bool = field(init=False)
-    pipeline_idle_timeout_secs: int = field(init=False)
+    Parameters:
+        handle_sigint: Whether the bot should install a SIGINT handler.
+        handle_sigterm: Whether the bot should install a SIGTERM handler.
+        pipeline_idle_timeout_secs: Seconds the pipeline may stay idle before
+            shutting down; ``None`` disables the idle timeout.
+        body: Optional request body data passed from the runner entry point.
+        call_data: Parsed telephony handshake as a :class:`CallData` model — typed
+            attribute access (``call_data.to_number``) that's also dict-compatible
+            (``call_data["call_id"]``). Populated by ``create_transport`` (or a direct
+            ``parse_telephony_websocket`` call) for telephony connections; ``None``
+            otherwise. Lives on the base so any bot can read ``runner_args.call_data``
+            uniformly, mirroring ``body``.
+        session_id: Identifier for this bot session.
+        cli_args: Parsed CLI arguments from the runner, when launched via the
+            development runner.
+        file_storage: The storage backend serving the host's upload endpoints,
+            injected by whichever host runs the bot — the one returned by the
+            bot module's ``create_file_storage()`` if it defines one, otherwise
+            the host's default (the development runner's ``-u/--uploads-folder``
+            local storage). Hand it to the LLM service's ``FileResolver``
+            (``file_resolver=FileResolver(file_storage=runner_args.file_storage)``)
+            so send-file messages can resolve the URLs it mints. ``None`` when
+            uploads are disabled.
+    """
+
+    # Use kw_only so subclasses don't need to worry about ordering.
+    handle_sigint: bool = field(init=False, kw_only=True)
+    handle_sigterm: bool = field(init=False, kw_only=True)
+    pipeline_idle_timeout_secs: float | None = field(init=False, kw_only=True)
+    body: Any | None = field(default_factory=dict, kw_only=True)
+    call_data: CallData | None = field(default=None, kw_only=True)
+    session_id: str | None = field(default=None, kw_only=True)
+    cli_args: argparse.Namespace | None = field(default=None, init=False, kw_only=True)
+    file_storage: FileStorage | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         self.handle_sigint = False
@@ -41,21 +195,42 @@ class DailyRunnerArguments(RunnerArguments):
     """
 
     room_url: str
-    token: Optional[str] = None
-    body: Optional[Any] = field(default_factory=dict)
+    token: str | None = None
+
+
+@dataclass
+class VonageRunnerArguments(RunnerArguments):
+    """Vonage transport session arguments for the runner.
+
+    Parameters:
+        application_id: Vonage application ID
+        vonage_session_id: Vonage session ID
+        token: Vonage Session Token
+    """
+
+    application_id: str
+    vonage_session_id: str
+    token: str
 
 
 @dataclass
 class WebSocketRunnerArguments(RunnerArguments):
     """WebSocket transport session arguments for the runner.
 
+    The parsed telephony handshake is available on the inherited ``call_data`` field
+    (a :class:`CallData` model), populated by ``create_transport``.
+
     Parameters:
         websocket: WebSocket connection for audio streaming
+        transport_type: Transport type identifier. Set to ``"websocket"`` for plain
+            WebSocket connections; ``None`` triggers auto-detection from the first
+            telephony provider message. After auto-detection, ``create_transport``
+            overwrites this in place with the detected provider (e.g. ``"twilio"``).
         body: Additional request data
     """
 
-    websocket: WebSocket
-    body: Optional[Any] = field(default_factory=dict)
+    websocket: "WebSocket"
+    transport_type: str | None = None
 
 
 @dataclass
@@ -67,3 +242,217 @@ class SmallWebRTCRunnerArguments(RunnerArguments):
     """
 
     webrtc_connection: Any
+
+
+@dataclass
+class LiveKitRunnerArguments(RunnerArguments):
+    """LiveKit transport session arguments for the runner.
+
+    Parameters:
+        room_name: LiveKit room name to join
+        url: LiveKit server URL to connect to
+        token: Authentication token for the room
+        body: Additional request data
+    """
+
+    room_name: str
+    url: str
+    token: str
+
+
+@deprecated(
+    "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `WebSocketRunnerArguments` instead."
+)
+@dataclass
+class EvalRunnerArguments(RunnerArguments):
+    """Eval transport session arguments for the runner.
+
+    Used to launch a bot with a local ``SingleClientWebsocketServerTransport`` speaking RTVI
+    (via ``EvalSerializer``). The eval harness connects as an RTVI client,
+    sends scripted user input, and asserts on the RTVI events the bot emits.
+    Intended for fast pipeline behavioral evaluations.
+
+    .. deprecated:: 1.13.0
+        Use :class:`WebSocketRunnerArguments` instead: the dev runner hands an
+        eval harness's connection to the bot like any WebSocket session.
+        Will be removed in 2.0.0.
+
+    Parameters:
+        host: Host address to bind the eval transport's WebSocket server to.
+        port: Port number to bind the eval transport's WebSocket server to.
+    """
+
+    host: str = "localhost"
+    port: int = 7860
+
+
+@dataclass
+class SIPRunnerArguments(RunnerArguments):
+    """SIP transport session arguments for the runner.
+
+    Used to launch a bot on a :class:`~pipecat.transports.sip.transport.SIPTransport`.
+    baresip registers with the SIP server itself, so there is no HTTP signaling
+    route; the development runner reads the account from the ``SIP_USER``,
+    ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
+    ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``,
+    ``SIP_INSTANCE_ID``, ``SIP_NET_INTERFACE``, and ``SIP_JITTER_BUFFER``
+    environment variables. Without ``SIP_USER`` and
+    ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
+    domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
+    For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
+    native stack's logging. The account may also arrive in the request body
+    as ``body["sip_client"]`` (a Daily SIP-trunk notification), which
+    :func:`pipecat.runner.sip.configure` reads first. Building this type by
+    hand is the advanced layer: :func:`pipecat.runner.sip.sip_runner_arguments`
+    builds it from an account and the environment, and
+    :func:`pipecat.runner.utils.create_transport` does so itself for plain
+    ``RunnerArguments`` whose body or environment holds the account.
+
+    Parameters:
+        user: The user part of ``sip:user@domain``.
+        domain: Registration domain; may carry a port.
+        password: Authentication password; may be empty.
+        transport: SIP transport: "udp", "tcp", or "tls".
+        audio_codecs: Codec preference order by stack name (e.g.
+            ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
+        auth_user: Digest username when the credential store keys it
+            differently from ``user`` (credential-list trunks).
+        extra_params: Extra baresip account parameters, each a
+            ``"key=value"`` string, appended verbatim to the SIP
+            address-of-record — e.g. ``("medianat=stun",
+            "stunserver=stun:HOST:PORT")`` for media-NAT traversal behind an
+            endpoint-independent NAT, ``medianat=turn`` behind a symmetric
+            one, and ``medianat=ice`` only when the peer also speaks ICE; see
+            the NAT notes on
+            :class:`~pipecat.transports.sip.connection.SIPConnection`. None
+            adds nothing.
+        reg_interval: Seconds between registration refreshes; 0 disables
+            registration entirely (trunk mode).
+        rtp_timeout: Seconds without received RTP after which a call is
+            declared dead and closed; 0 disables detection.
+        instance_id: A canonical lowercase UUID identifying this endpoint
+            across restarts (RFC 5626 ``+sip.instance``); None sends no
+            instance parameter.
+        native_log_level: Lowest severity captured from the native SIP
+            stack's own logging ("debug", "info", "warning", or "error").
+        sip_trace: Log every SIP message sent and received, verbatim.
+            Contains authentication material — keep it off in production.
+        net_interface: Restrict the stack to one local interface, by name
+            or address; None (the default) lets the OS pick the source
+            address per destination. Set it for a registrar on loopback
+            ("127.0.0.1") or one address of a multi-homed host. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection`.
+        jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or
+            "adaptive"; None selects the transport's default, a fixed
+            40–60 ms buffer. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection` for
+            what each mode costs.
+        jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
+            adaptive buffer; None with no mode selects the default.
+    """
+
+    user: str
+    domain: str
+    password: str = ""
+    transport: str = "udp"
+    audio_codecs: tuple | None = None
+    auth_user: str | None = None
+    extra_params: tuple | None = None
+    reg_interval: int = 600
+    rtp_timeout: int = 0
+    instance_id: str | None = None
+    native_log_level: str = "warning"
+    sip_trace: bool = False
+    net_interface: str | None = None
+    jitter_buffer_mode: str | None = None
+    jitter_buffer_ms: tuple | None = None
+
+
+@dataclass
+class MOQRunnerArguments(RunnerArguments):
+    """MOQ (Media over QUIC) transport session arguments for the runner.
+
+    The ``ready_event`` and ``cert_fingerprints`` fields are populated
+    automatically by :func:`pipecat.runner.utils.create_transport`; bots
+    don't need to thread them by hand.
+
+    Parameters:
+        host: MOQ relay/server hostname. Composes the relay URL with
+            ``port`` and ``path`` when ``relay_url`` is unset; in serve
+            mode it is the name the browser dials.
+        port: MOQ relay/server port; see ``host``.
+        path: MOQ endpoint path on the relay when the URL is composed
+            from ``host`` and ``port`` (client mode).
+        relay_url: Full relay URL to dial in client mode, query string
+            included (e.g. ``https://relay.example.com/?jwt=…``). Takes
+            precedence over ``host``/``port``/``path``, with a warning when
+            ``host`` or ``port`` is given as well. Client mode needs either
+            this or ``host`` and ``port``.
+        namespace: MOQ namespace (like a room identifier).
+        participant_id: This bot's participant id; it broadcasts under
+            ``<namespace>/<participant_id>``.
+        peer_id: The peer's participant id; the bot subscribes to
+            ``<namespace>/<peer_id>``.
+        verify_ssl: Whether to verify SSL certificates (client mode).
+        serve: When True, the bot binds its own MOQ server instead of
+            dialing a relay — useful for local dev with no separate
+            ``moq-relay`` process.
+        bind: Local UDP bind address — the listen address in serve mode
+            (e.g. ``"[::]:4080"``), the dial source address in client mode
+            (ephemeral if unset).
+        serve_bind: Serve-mode listen address.
+
+            .. deprecated:: 1.8.0
+                Use ``bind`` instead, which also covers client mode. Will be
+                removed in 2.0.0.
+        serve_tls_host: Hostname used for the generated self-signed cert
+            when no on-disk cert/key is provided.
+        serve_tls_cert: Path to a PEM-encoded TLS cert chain.
+        serve_tls_key: Path to the matching PEM-encoded private key.
+        ready_event: Event the bot fires once it has finished MOQ
+            bring-up. The HTTP ``/start`` endpoint waits on this before
+            telling the browser to open its WebTransport.
+        cert_fingerprints: SHA-256 fingerprints (hex) of the bot's TLS
+            cert chain — populated by the transport in serve mode so
+            ``/api/config`` can hand them to the browser for pinning.
+    """
+
+    host: str | None = None
+    port: int | None = None
+    path: str = "/moq"
+    relay_url: str | None = field(default=None, kw_only=True)
+    namespace: str = "pipecat"
+    participant_id: str = "response"
+    peer_id: str = "request"
+    verify_ssl: bool = True
+    serve: bool = False
+    bind: str | None = None
+    serve_bind: str | None = field(default=None, kw_only=True)
+    serve_tls_host: str = "localhost"
+    serve_tls_cert: str | None = None
+    serve_tls_key: str | None = None
+    ready_event: asyncio.Event | None = field(default=None, kw_only=True)
+    cert_fingerprints: list[str] = field(default_factory=list, kw_only=True)
+
+    def __post_init__(self):
+        """Carry the pre-1.8.0 ``serve_bind`` spelling over to ``bind``; check the dial target."""
+        super().__post_init__()
+        if self.serve_bind is not None:
+            warn_deprecated(
+                "`MOQRunnerArguments.serve_bind` is deprecated since 1.8.0 and will be "
+                "removed in 2.0.0. Use `MOQRunnerArguments.bind` instead.",
+                stacklevel=2,
+            )
+            if self.bind is None:
+                self.bind = self.serve_bind
+        if not self.serve and self.relay_url is None and (self.host is None or self.port is None):
+            raise ValueError(
+                "MOQRunnerArguments needs `relay_url`, or `host` and `port`, to dial a relay"
+            )
+        if not self.serve and self.relay_url is not None:
+            if self.host is not None or self.port is not None:
+                logger.warning(
+                    "MOQRunnerArguments: `relay_url` is set, so `host`, `port` and `path` "
+                    "are ignored"
+                )

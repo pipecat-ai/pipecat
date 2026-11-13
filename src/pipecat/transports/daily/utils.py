@@ -1,20 +1,21 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Daily REST Helpers.
 
-Methods that wrap the Daily API to create rooms, check room URLs, and get meeting tokens.
+Methods that wrap the Daily API to create rooms, check room URLs, get meeting
+tokens, and manage SIP clients.
 """
 
 import time
-from typing import Dict, List, Literal, Optional
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import aiohttp
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class DailyRoomSipParams(BaseModel):
@@ -27,13 +28,16 @@ class DailyRoomSipParams(BaseModel):
         num_endpoints: Number of allowed SIP endpoints.
         codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        provider: Optional SIP provider name (defaults to None).
+            Example: "daily"
     """
 
     display_name: str = "sw-sip-dialin"
     video: bool = False
     sip_mode: str = "dial-in"
     num_endpoints: int = 1
-    codecs: Optional[Dict[str, List[str]]] = None
+    codecs: dict[str, list[str]] | None = None
+    provider: str | None = None
 
 
 class RecordingsBucketConfig(BaseModel):
@@ -74,7 +78,7 @@ class TranscriptionBucketConfig(BaseModel):
     allow_api_access: bool = False
 
 
-class DailyRoomProperties(BaseModel, extra="allow"):
+class DailyRoomProperties(BaseModel):
     """Properties for configuring a Daily room.
 
     Reference: https://docs.daily.co/reference/rest-api/rooms/create-room#properties
@@ -86,7 +90,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         enable_emoji_reactions: Whether emoji reactions are enabled.
         eject_at_room_exp: Whether to remove participants when room expires.
         enable_dialout: Whether SIP dial-out is enabled.
-        enable_recording: Recording settings ('cloud', 'local', 'raw-tracks').
+        enable_recording: Recording settings ('cloud', 'cloud-audio-only', 'local', 'raw-tracks').
         enable_transcription_storage: Whether transcription storage is enabled.
         geo: Geographic region for room.
         max_participants: Maximum number of participants allowed in the room.
@@ -97,20 +101,22 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         start_video_off: Whether video is off by default.
     """
 
-    exp: Optional[float] = None
+    model_config = ConfigDict(extra="allow")
+
+    exp: float | None = None
     enable_chat: bool = False
     enable_prejoin_ui: bool = False
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = False
-    enable_dialout: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
-    enable_transcription_storage: Optional[bool] = None
-    geo: Optional[str] = None
-    max_participants: Optional[int] = None
-    recordings_bucket: Optional[RecordingsBucketConfig] = None
-    transcription_bucket: Optional[TranscriptionBucketConfig] = None
-    sip: Optional[DailyRoomSipParams] = None
-    sip_uri: Optional[dict] = None
+    enable_dialout: bool | None = None
+    enable_recording: Literal["cloud", "cloud-audio-only", "local", "raw-tracks"] | None = None
+    enable_transcription_storage: bool | None = None
+    geo: str | None = None
+    max_participants: int | None = None
+    recordings_bucket: RecordingsBucketConfig | None = None
+    transcription_bucket: TranscriptionBucketConfig | None = None
+    sip: DailyRoomSipParams | None = None
+    sip_uri: dict[str, Any] | None = None
     start_video_off: bool = False
 
     @property
@@ -123,7 +129,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         if not self.sip_uri:
             return ""
         else:
-            return "sip:%s" % self.sip_uri["endpoint"]
+            return f"sip:{self.sip_uri['endpoint']}"
 
 
 class DailyRoomParams(BaseModel):
@@ -135,7 +141,7 @@ class DailyRoomParams(BaseModel):
         properties: Room configuration properties.
     """
 
-    name: Optional[str] = None
+    name: str | None = None
     privacy: Literal["private", "public"] = "public"
     properties: DailyRoomProperties = Field(default_factory=DailyRoomProperties)
 
@@ -180,27 +186,27 @@ class DailyMeetingTokenProperties(BaseModel):
         enable_screenshare: If True, the user will be able to share their screen.
         start_video_off: If True, the user's video will be turned off when they join the room.
         start_audio_off: If True, the user's audio will be turned off when they join the room.
-        enable_recording: Recording settings for the token. Must be one of 'cloud', 'local' or 'raw-tracks'.
+        enable_recording: Recording settings for the token. Must be one of 'cloud', 'cloud-audio-only', 'local' or 'raw-tracks'.
         enable_prejoin_ui: If True, the user will see the prejoin UI before joining the room.
         start_cloud_recording: Start cloud recording when the user joins the room.
         permissions: Specifies the initial default permissions for a non-meeting-owner participant.
     """
 
-    room_name: Optional[str] = None
-    eject_at_token_exp: Optional[bool] = None
-    eject_after_elapsed: Optional[int] = None
-    nbf: Optional[int] = None
-    exp: Optional[int] = None
-    is_owner: Optional[bool] = None
-    user_name: Optional[str] = None
-    user_id: Optional[str] = None
-    enable_screenshare: Optional[bool] = None
-    start_video_off: Optional[bool] = None
-    start_audio_off: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
-    enable_prejoin_ui: Optional[bool] = None
-    start_cloud_recording: Optional[bool] = None
-    permissions: Optional[dict] = None
+    room_name: str | None = None
+    eject_at_token_exp: bool | None = None
+    eject_after_elapsed: int | None = None
+    nbf: int | None = None
+    exp: int | None = None
+    is_owner: bool | None = None
+    user_name: str | None = None
+    user_id: str | None = None
+    enable_screenshare: bool | None = None
+    start_video_off: bool | None = None
+    start_audio_off: bool | None = None
+    enable_recording: Literal["cloud", "cloud-audio-only", "local", "raw-tracks"] | None = None
+    enable_prejoin_ui: bool | None = None
+    start_cloud_recording: bool | None = None
+    permissions: dict[str, Any] | None = None
 
 
 class DailyMeetingTokenParams(BaseModel):
@@ -214,6 +220,64 @@ class DailyMeetingTokenParams(BaseModel):
     """
 
     properties: DailyMeetingTokenProperties = Field(default_factory=DailyMeetingTokenProperties)
+
+
+class DailySIPClientParams(BaseModel):
+    """Parameters for creating a Daily SIP client.
+
+    A SIP client is a set of plain SIP credentials on your Daily domain: any
+    SIP user agent can register with them and then receive calls at its
+    ``sip_uri`` or place calls through the domain. This is distinct from
+    ``DailyRoomSipParams``, which configures a room's SIP interconnect.
+
+    Parameters:
+        username: SIP username. Same naming rules as room names, with an
+            optional ``.<n>`` suffix (e.g. "support.1"); at most 64 characters.
+        password: Optional password (12-64 characters, at least one letter and
+            one digit). Auto-generated when omitted.
+        expires_in_seconds: Optional TTL in seconds (60-2592000). The client is
+            deleted automatically when it expires; never expires when omitted.
+    """
+
+    username: str
+    password: str | None = None
+    expires_in_seconds: int | None = None
+
+
+class DailySIPClientObject(BaseModel):
+    """Represents a Daily SIP client returned by the API.
+
+    Parameters:
+        username: SIP username.
+        domain: SIP domain to register with (e.g. "mydomain.sip-us.daily.co").
+        sip_uri: The client's dialable SIP URI.
+        password: SIP password. Only present in create and rotate responses —
+            it cannot be retrieved later, only rotated.
+        expires_at: Expiration timestamp in ISO 8601 format, or None if the
+            client never expires.
+    """
+
+    username: str
+    domain: str
+    sip_uri: str
+    password: str | None = None
+    expires_at: str | None = None
+
+
+class DailySIPClientPage(BaseModel):
+    """A page of Daily SIP clients returned by the list endpoint.
+
+    Parameters:
+        sip_clients: SIP clients in this page (passwords never included).
+        total: Total number of SIP clients on the domain.
+        limit: Page size used for this response.
+        offset: Offset used for this response.
+    """
+
+    sip_clients: list[DailySIPClientObject]
+    total: int
+    limit: int
+    offset: int
 
 
 class DailyRESTHelper:
@@ -297,20 +361,28 @@ class DailyRESTHelper:
         self,
         room_url: str,
         expiry_time: float = 60 * 60,
-        eject_at_token_exp: bool = False,
+        eject_at_token_exp: bool | None = None,
         owner: bool = True,
-        params: Optional[DailyMeetingTokenParams] = None,
+        params: DailyMeetingTokenParams | None = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
+
+        `room_name` is always taken from `room_url`. For `exp` and
+        `is_owner`, a value set in `params` is kept; otherwise
+        `expiry_time` and `owner` are used.
 
         Args:
             room_url: Daily room URL.
             expiry_time: Token validity duration in seconds (default: 1 hour).
-            eject_at_token_exp: Whether to eject user when token expires.
-            owner: Whether token has owner privileges.
-            params: Optional additional token properties. Note that room_name,
-                exp, and is_owner will be set based on the other function
-                parameters regardless of values in params.
+                Ignored if `params` sets `exp`.
+            eject_at_token_exp: Whether to eject the user when the token
+                expires. If unset, the value in `params` is kept; if that is
+                unset too, the field is left out so the room's
+                `eject_at_room_exp` setting applies. Setting it to True or
+                False overrides the room's ejection settings for this token.
+            owner: Whether token has owner privileges (default: True).
+                Ignored if `params` sets `is_owner`.
+            params: Optional additional token properties.
 
         Returns:
             Meeting token.
@@ -323,26 +395,29 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: int = int(time.time() + expiry_time)
-
         room_name = self.get_name_from_url(room_url)
 
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
 
         if params is None:
-            params = DailyMeetingTokenParams(
-                properties=DailyMeetingTokenProperties(
-                    room_name=room_name,
-                    is_owner=owner,
-                    exp=expiration,
-                    eject_at_token_exp=eject_at_token_exp,
-                )
-            )
+            params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties())
         else:
-            params.properties.room_name = room_name
-            params.properties.exp = expiration
-            params.properties.eject_at_token_exp = eject_at_token_exp
-            params.properties.is_owner = owner
+            # Fill in a copy. Written onto the caller's object, the defaults
+            # below would look like the caller's own values on the next call
+            # with the same `params`, and win over that call's arguments.
+            params = params.model_copy(deep=True)
+
+        properties = params.properties
+        properties.room_name = room_name
+
+        if properties.exp is None:
+            properties.exp = int(time.time() + expiry_time)
+
+        if properties.is_owner is None:
+            properties.is_owner = owner
+
+        if eject_at_token_exp is not None:
+            properties.eject_at_token_exp = eject_at_token_exp
 
         json = params.model_dump(exclude_none=True)
 
@@ -390,6 +465,181 @@ class DailyRESTHelper:
                 raise Exception(f"Failed to delete room [{room_name}] (status: {r.status}): {text}")
 
         return True
+
+    async def create_sip_client(self, params: DailySIPClientParams) -> DailySIPClientObject:
+        """Create a SIP client on the Daily domain.
+
+        The response is the only place the password is returned — store it if
+        you need it again later (it can only be rotated, not retrieved). The
+        credentials plug directly into the SIP transport::
+
+            client = await helper.create_sip_client(DailySIPClientParams(username="bot"))
+            connection = SIPConnection(
+                user=client.username,
+                domain=client.domain,
+                password=client.password,
+                transport="tls",
+            )
+
+        Args:
+            params: SIP client configuration parameters.
+
+        Returns:
+            DailySIPClientObject instance including the password.
+
+        Raises:
+            Exception: If creation fails — including 403 (domain SIP client
+                limit reached) and 409 (username already exists).
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = params.model_dump(exclude_none=True)
+        async with self.aiohttp_session.post(
+            f"{self.daily_api_url}/sip-clients", headers=headers, json=json
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to create SIP client (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
+
+    async def list_sip_clients(
+        self, limit: int | None = None, offset: int | None = None
+    ) -> DailySIPClientPage:
+        """List the SIP clients on the Daily domain.
+
+        Args:
+            limit: Maximum clients per page (1-100, API default 50).
+            offset: Number of clients to skip (API default 0).
+
+        Returns:
+            DailySIPClientPage with the clients (passwords never included).
+
+        Raises:
+            Exception: If the request fails or the response is invalid.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        params: dict[str, int] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        async with self.aiohttp_session.get(
+            f"{self.daily_api_url}/sip-clients", headers=headers, params=params
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to list SIP clients (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        try:
+            page = DailySIPClientPage(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return page
+
+    async def get_sip_client(self, username: str) -> DailySIPClientObject:
+        """Get a SIP client by username.
+
+        Args:
+            username: SIP username.
+
+        Returns:
+            DailySIPClientObject instance (password never included).
+
+        Raises:
+            Exception: If the client does not exist or the request fails.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.get(
+            f"{self.daily_api_url}/sip-clients/{username}", headers=headers
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(
+                    f"Unable to get SIP client [{username}] (status: {r.status}): {text}"
+                )
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
+
+    async def delete_sip_client(self, username: str) -> bool:
+        """Delete a SIP client by username.
+
+        Args:
+            username: SIP username.
+
+        Returns:
+            True if deletion was successful.
+
+        Raises:
+            Exception: If deletion fails (excluding 404 Not Found).
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.delete(
+            f"{self.daily_api_url}/sip-clients/{username}", headers=headers
+        ) as r:
+            if r.status != 200 and r.status != 404:
+                text = await r.text()
+                raise Exception(
+                    f"Failed to delete SIP client [{username}] (status: {r.status}): {text}"
+                )
+
+        return True
+
+    async def rotate_sip_client_password(
+        self, username: str, password: str | None = None
+    ) -> DailySIPClientObject:
+        """Rotate a SIP client's password.
+
+        The client's URI and expiration are unchanged; the response is the
+        only place the new password is returned.
+
+        Args:
+            username: SIP username.
+            password: Optional new password (12-64 characters, at least one
+                letter and one digit). Auto-generated when omitted.
+
+        Returns:
+            DailySIPClientObject instance including the new password.
+
+        Raises:
+            Exception: If the client does not exist or the request fails.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = {"password": password} if password is not None else {}
+        async with self.aiohttp_session.post(
+            f"{self.daily_api_url}/sip-clients/{username}/rotate", headers=headers, json=json
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(
+                    f"Unable to rotate SIP client password [{username}] "
+                    f"(status: {r.status}): {text}"
+                )
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
 
     async def _get_room_from_name(self, room_name: str) -> DailyRoomObject:
         """Internal method to get room details by name."""

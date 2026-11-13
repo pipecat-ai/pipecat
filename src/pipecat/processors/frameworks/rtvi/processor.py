@@ -1,0 +1,651 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""RTVIProcessor: main RTVI protocol processor."""
+
+import asyncio
+import base64
+from collections.abc import Mapping
+from typing import Any
+
+from loguru import logger
+from pydantic import BaseModel, ValidationError
+
+import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat import version as pipecat_version
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    EndWorkerFrame,
+    ErrorFrame,
+    Frame,
+    FunctionCallResultFrame,
+    InputAudioRawFrame,
+    InputDTMFFrame,
+    InputTransportMessageFrame,
+    InputTransportStartAudioStreamingFrame,
+    LLMConfigureOutputFrame,
+    LLMMessagesAppendFrame,
+    OutputTransportMessageUrgentFrame,
+    StartFrame,
+    SystemFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi.frames import (
+    RTVIClientMessageFrame,
+    RTVISendTextFrame,
+    RTVIUICancelJobGroupFrame,
+    RTVIUIEventFrame,
+    RTVIUISnapshotFrame,
+)
+from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
+from pipecat.services.llm_service import (
+    FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
+)
+from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.deprecation import warn_deprecated
+
+
+class RTVIProcessor(FrameProcessor):
+    """Main processor for handling RTVI protocol messages and actions.
+
+    This processor manages the RTVI protocol communication including client-server
+    handshaking, configuration management, action execution, and message routing.
+    It serves as the central hub for RTVI protocol operations.
+    """
+
+    def __init__(
+        self,
+        *,
+        transport: BaseTransport | None = None,
+        **kwargs,
+    ):
+        """Initialize the RTVI processor.
+
+        Args:
+            transport: Deprecated and ignored.
+
+                .. deprecated:: 1.4.0
+                    No replacement; the parameter is ignored. Will be removed in 2.0.0.
+                    The processor no longer needs a transport reference — audio input and
+                    audio-streaming start are driven by frames
+                    (:class:`InputAudioRawFrame` and
+                    :class:`InputTransportStartAudioStreamingFrame`) pushed
+                    downstream. For client-ready audio gating, set
+                    ``audio_in_stream_on_start=False`` on the transport params.
+            **kwargs: Additional arguments passed to parent class.
+        """
+        super().__init__(**kwargs)
+
+        self._bot_ready = False
+        self._client_ready = False
+        self._client_ready_id = ""
+        # Default to 0.0.0 to indicate unknown version.
+        self._client_version = [0, 0, 0]
+        self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
+
+        # A task to process incoming transport messages.
+        self._message_task: asyncio.Task | None = None
+
+        if transport is not None:
+            warn_deprecated(
+                "`RTVIProcessor(transport=...)` is deprecated since 1.4.0 and will be removed "
+                "in 2.0.0. No replacement. The argument is ignored: audio input and "
+                "audio-streaming start are driven by frames. For client-ready audio gating, "
+                "set `audio_in_stream_on_start=False` on the transport.",
+                stacklevel=2,
+            )
+
+        self._register_event_handler("on_bot_started")
+        self._register_event_handler("on_client_ready")
+        self._register_event_handler("on_client_message")
+        self._register_event_handler("on_ui_message")
+
+    @property
+    def client_version(self) -> list[int]:
+        """The negotiated client protocol version as [major, minor, patch].
+
+        Defaults to [0, 0, 0] until the client sends a ``client-ready`` message.
+        """
+        return self._client_version
+
+    def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
+        """Creates a new RTVI Observer.
+
+        Args:
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
+
+        Returns:
+            A new RTVI observer.
+        """
+        return RTVIObserver(self, params=params, **kwargs)
+
+    async def set_client_ready(self):
+        """Mark the client as ready and trigger the ready event."""
+        logger.debug(f"{self}: client is ready")
+        self._client_ready = True
+        await self._call_event_handler("on_client_ready")
+
+    async def set_bot_ready(self, about: Mapping[str, Any] | None = None):
+        """Mark the bot as ready and send the bot-ready message.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the Pipecat library and version will be used.
+        """
+        self._bot_ready = True
+        await self._send_bot_ready(about=about)
+
+    async def interrupt_bot(self):
+        """Interrupt the bot, as :meth:`broadcast_interruption` does."""
+        await self.broadcast_interruption()
+
+    async def send_server_message(self, data: Any):
+        """Send a server message to the client."""
+        message = RTVI.ServerMessage(data=data)
+        await self._send_server_message(message)
+
+    async def send_server_response(self, client_msg: RTVI.ClientMessage, data: Any):
+        """Send a server response for a given client message."""
+        message = RTVI.ServerResponse(
+            id=client_msg.msg_id, data=RTVI.RawServerResponseData(t=client_msg.type, d=data)
+        )
+        await self._send_server_message(message)
+
+    async def send_error_response(self, client_msg: RTVI.ClientMessage, error: str):
+        """Send an error response for a given client message."""
+        await self._send_error_response(id=client_msg.msg_id, error=error)
+
+    async def send_error(self, error: str):
+        """Send an error message to the client.
+
+        Args:
+            error: The error message to send.
+        """
+        await self._send_error_frame(ErrorFrame(error=error))
+
+    async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
+        """Push a transport message frame."""
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
+        await self.push_frame(frame)
+
+    async def handle_message(self, message: RTVI.Message, user_id: str | None = None):
+        """Handle an incoming RTVI message.
+
+        Args:
+            message: The RTVI message to handle.
+            user_id: Identifier for the user who sent it, if known.
+        """
+        await self._message_queue.put((message, user_id))
+
+    async def handle_function_call(self, params: FunctionCallParams):
+        """Handle a function call from the LLM.
+
+        Args:
+            params: The function call parameters.
+
+        .. deprecated:: 0.0.102
+            This method is deprecated. Function call events are now automatically
+            sent by :class:`RTVIObserver` using the ``llm-function-call-in-progress`` event.
+            Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
+            Will be removed in 2.0.0.
+        """
+        warn_deprecated(
+            "`RTVIProcessor.handle_function_call` is deprecated since 0.0.102 and will be "
+            "removed in 2.0.0. Use `RTVIObserver` instead. It sends function call events as "
+            "`llm-function-call-in-progress`.",
+            stacklevel=2,
+        )
+        fn = RTVI.LLMFunctionCallMessageData(
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+            args=params.arguments,
+        )
+        message = RTVI.LLMFunctionCallMessage(data=fn)
+        await self.push_transport_message(message, exclude_none=False)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames through the RTVI processor.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
+        await super().process_frame(frame, direction)
+
+        # Specific system frames
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, ErrorFrame):
+            await self._send_error_frame(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, InputTransportMessageFrame):
+            await self._handle_transport_message(frame)
+        # All other system frames
+        elif isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
+        # Control frames
+        elif isinstance(frame, EndFrame):
+            # Push EndFrame before stop(), because stop() waits on the task to
+            # finish and the task finishes when EndFrame is processed.
+            await self.push_frame(frame, direction)
+            await self._stop(frame)
+        # Data frames
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._llm_skip_tts = frame.skip_tts
+            await self.push_frame(frame, direction)
+        # Other frames
+        else:
+            await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        """Release resources held by the processor."""
+        await super().cleanup()
+        await self._cancel_tasks()
+
+    async def _start(self, frame: StartFrame):
+        """Start the RTVI processor tasks."""
+        if not self._message_task:
+            self._message_queue = asyncio.Queue()
+            self._message_task = self.create_task(self._message_task_handler())
+        await self._call_event_handler("on_bot_started")
+
+    async def _stop(self, frame: EndFrame):
+        """Stop the RTVI processor tasks."""
+        await self._cancel_tasks()
+
+    async def _cancel(self, frame: CancelFrame):
+        """Cancel the RTVI processor tasks."""
+        await self._cancel_tasks()
+
+    async def _cancel_tasks(self):
+        """Cancel all running tasks."""
+        if self._message_task:
+            await self.cancel_task(self._message_task)
+            self._message_task = None
+
+    async def _message_task_handler(self):
+        """Handle incoming transport messages."""
+        while True:
+            message, user_id = await self._message_queue.get()
+            await self._handle_message(message, user_id)
+            self._message_queue.task_done()
+
+    async def _handle_transport_message(self, frame: InputTransportMessageFrame):
+        """Handle an incoming transport message frame."""
+        try:
+            transport_message = frame.message
+            if (
+                not isinstance(transport_message, dict)
+                or transport_message.get("label") != RTVI.MESSAGE_LABEL
+            ):
+                logger.warning(f"Ignoring not RTVI message: {transport_message}")
+                return
+            message = RTVI.Message.model_validate(transport_message)
+            # Transports that know the sender, such as Daily and LiveKit, set it
+            # as ``participant_id`` on their subclass of the frame.
+            user_id = getattr(frame, "participant_id", None)
+            await self._message_queue.put((message, user_id))
+        except ValidationError as e:
+            await self.send_error(f"Invalid RTVI transport message: {e}")
+            logger.warning(f"Invalid RTVI transport message: {e}")
+
+    async def _handle_message(self, message: RTVI.Message, user_id: str | None = None):
+        """Handle a parsed RTVI message."""
+        try:
+            match message.type:
+                case "client-ready":
+                    data = None
+                    raw = message.data or {}
+                    version = raw.get("version")
+                    if isinstance(version, str):
+                        about = RTVI.AboutClientData(library="unknown")
+                        about_raw = raw.get("about")
+                        if about_raw is not None:
+                            try:
+                                about = RTVI.AboutClientData.model_validate(about_raw)
+                            except ValidationError:
+                                logger.warning(
+                                    "Invalid 'about' data in client-ready message, ignoring."
+                                )
+                        data = RTVI.ClientReadyData(version=version, about=about)
+                    await self._handle_client_ready(message.id, data)
+                case "disconnect-bot":
+                    await self.push_frame(EndWorkerFrame())
+                case "client-message":
+                    data = RTVI.RawClientMessageData.model_validate(message.data)
+                    await self._handle_client_message(message.id, data)
+                case "ui-event":
+                    event_data = RTVI.UIEventData.model_validate(message.data or {})
+                    await self.push_frame(
+                        RTVIUIEventFrame(
+                            msg_id=message.id,
+                            event=event_data.event,
+                            payload=event_data.payload,
+                        )
+                    )
+                    await self._call_event_handler(
+                        "on_ui_message",
+                        RTVI.UIEventMessage(id=message.id, data=event_data),
+                    )
+                case "ui-snapshot":
+                    snapshot_data = RTVI.UISnapshotData.model_validate(message.data or {})
+                    await self.push_frame(
+                        RTVIUISnapshotFrame(msg_id=message.id, tree=snapshot_data.tree)
+                    )
+                    await self._call_event_handler(
+                        "on_ui_message",
+                        RTVI.UISnapshotMessage(id=message.id, data=snapshot_data),
+                    )
+                case "ui-cancel-job-group":
+                    cancel_data = RTVI.UICancelJobGroupData.model_validate(message.data or {})
+                    await self.push_frame(
+                        RTVIUICancelJobGroupFrame(
+                            msg_id=message.id,
+                            job_id=cancel_data.job_id,
+                            reason=cancel_data.reason,
+                        )
+                    )
+                    await self._call_event_handler(
+                        "on_ui_message",
+                        RTVI.UICancelJobGroupMessage(id=message.id, data=cancel_data),
+                    )
+                case "llm-function-call-result":
+                    data = RTVI.LLMFunctionCallResultData.model_validate(message.data)
+                    await self._handle_function_call_result(data)
+                case "send-text":
+                    data = RTVI.SendTextData.model_validate(message.data)
+                    await self._handle_send_text(data, message.id, user_id)
+                case "send-file":
+                    data = RTVI.SendFileData.model_validate(message.data)
+                    await self._handle_send_file(data, message.id)
+                case "raw-audio" | "raw-audio-batch":
+                    await self._handle_audio_buffer(message.data)
+                case "dtmf":
+                    data = RTVI.DTMFInputData.model_validate(message.data)
+                    await self._handle_dtmf(data)
+
+                case _:
+                    logger.warning(f"Unsupported RTVI message type: {message.type}")
+                    await self._send_error_response(message.id, f"Unsupported type {message.type}")
+
+        except ValidationError as e:
+            await self._send_error_response(message.id, f"Invalid message: {e}")
+            logger.warning(f"Invalid message: {e}")
+        except Exception as e:
+            await self._send_error_response(message.id, f"Exception processing message: {e}")
+            logger.warning(f"Exception processing message: {e}")
+
+    async def _handle_client_ready(self, request_id: str, data: RTVI.ClientReadyData | None):
+        """Handle the client-ready message from the client."""
+        version = data.version if data else None
+        logger.debug(f"Received client-ready: version {version}")
+        version_error = None
+        if version:
+            try:
+                parts = [int(v) for v in version.split(".")]
+                if len(parts) != 3:
+                    raise ValueError
+                self._client_version = parts
+                server_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+                client_major = self._client_version[0]
+                if client_major == server_major:
+                    pass  # fully compatible
+                elif client_major == RTVI.LEGACY_SUPPORTED_MAJOR:
+                    # Any 1.x client is deprecated but still served with the v1 bot-output format.
+                    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs.
+                    # 1.x.x is deprecated but still served with the v1 bot-output format.
+                    # legacy_warning = (
+                    #     f"RTVI client version {version} is deprecated. "
+                    #     f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "
+                    #     "The bot-output event format has changed in 2.0.0."
+                    # )
+                    # logger.warning(legacy_warning)
+                    # await self._send_error_response(request_id, legacy_warning)
+                    # version_error intentionally left as None — connection proceeds.
+                    pass
+                else:
+                    version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
+            except ValueError:
+                version_error = f"Invalid client version format ({version})."
+        else:
+            version_error = "Client version unknown."
+        about = data.about if data else {"library": "unknown"}
+        if version_error:
+            version_error += " Compatibility issues may occur."
+            logger.warning(version_error)
+            await self._send_error_response(request_id, version_error)
+
+        logger.debug(f"Client Details: {about}")
+        # Ask the input transport to start streaming audio now that the client
+        # is ready.
+        await self.push_frame(InputTransportStartAudioStreamingFrame())
+
+        self._client_ready_id = request_id
+        await self.set_client_ready()
+
+    async def _handle_audio_buffer(self, data):
+        """Handle incoming audio buffer data.
+
+        The RTVIProcessor is prepended to the very top of the pipeline, so
+        pushing ``InputAudioRawFrame`` downstream reaches the input transport,
+        which feeds it through its VAD/processing path. Frame-based so we don't
+        hold a transport reference.
+        """
+        # Extract audio batch ensuring it's a list
+        audio_list = data.get("base64AudioBatch") or [data.get("base64Audio")]
+
+        try:
+            for base64_audio in filter(None, audio_list):  # Filter out None values
+                pcm_bytes = base64.b64decode(base64_audio)
+                frame = InputAudioRawFrame(
+                    audio=pcm_bytes,
+                    sample_rate=data["sampleRate"],
+                    num_channels=data["numChannels"],
+                )
+                await self.push_frame(frame)
+
+        except (KeyError, TypeError, ValueError) as e:
+            # Handle missing keys, decoding errors, and invalid types
+            logger.error(f"Error processing audio buffer: {e}")
+
+    async def _handle_dtmf(self, data: RTVI.DTMFInputData):
+        """Handle DTMF keypresses from the client.
+
+        Like ``_handle_audio_buffer``, the RTVIProcessor sits at the top of the
+        pipeline, so pushing ``InputDTMFFrame`` downstream reaches the input
+        transport and the bot's DTMF handling exactly as a telephony transport's
+        keypresses would. A multi-key sequence is pushed as one frame per key,
+        in order.
+        """
+        for button in data.buttons:
+            await self.push_frame(InputDTMFFrame(button=button))
+
+    async def _handle_send_text(
+        self, data: RTVI.SendTextData, message_id: str, user_id: str | None = None
+    ):
+        """Handle a send-text message from the client."""
+        opts = data.options if data.options is not None else RTVI.SendTextOptions()
+        if opts.run_immediately:
+            await self.interrupt_bot()
+            # Drain the pipeline before appending the new message. The
+            # interruption commits the in-progress assistant response into the
+            # context; flushing guarantees that lands *before* we append (and
+            # run) the new user message, so the context stays correctly ordered
+            # (otherwise the append can overtake the commit and the model
+            # continues the interrupted turn). This runs in the message task, so
+            # awaiting here doesn't block the frame loop that forwards the probe.
+            await self.pipeline_worker.flush_pipeline()
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        text_frame = LLMMessagesAppendFrame(
+            messages=[{"role": "user", "content": data.content}],
+            run_llm=opts.run_immediately,
+        )
+        await self.push_frame(text_frame)
+        await self.push_frame(
+            RTVISendTextFrame(msg_id=message_id, text=data.content, user_id=user_id)
+        )
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
+
+    async def _handle_send_file(self, data: RTVI.SendFileData, message_id: str):
+        """Handle a send-file message from the client.
+
+        Validation and framing only: a URL source is passed through unresolved,
+        and whether the LLM provider fetches it itself or the LLM service's
+        :class:`~pipecat.utils.file_resolver.FileResolver` downloads it is
+        decided at completion time.
+        """
+        file = data.file
+        opts = data.options if data.options is not None else RTVI.SendFileOptions()
+
+        logger.debug(f"Handling file from RTVI: format={file.format}, type={file.source.type}")
+
+        source: str
+        source_type: RTVI.RTVIFileSourceType
+        match file.source:
+            case RTVI.FileBytes() as fs:
+                # `bytes` is raw base64, but tolerate clients that send a full data URL.
+                if fs.bytes.startswith("data:"):
+                    source = fs.bytes
+                else:
+                    source = f"data:{file.format};base64,{fs.bytes}"
+                source_type = "bytes"
+            case RTVI.FileUrl() as fs:
+                source = fs.url
+                source_type = "url"
+            case _:
+                logger.warning(f"Unsupported file source type: {file.source.type}")
+                await self._send_error_response(
+                    message_id, f"Unsupported file source type: {file.source.type}"
+                )
+                return
+
+        if file.format.startswith("image/") and source_type == "bytes":
+            size = (
+                (file.source.width or 0, file.source.height or 0)
+                if isinstance(file.source, RTVI.FileBytes)
+                else (0, 0)
+            )
+            image_bytes = await asyncio.to_thread(base64.b64decode, source.split("base64,", 1)[1])
+            file_frame = UserImageRawFrame(
+                text=data.content,
+                image=image_bytes,
+                size=size,
+                format=file.format,
+                append_to_context=True,
+                run_llm=opts.run_immediately,
+            )
+        else:
+            file_frame = UserFileRawFrame(
+                text=data.content,
+                file=source,
+                type=source_type,
+                filename=file.name,
+                format=file.format,
+                custom_options=opts.custom_options,
+                append_to_context=True,
+                run_llm=opts.run_immediately,
+            )
+
+        if opts.run_immediately:
+            await self.interrupt_bot()
+
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        await self.push_frame(file_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
+
+    async def _handle_client_message(self, msg_id: str, data: RTVI.RawClientMessageData):
+        """Handle a client message frame."""
+        # Create a RTVIClientMessageFrame to push the message
+        frame = RTVIClientMessageFrame(msg_id=msg_id, type=data.t, data=data.d)
+        await self.push_frame(frame)
+        await self._call_event_handler(
+            "on_client_message",
+            RTVI.ClientMessage(
+                msg_id=msg_id,
+                type=data.t,
+                data=data.d,
+            ),
+        )
+
+    async def _handle_function_call_result(self, data):
+        """Handle a function call result from the client."""
+        frame = FunctionCallResultFrame(
+            function_name=data.function_name,
+            tool_call_id=data.tool_call_id,
+            arguments=data.arguments,
+            result=data.result,
+        )
+        await self.push_frame(frame)
+
+    async def _send_bot_ready(self, about: Mapping[str, Any] | None = None):
+        """Send the bot-ready message to the client.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the pipecat library and version will be used.
+        """
+        if not about:
+            about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
+        # Negotiate the protocol version we advertise back to the client.
+        # The server observer serves v1-formatted bot-output events to
+        # 1.x clients (see `_is_legacy_client`), so advertising the
+        # server's own 2.0.0 PROTOCOL_VERSION here would push the client's
+        # aggregator onto its v2 path (server-side speech progress) while
+        # the wire actually carries v1 events, and the two would collide.
+        # For legacy clients, echo their declared version back.
+        if self._client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR:
+            version = ".".join(str(v) for v in self._client_version)
+        else:
+            version = RTVI.PROTOCOL_VERSION
+        message = RTVI.BotReady(
+            id=self._client_ready_id,
+            data=RTVI.BotReadyData(
+                version=version,
+                about=about,
+                capabilities=self.pipeline_worker.capabilities,
+            ),
+        )
+        await self.push_transport_message(message)
+
+    async def _send_server_message(self, message: RTVI.ServerMessage | RTVI.ServerResponse):
+        """Send a message or response to the client."""
+        await self.push_transport_message(message)
+
+    async def _send_error_frame(self, frame: ErrorFrame):
+        """Send an error frame as an RTVI error message."""
+        message = RTVI.Error(data=RTVI.ErrorData(error=frame.error, fatal=frame.fatal))
+        await self.push_transport_message(message)
+
+    async def _send_error_response(self, id: str, error: str):
+        """Send an error response message."""
+        message = RTVI.ErrorResponse(id=id, data=RTVI.ErrorResponseData(error=error))
+        await self.push_transport_message(message)

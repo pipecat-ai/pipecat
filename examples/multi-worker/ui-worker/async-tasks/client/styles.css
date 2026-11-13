@@ -1,0 +1,245 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, sans-serif;
+  --border: #d4d4d8;
+  --muted: #71717a;
+  --accent: #3b82f6;
+  --success: #16a34a;
+  --error: #dc2626;
+  --cancelled: #71717a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+  color: #18181b;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+
+header h1 {
+  font-size: 1.125rem;
+  margin: 0;
+}
+
+#connect {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+#connect:hover {
+  background: #f4f4f5;
+}
+
+#connect[data-state="connected"] {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+.hint {
+  margin: 0 0 1.5rem;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 0.875rem 1rem;
+  border-left: 3px solid var(--border);
+  background: #fff;
+}
+
+main h2 {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 1.5rem 0 0.75rem;
+}
+
+.empty-state {
+  font-size: 0.875rem;
+  color: var(--muted);
+  font-style: italic;
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.empty-state[hidden] {
+  display: none;
+}
+
+.task-group {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.task-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.task-group-label {
+  font-weight: 500;
+  font-size: 0.9375rem;
+}
+
+.cancel-btn {
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.cancel-btn:hover {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.cancel-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.workers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.workers li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.worker-name {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  min-width: 6.5rem;
+  color: #52525b;
+}
+
+.worker-update {
+  color: #3f3f46;
+  flex: 1;
+  font-style: italic;
+}
+
+.worker-status {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.worker-status[data-status="running"] {
+  color: var(--accent);
+}
+
+.worker-status[data-status="completed"] {
+  color: var(--success);
+}
+
+.worker-status[data-status="cancelled"] {
+  color: var(--cancelled);
+}
+
+.worker-status[data-status="failed"],
+.worker-status[data-status="error"] {
+  color: var(--error);
+}
+
+.result-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.result-card-label {
+  font-weight: 500;
+  font-size: 0.9375rem;
+  margin-bottom: 0.375rem;
+}
+
+.result-card-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.625rem;
+}
+
+.result-card-section {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-bottom: 0.5rem;
+}
+
+.result-card-section:last-child {
+  margin-bottom: 0;
+}
+
+.result-card-section .source {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #52525b;
+}
+
+#status {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #18181b;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+#status[data-show="1"] {
+  opacity: 1;
+}

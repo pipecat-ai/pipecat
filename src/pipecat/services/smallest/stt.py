@@ -1,0 +1,519 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Smallest AI speech-to-text service implementation.
+
+This module provides a STT service using Smallest AI's Waves API:
+
+- ``SmallestSTTService``: WebSocket-based real-time STT. Streams audio
+  continuously and receives interim/final transcripts with low latency.
+"""
+
+import json
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any, ClassVar
+from urllib.parse import urlencode
+
+from loguru import logger
+from websockets.protocol import State
+
+from pipecat import version as pipecat_version
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import SMALLEST_TTFS_P99
+from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+
+
+def language_to_smallest_stt_language(language: Language) -> str:
+    """Convert a Language enum to Smallest STT language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The Smallest language code string.
+    """
+    LANGUAGE_MAP = {
+        Language.BG: "bg",
+        Language.BN: "bn",
+        Language.CS: "cs",
+        Language.DA: "da",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.ET: "et",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.GU: "gu",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.KN: "kn",
+        Language.LT: "lt",
+        Language.LV: "lv",
+        Language.ML: "ml",
+        Language.MR: "mr",
+        Language.MT: "mt",
+        Language.NL: "nl",
+        Language.OR: "or",
+        Language.PA: "pa",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.RO: "ro",
+        Language.RU: "ru",
+        Language.SK: "sk",
+        Language.SV: "sv",
+        Language.TA: "ta",
+        Language.TE: "te",
+        Language.UK: "uk",
+    }
+
+    return resolve_language(language, LANGUAGE_MAP)
+
+
+class SmallestSTTModel(StrEnum):
+    """Available Smallest AI STT models."""
+
+    PULSE = "pulse"
+    PULSE_2 = "pulse-2"
+
+
+def _validate_pulse_2_language(
+    model: str | NotGiven | None, language: Language | str | NotGiven | None
+) -> None:
+    """Raise if ``language`` isn't English and ``model`` is the English-only ``pulse-2``.
+
+    The server rejects this combination by closing the socket, so raise up front
+    with a clear message instead.
+    """
+    if (
+        model == SmallestSTTModel.PULSE_2
+        and language
+        and str(language).split("-")[0].lower() != "en"
+    ):
+        raise ValueError(f"model 'pulse-2' is English-only, got language '{language}'")
+
+
+@dataclass
+class SmallestSTTSettings(STTSettings):
+    """Settings for SmallestSTTService.
+
+    Parameters:
+        word_timestamps: Include word-level timestamps.
+        full_transcript: Include cumulative transcript.
+        sentence_timestamps: Include sentence-level timestamps.
+        redact_pii: Redact personally identifiable information.
+        redact_pci: Redact payment card information.
+        numerals: Convert spoken numerals to digits.
+        diarize: Enable speaker diarization. Each contiguous speaker run of a
+            final transcript is emitted as its own frame with Smallest's speaker
+            number as ``speaker.label``. Requests word timestamps, which carry the
+            speakers. Interim transcripts are not labelled.
+        endpointing: Finalize promptly on trailing silence.
+        eou_timeout_ms: Trailing-silence duration, in milliseconds, before
+            Pulse finalizes the transcript on its own. Ranges 100-10000;
+            defaults to 600 when ``endpointing`` is ``True`` and 800 when
+            ``False``. Governs mid-utterance segmentation (e.g. a natural
+            pause) since the VAD-triggered ``finalize`` this service sends on
+            ``VADUserStoppedSpeakingFrame`` already finalizes the turn's last
+            segment immediately, ahead of this timer. No effect on
+            ``model="pulse-2"``, which uses its own built-in end-of-turn
+            detection.
+        keywords: Comma-separated ``KEYWORD:INTENSIFIER`` pairs to boost
+            recognition of domain-specific words/phrases (e.g. ``"NVIDIA:2"``).
+        format: Apply punctuation and capitalization to transcripts.
+        emotion_detection: ``model="pulse-2"`` only. Adds a six-class
+            per-utterance ``emotion`` object to every final transcript. No
+            effect on ``model="pulse"``.
+        gender_detection: ``model="pulse-2"`` only. Adds an acoustic
+            per-utterance ``gender`` estimate to every final transcript. No
+            effect on ``model="pulse"``.
+        itn_normalize: Run inverse text normalization so spoken numbers come
+            back as digits (e.g. "twenty five" -> "25").
+        no_format_delay: With ``itn_normalize`` on, a number still being
+            dictated at the end of a final is held back and merged into the
+            next final so it normalizes whole. Set to ``True`` to emit every
+            final as soon as it is ready instead. No effect unless
+            ``itn_normalize`` is ``True``; text is never dropped either way.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
+    """
+
+    word_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    full_transcript: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sentence_timestamps: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pii: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_pci: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    eou_timeout_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    gender_detection: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    itn_normalize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_format_delay: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
+
+
+class SmallestSTTService(WebsocketSTTService):
+    """Smallest AI real-time speech-to-text service using the Pulse WebSocket API.
+
+    Streams audio continuously over a WebSocket connection and receives
+    interim and final transcription results with low latency. Best suited
+    for real-time voice applications where immediate feedback is needed.
+
+    Uses Pipecat's VAD to detect when the user stops speaking and sends
+    a ``finalize`` message to flush the final transcript while keeping the
+    session alive for the next utterance.
+
+    Connects to ``wss://api.smallest.ai/waves/v1/stt/live?model=pulse``. Set
+    ``model=SmallestSTTModel.PULSE_2`` in the settings for Pulse 2.0, an
+    English-only model that adds per-utterance ``emotion`` and ``gender`` to
+    final transcripts (see ``emotion_detection``/``gender_detection``, on by
+    default). Both appear in the ``TranscriptionFrame`` ``result`` and are
+    omitted for very short utterances. Pulse 2.0 also has built-in end-of-turn detection,
+    but Pipecat's VAD and user turn strategies still decide when the user's
+    turn ends, and the VAD-triggered ``finalize`` flushes the final transcript
+    as with Pulse. ``endpointing`` has no effect on this model.
+
+    Example::
+
+        stt = SmallestSTTService(
+            api_key="your-api-key",
+            settings=SmallestSTTService.Settings(
+                language=Language.EN,
+                word_timestamps=True,
+            ),
+        )
+    """
+
+    Settings = SmallestSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "wss://api.smallest.ai",
+        encoding: str = "linear16",
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SMALLEST_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the Smallest AI STT service.
+
+        Args:
+            api_key: Smallest AI API key for authentication.
+            base_url: Base WebSocket URL for the Smallest API.
+            encoding: Audio encoding format. Defaults to "linear16".
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline's rate.
+            settings: Runtime-updatable settings for the STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+            **kwargs: Additional arguments passed to WebsocketSTTService.
+        """
+        default_settings = self.Settings(
+            model=SmallestSTTModel.PULSE.value,
+            language=Language.EN,
+            word_timestamps=False,
+            full_transcript=False,
+            sentence_timestamps=False,
+            redact_pii=False,
+            redact_pci=False,
+            numerals="auto",
+            diarize=False,
+            endpointing=True,
+            eou_timeout_ms=None,
+            keywords="",
+            format=True,
+            emotion_detection=True,
+            gender_detection=True,
+            itn_normalize=False,
+            no_format_delay=False,
+            speaker_format=None,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        _validate_pulse_2_language(default_settings.model, default_settings.language)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=10,
+            keepalive_interval=5,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._encoding = encoding
+        self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics."""
+        return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to Smallest service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Smallest-specific language code, or None if not supported.
+        """
+        return language_to_smallest_stt_language(language)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and disconnect from the WebSocket."""
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and disconnect from the WebSocket."""
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, handling VAD events for finalization."""
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            if self._websocket and self._websocket.state is State.OPEN:
+                try:
+                    await self._websocket.send(json.dumps({"type": "finalize"}))
+                except Exception as e:
+                    logger.warning(f"{self} failed to send finalize: {e}")
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Send audio to the Smallest Pulse WebSocket for transcription.
+
+        Args:
+            audio: Raw PCM audio bytes.
+
+        Yields:
+            None -- transcription results arrive via WebSocket messages.
+        """
+        # The receive loop reconnects a dropped socket; audio arriving
+        # meanwhile is dropped.
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                await self._websocket.send(audio)
+            except Exception as e:
+                yield ErrorFrame(error=f"Smallest STT error: {e}")
+                return
+
+        yield None
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if anything changed."""
+        prospective_model = delta.model if is_given(delta.model) else self._settings.model
+        prospective_language = (
+            delta.language if is_given(delta.language) else self._settings.language
+        )
+        _validate_pulse_2_language(prospective_model, prospective_language)
+
+        changed = await super()._update_settings(delta)
+
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
+    async def _connect(self):
+        await self._connect_websocket()
+        await super()._connect()
+
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+    async def _disconnect(self):
+        await super()._disconnect()
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Establish WebSocket connection to the Smallest Pulse STT API."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            logger.debug("Connecting to Smallest STT")
+
+            query_params = {
+                "model": self._settings.model,
+                "language": self._settings.language,
+                "encoding": self._encoding,
+                "sample_rate": str(self.sample_rate),
+                # Speakers are reported on the words, so diarization needs them.
+                "word_timestamps": str(
+                    bool(self._settings.word_timestamps or self._settings.diarize)
+                ).lower(),
+                "full_transcript": str(self._settings.full_transcript).lower(),
+                "sentence_timestamps": str(self._settings.sentence_timestamps).lower(),
+                "redact_pii": str(self._settings.redact_pii).lower(),
+                "redact_pci": str(self._settings.redact_pci).lower(),
+                "numerals": self._settings.numerals,
+                "diarize": str(self._settings.diarize).lower(),
+                "endpointing": str(self._settings.endpointing).lower(),
+                "format": str(self._settings.format).lower(),
+                "emotion_detection": str(self._settings.emotion_detection).lower(),
+                "gender_detection": str(self._settings.gender_detection).lower(),
+                "itn_normalize": str(self._settings.itn_normalize).lower(),
+                "no_format_delay": str(self._settings.no_format_delay).lower(),
+            }
+
+            # An empty `keywords` value would register a single empty keyword,
+            # so omit the parameter entirely when no keywords are configured.
+            if self._settings.keywords:
+                query_params["keywords"] = self._settings.keywords
+
+            # Omitted unless set, so the server's endpointing-dependent default
+            # (600ms/800ms) applies.
+            if self._settings.eou_timeout_ms is not None:
+                query_params["eou_timeout_ms"] = str(self._settings.eou_timeout_ms)
+
+            ws_url = f"{self._base_url}/waves/v1/stt/live?{urlencode(query_params)}"
+
+            self._websocket = await self._websocket_connect(
+                ws_url,
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "X-Source": "pipecat",
+                    "X-Pipecat-Version": pipecat_version(),
+                },
+            )
+            await self._call_event_handler("on_connected")
+            logger.debug("Connected to Smallest STT")
+        except Exception as e:
+            await self.push_error(error_msg=f"Smallest STT connection error: {e}", exception=e)
+            self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
+
+    async def _disconnect_websocket(self):
+        """Close the WebSocket connection."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                logger.debug("Disconnecting from Smallest STT")
+                await self._websocket.close()
+        except Exception as e:
+            logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
+
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _receive_messages(self):
+        """Receive and process messages from the Smallest Pulse WebSocket."""
+        async for message in self._get_websocket():
+            try:
+                data = json.loads(message)
+                await self._process_response(data)
+            except json.JSONDecodeError:
+                logger.warning(f"{self} received non-JSON message: {message}")
+            except Exception as e:
+                logger.error(f"{self} error processing message: {e}")
+
+    async def _process_response(self, data: dict):
+        """Process a transcription response from the Pulse API.
+
+        Args:
+            data: Parsed JSON response containing transcript data.
+
+        The response contains:
+            - ``transcript``: The recognized text.
+            - ``is_final``: Whether this is a final (vs. interim) result.
+            - ``is_last``: Whether this is the last message of the session.
+              Only ``True`` after ``close_stream`` is sent at call end.
+            - ``language``: The detected or specified language.
+            - ``session_id``: Unique identifier for the WebSocket session.
+        """
+        is_final = data.get("is_final", False)
+        is_last = data.get("is_last", False)
+        text = data.get("transcript", "").strip()
+
+        if is_last:
+            logger.debug(f"{self} received is_last; server will close session")
+
+        if not text:
+            return
+
+        if is_final:
+            logger.debug(f"Smallest final transcript: [{text}]")
+            await self._handle_transcription(text, True, data.get("language"))
+            words = None
+            if self._settings.diarize:
+                words = [
+                    (word.get("word", ""), word.get("speaker")) for word in data.get("words") or []
+                ]
+            runs = self._diarized_runs(text, words)
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
+            await self._push_transcription_runs(runs, language=data.get("language"), result=data)
+        else:
+            logger.trace(f"Smallest interim transcript: [{text}]")
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    data.get("language"),
+                    result=data,
+                )
+            )
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: str | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,9 +12,14 @@ and interruption handling.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
+# Not marked with @deprecated: the decorator warns when a class is subclassed
+# as well as when it is instantiated, so a filter defined at module level would
+# warn at import time. Using a filter warns instead, when it is passed to a TTS
+# service through `text_filters`.
 class BaseTextFilter(ABC):
     """Abstract base class for text filters in the Pipecat framework.
 
@@ -24,9 +29,15 @@ class BaseTextFilter(ABC):
 
     Subclasses must implement all abstract methods to define specific filtering
     behavior, settings management, and interruption handling logic.
+
+    .. deprecated:: 1.14.0
+        Use a :data:`~pipecat.utils.text.transforms.TextTransform` instead: an async
+        ``(text, text_type) -> text`` callable registered with ``text_transforms`` on
+        a TTS service to rewrite what is spoken, or on
+        :class:`~pipecat.processors.aggregators.llm_text_processor.LLMTextProcessor`
+        to rewrite what everything downstream sees. Will be removed in 2.0.0.
     """
 
-    @abstractmethod
     async def update_settings(self, settings: Mapping[str, Any]):
         """Update the filter's configuration settings.
 
@@ -53,7 +64,6 @@ class BaseTextFilter(ABC):
         """
         pass
 
-    @abstractmethod
     async def handle_interruption(self):
         """Handle interruption events in the processing pipeline.
 
@@ -62,7 +72,6 @@ class BaseTextFilter(ABC):
         """
         pass
 
-    @abstractmethod
     async def reset_interruption(self):
         """Reset the filter state after an interruption has been handled.
 

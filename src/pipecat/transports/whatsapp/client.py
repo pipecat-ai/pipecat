@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,8 @@ WhatsApp call events.
 import asyncio
 import hashlib
 import hmac
-from typing import Awaitable, Callable, Dict, List, Optional
+import inspect
+from collections.abc import Awaitable, Callable
 
 import aiohttp
 from loguru import logger
@@ -28,6 +29,7 @@ from pipecat.transports.whatsapp.api import (
     WhatsAppTerminateCallValue,
     WhatsAppWebhookRequest,
 )
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class WhatsAppClient:
@@ -37,7 +39,7 @@ class WhatsAppClient:
     events from WhatsApp, and maintains ongoing call state. It supports both
     incoming call handling and call termination through the WhatsApp Cloud API.
 
-    Attributes:
+    Parameters:
         _whatsapp_api: WhatsApp API instance for making API calls
         _ongoing_calls_map: Dictionary mapping call IDs to WebRTC connections
         _ice_servers: List of ICE servers for WebRTC connections
@@ -48,8 +50,8 @@ class WhatsAppClient:
         whatsapp_token: str,
         phone_number_id: str,
         session: aiohttp.ClientSession,
-        ice_servers: Optional[List[IceServer]] = None,
-        whatsapp_secret: Optional[str] = None,
+        ice_servers: list[IceServer] | None = None,
+        whatsapp_secret: str | None = None,
     ) -> None:
         """Initialize the WhatsApp client.
 
@@ -65,7 +67,7 @@ class WhatsAppClient:
             whatsapp_token=whatsapp_token, phone_number_id=phone_number_id, session=session
         )
         self._whatsapp_secret = whatsapp_secret
-        self._ongoing_calls_map: Dict[str, SmallWebRTCConnection] = {}
+        self._ongoing_calls_map: dict[str, SmallWebRTCConnection] = {}
 
         # Set default ICE servers if none provided
         if ice_servers is None:
@@ -73,11 +75,11 @@ class WhatsAppClient:
         else:
             self._ice_servers = ice_servers
 
-    def update_ice_servers(self, ice_servers: Optional[List[IceServer]] = None):
+    def update_ice_servers(self, ice_servers: list[IceServer] | None = None):
         """Update the list of ICE servers used for WebRTC connections."""
         self._ice_servers = ice_servers
 
-    def update_whatsapp_secret(self, whatsapp_secret: Optional[str] = None):
+    def update_whatsapp_secret(self, whatsapp_secret: str | None = None):
         """Update the WhatsApp APP secret for validating that the webhook request came from WhatsApp."""
         self._whatsapp_secret = whatsapp_secret
 
@@ -125,7 +127,7 @@ class WhatsAppClient:
         logger.debug("All calls terminated successfully")
 
     async def handle_verify_webhook_request(
-        self, params: Dict[str, str], expected_verification_token: str
+        self, params: dict[str, str], expected_verification_token: str
     ) -> int:
         """Handle a verify webhook request from WhatsApp.
 
@@ -154,8 +156,17 @@ class WhatsAppClient:
 
         return int(challenge)
 
-    async def _validate_whatsapp_webhook_request(self, raw_body: bytes, sha256_signature: str):
+    async def _validate_whatsapp_webhook_request(
+        self, raw_body: bytes | None, sha256_signature: str | None
+    ):
         """Common handler for both /start and /connect endpoints."""
+        # Callers gate on `self._whatsapp_secret`, so the assert holds.
+        assert self._whatsapp_secret is not None
+        if raw_body is None:
+            raise Exception("Missing raw request body")
+        if not sha256_signature:
+            raise Exception("Missing X-Hub-Signature-256 header")
+
         # Compute HMAC SHA256 using your App Secret
         expected_signature = hmac.new(
             key=self._whatsapp_secret.encode("utf-8"),
@@ -164,22 +175,20 @@ class WhatsAppClient:
         ).hexdigest()
 
         # Extract signature from header (strip 'sha256=' prefix)
-        if not sha256_signature:
-            raise Exception("Missing X-Hub-Signature-256 header")
         received_signature = sha256_signature.split("sha256=")[-1]
 
         # Compare signatures securely
         if not hmac.compare_digest(expected_signature, received_signature):
             raise Exception("Invalid webhook signature")
 
-        logger.debug(f"Webhook signature verified!")
+        logger.debug("Webhook signature verified!")
 
     async def handle_webhook_request(
         self,
         request: WhatsAppWebhookRequest,
-        connection_callback: Optional[Callable[[SmallWebRTCConnection], Awaitable[None]]] = None,
-        raw_body: Optional[bytes] = None,
-        sha256_signature: Optional[str] = None,
+        connection_callback: Callable[..., Awaitable[None]] | None = None,
+        raw_body: bytes | None = None,
+        sha256_signature: str | None = None,
     ) -> bool:
         """Handle a webhook request from WhatsApp.
 
@@ -190,9 +199,19 @@ class WhatsAppClient:
 
         Args:
             request: The webhook request from WhatsApp containing call events
-            connection_callback: Optional callback function to invoke when a new
-                               WebRTC connection is established. The callback
-                               receives the SmallWebRTCConnection instance.
+            connection_callback: Optional callback invoked when a new WebRTC
+                               connection is established. Accepts two signatures:
+                               ``(connection, call)`` — preferred, receives the
+                               SmallWebRTCConnection and the WhatsAppConnectCall
+                               with caller metadata; or the legacy
+                               ``(connection,)`` signature.
+
+                               .. deprecated:: 1.4.0
+                                   The single-argument ``(connection,)`` signature is
+                                   deprecated. Use ``(connection, call: WhatsAppConnectCall)``
+                                   instead.
+                                   Will be removed in 2.0.0.
+
             raw_body: Optional bytes containing the raw request body.
             sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 
@@ -219,7 +238,24 @@ class WhatsAppClient:
                                     # Invoke callback if provided
                                     if connection_callback and connection:
                                         try:
-                                            await connection_callback(connection)
+                                            if (
+                                                len(
+                                                    inspect.signature(
+                                                        connection_callback
+                                                    ).parameters
+                                                )
+                                                >= 2
+                                            ):
+                                                await connection_callback(connection, call)
+                                            else:
+                                                warn_deprecated(
+                                                    "`connection_callback(connection)` is deprecated since 1.4.0 "
+                                                    "and will be removed in 2.0.0. Use "
+                                                    "`connection_callback(connection, call: WhatsAppConnectCall)` "
+                                                    "instead.",
+                                                    stacklevel=2,
+                                                )
+                                                await connection_callback(connection)
                                             logger.debug(
                                                 f"Connection callback executed successfully for call {call.id}"
                                             )
@@ -306,7 +342,12 @@ class WhatsAppClient:
             # Create and initialize WebRTC connection
             pipecat_connection = SmallWebRTCConnection(self._ice_servers)
             await pipecat_connection.initialize(sdp=call.session.sdp, type=call.session.sdp_type)
-            sdp_answer = pipecat_connection.get_answer().get("sdp")
+            answer = pipecat_connection.get_answer()
+            if answer is None:
+                raise RuntimeError("SmallWebRTC connection produced no SDP answer")
+            sdp_answer = answer.get("sdp")
+            if sdp_answer is None:
+                raise RuntimeError("SmallWebRTC SDP answer missing 'sdp' field")
             sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
 
             logger.debug(f"SDP answer generated for call {call.id}")

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,14 +11,20 @@ while preserving structure and handling special cases like code blocks and table
 """
 
 import re
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from markdown import Markdown
 from pydantic import BaseModel
 
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 
 
+@deprecated(
+    "`MarkdownTextFilter` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "Use `strip_markdown` instead."
+)
 class MarkdownTextFilter(BaseTextFilter):
     """Text filter that removes Markdown formatting from text content.
 
@@ -26,6 +32,14 @@ class MarkdownTextFilter(BaseTextFilter):
     including leading and trailing spaces. Handles special cases like
     asterisks and table formatting. Supports selective filtering of code
     blocks and tables based on configuration.
+
+    .. deprecated:: 1.14.0
+        Use :data:`~pipecat.utils.text.transforms.strip_markdown` instead, registered
+        with ``text_transforms``. In place of ``filter_code`` and ``filter_tables``,
+        give the block its own text type with
+        :class:`~pipecat.utils.text.pattern_pair_aggregator.PatternPairAggregator` and
+        list that type in the TTS service's ``skip_text_types``, which keeps the block
+        in the context and out of the audio. Will be removed in 2.0.0.
     """
 
     class InputParams(BaseModel):
@@ -35,13 +49,15 @@ class MarkdownTextFilter(BaseTextFilter):
             enable_text_filter: Whether to apply Markdown filtering. Defaults to True.
             filter_code: Whether to remove code blocks from the text. Defaults to False.
             filter_tables: Whether to remove table content from the text. Defaults to False.
+            filter_repeated_sequences: Whether to remove repeated sequences from the text. Defaults to True.
         """
 
-        enable_text_filter: Optional[bool] = True
-        filter_code: Optional[bool] = False
-        filter_tables: Optional[bool] = False
+        enable_text_filter: bool | None = True
+        filter_code: bool | None = False
+        filter_tables: bool | None = False
+        filter_repeated_sequences: bool | None = True
 
-    def __init__(self, params: Optional[InputParams] = None, **kwargs):
+    def __init__(self, params: InputParams | None = None, **kwargs):
         """Initialize the Markdown text filter.
 
         Args:
@@ -49,7 +65,7 @@ class MarkdownTextFilter(BaseTextFilter):
             **kwargs: Additional keyword arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._settings = params or MarkdownTextFilter.InputParams()
+        self._settings = params or self.InputParams()
         self._in_code_block = False
         self._in_table = False
         self._interrupted = False
@@ -74,14 +90,33 @@ class MarkdownTextFilter(BaseTextFilter):
             The filtered text with Markdown formatting removed or converted.
         """
         if self._settings.enable_text_filter:
+            # Strip markdown headers to plain text before the newline collapse
+            # below. md.convert can't recognize a header once the collapse
+            # injects a leading space, so we normalize headers ourselves.
+            # First, drop blank lines before a header (keeping the marker) so
+            # the collapse doesn't turn them into a leading space.
+            filtered_text = re.sub(r"\n\s*\n(#{1,6}[ \t])", r"\n\1", text)
+            # Then strip the leading marker and any "closed" trailing marker
+            # (e.g. ## Title ##), leaving just the header text. The trailing
+            # marker's surrounding spaces are absorbed only when the marker is
+            # present, so genuine trailing whitespace (needed for word-by-word
+            # streaming) is preserved on open headers.
+            filtered_text = re.sub(
+                r"^#{1,6}[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$",
+                r"\1",
+                filtered_text,
+                flags=re.MULTILINE,
+            )
+
             # Remove newlines and replace with a space only when there's no text before or after
-            filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
+            filtered_text = re.sub(r"^\s*\n", " ", filtered_text, flags=re.MULTILINE)
 
             # Remove backticks from inline code, but not from code blocks
             filtered_text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", filtered_text)
 
             # Remove repeated sequences of 5 or more characters
-            filtered_text = re.sub(r"(\S)(\1{4,})", "", filtered_text)
+            if self._settings.filter_repeated_sequences:
+                filtered_text = re.sub(r"(\S)(\1{4,})", "", filtered_text)
 
             # Preserve numbered list items with a unique marker, §NUM§
             filtered_text = re.sub(r"^(\d+\.)\s", r"§NUM§\1 ", filtered_text)

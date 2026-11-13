@@ -1,0 +1,178 @@
+# The user asks for time. The model must answer with ○ and nothing else.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: time_request
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: time_hold_on
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: Hmm, hold on a second.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_hold_on_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: hmm hold on a second
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_let_me_think
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: Let me think about that for a moment.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_let_me_think_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: let me think about that for a moment
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_give_me_minute
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What would you say is your biggest strength?
+  turns:
+  - user: Give me a minute to gather my thoughts.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_give_me_minute_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What would you say is your biggest strength?
+  turns:
+  - user: give me a minute to gather my thoughts
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_checking_calendar
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What day works for your appointment?
+  turns:
+  - user: One sec, let me check my calendar.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_checking_calendar_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What day works for your appointment?
+  turns:
+  - user: one sec let me check my calendar
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_dont_answer_yet
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Wait, don't answer yet, I'm still deciding.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_dont_answer_yet_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: wait don't answer yet i'm still deciding
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_looking_it_up
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's your account number?
+  turns:
+  - user: Hang on, I have to look it up.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: time_looking_it_up_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's your account number?
+  turns:
+  - user: hang on i have to look it up
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false

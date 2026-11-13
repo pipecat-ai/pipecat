@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,22 +12,15 @@ runtime configuration changes.
 """
 
 import asyncio
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
+import soundfile as sf
 from loguru import logger
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.frames.frames import MixerControlFrame, MixerEnableFrame, MixerUpdateSettingsFrame
-
-try:
-    import soundfile as sf
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use the soundfile mixer, you need to `pip install pipecat-ai[soundfile]`."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 class SoundfileMixer(BaseAudioMixer):
@@ -70,7 +63,7 @@ class SoundfileMixer(BaseAudioMixer):
         self._sample_rate = 0
 
         self._sound_pos = 0
-        self._sounds: Dict[str, Any] = {}
+        self._sounds: dict[str, Any] = {}
         self._current_sound = default_sound
         self._mixing = mixing
         self._loop = loop

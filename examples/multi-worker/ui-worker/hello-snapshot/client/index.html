@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hello UIAgent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Local News Today</h1>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <main>
+      <section aria-label="Top stories">
+        <h2>Top stories</h2>
+
+        <article id="story-mediterranean" class="card">
+          <h3>Mediterranean diet linked to longer cognitive lifespan</h3>
+          <p>
+            A 12-year study following 50,000 adults across Italy and Spain
+            found that strict adherence to the Mediterranean diet
+            correlated with a 28% lower incidence of age-related cognitive
+            decline. Researchers attribute the effect to anti-inflammatory
+            compounds in olive oil and oily fish.
+          </p>
+        </article>
+
+        <article id="story-atacama" class="card">
+          <h3>Atacama solar field crosses 5 GW capacity</h3>
+          <p>
+            Chile's flagship desert solar project added another 600 MW of
+            generation this quarter, pushing total capacity past five
+            gigawatts. The expansion, completed three months ahead of
+            schedule, makes Atacama the largest solar generation site in
+            South America.
+          </p>
+        </article>
+
+        <article id="story-mars" class="card">
+          <h3>Mars sample return mission re-scoped to 2031</h3>
+          <p>
+            NASA and ESA jointly announced a revised timeline for the Mars
+            Sample Return mission, citing budget pressure and the need to
+            consolidate launch logistics. The first samples are now
+            expected back on Earth in late 2031, a two-year delay.
+          </p>
+        </article>
+      </section>
+
+      <aside aria-label="Trending tags">
+        <h2>Trending</h2>
+        <ul>
+          <li>climate</li>
+          <li>health</li>
+          <li>space</li>
+          <li>energy</li>
+          <li>longevity</li>
+        </ul>
+      </aside>
+    </main>
+
+    <div id="status" aria-live="polite"></div>
+
+    <!-- Bot audio sink. main.js attaches the bot's audio track to
+         this element on RTVIEvent.TrackStarted. Hidden via
+         data-a11y-exclude so it doesn't show up in the snapshot. -->
+    <audio id="bot-audio" autoplay data-a11y-exclude></audio>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

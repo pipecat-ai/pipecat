@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,9 +7,8 @@
 """Gated LLM context aggregator for controlled message flow."""
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, LLMContextFrame, StartFrame
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.base_notifier import BaseNotifier
 
 
 class GatedLLMContextAggregator(FrameProcessor):
@@ -49,7 +48,7 @@ class GatedLLMContextAggregator(FrameProcessor):
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
             await self.push_frame(frame)
-        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        elif isinstance(frame, LLMContextFrame):
             if self._start_open:
                 self._start_open = False
                 await self.push_frame(frame, direction)
@@ -57,6 +56,11 @@ class GatedLLMContextAggregator(FrameProcessor):
                 self._last_context_frame = frame
         else:
             await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        """Release resources held by the aggregator."""
+        await super().cleanup()
+        await self._stop()
 
     async def _start(self):
         """Start the gate task handler."""

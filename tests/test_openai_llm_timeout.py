@@ -1,0 +1,672 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Unit tests for OpenAI LLM error handling."""
+
+from unittest.mock import AsyncMock, patch
+
+import openai
+import pytest
+
+from pipecat.frames.frames import (
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.http import TIMEOUT_EXCEPTIONS
+from tests.openai_http_helpers import http
+
+
+def _openai_status_error(status_code: int):
+    """Build a real OpenAI API status error of the given HTTP status."""
+    import httpx
+    from openai import APIStatusError, BadRequestError, RateLimitError, UnprocessableEntityError
+
+    classes = {400: BadRequestError, 422: UnprocessableEntityError, 429: RateLimitError}
+    response = httpx.Response(
+        status_code,
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    cls = classes.get(status_code, APIStatusError)
+    return cls("simulated api error", response=response, body={"error": {}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_exception", TIMEOUT_EXCEPTIONS, ids=lambda e: e.__module__)
+async def test_openai_llm_emits_error_frame_on_timeout(timeout_exception):
+    """Test that OpenAI LLM service emits ErrorFrame when a timeout occurs.
+
+    This enables LLMSwitcher to trigger failover to backup LLMs when the
+    primary LLM times out. Runs against every installed HTTP client family,
+    since a timeout mid-stream surfaces as that family's own exception.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        # Track pushed frames and errors
+        pushed_frames = []
+        pushed_errors = []
+        timeout_handler_called = False
+
+        original_push_frame = service.push_frame
+
+        async def mock_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+            await original_push_frame(frame, direction)
+
+        async def mock_push_error(error_msg, exception=None, **kwargs):
+            pushed_errors.append({"error_msg": error_msg, "exception": exception})
+
+        async def mock_timeout_handler(event_name, *args):
+            nonlocal timeout_handler_called
+            if event_name == "on_completion_timeout":
+                timeout_handler_called = True
+
+        service.push_frame = mock_push_frame
+        service.push_error = mock_push_error
+        service._call_event_handler = AsyncMock(side_effect=mock_timeout_handler)
+
+        # Mock _process_context to raise TimeoutException
+        service._process_context = AsyncMock(side_effect=timeout_exception("Connection timed out"))
+
+        # Mock metrics methods
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+
+        # Create a context frame to process
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        frame = LLMContextFrame(context=context)
+
+        # Process the frame
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Verify timeout handler was called
+        service._call_event_handler.assert_any_call("on_completion_timeout")
+        assert timeout_handler_called
+
+        # Verify push_error was called with correct message
+        assert len(pushed_errors) == 1
+        assert pushed_errors[0]["error_msg"] == "LLM completion timeout"
+        assert isinstance(pushed_errors[0]["exception"], timeout_exception)
+
+        # Verify LLMFullResponseStartFrame and LLMFullResponseEndFrame were pushed
+        frame_types = [type(f) for f in pushed_frames]
+        assert LLMFullResponseStartFrame in frame_types
+        assert LLMFullResponseEndFrame in frame_types
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_timeout_still_pushes_end_frame():
+    """Test that LLMFullResponseEndFrame is pushed even when timeout occurs.
+
+    The finally block should ensure proper cleanup regardless of timeout.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        pushed_frames = []
+
+        async def mock_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        service.push_frame = mock_push_frame
+        service.push_error = AsyncMock()
+        service._call_event_handler = AsyncMock()
+        service._process_context = AsyncMock(side_effect=http.TimeoutException("Timeout"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Verify both start and end frames are pushed
+        frame_types = [type(f) for f in pushed_frames]
+        assert LLMFullResponseStartFrame in frame_types
+        assert LLMFullResponseEndFrame in frame_types
+
+        # Verify metrics were stopped
+        service.stop_processing_metrics.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_stream_closed_on_cancellation():
+    """Test that the stream is closed when CancelledError occurs during iteration.
+
+    This prevents socket leaks when the pipeline is interrupted (e.g., user interruption).
+    See issue #3589.
+    """
+    import asyncio
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        # Track if close was called
+        stream_closed = False
+
+        class MockAsyncStream:
+            """Mock AsyncStream that tracks close() calls and raises CancelledError."""
+
+            def __init__(self):
+                self.iteration_count = 0
+
+            async def close(self):
+                nonlocal stream_closed
+                stream_closed = True
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                self.iteration_count += 1
+                if self.iteration_count > 1:
+                    # Simulate cancellation during iteration
+                    raise asyncio.CancelledError()
+                # Return a minimal chunk for first iteration
+                mock_chunk = AsyncMock()
+                mock_chunk.usage = None
+                mock_chunk.model = None
+                mock_chunk.choices = []
+                return mock_chunk
+
+        mock_stream = MockAsyncStream()
+
+        # Mock the stream creation methods
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Process context should raise CancelledError but stream should still be closed
+        with pytest.raises(asyncio.CancelledError):
+            await service._process_context(context)
+
+        # Verify stream was closed despite the cancellation
+        assert stream_closed, "Stream should be closed even when CancelledError occurs"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_emits_error_frame_on_exception():
+    """Test that OpenAI LLM service emits ErrorFrame when a general exception occurs.
+
+    This enables proper error handling for API errors, rate limits, and other failures.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        pushed_errors = []
+
+        async def mock_push_error(error_msg, exception=None, **kwargs):
+            pushed_errors.append({"error_msg": error_msg, "exception": exception})
+
+        service.push_frame = AsyncMock()
+        service.push_error = mock_push_error
+        service._call_event_handler = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("API Error"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Verify push_error was called with correct message
+        assert len(pushed_errors) == 1
+        assert "Error during completion" in pushed_errors[0]["error_msg"]
+        assert "API Error" in pushed_errors[0]["error_msg"]
+        assert isinstance(pushed_errors[0]["exception"], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_on_context_conversion_error():
+    """Test that an LLMContextConversionError also triggers file-message cleanup.
+
+    An unsupported file MIME type (or corrupt base64) fails during local
+    message conversion, before any request reaches OpenAI at all — so it
+    never surfaces as an invalid_request_error, but it's just as much
+    evidence the file was the problem.
+    """
+    from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        service._process_context = AsyncMock(
+            side_effect=LLMContextConversionError(ValueError("Unsupported 'file' MIME type"))
+        )
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_on_bad_request_error():
+    """Test that a payload-shaped API error (400) triggers file-message cleanup.
+
+    OpenAI receives files inline (file_data), so a rejected file surfaces as a
+    BadRequestError rather than anything file-specific. Cleanup prevents the
+    context from getting permanently stuck retrying a file OpenAI has already
+    rejected.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        service._process_context = AsyncMock(side_effect=_openai_status_error(400))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_removes_file_message_despite_newer_message():
+    """Test that the right file message is found even if it's no longer the newest.
+
+    A file arriving alongside a separately-aggregated user utterance (e.g. the
+    user was mid-turn when the file was sent) can end up with a plain-text
+    message added after it, before either has gone through a completion. The
+    file should still be identified as the removal candidate.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        service._process_context = AsyncMock(side_effect=_openai_status_error(400))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        context.add_message({"role": "user", "content": "what does it say?"})
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_leaves_a_confirmed_file_message_alone():
+    """Test that a file already confirmed accepted by a prior completion is untouched.
+
+    Once an assistant reply has followed the file, it's no longer a removal
+    candidate — a later, unrelated turn erroring out shouldn't discard it.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+
+        service._process_context = AsyncMock(side_effect=_openai_status_error(400))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        # Simulates an earlier, separate completion that succeeded with this file.
+        context.add_message({"role": "assistant", "content": "Here's a summary."})
+        context.add_message({"role": "user", "content": "what does it say?"})
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        messages = context.get_messages()
+        assert len(messages) == 3
+        assert messages[2]["content"] == "what does it say?"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_leaves_context_alone_on_unrelated_error():
+    """Test that an unrelated error does not trigger file-message cleanup."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("rate limited"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        assert len(context.get_messages()) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,removed",
+    [(400, True), (422, True), (413, True), (429, False)],
+)
+async def test_openai_llm_file_cleanup_only_for_payload_shaped_errors(status_code, removed):
+    """Bad request (400), unprocessable content (422), and payload too large
+    (413) indicate the request itself was bad, so the pending file is removed;
+    rate limiting (429) says nothing about the file, so it's kept for retry."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        service.push_frame = AsyncMock()
+        service.push_error = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_openai_status_error(status_code))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,abc123"
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        assert len(context.get_messages()) == (1 if removed else 2)
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_async_iterator_closed_on_stream_end():
+    """Test that the async iterator is explicitly closed after stream consumption.
+
+    This prevents uvloop's broken asyncgen finalizer from firing on Python 3.12+
+    when async generators are garbage-collected without explicit cleanup.
+    See MagicStack/uvloop#699.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        # Track if the iterator's aclose was called
+        iterator_aclosed = False
+        stream_closed = False
+
+        class MockAsyncIterator:
+            """Mock async iterator that tracks aclose() calls."""
+
+            def __init__(self):
+                self.iteration_count = 0
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                self.iteration_count += 1
+                if self.iteration_count > 2:
+                    raise StopAsyncIteration()
+                # Return a minimal chunk
+                mock_chunk = AsyncMock()
+                mock_chunk.usage = None
+                mock_chunk.model = None
+                mock_chunk.choices = []
+                return mock_chunk
+
+            async def aclose(self):
+                nonlocal iterator_aclosed
+                iterator_aclosed = True
+
+        class MockAsyncStream:
+            """Mock stream whose __aiter__ returns a separate iterator object."""
+
+            def __init__(self, iterator):
+                self._iterator = iterator
+
+            def __aiter__(self):
+                return self._iterator
+
+            async def close(self):
+                nonlocal stream_closed
+                stream_closed = True
+
+        mock_iterator = MockAsyncIterator()
+        mock_stream = MockAsyncStream(mock_iterator)
+
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        await service._process_context(context)
+
+        # Verify the iterator was explicitly closed (prevents uvloop crash)
+        assert iterator_aclosed, "Async iterator should be explicitly closed"
+        # Verify the stream was also closed (releases HTTP resources)
+        assert stream_closed, "Stream should be closed to release HTTP resources"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_rejected_api_key_misconfigures_the_service():
+    """Test that a rejected API key marks the service as misconfigured."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.AuthenticationError(
+                "Incorrect API key provided",
+                response=http.Response(401, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert not service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_server_error_leaves_the_service_usable():
+    """Test that a provider-side failure leaves the service retryable."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        request = http.Request("POST", "https://api.openai.com/v1/chat/completions")
+        service._process_context = AsyncMock(
+            side_effect=openai.InternalServerError(
+                "server had an error",
+                response=http.Response(500, request=request),
+                body=None,
+            )
+        )
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_starts_usable():
+    """Test that a service is usable until something proves otherwise.
+
+    The client is constructed without contacting the provider, so an invalid
+    API key builds just as happily as a valid one; only a rejected request
+    tells us anything.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_unexpected_failure_leaves_the_service_usable():
+    """Test that a failure of unattributable cause is not held against the service."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert service.is_usable
+
+
+def _bad_request_with_code(code: str | None):
+    """Build a real OpenAI ``BadRequestError`` carrying the given error ``code``."""
+    from openai import BadRequestError
+
+    response = http.Response(
+        400, request=http.Request("POST", "https://api.openai.com/v1/chat/completions")
+    )
+    return BadRequestError(
+        "simulated api error",
+        response=response,
+        body={"code": code, "message": "simulated api error"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code, expect_usable",
+    [
+        ("content_filter", True),
+        ("context_length_exceeded", False),
+        (None, False),
+    ],
+)
+async def test_openai_llm_usability_after_bad_request(code, expect_usable):
+    """Test that only a content-filter rejection leaves the service usable.
+
+    A content filter rejects one request's content with an HTTP 400, and the next
+    request can succeed, so it must not cost the service its usability. Any other
+    400 still classifies as permanent. Goes through the real ``push_error_frame``
+    path, which classifies the error and flips ``is_usable``.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        errors = []
+
+        @service.event_handler("on_error")
+        async def on_error(processor, error):
+            # pipecat marks the service unusable before on_error handlers run.
+            errors.append((error.category, processor.is_usable))
+
+        service.push_frame = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_bad_request_with_code(code))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert len(errors) == 1
+        category, usable_at_handler_time = errors[0]
+        assert usable_at_handler_time is expect_usable
+        assert service.is_usable is expect_usable
+        assert category.is_permanent is not expect_usable
+        assert (category == ErrorCategory.CONTENT_FILTERED) is (code == "content_filter")
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_content_filter_on_file_keeps_its_category():
+    """Test that a content-filter rejection reports CONTENT_FILTERED despite file cleanup.
+
+    The pending file is still removed, since it may be what the filter rejected.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        errors = []
+
+        @service.event_handler("on_error")
+        async def on_error(processor, error):
+            errors.append(error.category)
+
+        service.push_frame = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_bad_request_with_code("content_filter"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert errors == [ErrorCategory.CONTENT_FILTERED]
+        assert service.is_usable
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"

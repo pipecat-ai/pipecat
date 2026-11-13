@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,8 +7,8 @@
 """Testing utilities for Pipecat pipeline components."""
 
 import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.workers.runner import WorkerRunner
 
 
 @dataclass
@@ -123,14 +123,17 @@ class QueuedFrameProcessor(FrameProcessor):
 async def run_test(
     processor: FrameProcessor,
     *,
+    enable_rtvi: bool = False,
+    expected_down_frames: Sequence[type] | None = None,
+    expected_up_frames: Sequence[type] | None = None,
     frames_to_send: Sequence[Frame],
-    expected_down_frames: Optional[Sequence[type]] = None,
-    expected_up_frames: Optional[Sequence[type]] = None,
+    frames_to_send_direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ignore_start: bool = True,
-    observers: Optional[List[BaseObserver]] = None,
-    pipeline_params: Optional[PipelineParams] = None,
+    observers: list[BaseObserver] | None = None,
+    pipeline_params: PipelineParams | None = None,
     send_end_frame: bool = True,
-) -> Tuple[Sequence[Frame], Sequence[Frame]]:
+    start_timeout: float = 1.0,
+) -> tuple[Sequence[Frame], Sequence[Frame]]:
     """Run a test pipeline with the specified processor and validate frame flow.
 
     This function creates a test pipeline with the given processor, sends the
@@ -139,19 +142,26 @@ async def run_test(
 
     Args:
         processor: The frame processor to test.
-        frames_to_send: Sequence of frames to send through the processor.
+        enable_rtvi: Whether RTVI should be enabled in this test.
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
+        frames_to_send: Sequence of frames to send through the processor.
+        frames_to_send_direction: Direction to send frames_to_send. Downstream
+            frames are pushed from the beginning of the pipeline, upstream frames
+            from the end. Defaults to DOWNSTREAM.
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
         pipeline_params: Optional pipeline parameters.
         send_end_frame: Whether to send an EndFrame at the end of the test.
+        start_timeout: How long to wait, in seconds, for the pipeline to start
+            before giving up.
 
     Returns:
         Tuple containing (downstream_frames, upstream_frames) that were received.
 
     Raises:
         AssertionError: If the received frames don't match the expected frame types.
+        TimeoutError: If the pipeline doesn't start within ``start_timeout``.
     """
     observers = observers or []
     pipeline_params = pipeline_params or PipelineParams()
@@ -171,40 +181,57 @@ async def run_test(
 
     pipeline = Pipeline([source, processor, sink])
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
-        params=pipeline_params,
-        observers=observers,
         cancel_on_idle_timeout=False,
+        enable_rtvi=enable_rtvi,
+        observers=observers,
+        params=pipeline_params,
     )
 
+    pipeline_started = asyncio.Event()
+
+    @worker.event_handler("on_pipeline_started")
+    async def _on_pipeline_started(worker, frame):
+        pipeline_started.set()
+
     async def push_frames():
-        # Just give a little head start to the runner.
-        await asyncio.sleep(0.01)
+        # Processors drop frames that arrive before StartFrame, and upstream
+        # frames enter at the sink, which StartFrame reaches last.
+        await asyncio.wait_for(pipeline_started.wait(), timeout=start_timeout)
         for frame in frames_to_send:
             if isinstance(frame, SleepFrame):
                 await asyncio.sleep(frame.sleep)
             else:
-                await task.queue_frame(frame)
+                await worker.queue_frame(frame, frames_to_send_direction)
 
         if send_end_frame:
-            await task.queue_frame(EndFrame())
+            await worker.queue_frame(EndFrame())
 
-    runner = PipelineRunner()
-    await asyncio.gather(runner.run(task), push_frames())
+    runner = WorkerRunner()
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), push_frames())
 
     #
     # Down frames
     #
-    received_down_frames: Sequence[Frame] = []
-    if expected_down_frames is not None:
-        while not received_down.empty():
-            frame = await received_down.get()
-            if not isinstance(frame, EndFrame) or not send_end_frame:
-                received_down_frames.append(frame)
+    received_down_frames: list[Frame] = []
+    while not received_down.empty():
+        frame = await received_down.get()
+        if not isinstance(frame, EndFrame) or not send_end_frame:
+            received_down_frames.append(frame)
 
-        print("received DOWN frames =", received_down_frames)
-        print("expected DOWN frames =", expected_down_frames)
+    if expected_down_frames is not None:
+        down_frames_printed = "["
+        for frame in received_down_frames:
+            down_frames_printed += f"{frame.__class__.__name__}, "
+        down_frames_printed += "]"
+        expected_frames_printed = "["
+        for frame in expected_down_frames:
+            expected_frames_printed += f"{frame.__name__}, "
+        expected_frames_printed += "]"
+        print("received DOWN frames =", down_frames_printed)
+        print("expected DOWN frames =", expected_frames_printed)
 
         assert len(received_down_frames) == len(expected_down_frames)
 
@@ -214,12 +241,12 @@ async def run_test(
     #
     # Up frames
     #
-    received_up_frames: Sequence[Frame] = []
-    if expected_up_frames is not None:
-        while not received_up.empty():
-            frame = await received_up.get()
-            received_up_frames.append(frame)
+    received_up_frames: list[Frame] = []
+    while not received_up.empty():
+        frame = await received_up.get()
+        received_up_frames.append(frame)
 
+    if expected_up_frames is not None:
         print("received UP frames =", received_up_frames)
         print("expected UP frames =", expected_up_frames)
 

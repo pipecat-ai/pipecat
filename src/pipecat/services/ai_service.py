@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,8 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-from typing import Any, AsyncGenerator, Dict, Mapping
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 
@@ -19,10 +20,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    ServiceMetadataFrame,
+    ServiceSwitcherRequestMetadataFrame,
     StartFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.services.settings import ServiceSettings
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class AIService(FrameProcessor):
@@ -34,34 +39,76 @@ class AIService(FrameProcessor):
     this base infrastructure.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, settings: ServiceSettings | None = None, **kwargs):
         """Initialize the AI service.
 
         Args:
+            settings: The runtime-updatable settings for the AI service.
             **kwargs: Additional arguments passed to the parent FrameProcessor.
         """
         super().__init__(**kwargs)
-        self._model_name: str = ""
-        self._settings: Dict[str, Any] = {}
-        self._session_properties: Dict[str, Any] = {}
+        self._settings: ServiceSettings = (
+            settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or ServiceSettings()
+        )
+        self._sync_model_name_to_metrics()
+        self._session_properties: dict[str, Any] = {}
+        self._tracing_enabled: bool = False
+        self._tracing_context = None
 
     @property
-    def model_name(self) -> str:
-        """Get the current model name.
+    def settings(self) -> ServiceSettings:
+        """The service's current settings, for reading.
+
+        Change them with a
+        :class:`~pipecat.frames.frames.ServiceUpdateSettingsFrame`, so the
+        service applies the change and its metrics keep the model in sync.
+        """
+        return self._settings
+
+    def _sync_model_name_to_metrics(self):
+        """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
+
+        We don't store model name here because there's already a single source
+        of truth for it in `self._settings.model`. This method is just for
+        syncing the model name to the metrics data.
+        """
+        model = self._settings.model
+        self.set_core_metrics_data(
+            MetricsData(processor=self.name, model=model if isinstance(model, str) else "")
+        )
+
+    def service_metadata_frame(self) -> ServiceMetadataFrame | None:
+        """The metadata frame this service broadcasts at start, or None.
+
+        Override to return a populated
+        :class:`~pipecat.frames.frames.ServiceMetadataFrame` (or a subtype such as
+        ``STTMetadataFrame``) describing this service for downstream processors, for
+        example the ``user_turn_strategies`` an STT with server-side end-of-turn
+        detection recommends. Return None to broadcast nothing.
 
         Returns:
-            The name of the AI model being used.
+            The metadata frame to broadcast, or None.
         """
-        return self._model_name
+        return None
 
-    def set_model_name(self, model: str):
-        """Set the AI model name and update metrics.
+    async def broadcast_service_metadata(self):
+        """Broadcast this service's metadata frame, if any."""
+        frame = self.service_metadata_frame()
+        if frame:
+            await self.broadcast_frame_instance(frame)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            model: The name of the AI model to use.
+            setup: Configuration object containing setup parameters.
         """
-        self._model_name = model
-        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
+        await super().setup(setup)
+        self._tracing_enabled = setup.enable_tracing
+        self._tracing_context = setup.tracing_context
 
     async def start(self, frame: StartFrame):
         """Start the AI service.
@@ -72,13 +119,13 @@ class AIService(FrameProcessor):
         Args:
             frame: The start frame containing initialization parameters.
         """
-        pass
+        self._settings.validate_complete()
 
     async def stop(self, frame: EndFrame):
-        """Stop the AI service.
+        """Stop the AI service on a graceful end (``EndFrame``).
 
-        Called when the service should stop processing. Subclasses should
-        override this method to perform cleanup operations.
+        Runs in frame order, after pending frames drain. Override for graceful
+        shutdown behavior, such as flushing in-flight work before stopping.
 
         Args:
             frame: The end frame.
@@ -86,54 +133,104 @@ class AIService(FrameProcessor):
         pass
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the AI service.
+        """Cancel the AI service immediately (``CancelFrame``).
 
-        Called when the service should cancel all operations. Subclasses should
-        override this method to handle cancellation logic.
+        Runs at once, ahead of any queued frames, to abort active work fast (for
+        example, stop producing audio now). Override only for that time-sensitive
+        subset.
 
         Args:
             frame: The cancel frame.
         """
         pass
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        from pipecat.services.openai.realtime.events import SessionProperties
+    async def _update_settings(self, delta: ServiceSettings) -> dict[str, Any]:
+        """Apply a settings delta and return the changed fields.
 
-        for key, value in settings.items():
-            logger.debug("Update request for:", key, value)
+        The delta is applied to ``_settings`` and a dict mapping each changed
+        field name to its **pre-update** value is returned.  The ``model``
+        field is handled specially: when it changes, ``set_model_name`` is
+        called.
 
-            if key in self._settings:
-                logger.info(f"Updating LLM setting {key} to: [{value}]")
-                self._settings[key] = value
-            elif key in SessionProperties.model_fields:
-                logger.debug("Attempting to update", key, value)
+        Concrete services should override this method (calling ``super()``)
+        to react to specific changed fields (e.g. reconnect on voice change).
 
-                try:
-                    from pipecat.services.openai.realtime.events import TurnDetection
+        Args:
+            delta: A delta-mode settings object.
 
-                    if isinstance(self._session_properties, SessionProperties):
-                        current_properties = self._session_properties
-                    else:
-                        current_properties = SessionProperties(**self._session_properties)
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = self._settings.apply_update(delta)
 
-                    if key == "turn_detection" and isinstance(value, dict):
-                        turn_detection = TurnDetection(**value)
-                        setattr(current_properties, key, turn_detection)
-                    else:
-                        setattr(current_properties, key, value)
+        if "model" in changed:
+            self._sync_model_name_to_metrics()
 
-                    validated_properties = SessionProperties.model_validate(
-                        current_properties.model_dump()
-                    )
-                    logger.info(f"Updating LLM setting {key} to: [{value}]")
-                    self._session_properties = validated_properties.model_dump()
-                except Exception as e:
-                    logger.warning(f"Unexpected error updating session property {key}: {e}")
-            elif key == "model":
-                logger.info(f"Updating LLM setting {key} to: [{value}]")
-                self.set_model_name(value)
-            else:
-                logger.warning(f"Unknown setting for {self.name} service: {key}")
+        if changed:
+            logger.info(f"{self.name}: updated settings fields: {set(changed)}")
+            # New settings may be the ones that make the service work, so give
+            # it another chance rather than leaving it permanently written off.
+            await self.set_usable(True)
+
+        return changed
+
+    def _warn_init_param_moved_to_settings(
+        self,
+        param_name: str,
+        settings_field: str | None = None,
+        stacklevel: int = 3,
+        deprecated_since: str = "0.0.105",
+    ):
+        """Warn that an ``__init__`` param has moved to ``Settings``.
+
+        Emits a ``DeprecationWarning`` directing users to the canonical
+        ``settings=ServiceClass.Settings(field=...)`` API.
+
+        Args:
+            param_name: Name of the deprecated ``__init__`` parameter.
+            settings_field: The corresponding field on the ``Settings``
+                dataclass, if different from *param_name*.  When ``None``
+                the message omits the field hint.
+            stacklevel: Stack depth for the warning.  Default ``3`` targets
+                the caller's caller (i.e. user code that instantiated the
+                service).
+            deprecated_since: The release that deprecated the parameter.
+        """
+        service = type(self).__name__
+        field = f"{settings_field}=..." if settings_field else "..."
+        warn_deprecated(
+            f"`{service}({param_name}=...)` is deprecated since {deprecated_since} and will be "
+            f"removed in 2.0.0. Use `settings={service}.Settings({field})` instead. If both "
+            "are provided, `settings` takes precedence.",
+            stacklevel=stacklevel,
+        )
+
+    def _warn_unhandled_updated_settings(self, unhandled):
+        """Log a warning for settings changes that won't take effect at runtime.
+
+        Convenience helper for ``_update_settings`` overrides.  Accepts any
+        iterable of field names (a ``dict``, ``set``, ``dict_keys``, etc.).
+
+        Args:
+            unhandled: Field names that changed but are not applied.
+        """
+        if unhandled:
+            fields = ", ".join(sorted(unhandled))
+            logger.warning(f"{self.name}: runtime update of [{fields}] is not currently supported")
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame and broadcast service metadata once the service starts.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+
+        # Broadcast metadata after StartFrame goes downstream, so downstream sees
+        # StartFrame first.
+        if isinstance(frame, StartFrame):
+            await self.broadcast_service_metadata()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle service lifecycle.
@@ -148,11 +245,13 @@ class AIService(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self.start(frame)
-        elif isinstance(frame, CancelFrame):
-            await self.cancel(frame)
+            await self._start(frame)
         elif isinstance(frame, EndFrame):
-            await self.stop(frame)
+            await self._stop(frame)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
+        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
+            await self.broadcast_service_metadata()
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         """Process frames from an async generator.
@@ -166,6 +265,24 @@ class AIService(FrameProcessor):
         async for f in generator:
             if f:
                 if isinstance(f, ErrorFrame):
-                    await self.push_error(f)
+                    await self.push_error_frame(f)
                 else:
                     await self.push_frame(f)
+
+    async def _start(self, frame: StartFrame):
+        try:
+            await self.start(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _stop(self, frame: EndFrame):
+        try:
+            await self.stop(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _cancel(self, frame: CancelFrame):
+        try:
+            await self.cancel(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")

@@ -1,0 +1,14 @@
+agent_name = "{{ project_name }}"
+secret_set = "{{ project_name }}-secrets"
+{% if enable_video_input or enable_video_output %}
+agent_profile = "agent-2x"
+{% else %}
+agent_profile = "agent-1x"
+{% endif %}
+{% if enable_krisp %}
+[krisp_viva]
+	audio_filter = "tel"
+{% endif %}
+
+[scaling]
+	min_agents = 1

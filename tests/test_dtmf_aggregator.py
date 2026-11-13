@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -48,6 +48,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(transcription_frames), 1)
         self.assertEqual(transcription_frames[0].text, "DTMF: 123#")
+        self.assertTrue(transcription_frames[0].finalized)
 
     async def test_timeout_aggregation(self):
         """Test DTMF aggregation with timeout flush."""
@@ -82,6 +83,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transcription_frames), 2)
         self.assertEqual(transcription_frames[0].text, "DTMF: 12")
         self.assertEqual(transcription_frames[1].text, "DTMF: 3")
+        self.assertTrue(all(f.finalized for f in transcription_frames))
 
     async def test_multiple_aggregations(self):
         """Test multiple DTMF sequences with pound termination."""
@@ -240,3 +242,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(transcription_frames), 1)
         self.assertEqual(transcription_frames[0].text, "DTMF: 0123456789*#")
+
+
+if __name__ == "__main__":
+    unittest.main()

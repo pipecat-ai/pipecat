@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document review — UIAgent demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Manuscript review</h1>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <main>
+      <section class="document" aria-label="Draft">
+        <article>
+          <h2>The quiet revolution of asynchronous work</h2>
+
+          <p class="lede">A draft. Select any paragraph and ask for review.</p>
+
+          <p>
+            Five years ago, working remotely was the unusual choice.
+            Today it is the unremarkable one. The shift happened too
+            quickly for most organizations to absorb its second-order
+            effects, and the conversation has barely caught up to where
+            work actually is.
+          </p>
+
+          <p>
+            The asynchronous-first model that emerged out of necessity in
+            2020 and has since become structural across knowledge work
+            has produced a strange paradox in which workers report higher
+            autonomy and satisfaction than at any point in the postwar
+            era while simultaneously reporting greater isolation, lower
+            trust in leadership, and a measurable decline in the quality
+            of collaboration on novel problems, which suggests not that
+            remote work is good or bad but that we have not yet learned
+            to use the tool we built ourselves.
+          </p>
+
+          <p>
+            There are real benefits and real costs. Different people
+            experience it differently. Each company has to find its own
+            way.
+          </p>
+
+          <p>
+            Anyone who claims that in-person work is more productive is
+            simply wrong. The research is unanimous. Decades of management
+            orthodoxy were built on assumptions that have been
+            comprehensively disproven.
+          </p>
+
+          <p>
+            What seems to work best are deliberately structured rhythms:
+            weekly all-hands video calls for shared context, written
+            async updates for status, in-person quarterly gatherings for
+            relationship building, and clear synchronous-only windows for
+            high-stakes decision making. Each rhythm has a different
+            cost; none is free.
+          </p>
+
+          <p>
+            The fight over whether remote work is here to stay has ended.
+            The interesting question now is what we have lost in the
+            transition that nobody noticed at the time, and what we are
+            about to lose if we do not redesign for the new shape of
+            work.
+          </p>
+        </article>
+      </section>
+
+      <aside class="notes" aria-label="Notes">
+        <h2>Notes</h2>
+
+        <form id="note-form">
+          <label for="note-input">Add a note</label>
+          <textarea
+            id="note-input"
+            name="note"
+            rows="3"
+            placeholder="Type or dictate a note…"
+          ></textarea>
+          <button id="note-save" type="submit">Save</button>
+        </form>
+
+        <div id="notes-empty" class="empty-state">
+          No notes yet. Select a paragraph and ask the assistant to
+          review it, or dictate a note of your own.
+        </div>
+
+        <ol id="notes-list" aria-label="Existing notes"></ol>
+      </aside>
+    </main>
+
+    <div id="status" aria-live="polite"></div>
+    <audio id="bot-audio" autoplay data-a11y-exclude></audio>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

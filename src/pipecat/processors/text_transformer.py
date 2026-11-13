@@ -1,12 +1,12 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Stateless text transformation processor for Pipecat."""
 
-from typing import Callable, Coroutine, Union
+from collections.abc import Callable, Coroutine
 
 from pipecat.frames.frames import Frame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -17,11 +17,12 @@ class StatelessTextTransformer(FrameProcessor):
 
     This processor intercepts TextFrame objects and applies a user-provided
     transformation function to the text content. The function can be either
-    synchronous or asynchronous (coroutine).
+    synchronous or asynchronous (coroutine). The frame keeps its type, its
+    other fields and its direction; only its text changes.
     """
 
     def __init__(
-        self, transform_fn: Union[Callable[[str], str], Callable[[str], Coroutine[None, None, str]]]
+        self, transform_fn: Callable[[str], str] | Callable[[str], Coroutine[None, None, str]]
     ):
         """Initialize the text transformer.
 
@@ -45,6 +46,7 @@ class StatelessTextTransformer(FrameProcessor):
             result = self._transform_fn(frame.text)
             if isinstance(result, Coroutine):
                 result = await result
-            await self.push_frame(TextFrame(text=result))
+            frame.text = result
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)

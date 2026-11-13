@@ -1,0 +1,825 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Tests for ElevenLabs TTS alignment handling."""
+
+import json
+import unittest
+import unittest.mock
+from typing import Any
+
+import pytest
+from loguru import logger
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
+from websockets.protocol import State
+
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import TTSMetadataFrame, TTSUpdateSettingsFrame
+from pipecat.pipeline.worker import PipelineParams
+from pipecat.services.elevenlabs.tts import (
+    ElevenLabsHttpTTSService,
+    ElevenLabsTTSService,
+    _select_alignment,
+    _strip_utterance_leading_spaces,
+    _word_timestamps_include_inter_frame_spaces,
+    calculate_word_times,
+)
+from pipecat.services.elevenlabs.tts_base import (
+    ELEVENLABS_MODEL_LANGUAGES,
+    ELEVENLABS_V2_5_LANGUAGES,
+    ELEVENLABS_V3_LANGUAGES,
+    ELEVENLABS_V4_LANGUAGES,
+    elevenlabs_language_code,
+    language_to_elevenlabs_language,
+)
+from pipecat.tests.utils import run_test
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
+
+_WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
+
+
+def _chunk(text: str) -> dict[str, list[Any]]:
+    chars = list(text)
+    return {
+        "chars": chars,
+        "charStartTimesMs": [i * 100 for i in range(len(chars))],
+        "charDurationsMs": [100 for _ in chars],
+    }
+
+
+def _words_from_chunks(chunks: list[dict[str, list[Any]]]) -> list[str]:
+    cumulative_time = 0.0
+    partial_word = ""
+    partial_word_start_time = 0.0
+    word_times = []
+    alignment_started = False
+
+    for chunk in chunks:
+        alignment = _strip_utterance_leading_spaces(
+            chunk,
+            _WS_ALIGNMENT_KEYS,
+            not alignment_started,
+        )
+        alignment_started = True
+        chunk_word_times, partial_word, partial_word_start_time = calculate_word_times(
+            alignment,
+            cumulative_time,
+            partial_word,
+            partial_word_start_time,
+        )
+        word_times.extend(chunk_word_times)
+
+        starts = alignment["charStartTimesMs"]
+        durations = alignment["charDurationsMs"]
+        if starts and durations:
+            cumulative_time += (starts[-1] + durations[-1]) / 1000.0
+
+    if partial_word:
+        word_times.append((partial_word, partial_word_start_time))
+
+    return [word for word, _ in word_times]
+
+
+def _concatenate_words_for_language(words: list[str], language: str) -> str:
+    includes_inter_frame_spaces = _word_timestamps_include_inter_frame_spaces(language)
+    return concatenate_aggregated_text(
+        [
+            TextPartForConcatenation(
+                word,
+                includes_inter_part_spaces=includes_inter_frame_spaces,
+            )
+            for word in words
+        ]
+    )
+
+
+def test_elevenlabs_flash_alignment_preserves_inter_word_chunk_space():
+    chunks = [
+        _chunk(" Why did the math book"),
+        _chunk(" look so sad? "),
+        _chunk(" Because it had too m"),
+        _chunk("any problems. "),
+    ]
+
+    assert _words_from_chunks(chunks) == [
+        "Why",
+        "did",
+        "the",
+        "math",
+        "book",
+        "look",
+        "so",
+        "sad?",
+        "Because",
+        "it",
+        "had",
+        "too",
+        "many",
+        "problems.",
+    ]
+
+
+def test_elevenlabs_japanese_timestamp_chunks_reassemble_without_spaces():
+    words = _words_from_chunks(
+        [
+            _chunk("どんなことでも気 "),
+            _chunk("軽に相談してくださいね。 "),
+        ]
+    )
+
+    assert words == ["どんなことでも気", "軽に相談してくださいね。"]
+    assert (
+        _concatenate_words_for_language(words, language="ja")
+        == "どんなことでも気軽に相談してくださいね。"
+    )
+
+
+def test_elevenlabs_chinese_timestamp_chunks_reassemble_without_spaces():
+    words = _words_from_chunks(
+        [
+            _chunk("你好，我是 "),
+            _chunk("你的智能助手。 "),
+        ]
+    )
+
+    assert words == ["你好，我是", "你的智能助手。"]
+    assert _concatenate_words_for_language(words, language="zh-CN") == "你好，我是你的智能助手。"
+
+
+def test_elevenlabs_english_timestamp_chunks_reassemble_with_spaces():
+    words = ["Hello", "world."]
+
+    assert _concatenate_words_for_language(words, language="en") == "Hello world."
+
+
+def test_elevenlabs_timestamp_spacing_languages():
+    assert _word_timestamps_include_inter_frame_spaces("ja") is True
+    assert _word_timestamps_include_inter_frame_spaces("zh-CN") is True
+    assert _word_timestamps_include_inter_frame_spaces("yue") is True
+    assert _word_timestamps_include_inter_frame_spaces("en") is False
+
+
+def test_elevenlabs_alignment_strips_only_utterance_leading_spaces():
+    first = _strip_utterance_leading_spaces(_chunk("  Hello"), _WS_ALIGNMENT_KEYS, True)
+    subsequent = _strip_utterance_leading_spaces(_chunk(" world"), _WS_ALIGNMENT_KEYS, False)
+
+    assert first["chars"] == list("Hello")
+    assert subsequent["chars"] == list(" world")
+
+
+def test_select_alignment_default_prefers_alignment():
+    msg = {
+        "alignment": _chunk("Hello"),
+        "normalizedAlignment": _chunk(" Hello"),
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list("Hello")
+
+
+def test_select_alignment_dictionary_mode_prefers_normalized():
+    msg = {
+        "alignment": _chunk("Hello"),
+        "normalizedAlignment": _chunk(" Hello"),
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+
+def test_select_alignment_falls_back_when_preferred_missing():
+    msg_default = {"normalizedAlignment": _chunk(" Hello")}
+    selected = _select_alignment(
+        msg_default,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+    msg_dict = {"alignment": _chunk("Hello")}
+    selected = _select_alignment(
+        msg_dict,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["chars"] == list("Hello")
+
+
+def test_select_alignment_falls_back_when_preferred_null():
+    msg = {"alignment": None, "normalizedAlignment": _chunk(" Hello")}
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+
+def test_select_alignment_returns_none_when_both_missing():
+    assert (
+        _select_alignment(
+            {},
+            normalized_key="normalizedAlignment",
+            alignment_key="alignment",
+            prefer_normalized=False,
+        )
+        is None
+    )
+    assert (
+        _select_alignment(
+            {"alignment": None, "normalizedAlignment": None},
+            normalized_key="normalizedAlignment",
+            alignment_key="alignment",
+            prefer_normalized=True,
+        )
+        is None
+    )
+
+
+def test_select_alignment_works_with_http_field_names():
+    msg = {
+        "alignment": {"characters": list("Hi")},
+        "normalized_alignment": {"characters": list(" Hi")},
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalized_alignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["characters"] == list("Hi")
+
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalized_alignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["characters"] == list(" Hi")
+
+
+# ---------------------------------------------------------------------------
+# Keepalive vs context-init race
+#
+# The keepalive must only stamp a context_id once its context-init (carrying
+# voice_settings) has been sent. Stamping it earlier makes the keepalive the
+# context's first message, with no voice_settings, and ElevenLabs rejects the
+# later context-init with a 1008 policy violation.
+# ---------------------------------------------------------------------------
+
+
+class _FakeWebSocket:
+    """Minimal stand-in for the ElevenLabs websocket that records sends."""
+
+    def __init__(self):
+        self.state = State.OPEN
+        self.sent: list[dict] = []
+
+    async def send(self, data: str):
+        self.sent.append(json.loads(data))
+
+
+def _make_service() -> ElevenLabsTTSService:
+    return ElevenLabsTTSService(
+        api_key="test-key",
+        settings=ElevenLabsTTSService.Settings(
+            voice="test-voice",
+            stability=0.55,
+            similarity_boost=0.85,
+            use_speaker_boost=True,
+            speed=0.81,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_keepalive_does_not_stamp_context_before_init():
+    """During the pre-init window the keepalive must not stamp the new context_id."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    # Simulate the start of an LLM turn: TTSService sets the turn context id on
+    # LLMFullResponseStartFrame, before run_tts sends the voice_settings init.
+    service._turn_context_id = "ctx-1"
+    service.reset_active_audio_context()
+    assert "ctx-1" not in service._context_init_sent
+
+    await service._send_keepalive()
+
+    # Context-less keepalive: the real context-init stays the context's first
+    # message, so ElevenLabs won't reject it with 1008.
+    assert ws.sent == [{"text": ""}]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_stamps_context_after_init():
+    """Once the context-init has been sent, the keepalive targets that context."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    service._turn_context_id = "ctx-1"
+    service.reset_active_audio_context()
+    # run_tts records the context once its voice_settings init has gone out.
+    service._context_init_sent.add("ctx-1")
+
+    await service._send_keepalive()
+
+    assert ws.sent == [{"text": "", "context_id": "ctx-1"}]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_without_active_context_sends_empty():
+    """With no active context, the keepalive sends a plain empty message."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    service._turn_context_id = None
+    service.reset_active_audio_context()
+
+    await service._send_keepalive()
+
+    assert ws.sent == [{"text": ""}]
+
+
+class _FakeHttpResponse:
+    """Minimal aiohttp response stand-in; the 400 makes run_tts bail after posting."""
+
+    status = 400
+
+    async def text(self):
+        return "rejected"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeHttpSession:
+    """Records the JSON payload of each POST."""
+
+    def __init__(self):
+        self.payloads: list[dict] = []
+
+    def post(self, url, json=None, headers=None, params=None):
+        self.payloads.append(json)
+        return _FakeHttpResponse()
+
+
+async def _http_payload_for_model(model: str) -> dict:
+    session = _FakeHttpSession()
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=session,
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
+    )
+    service._previous_text = "Hello!"
+    async for _ in service.run_tts("How can I assist you today?", "ctx-1"):
+        pass
+    return session.payloads[0]
+
+
+@pytest.mark.asyncio
+async def test_http_payload_includes_previous_text_when_supported():
+    payload = await _http_payload_for_model("eleven_flash_v2_5")
+    assert payload["previous_text"] == "Hello!"
+
+
+@pytest.mark.parametrize("model", ["eleven_v3", "eleven_v3_conversational"])
+@pytest.mark.asyncio
+async def test_http_payload_omits_previous_text_for_eleven_v3_models(model: str):
+    payload = await _http_payload_for_model(model)
+    assert "previous_text" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Disconnect vs server-initiated close race
+#
+# When the server closes the websocket first (normal during teardown), the
+# close-handshake send in _disconnect_websocket raises ConnectionClosed. That
+# must not be reported as a pipeline error: a non-fatal ErrorFrame here can
+# e.g. trigger a spurious ServiceSwitcherStrategyFailover switch on shutdown.
+# ---------------------------------------------------------------------------
+
+
+class _ClosedWebSocket:
+    """Websocket stand-in whose sends fail with a normal close."""
+
+    state = State.OPEN
+
+    async def send(self, data: str):
+        raise ConnectionClosedOK(Close(1001, "going away"), Close(1001, "going away"), True)
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_push_error_when_server_closed_first():
+    """A ConnectionClosed during the disconnect handshake is not a pipeline error."""
+    service = _make_service()
+    service._websocket = _ClosedWebSocket()
+
+    errors = []
+
+    async def push_error(error_msg=None, exception=None):
+        errors.append(error_msg)
+
+    service.push_error = push_error
+
+    await service._disconnect_websocket()
+
+    assert errors == []
+    assert service._websocket is None
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+@pytest.mark.asyncio
+async def test_text_normalization_change_reconnects():
+    """apply_text_normalization is a query parameter of the websocket URL."""
+    service = _make_service()
+    with (
+        unittest.mock.patch.object(service, "_disconnect") as disconnect,
+        unittest.mock.patch.object(service, "_connect") as connect,
+    ):
+        await service._update_settings(ElevenLabsTTSService.Settings(apply_text_normalization="on"))
+    disconnect.assert_awaited_once()
+    connect.assert_awaited_once()
+
+
+def test_v3_language_set_extends_the_v2_5_set():
+    """Eleven v3 adds languages; it never drops one Flash and Turbo support."""
+    assert ELEVENLABS_V2_5_LANGUAGES < ELEVENLABS_V3_LANGUAGES
+    assert len(ELEVENLABS_V2_5_LANGUAGES) == 32
+    assert len(ELEVENLABS_V3_LANGUAGES) == 74
+
+
+def test_v4_language_set_extends_the_v3_set():
+    """Eleven v4 adds languages; it never drops one Eleven v3 supports."""
+    assert ELEVENLABS_V3_LANGUAGES < ELEVENLABS_V4_LANGUAGES
+    assert len(ELEVENLABS_V4_LANGUAGES) == 84
+
+
+def test_language_code_is_gated_by_model():
+    """A language the model doesn't cover is dropped rather than sent."""
+    # Welsh is v3-only.
+    assert elevenlabs_language_code("eleven_v3_conversational", "cy") == "cy"
+    assert elevenlabs_language_code("eleven_flash_v2_5", "cy") is None
+    # German is common to both.
+    assert elevenlabs_language_code("eleven_flash_v2_5", "de") == "de"
+    assert elevenlabs_language_code("eleven_v3", "de") == "de"
+    # Cantonese is v4-only.
+    assert elevenlabs_language_code("eleven_v4_turbo", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v4", "yue") == "yue"
+    assert elevenlabs_language_code("eleven_v3", "yue") is None
+
+
+def test_models_without_language_support_send_no_code():
+    """Models absent from the mapping take no language code at all."""
+    assert "eleven_multilingual_v2" not in ELEVENLABS_MODEL_LANGUAGES
+    assert elevenlabs_language_code("eleven_multilingual_v2", "de") is None
+    assert elevenlabs_language_code(None, "de") is None
+
+
+def test_no_language_requested_is_not_a_warning_case():
+    """Omitting a language is normal, not a mismatch."""
+    assert elevenlabs_language_code("eleven_v3", None) is None
+    assert elevenlabs_language_code("eleven_v3", "") is None
+
+
+def test_every_mapped_language_is_accepted_by_some_model():
+    """The enum map and the per-model sets can't drift apart."""
+    from pipecat.transcriptions.language import Language
+
+    for language in Language:
+        code = language_to_elevenlabs_language(language)
+        if code in ELEVENLABS_V3_LANGUAGES:
+            assert elevenlabs_language_code("eleven_v3", code) == code
+        if code in ELEVENLABS_V4_LANGUAGES:
+            assert elevenlabs_language_code("eleven_v4_turbo", code) == code
+
+
+@pytest.mark.parametrize("model", ["eleven_v3", "eleven_v4_turbo"])
+def test_websocket_service_warns_on_v3_v4_models(model):
+    """The multi-stream TTS endpoint serves no v3/v4 model; the handshake
+    rejects one with a 400 that leaves the processor unusable, so a clear
+    warning with a pointer to the classes that do serve them beats it."""
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        service = ElevenLabsTTSService(
+            api_key="test-key",
+            settings=ElevenLabsTTSService.Settings(voice="test-voice", model=model),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert service._settings.model == model
+    assert any(model in w and "ElevenLabsDialogueTTSService" in w for w in warnings)
+
+
+def test_websocket_service_accepts_flash_models_without_a_warning():
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        ElevenLabsTTSService(
+            api_key="test-key",
+            settings=ElevenLabsTTSService.Settings(voice="test-voice", model="eleven_flash_v2_5"),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert not [w for w in warnings if "v3/v4" in w or "does not serve" in w]
+
+
+class _MessagesWebSocket:
+    """Yields the given server messages, then ends."""
+
+    def __init__(self, messages: list[dict]):
+        self.state = State.OPEN
+        self._messages = [json.dumps(m) for m in messages]
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for message in self._messages:
+            yield message
+
+
+@pytest.mark.asyncio
+async def test_wordless_alignment_still_advances_the_clock():
+    """Trailing punctuation can arrive on its own; its span must not be dropped."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word_times)
+
+    service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
+    service._websocket = _MessagesWebSocket(
+        [{"contextId": "ctx-1", "alignment": _chunk(text)} for text in ("Hi there", "!", " Bye ")]
+    )
+
+    await service._receive_messages()
+
+    assert [word for word, _ in reported] == ["Hi", "there!", "Bye"]
+    # "Bye" starts after the 8 characters of the first chunk, the "!", and its space.
+    assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)
+
+
+def test_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_service()._pause_frame_processing is True
+    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
+@pytest.mark.asyncio
+async def test_interleaved_contexts_align_words_independently():
+    """Alignment for concurrent contexts arrives interleaved on one socket; a word
+    split across one context's chunks must not pick up another context's
+    characters or clock."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word, start) for word, start in word_times)
+
+    service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
+    await service.create_audio_context("ctx-2")
+    service._websocket = _MessagesWebSocket(
+        [
+            {"contextId": context_id, "alignment": _chunk(text)}
+            for context_id, text in (
+                ("ctx-1", "Hello wor"),
+                ("ctx-2", "Good mor"),
+                ("ctx-1", "ld "),
+                ("ctx-2", "ning "),
+            )
+        ]
+    )
+
+    await service._receive_messages()
+
+    assert [(c, w) for c, w, _ in reported] == [
+        ("ctx-1", "Hello"),
+        ("ctx-2", "Good"),
+        ("ctx-1", "world"),
+        ("ctx-2", "morning"),
+    ]
+    starts = {w: t for _, w, t in reported}
+    # "world" starts at "wor" in ctx-1's first chunk; "morning" at "mor" in ctx-2's.
+    assert starts["world"] == pytest.approx(0.6)
+    assert starts["morning"] == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_context_late_alignment_is_ignored():
+    """Alignment the server sends after an interruption must not bring back the
+    context's word clock, which nothing would remove again."""
+    service = _make_service()
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word) for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    await service.create_audio_context("ctx-1")
+    service._websocket = _MessagesWebSocket([{"contextId": "ctx-1", "alignment": _chunk("Hello ")}])
+    await service._receive_messages()
+    assert "ctx-1" in service._word_clocks
+
+    # The bot is interrupted: the audio context goes away and its clock is dropped.
+    service._websocket = _FakeWebSocket()
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_interrupted("ctx-1")
+
+    service._websocket = _MessagesWebSocket(
+        [
+            {"contextId": "ctx-1", "alignment": _chunk("there wor")},
+            {"contextId": "ctx-1", "alignment": _chunk("ld ")},
+            {"contextId": "ctx-1", "isFinal": True},
+        ]
+    )
+    await service._receive_messages()
+
+    assert "ctx-1" not in service._word_clocks, "late alignment re-created the word clock"
+    assert reported == [("ctx-1", "Hello")]
+
+
+@pytest.mark.parametrize(
+    "model, adapter",
+    [
+        ("eleven_flash_v2_5", BaseExpressionAdapter),
+        ("eleven_multilingual_v2", BaseExpressionAdapter),
+        ("eleven_v3", ElevenLabsAudioTagExpressionAdapter),
+        ("eleven_v4_turbo", ElevenLabsAudioTagExpressionAdapter),
+    ],
+)
+def test_http_expression_adapter_follows_the_model(model, adapter):
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_FakeHttpSession(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model=model),
+    )
+    assert type(service.get_expression_adapter()) is adapter
+
+
+@pytest.mark.asyncio
+async def test_http_model_change_to_one_without_audio_tags_is_broadcast():
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_FakeHttpSession(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+
+    _, up = await run_test(
+        service,
+        frames_to_send=[
+            TTSUpdateSettingsFrame(
+                delta=ElevenLabsHttpTTSService.Settings(model="eleven_flash_v2_5")
+            )
+        ],
+        pipeline_params=PipelineParams(enable_expressive_conversation=True),
+    )
+
+    metadata = [f for f in up if isinstance(f, TTSMetadataFrame)]
+    assert metadata[0].expression is not None
+    assert metadata[-1].expression is None
+
+
+class _StreamingHttpResponse:
+    """A 200 response streaming the given JSON lines."""
+
+    status = 200
+
+    def __init__(self, lines: list[dict]):
+        self.content = self._lines([json.dumps(line).encode() + b"\n" for line in lines])
+
+    async def _lines(self, lines):
+        for line in lines:
+            yield line
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _http_chunk(text: str) -> dict:
+    return {
+        "alignment": {
+            "characters": list(text),
+            "character_start_times_seconds": [i * 0.1 for i in range(len(text))],
+            "character_end_times_seconds": [(i + 1) * 0.1 for i in range(len(text))],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_http_word_timestamps_report_audio_tags_as_words():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            chunks = ["It's ", "[excited]", " back [sh", "ort pause] up."]
+            return _StreamingHttpResponse([_http_chunk(c) for c in chunks])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    async for _ in service.run_tts("It's [excited] back [short pause] up.", "ctx-1"):
+        pass
+
+    assert reported[:4] == ["It's", "[excited]", "back", "[short pause]"]
+
+
+@pytest.mark.asyncio
+async def test_http_audio_tag_ending_the_reply_is_reported_whole():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            chunks = ["Thanks. [inhales ", "deeply]"]
+            return _StreamingHttpResponse([_http_chunk(c) for c in chunks])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    async for _ in service.run_tts("Thanks. [inhales deeply]", "ctx-1"):
+        pass
+
+    assert reported == ["Thanks.", "[inhales deeply]"]
+
+
+@pytest.mark.asyncio
+async def test_http_alignment_is_left_as_is_without_expressive_conversation():
+    class _Session:
+        def post(self, url, json=None, headers=None, params=None):
+            return _StreamingHttpResponse([_http_chunk("Press [ to open the menu now.")])
+
+    service = ElevenLabsHttpTTSService(
+        api_key="test-key",
+        aiohttp_session=_Session(),
+        settings=ElevenLabsHttpTTSService.Settings(voice="test-voice", model="eleven_v3"),
+    )
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    async for _ in service.run_tts("Press [ to open the menu now.", "ctx-1"):
+        pass
+
+    assert reported == ["Press", "[", "to", "open", "the", "menu", "now."]

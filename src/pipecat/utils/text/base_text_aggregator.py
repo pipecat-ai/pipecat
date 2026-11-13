@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,10 +9,72 @@
 This module defines the abstract base class for text aggregators that accumulate
 and process text tokens, typically used by TTS services to determine when
 aggregated text should be sent for speech synthesis.
+
+Attributes:
+    AggregationType: Deprecated alias for :class:`TextType`.
+
+        .. deprecated:: 1.13.0
+            Use :class:`TextType` instead.
+            Will be removed in 2.0.0.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.string import resolve_sentence_tokenizer_language
+
+
+class TextType(StrEnum):
+    """Built-in text types.
+
+    ``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,
+    such as "Mm-hmm.". Text can also have a type of its own, such as ``"code"``.
+
+    ``EXPRESSION_SOUND`` and ``EXPRESSION_PAUSE`` are part of expressive
+    conversation (alpha): a sound or a silence an LLM writes into its reply,
+    which isn't spoken as words. The text is the sound's name, as written in
+    its tag, or the pause's duration in milliseconds.
+    """
+
+    BACKCHANNEL = "backchannel"
+    EXPRESSION_SOUND = "expression_sound"
+    EXPRESSION_PAUSE = "expression_pause"
+    SENTENCE = "sentence"
+    TOKEN = "token"
+    WORD = "word"
+
+    def __str__(self):
+        return self.value
+
+
+@dataclass
+class Aggregation:
+    """Data class representing aggregated text and its type.
+
+    An Aggregation object is created whenever a stream of text is aggregated by
+    a text aggregator. It contains the aggregated text and a type saying what
+    the text represents.
+
+    Parameters:
+        text: The aggregated text content.
+        type: What the text represents: a :class:`TextType` such as a sentence or
+            a word, or a custom type such as ``"code"``.
+    """
+
+    text: str
+    type: str
+
+    def __str__(self) -> str:
+        """Return a string representation of the aggregation.
+
+        Returns:
+            A descriptive string showing the type and text of the aggregation.
+        """
+        return f"Aggregation by {self.type}: {self.text}"
 
 
 class BaseTextAggregator(ABC):
@@ -28,9 +90,49 @@ class BaseTextAggregator(ABC):
     logic, text manipulation behavior, and state management for interruptions.
     """
 
+    def __init__(
+        self,
+        *,
+        aggregation_type: TextType = TextType.SENTENCE,
+        language: str | None = None,
+    ):
+        """Initialize the base text aggregator.
+
+        Args:
+            aggregation_type: The aggregation strategy to use. SENTENCE buffers
+                text until sentence boundaries are detected, TOKEN passes text
+                through immediately, and WORD buffers until word boundaries.
+            language: Language code for sentence detection.
+        """
+        self._aggregation_type = TextType(aggregation_type)
+        self._language = resolve_sentence_tokenizer_language(language)
+
+    @property
+    def language(self) -> str:
+        """The normalized language code used for sentence detection."""
+        return self._language
+
+    def set_language(self, language: str | None) -> None:
+        """Select a sentence tokenizer without discarding buffered text.
+
+        Args:
+            language: Language code. Call between generations
+                to keep one language for all text within a generation.
+        """
+        self._language = resolve_sentence_tokenizer_language(language)
+
+    @property
+    def aggregation_type(self) -> TextType:
+        """Get the aggregation type for this aggregator.
+
+        Returns:
+            The aggregation type.
+        """
+        return self._aggregation_type
+
     @property
     @abstractmethod
-    def text(self) -> str:
+    def text(self) -> Aggregation:
         """Get the currently aggregated text.
 
         Subclasses must implement this property to return the text that has
@@ -42,25 +144,43 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    async def aggregate(self, text: str) -> Optional[str]:
-        """Aggregate the specified text with the currently accumulated text.
+    async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
+        """Aggregate the specified text and yield completed aggregations.
 
-        This method should be implemented to define how the new text contributes
-        to the aggregation process. It returns the updated aggregated text if
-        it's ready to be processed, or None otherwise.
+        This method processes the input text character-by-character internally
+        and yields Aggregation objects as they complete.
 
         Subclasses should implement their specific logic for:
 
-        - How to combine new text with existing accumulated text
+        - How to process text character-by-character
         - When to consider the aggregated text ready for processing
         - What criteria determine text completion (e.g., sentence boundaries)
+        - When a completion occurs, yield an Aggregation object containing the
+          aggregated text (stripped of leading/trailing whitespace) and its type
 
         Args:
             text: The text to be aggregated.
 
+        Yields:
+            Aggregation objects as they complete. Each Aggregation consists of
+            the aggregated text (stripped of leading/trailing whitespace) and
+            a type saying what it represents: a :class:`TextType` such as a
+            sentence or a word, or a custom type such as ``"code"``.
+        """
+        pass
+        # Make this a generator to satisfy type checker
+        yield  # pyright: ignore[reportReturnType]  # pragma: no cover
+
+    @abstractmethod
+    async def flush(self) -> Aggregation | None:
+        """Flush any pending aggregation.
+
+        This method is called at the end of a stream (e.g., when receiving
+        LLMFullResponseEndFrame) to return any text that was buffered.
+
         Returns:
-            The updated aggregated text if ready for processing, or None if more
-            text is needed before the aggregated content is ready.
+            An Aggregation object if there is pending text, or None if there
+            is no pending text.
         """
         pass
 
@@ -86,3 +206,19 @@ class BaseTextAggregator(ABC):
         resetting any internal tracking variables.
         """
         pass
+
+
+if TYPE_CHECKING:
+    AggregationType = TextType
+else:
+
+    def __getattr__(name: str):
+        """Resolve the deprecated ``AggregationType`` alias."""
+        if name == "AggregationType":
+            warn_deprecated(
+                "`AggregationType` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `TextType` instead.",
+                stacklevel=2,
+            )
+            return TextType
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

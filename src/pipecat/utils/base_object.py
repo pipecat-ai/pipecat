@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,12 +13,16 @@ and async cleanup for all Pipecat components.
 
 import asyncio
 import inspect
+import traceback
 from abc import ABC
+from collections.abc import Coroutine
+from contextvars import Context
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -37,7 +41,7 @@ class EventHandler:
     """
 
     name: str
-    handlers: List[Any]
+    handlers: list[Any]
     is_sync: bool
 
 
@@ -49,19 +53,27 @@ class BaseObject(ABC):
     classes in the framework should inherit from this base class.
     """
 
-    def __init__(self, *, name: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        task_manager: BaseTaskManager | None = None,
+        **kwargs,
+    ):
         """Initialize the base object.
 
         Args:
             name: Optional custom name for the object. If not provided,
                 generates a name using the class name and instance count.
+            task_manager: Optional task manager for handling asyncio tasks.
             **kwargs: Additional arguments passed to parent class.
         """
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._task_manager = task_manager
 
         # Registered event handlers.
-        self._event_handlers: Dict[str, EventHandler] = {}
+        self._event_handlers: dict[str, EventHandler] = {}
 
         # Set of tasks being executed. When a task finishes running it gets
         # automatically removed from the set. When we cleanup we wait for all
@@ -86,16 +98,85 @@ class BaseObject(ABC):
         """
         return self._name
 
+    @property
+    def task_manager(self) -> BaseTaskManager:
+        """Get the task manager for this object.
+
+        Returns:
+            The task manager instance.
+
+        Raises:
+            Exception: If the task manager is not initialized.
+        """
+        if not self._task_manager:
+            raise Exception(f"{self}: TaskManager is not initialized.")
+        return self._task_manager
+
+    async def setup(self, task_manager: BaseTaskManager):
+        """Wire the object up with a task manager.
+
+        Owners of a :class:`BaseObject` should call this on their child objects
+        to propagate the task manager down. Subclasses that own other
+        :class:`BaseObject` instances should override and forward::
+
+            async def setup(self, task_manager):
+                await super().setup(task_manager)
+                await self._child.setup(task_manager)
+
+        Args:
+            task_manager: The task manager to associate with this instance.
+        """
+        self._task_manager = task_manager
+
+    def create_task(
+        self,
+        coroutine: Coroutine,
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> asyncio.Task:
+        """Create a new task managed by this object's task manager.
+
+        Args:
+            coroutine: The coroutine to run in the task.
+            name: Optional name for the task.
+            context: Optional context manager to use when creating the task.
+
+        Returns:
+            The created asyncio task.
+        """
+        if not name:
+            # Native coroutines expose ``cr_code``; fall back to a generic
+            # name for any other awaitable subtype.
+            cr_code = getattr(coroutine, "cr_code", None)
+            name = getattr(cr_code, "co_name", "task")
+        return self.task_manager.create_task(coroutine, f"{self}::{name}", context)
+
+    async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
+        """Cancel a task managed by this object's task manager.
+
+        A default timeout of 1 second is used in order to avoid potential
+        freezes caused by certain libraries that swallow
+        :class:`asyncio.CancelledError`.
+
+        Args:
+            task: The task to cancel.
+            timeout: Optional timeout for task cancellation.
+        """
+        await self.task_manager.cancel_task(task, timeout)
+
     async def cleanup(self):
         """Clean up resources and wait for running event handlers to complete.
 
         This method should be called when the object is no longer needed.
         It waits for all currently executing event handler tasks to finish
-        before returning.
+        before returning, except the one it is called from, since a task
+        can't wait for itself.
         """
-        if self._event_tasks:
-            event_names, tasks = zip(*self._event_tasks)
-            logger.debug(f"{self} waiting on event handlers to finish {list(event_names)}...")
+        current = asyncio.current_task()
+        event_tasks = [(name, task) for name, task in self._event_tasks if task is not current]
+        if event_tasks:
+            event_names, tasks = zip(*event_tasks)
+            logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
     def event_handler(self, event_name: str):
@@ -125,7 +206,22 @@ class BaseObject(ABC):
         if event_name in self._event_handlers:
             self._event_handlers[event_name].handlers.append(handler)
         else:
-            logger.warning(f"Event handler {event_name} not registered")
+            logger.warning(f"{self}: event handler {event_name} not registered")
+
+    def remove_event_handler(self, event_name: str, handler):
+        """Remove a previously added event handler.
+
+        No-op if the event isn't registered or the handler was never added.
+
+        Args:
+            event_name: The name of the event the handler was added for.
+            handler: The handler to remove.
+        """
+        if event_name in self._event_handlers:
+            try:
+                self._event_handlers[event_name].handlers.remove(handler)
+            except ValueError:
+                pass
 
     def _register_event_handler(self, event_name: str, sync: bool = False):
         """Register an event handler type.
@@ -139,7 +235,7 @@ class BaseObject(ABC):
                 name=event_name, handlers=[], is_sync=sync
             )
         else:
-            logger.warning(f"Event handler {event_name} already registered")
+            logger.warning(f"{self}: event handler {event_name} already registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         """Call all registered handlers for the specified event.
@@ -154,7 +250,9 @@ class BaseObject(ABC):
 
         event_handler = self._event_handlers[event_name]
 
-        for handler in event_handler.handlers:
+        # Iterate over a copy, so that a handler that adds or removes handlers
+        # for this event doesn't change which handlers this call runs.
+        for handler in list(event_handler.handlers):
             if event_handler.is_sync:
                 # Just run the handler.
                 await self._run_handler(event_handler.name, handler, *args, **kwargs)
@@ -187,7 +285,11 @@ class BaseObject(ABC):
             else:
                 handler(self, *args, **kwargs)
         except Exception as e:
-            logger.exception(f"Exception in event handler {event_name}: {e}")
+            tb = traceback.extract_tb(e.__traceback__)
+            last = tb[-1]
+            logger.error(
+                f"{self}: uncaught exception in event handler '{event_name}' ({last.filename}:{last.lineno}): {e}"
+            )
 
     def _event_task_finished(self, task: asyncio.Task):
         """Clean up completed event handler tasks.

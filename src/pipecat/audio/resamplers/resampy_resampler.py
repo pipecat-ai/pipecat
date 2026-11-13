@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,16 +11,32 @@ for high-quality audio sample rate conversion.
 """
 
 import numpy as np
-import resampy
+from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.utils.deprecation import deprecated
+
+try:
+    import resampy
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use ResampyResampler, you need to `uv add "pipecat-ai[resampy]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use "
+    "`SincAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead."
+)
 class ResampyResampler(BaseAudioResampler):
     """Audio resampler implementation using the resampy library.
 
     This resampler uses the resampy library's Kaiser windowing filter
     for high-quality audio resampling with good performance characteristics.
+
+    .. deprecated:: 1.2.0
+        Use :class:`SincAudioResampler`, :func:`create_file_resampler()`,
+        or :func:`create_stream_resampler()` instead. Will be removed in 2.0.0.
     """
 
     def __init__(self, **kwargs):
@@ -45,6 +61,11 @@ class ResampyResampler(BaseAudioResampler):
         if in_rate == out_rate:
             return audio
         audio_data = np.frombuffer(audio, dtype=np.int16)
-        resampled_audio = resampy.resample(audio_data, in_rate, out_rate, filter="kaiser_fast")
+        resampled_audio = resampy.resample(
+            audio_data,  # pyright: ignore[reportArgumentType] -- int16 is supported at runtime
+            in_rate,
+            out_rate,
+            filter="kaiser_fast",
+        )
         result = resampled_audio.astype(np.int16).tobytes()
         return result

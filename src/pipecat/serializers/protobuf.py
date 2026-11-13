@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,6 +9,7 @@
 import dataclasses
 import json
 
+from google.protobuf.message import DecodeError
 from loguru import logger
 
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
@@ -16,13 +17,14 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     TextFrame,
     TranscriptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 @dataclasses.dataclass
@@ -49,6 +51,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
         MessageFrame: "message",
+        InterruptionFrame: "interruption",
     }
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
 
@@ -57,21 +60,22 @@ class ProtobufFrameSerializer(FrameSerializer):
         InputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
         MessageFrame: "message",
+        InterruptionFrame: "interruption",
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
-    def __init__(self):
-        """Initialize the Protobuf frame serializer."""
-        pass
+    def __init__(self, params: FrameSerializer.InputParams | None = None):
+        """Initialize the Protobuf frame serializer.
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Get the serializer type.
-
-        Returns:
-            FrameSerializerType.BINARY indicating binary serialization format.
+        Args:
+            params: Configuration parameters.
         """
-        return FrameSerializerType.BINARY
+        super().__init__(params)
+        # The base serializer defaults to filtering out RTVI protocol messages
+        # to avoid sending them over telephony media streams. ProtobufFrameSerializer
+        # is used by WebSocket transports, which are the delivery channel for
+        # these messages, so we disable the filter.
+        self._params.ignore_rtvi_messages = False
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
@@ -83,21 +87,24 @@ class ProtobufFrameSerializer(FrameSerializer):
             Serialized frame as bytes, or None if frame type is not serializable.
         """
         # Wrapping this messages as a JSONFrame to send
+        serializable: Frame | MessageFrame = frame
         if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            frame = MessageFrame(
+            if self.should_ignore_frame(frame):
+                return None
+            serializable = MessageFrame(
                 data=json.dumps(frame.message),
             )
 
-        proto_frame = frame_protos.Frame()
-        if type(frame) not in self.SERIALIZABLE_TYPES:
-            logger.warning(f"Frame type {type(frame)} is not serializable")
+        proto_frame = frame_protos.Frame()  # type: ignore[attr-defined]
+        if type(serializable) not in self.SERIALIZABLE_TYPES:
+            logger.warning(f"Frame type {type(serializable)} is not serializable")
             return None
 
         # ignoring linter errors; we check that type(frame) is in this dict above
-        proto_optional_name = self.SERIALIZABLE_TYPES[type(frame)]  # type: ignore
+        proto_optional_name = self.SERIALIZABLE_TYPES[type(serializable)]  # type: ignore
         proto_attr = getattr(proto_frame, proto_optional_name)
-        for field in dataclasses.fields(frame):  # type: ignore
-            value = getattr(frame, field.name)
+        for field in dataclasses.fields(serializable):  # type: ignore
+            value = getattr(serializable, field.name)
             if value and hasattr(proto_attr, field.name):
                 setattr(proto_attr, field.name, value)
 
@@ -112,7 +119,11 @@ class ProtobufFrameSerializer(FrameSerializer):
         Returns:
             Deserialized frame instance, or None if deserialization fails.
         """
-        proto = frame_protos.Frame.FromString(data)
+        try:
+            proto = frame_protos.Frame.FromString(data)  # type: ignore[attr-defined]
+        except DecodeError as e:
+            logger.error(f"Unable to deserialize Protobuf frame: {e}")
+            return None
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:
             logger.error("Unable to deserialize a valid frame")
@@ -135,7 +146,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])
@@ -150,10 +161,10 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         # Set special fields
         if id:
-            setattr(instance, "id", id)
+            instance.id = id
         if name:
-            setattr(instance, "name", name)
+            instance.name = name
         if pts:
-            setattr(instance, "pts", pts)
+            instance.pts = pts
 
         return instance

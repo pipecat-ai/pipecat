@@ -17,23 +17,150 @@ We welcome contributions of all kinds! Your help is appreciated. Follow these st
    git checkout -b your-branch-name
    ```
 4. **Make your changes**: Edit or add files as necessary.
-5. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
-6. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
+5. **Add a changelog entry**: Create a changelog fragment file (see [Changelog Entries](#changelog-entries) below).
+6. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
+7. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
 
 ```bash
 git commit -m "Description of your changes"
 ```
 
-7. **Push your changes**: Push your branch to your forked repository.
+8. **Push your changes**: Push your branch to your forked repository.
 
 ```bash
 git push origin your-branch-name
 ```
 
-8. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
+9. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
    > Important: Describe the changes you've made clearly!
 
 Our maintainers will review your PR, and once everything is good, your contributions will be merged!
+
+## Filing Bug Reports
+
+A good bug report is one a maintainer can act on. The single most useful thing you can include is a **minimal runnable reproduction**: a small single-file bot, or a test using `run_test()` from `pipecat.tests.utils`, that shows the bug.
+
+### What we require
+
+- A minimal reproducible example (runnable code, not just prose). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
+- Confirmation that you reproduced the issue yourself on the latest Pipecat release (or `main`).
+
+### What gets your report looked at faster
+
+- A failing [behavioral eval](src/pipecat/evals/) scenario that demonstrates the bug.
+- An audio recording, when the bug is audible (interruptions, latency, garbled audio, wrong turn-taking).
+
+### AI-assisted reports
+
+Using AI tools to help write a report is fine. Submitting AI output you haven't verified is not. If you file a report:
+
+- You must have observed the behavior yourself.
+- You must be able to personally answer follow-up questions about it.
+
+Reports that appear machine-generated and unverified may be closed with a single request for justification. Repeat submissions of unverified reports may lead to being blocked from the repository.
+
+### Triage of incomplete reports
+
+Reports without a runnable reproduction get the `needs-repro` label and one comment asking for it. If no reproduction (or a clear explanation of why one isn't possible) is added within 30 days, the issue is closed automatically. Closed issues can always be reopened once a reproduction is available.
+
+If you respond on a `needs-repro` issue, any comment resets the 30-day clock. When a maintainer reviews your response and confirms it includes a runnable reproduction, they relabel the issue `repro-provided`, which takes it out of the auto-close pool and into the review queue. If what you added still isn't a runnable reproduction, the `needs-repro` label stays and the clock keeps running.
+
+## Changelog Entries
+
+Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
+
+A fix or follow-up to a change that has not shipped yet needs no entry of its own: the unreleased change's entry covers it — update that entry instead if the follow-up alters what it should say.
+
+### Creating a Changelog Fragment
+
+1. Create a new file in the `changelog/` directory with this naming pattern:
+
+   ```
+   <PR_number>.<type>.md
+   ```
+
+2. Choose the appropriate type:
+   - `added.md` - New features
+   - `changed.md` - Changes in existing functionality
+   - `deprecated.md` - Soon-to-be removed features
+   - `removed.md` - Removed features
+   - `fixed.md` - Bug fixes
+   - `performance.md` - Performance improvements
+   - `security.md` - Security fixes
+   - `other.md` - Other changes (documentation, dependencies, etc.)
+
+3. Write your changelog entry as a Markdown bullet point. Include the `-` at the start:
+
+**Example files:**
+
+`changelog/1234.added.md`:
+
+```markdown
+- Added support for Anthropic Claude 3.5 Sonnet with improved streaming performance.
+```
+
+`changelog/5678.fixed.md`:
+
+```markdown
+- Fixed an issue where audio frames were dropped during high-load scenarios.
+```
+
+**For entries with nested bullets:**
+
+`changelog/1234.changed.md`:
+
+```markdown
+- Updated service configuration:
+  - Changed default timeout to 30 seconds
+  - Added retry logic for failed connections
+```
+
+### Multiple Changes in One PR
+
+**Different types of changes:** Create separate fragment files for each type:
+
+```
+changelog/1234.added.md
+changelog/1234.fixed.md
+```
+
+**Multiple changes of the same type:** Create numbered fragment files:
+
+```
+changelog/1234.changed.md
+changelog/1234.changed.2.md
+```
+
+**Related changes:** Use nested bullets in a single fragment:
+
+```markdown
+- Updated service configuration:
+  - Changed default timeout to 30 seconds
+  - Added retry logic for failed connections
+```
+
+**Rule of thumb:** One logical change per fragment file. If changes are unrelated, use separate files.
+
+### Preview Your Changes
+
+To see what your changelog entry will look like:
+
+```bash
+towncrier build --draft --version Unreleased
+```
+
+This won't modify any files, just show you a preview.
+
+### When to Skip Changelog Entries
+
+You can skip adding a changelog entry for:
+
+- Documentation-only changes
+- Internal refactoring with no user-facing impact
+- Test-only changes
+- CI/build configuration changes
+
+If you're unsure whether your change needs a changelog entry, ask in your PR!
 
 ## Dependency Management
 
@@ -51,6 +178,16 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Th
    ```
 
 **Important:** Never manually edit `uv.lock`. It's auto-generated by `uv lock`.
+
+## Reasoning Defaults for LLM Services
+
+A voice agent depends on a fast first response, so LLM services send each model they list the lowest reasoning (thinking) setting its provider documents, unless the developer configures reasoning. Whether a bot needs more reasoning is the developer's call.
+
+- **List models by exact name.** Keep the defaults in a table keyed by model name, such as `_THINKING_DEFAULTS` in the Anthropic service. Never derive a value from a version number: a model that isn't listed, including one released after the code was written, runs at the provider's default and is never sent a value it rejects.
+- **Use the lowest documented setting.** Each entry is the lowest reasoning setting the provider's documentation gives for that model: reasoning off where the model allows it, otherwise its lowest level, effort or budget. Confirm the provider accepts it with one request through the service. Leave out aliases such as `gemini-flash-latest`, since the model they name changes, and remove entries for models the provider has shut down.
+- **`use_provider_thinking_default` turns the default off.** With `LLMSettings.use_provider_thinking_default` set, `LLMService._apply_thinking_default()` sends no default and logs at DEBUG that the model runs at the provider's default. `BackendLLMWorker` sets it on its LLM, which does the reasoning its frontend hands off.
+- **Configured settings win.** If the developer sets any reasoning control, such as `thinking` or `effort`, directly or through `extra`, the service sends exactly that and logs nothing.
+- **Log once per model.** The first request for a listed model logs at INFO the value sent, when more reasoning helps, and the setting that changes it. The first request for an unlisted model that can reason logs a WARNING that it runs at the provider's default. A model that can't reason logs nothing.
 
 ## Code Style and Documentation
 
@@ -109,10 +246,76 @@ We follow Google-style docstrings with these specific conventions:
 
 **Deprecations:**
 
-- Use `warnings.warn()` in code for runtime deprecation warnings
-- Add `.. deprecated::` directive in docstrings for documentation visibility
-- Include version information and describe current status
-- Describe parameters in present tense, use directive to indicate deprecation status
+Always add a `.. deprecated::` directive to the docstring — it is the single
+source of truth that tooling parses into a deprecation registry, so it follows
+a small grammar (enforced by `tests/test_deprecation_markers.py`):
+
+- A version after `::` (e.g. `.. deprecated:: 1.3.0`).
+- A body that names the replacement with a Sphinx role — `:class:`, `:meth:`,
+  `:func:`, `:attr:`, `:mod:` (preferred, since the role encodes the target's
+  kind) — or a backticked name, or states `No replacement.` explicitly. Use a
+  plain backtick (not a role) when a role wouldn't resolve: aliases like
+  ``Service.Settings``, usage idioms like ``settings=...``, or parameters.
+- **The replacement is the first reference in the body**, so lead with the
+  relation clause — `Use :class:`X` instead.`, `Merged into :class:`X`.`,
+  `Moved to :mod:`X`.`. Any references after it are contextual prose, not
+  additional replacements, so you can freely mention related APIs:
+
+  ```
+  .. deprecated:: 1.3.0
+      Use :class:`~pipecat.workers.runner.WorkerRunner` instead. It now runs
+      workers (of which :class:`~pipecat.pipeline.worker.PipelineWorker` is one
+      kind), not just pipelines.
+  ```
+
+  Here the replacement is `WorkerRunner`; `PipelineWorker` is just context.
+- **Never lead with a contextual reference.** The first reference must be the
+  actual replacement — not the deprecated thing itself, a ``DeprecationWarning``,
+  or a related-but-not-replacement API. When nothing replaces it (a removed
+  parameter, a behavior change), lead with `No replacement.` rather than relying
+  on incidental words like "no longer".
+
+For the *runtime* warning, the mechanism depends on what is being deprecated:
+
+- **Classes, functions, methods, and properties** → the PEP 702 `@deprecated`
+  decorator (`from pipecat.utils.deprecation import deprecated`). It emits the
+  `DeprecationWarning` automatically and lets type checkers and IDEs flag usages
+  statically. (For a property, place `@deprecated` below `@property`, on the
+  getter.) Its message must be a string literal following the canonical
+  template:
+  - `` `Subject` is deprecated since X.Y.Z and will be removed in A.B.C. Use `Replacement` instead.``
+  - The removal version `A.B.C` is a concrete semantic version (e.g. `2.0.0`) —
+    commit to the release that removes it, don't write "a future release". With
+    nothing to migrate to, the second sentence is `No replacement.` — stated
+    explicitly.
+- **Parameters, fields, module moves, behavior/value changes** → the decorator
+  can't mark these, so call `warn_deprecated(message, stacklevel=...)` (`from
+  pipecat.utils.deprecation import warn_deprecated`), never `warnings.warn`
+  directly. Set `stacklevel` as for `warnings.warn`, pointing at the caller's
+  code where you can. The message follows the same canonical template, written
+  as a string or f-string literal so `tests/test_deprecation_markers.py` can
+  check it. These don't get static-checker detection; the directive documents
+  them.
+
+`warn_deprecated()` shows the warning even where Python's default filters would
+hide it, since many deprecations are detected inside Pipecat as a pipeline runs,
+and warns once per call site, so a check on every frame or a field read
+wherever its object travels doesn't repeat.
+
+```python
+from pipecat.utils.deprecation import deprecated, warn_deprecated
+
+
+@deprecated(
+    "`OldService` is deprecated since 1.3.0 and will be removed in 2.0.0. Use `NewService` instead."
+)
+class OldService(NewService):
+    """Deprecated alias for :class:`NewService`.
+
+    .. deprecated:: 1.3.0
+        Use :class:`NewService` instead. Will be removed in 2.0.0.
+    """
+```
 
 #### Examples:
 
@@ -139,15 +342,16 @@ class MyService(BaseService):
             old_param: Controls legacy behavior.
 
                 .. deprecated:: 1.2.0
-                    This parameter no longer has any effect and will be removed in version 2.0.
+                    No replacement; this parameter no longer has any effect. Will
+                    be removed in 2.0.0.
 
             **kwargs: Additional arguments passed to parent.
         """
         if old_param is not None:
-            import warnings
-            warnings.warn(
-                "Parameter 'old_param' is deprecated and will be removed in version 2.0.",
-                DeprecationWarning,
+            warn_deprecated(
+                "`old_param` is deprecated since 1.2.0 and will be removed in 2.0.0. "
+                "No replacement.",
+                stacklevel=2,
             )
         super().__init__(**kwargs)
 
@@ -171,6 +375,7 @@ class MyService(BaseService):
         """
         pass
 
+
 # Dataclass with code examples
 @dataclass
 class MessageFrame:
@@ -190,6 +395,7 @@ class MessageFrame:
     """
 
     messages: List[dict]
+
 
 # Enum class
 class Status(Enum):

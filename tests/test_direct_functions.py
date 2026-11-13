@@ -1,14 +1,15 @@
-import asyncio
-import unittest
-from typing import Optional, TypedDict, Union
-
-from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
-from pipecat.services.llm_service import FunctionCallParams
-
-# Copyright (c) 2025, Daily
+#
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+import asyncio
+import unittest
+from typing import Any, TypedDict
+
+from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
+from pipecat.services.llm_service import FunctionCallParams
 
 
 class TestDirectFunction(unittest.TestCase):
@@ -51,7 +52,7 @@ class TestDirectFunction(unittest.TestCase):
         self.assertEqual(func.properties, {})
 
         async def my_function_simple_params(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None]
+            params: FunctionCallParams, name: str, age: int, height: float | None
         ):
             return {"status": "success"}, None
 
@@ -69,7 +70,7 @@ class TestDirectFunction(unittest.TestCase):
             params: FunctionCallParams,
             address_lines: list[str],
             nickname: str | int | float,
-            extra: Optional[dict[str, str]],
+            extra: dict[str, str] | None,
         ):
             return {"status": "success"}, None
 
@@ -125,6 +126,25 @@ class TestDirectFunction(unittest.TestCase):
             },
         )
 
+    def test_any_params_accept_any_value(self):
+        async def my_function_any_params(
+            params: FunctionCallParams,
+            value: Any,
+            tags: list[Any],
+            metadata: dict[str, Any],
+        ):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function_any_params)
+        self.assertEqual(
+            func.properties,
+            {
+                "value": {},
+                "tags": {"type": "array", "items": {}},
+                "metadata": {"type": "object", "additionalProperties": {}},
+            },
+        )
+
     def test_required_is_set_from_function(self):
         async def my_function_no_params(params: FunctionCallParams):
             return {"status": "success"}, None
@@ -133,7 +153,7 @@ class TestDirectFunction(unittest.TestCase):
         self.assertEqual(func.required, [])
 
         async def my_function_simple_params(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None] = None
+            params: FunctionCallParams, name: str, age: int, height: float | None = None
         ):
             return {"status": "success"}, None
 
@@ -142,9 +162,9 @@ class TestDirectFunction(unittest.TestCase):
 
         async def my_function_complex_params(
             params: FunctionCallParams,
-            address_lines: Optional[list[str]],
+            address_lines: list[str] | None,
             nickname: str | int = "Bud",
-            extra: Optional[dict[str, str]] = None,
+            extra: dict[str, str] | None = None,
         ):
             return {"status": "success"}, None
 
@@ -153,7 +173,7 @@ class TestDirectFunction(unittest.TestCase):
 
     def test_property_descriptions_are_set_from_function(self):
         async def my_function(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None]
+            params: FunctionCallParams, name: str, age: int, height: float | None
         ):
             """
             This is a test function.
@@ -187,19 +207,19 @@ class TestDirectFunction(unittest.TestCase):
         def my_function_non_async(params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "must be async"):
             DirectFunctionWrapper(function=my_function_non_async)
 
         async def my_function_missing_params():
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "must have at least one parameter"):
             DirectFunctionWrapper(my_function_missing_params)
 
         async def my_function_misplaced_params(foo: str, params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "first parameter must be named"):
             DirectFunctionWrapper(my_function_misplaced_params)
 
     def test_invoke_calls_function_with_args_and_params_object(self):

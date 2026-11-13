@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,43 +10,69 @@ This module provides utilities for natural language text processing including
 sentence boundary detection, email and number pattern handling, and XML-style
 tag parsing for structured text content.
 
-Dependencies:
-    This module uses NLTK (Natural Language Toolkit) for robust sentence
-    tokenization. NLTK is licensed under the Apache License 2.0.
-    See: https://www.nltk.org/
-    Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
+Sentence boundaries use sentencex's embedded language rules without external data.
 """
 
 import re
-from typing import FrozenSet, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from functools import cache
 
-import nltk
-from loguru import logger
-from nltk.tokenize import sent_tokenize
+# The native extension does not publish Python type stubs.
+from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
-# Ensure punkt_tab tokenizer data is available
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except LookupError:
-    try:
-        nltk.download("punkt_tab", quiet=True)
-    except (OSError, PermissionError) as e:
-        logger.error(
-            f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-            "This data is required for sentence tokenization features. "
-            "The download failed due to filesystem permissions. "
-            "To resolve: pre-install the data in a location with appropriate read permissions, "
-            "or set the NLTK_DATA environment variable to point to a writable directory. "
-            "See https://www.nltk.org/data.html for more information."
-        )
+_QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
+# A numbered-list marker such as "1." at the start of a line.
+_LIST_MARKER = re.compile(r"(?m)^[ \t]*\d+\.(?=[ \t])")
 
-SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
+
+def resolve_sentence_tokenizer_language(language: str | None) -> str:
+    """Normalize a language code for sentencex's language fallback map.
+
+    Args:
+        language: Language code, optionally with a region. None, empty, and
+            automatic language selections use English.
+
+    Returns:
+        A lowercase base language code. Sentencex resolves unsupported codes.
+    """
+    if not isinstance(language, str):
+        return "en"
+    normalized = language.strip().lower().replace("_", "-").split("-")[0]
+    return "en" if normalized in ("", "auto") else normalized
+
+
+@cache
+def _sent_tokenizer(language: str = "en") -> Callable[[str], list[str]]:
+    """Return a sentence splitter that preserves source offsets before whitespace.
+
+    Paragraph separators belong to the following sentence. Trailing whitespace
+    stays in the aggregation buffer until that sentence is emitted.
+    """
+    code = resolve_sentence_tokenizer_language(language)
+
+    def tokenize(text: str) -> list[str]:
+        sentences = []
+        pending = ""
+        for span in segment(code, text):
+            pending += span
+            if span.strip():
+                sentence = pending.rstrip()
+                sentences.append(sentence)
+                pending = pending[len(sentence) :]
+        return sentences
+
+    return tokenize
+
+
+SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
     {
         # Latin script punctuation (most European languages, Filipino, etc.)
         ".",
         "!",
         "?",
         ";",
+        "…",
         # East Asian punctuation (Chinese (Traditional & Simplified), Japanese, Korean)
         "。",  # Ideographic full stop
         "？",  # Full-width question mark
@@ -62,8 +88,6 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
         "؛",  # Arabic semicolon
         "۔",  # Urdu full stop
         "؏",  # Arabic sign misra (classical texts)
-        # Thai
-        "।",  # Thai uses Devanagari-style punctuation in some contexts
         # Myanmar/Burmese
         "၊",  # Myanmar sign little section
         "။",  # Myanmar sign section
@@ -72,7 +96,6 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
         "៕",  # Khmer sign bariyoosan
         # Lao
         "໌",  # Lao cancellation mark (used as period)
-        "༎",  # Tibetan mark delimiter tsheg bstar (also used in Lao contexts)
         # Tibetan
         "།",  # Tibetan mark intersyllabic tsheg
         "༎",  # Tibetan mark delimiter tsheg bstar
@@ -87,7 +110,17 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
     }
 )
 
-StartEndTags = Tuple[str, str]
+# Latin punctuation that sentencex handles well — these need sentencex's disambiguation
+# because "." can appear in abbreviations, decimals, etc.
+_LATIN_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset({".", "!", "?", ";", "…"})
+
+# Non-Latin sentence-ending punctuation that is always unambiguous and never needs
+# the tokenizer's disambiguation logic. Used for punctuation outside its rules.
+UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = (
+    SENTENCE_ENDING_PUNCTUATION - _LATIN_SENTENCE_ENDING_PUNCTUATION
+)
+
+StartEndTags = tuple[str, str]
 
 
 def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
@@ -109,15 +142,16 @@ def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
     return text
 
 
-def match_endofsentence(text: str) -> int:
+def match_endofsentence(text: str, *, language: str | None = None) -> int:
     """Find the position of the end of a sentence in the provided text.
 
-    This function uses NLTK's sentence tokenizer to detect sentence boundaries
+    This function uses sentencex's sentence tokenizer to detect sentence boundaries
     in the input text, combined with punctuation verification to ensure that
     single tokens without proper sentence endings aren't considered complete sentences.
 
     Args:
         text: The input text in which to find the end of the sentence.
+        language: Language code. Defaults to English.
 
     Returns:
         The position of the end of the sentence if found, otherwise 0.
@@ -127,71 +161,220 @@ def match_endofsentence(text: str) -> int:
     if not text:
         return 0
 
-    # Use NLTK's sentence tokenizer to find sentence boundaries
-    sentences = sent_tokenize(text)
+    # Sentencex splits after a list marker ("1. The" -> "1.", "The"). Blank the
+    # marker with equal-width spaces so it stays with its item; boundary offsets
+    # still refer to the original text. The digits are blanked too because some
+    # languages' rules (German, Finnish, Czech, ...) never start a sentence at a
+    # digit, which would merge each item into the one before it.
+    tokenizer_text = _LIST_MARKER.sub(lambda m: " " * len(m[0]), text)
+    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
 
     if not sentences:
         return 0
 
     first_sentence = sentences[0]
 
-    # If there's only one sentence that equals the entire text,
-    # verify it actually ends with sentence-ending punctuation.
-    # This is required as NLTK may return a single sentence for
-    # text that's a single word. In the case of LLM tokens, it's
-    # common for text to be single words, so we need to ensure
-    # sentence-ending punctuation is present.
-    if len(sentences) == 1 and first_sentence == text:
-        return len(text) if text and text[-1] in SENTENCE_ENDING_PUNCTUATION else 0
+    # With an unfinished quote such as 'She said, "Dr. S', sentencex can split
+    # after '"Dr.'. Recheck a proposed split after a quoted word ending in a
+    # period, letting sentencex decide whether that word is an abbreviation.
+    if len(sentences) > 1 and (quote := _QUOTED_WORD_END.search(first_sentence)):
+        # Group 1 contains only the opening quote characters. Replace them with
+        # equal-width spaces so sentencex sees the abbreviation without the quote.
+        # Boundary offsets still refer to the original text, which keeps its quotes.
+        start, end = quote.span(1)
+        tokenizer_text = tokenizer_text[:start] + " " * (end - start) + tokenizer_text[end:]
+        sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
+        first_sentence = sentences[0]
 
-    # If there are multiple sentences, the first one is complete by definition
-    # (NLTK found a boundary, so there must be proper punctuation)
+    # A single span can be an incomplete fragment; require terminal punctuation.
+    if len(sentences) == 1 and first_sentence == tokenizer_text:
+        if text and text[-1] in SENTENCE_ENDING_PUNCTUATION:
+            return len(text)
+        # Additional punctuation can delimit sentences outside the selected rules.
+        for i, ch in enumerate(text):
+            if ch in UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION:
+                return i + 1
+        return 0
+
     if len(sentences) > 1:
         return len(first_sentence)
 
-    # Single sentence that doesn't equal the full text means incomplete
     return 0
 
 
 def parse_start_end_tags(
     text: str,
     tags: Sequence[StartEndTags],
-    current_tag: Optional[StartEndTags],
+    current_tag: StartEndTags | None,
     current_tag_index: int,
-) -> Tuple[Optional[StartEndTags], int]:
+) -> tuple[StartEndTags | None, int]:
     """Parse text to identify start and end tag pairs.
 
-    If a start tag was previously found (i.e., current_tag is valid), wait for
-    the corresponding end tag. Otherwise, wait for a start tag.
-
-    This function returns the index in the text where parsing should continue
-    in the next call and the current or new tags.
+    Scans the text from ``current_tag_index``: inside a tag, for its end tag;
+    outside one, for the earliest start tag of any pair, and then for that
+    pair's end tag after it. A pair whose start and end tags are the same,
+    such as ``("^^", "^^")``, is found the same way.
 
     Args:
         text: The text to be parsed.
         tags: List of tuples containing start and end tags.
         current_tag: The currently active tags, if any.
-        current_tag_index: The current index in the text.
+        current_tag_index: Where in the text to resume scanning.
 
     Returns:
-        A tuple containing None or the current tag and the index of the text.
+        The tag the text ends inside, or None, and where to resume scanning:
+        just past the open tag's start, or past the last tag that closed.
     """
-    # If we are already inside a tag, check if the end tag is in the text.
-    if current_tag:
-        _, end_tag = current_tag
-        if end_tag in text[current_tag_index:]:
-            return (None, len(text))
-        return (current_tag, current_tag_index)
+    index = current_tag_index
+    while True:
+        if current_tag:
+            end = text.find(current_tag[1], index)
+            if end < 0:
+                return (current_tag, index)
+            index = end + len(current_tag[1])
+            current_tag = None
+        starts = [(text.find(start, index), (start, end)) for start, end in tags]
+        found = [(position, tag) for position, tag in starts if position >= 0]
+        if not found:
+            return (None, index)
+        position, current_tag = min(found, key=lambda found_tag: found_tag[0])
+        index = position + len(current_tag[0])
 
-    # Check if any start tag appears in the text
-    for start_tag, end_tag in tags:
-        start_tag_count = text[current_tag_index:].count(start_tag)
-        end_tag_count = text[current_tag_index:].count(end_tag)
-        if start_tag_count == 0 and end_tag_count == 0:
-            return (None, current_tag_index)
-        elif start_tag_count > end_tag_count:
-            return ((start_tag, end_tag), len(text))
-        elif start_tag_count == end_tag_count:
-            return (None, len(text))
 
-    return (None, current_tag_index)
+def longest_trailing_partial_match(text: str, candidates: Sequence[str]) -> int:
+    """Find the length of the longest suffix of text that is a proper prefix of a candidate.
+
+    Used to detect a delimiter (e.g., an XML-style start tag) that has been
+    split across two text chunks: the trailing partial delimiter can be held
+    back from output until the next chunk completes it, rather than being
+    flushed as plain text and losing the delimiter.
+
+    Args:
+        text: The text to check for a trailing partial match.
+        candidates: Full strings to match a proper prefix of against the end of text.
+
+    Returns:
+        The length of the longest matching suffix, or 0 if no candidate has a
+        proper prefix matching the end of text.
+    """
+    longest = 0
+    for candidate in candidates:
+        max_len = min(len(text), len(candidate) - 1)
+        for length in range(max_len, longest, -1):
+            if text[-length:] == candidate[:length]:
+                longest = length
+                break
+    return longest
+
+
+@dataclass
+class TextPartForConcatenation:
+    """Class representing a part of text for concatenation with concatenate_aggregated_text.
+
+    Parameters:
+        text: The text content.
+        includes_inter_part_spaces: Whether any necessary inter-frame
+            (leading/trailing) spaces are already included in the text.
+    """
+
+    text: str
+    includes_inter_part_spaces: bool
+
+    def __str__(self):
+        return f"{type(self).__name__}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
+
+
+def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> str:
+    """Concatenate a list of text parts into a single string.
+
+    This function joins the provided list of text parts into a single string,
+    taking into account whether or not the parts already contain spacing.
+
+    This function is useful for aggregating text segments received from LLMs or
+    transcription services.
+
+    Args:
+        text_parts: A list of text parts to concatenate.
+
+    Returns:
+        A single concatenated string.
+    """
+    result = ""
+    last_includes_inter_part_spaces = False
+
+    if not text_parts:
+        return result
+
+    def append_part(part: TextPartForConcatenation):
+        nonlocal result
+        nonlocal last_includes_inter_part_spaces
+        result += part.text
+        last_includes_inter_part_spaces = part.includes_inter_part_spaces
+
+    for part in text_parts:
+        # Part is empty.
+        # Skip.
+        if not part.text:
+            continue
+
+        # Result is as yet empty.
+        # Just append.
+        if not result:
+            append_part(part)
+            continue
+
+        if part.includes_inter_part_spaces and last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has spaces already included.
+            # Just append.
+            append_part(part)
+        elif not part.includes_inter_part_spaces and not last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has no spaces included.
+            # Add a space before appending.
+            result += " "
+            append_part(part)
+        else:
+            # This part represents a transition to a new run (spaces -> no spaces, or vice versa).
+            # Add a space if needed, before appending.
+            if not result[-1].isspace() and not part.text[0].isspace():
+                result += " "
+            append_part(part)
+
+    # NOTE: the above logic assumes that runs of text parts with
+    # includes_inter_part_spaces=True are well-formed, i.e. they're not
+    # actually multiple separate runs with a space-less boundary, like
+    # "hello ", "world.", "goodnight ", "moon."
+
+    # Clean up any excessive whitespace
+    result = result.strip()
+
+    return result
+
+
+# Characters of scripts that are written without spaces between words (Chinese,
+# Japanese kana, Thai). A word boundary can't be required next to them: in
+# "你好小助手今天天气怎么样" there is no boundary between "手" and "今", because both
+# are word characters.
+_UNSPACED_SCRIPT_CHAR_RE = re.compile(
+    r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]"
+)
+
+
+def compile_phrase_pattern(phrase: str) -> re.Pattern:
+    """Compile a case-insensitive pattern that finds a spoken phrase in text.
+
+    The words of the phrase may be separated by any amount of whitespace
+    (including none). The match must start and end on a word boundary, except
+    next to characters of scripts written without spaces (Chinese, Japanese,
+    Thai), where speech-to-text output has no boundaries between words.
+
+    Args:
+        phrase: The phrase to find, for example "hey pipecat" or "小助手".
+
+    Returns:
+        The compiled pattern.
+    """
+    words = phrase.split()
+    body = r"\s*".join(re.escape(word) for word in words)
+    start = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"\b"
+    end = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"\b"
+    return re.compile(start + body + end, re.IGNORECASE)

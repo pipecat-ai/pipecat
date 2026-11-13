@@ -1,24 +1,22 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Google RTVI integration models and observer implementation.
+"""Google RTVI processor and observer implementation.
 
 This module provides integration with Google's services through the RTVI framework,
 including models for search responses and an observer for handling Google-specific
 frame types.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import FramePushed
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 
 
@@ -31,9 +29,9 @@ class RTVISearchResponseMessageData(BaseModel):
         origins: List of search result origins with metadata.
     """
 
-    search_result: Optional[str]
-    rendered_content: Optional[str]
-    origins: List[LLMSearchOrigin]
+    search_result: str | None
+    rendered_content: str | None
+    origins: list[LLMSearchOrigin]
 
 
 class RTVIBotLLMSearchResponseMessage(BaseModel):
@@ -88,4 +86,23 @@ class GoogleRTVIObserver(RTVIObserver):
                 rendered_content=frame.rendered_content,
             )
         )
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
+
+
+class GoogleRTVIProcessor(RTVIProcessor):
+    """RTVI processor for Google service integration.
+
+    Creates a specific Google RTVI Observer.
+    """
+
+    def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
+        """Creates a new RTVI Observer.
+
+        Args:
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
+
+        Returns:
+            A new RTVI observer.
+        """
+        return GoogleRTVIObserver(self)

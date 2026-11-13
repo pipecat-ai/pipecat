@@ -1,23 +1,70 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
+import io
 import unittest
+from dataclasses import dataclass, field
+
+from loguru import logger
 
 from pipecat.frames.frames import (
+    DataFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
     OutputTransportMessageUrgentFrame,
+    StartFrame,
+    StopFrame,
+    SystemFrame,
     TextFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.identity_filter import IdentityFilter
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+)
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
+
+
+@dataclass
+class BroadcastTestFrame(DataFrame):
+    """Test frame with init fields for broadcast testing."""
+
+    text: str = ""
+    value: int = 0
+    items: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _CancelInProgressFrame(SystemFrame):
+    """Asks the processor to cancel ``target`` if it is the frame in progress."""
+
+    target: Frame | None = None
+
+
+class _CancelInProgressProcessor(FrameProcessor):
+    """Takes 0.4s over every non-system frame, and records what each cancel request did."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled: list[bool] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, _CancelInProgressFrame):
+            assert frame.target is not None
+            self.cancelled.append(await self._cancel_frame_in_progress(frame.target))
+        elif not isinstance(frame, SystemFrame):
+            await asyncio.sleep(0.4)
+        await self.push_frame(frame, direction)
 
 
 class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
@@ -65,44 +112,434 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         assert before_push_called
         assert after_push_called
 
-    async def test_interruption_and_wait(self):
-        class DelayFrameProcessor(FrameProcessor):
-            """This processors just gives time to the event loop to change
-            between tasks. Otherwise things happen to fast."""
-
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                await super().process_frame(frame, direction)
-                await asyncio.sleep(0.1)
-                await self.push_frame(frame, direction)
+    async def test_broadcast_interruption(self):
+        """Test that broadcast_interruption() pushes InterruptionFrame both
+        directions and allows subsequent code to run."""
 
         class InterruptFrameProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):
                 await super().process_frame(frame, direction)
 
                 if isinstance(frame, TextFrame):
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
                     await self.push_frame(OutputTransportMessageUrgentFrame(message=frame.text))
                 else:
                     await self.push_frame(frame, direction)
 
-        pipeline = Pipeline([DelayFrameProcessor(), InterruptFrameProcessor()])
+        pipeline = Pipeline([InterruptFrameProcessor()])
 
         frames_to_send = [
-            # Just a random interruption to make sure we don't clear anything
-            # before the actual `InterruptionTaskFrame` interruption.
-            InterruptionFrame(),
-            # This will generate an `InterruptionTaskFrame` and will wait for an
-            # `InterruptionFrame`.
             TextFrame(text="Hello from Pipecat!"),
-            # Just give time for everything to complete.
             SleepFrame(sleep=0.5),
-            EndFrame(),
         ]
         expected_down_frames = [
             InterruptionFrame,
-            InterruptionFrame,
             OutputTransportMessageUrgentFrame,
-            EndFrame,
+        ]
+        expected_up_frames = [
+            InterruptionFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+
+    async def test_interruptible_frames(self):
+        @dataclass
+        class TestInterruptibleFrame(DataFrame):
+            text: str
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            """This processor just delays processing frames so we have time to
+            try to interrupt them.
+            """
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    # Sleep more than SleepFrame default.
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+
+        frames_to_send = [
+            TestInterruptibleFrame(text="Hello from Pipecat!"),
+            # Make sure we hit the DelayTestFrameProcessor first.
+            SleepFrame(),
+            # Just a random interruption. This should cause the interruption of
+            # TestInterruptibleFrame.
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [InterruptionFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_uninterruptible_frames(self):
+        @dataclass
+        class TestUninterruptibleFrame(DataFrame):
+            text: str
+            interruptible: bool = field(default=False, init=False)
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            """This processor just delays processing non-InterruptionFrame so we
+            have time to try to interrupt them.
+
+            """
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    # Sleep more than SleepFrame default.
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+
+        frames_to_send = [
+            TestUninterruptibleFrame(text="Hello from Pipecat!"),
+            # Make sure we hit the DelayTestFrameProcessor first.
+            SleepFrame(),
+            # Just a random interruption. This should not cause the interruption
+            # of TestUninterruptibleFrame.
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TestUninterruptibleFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_cancel_frame_in_progress_keeps_the_queue(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            TextFrame(text="queued"),
+            _CancelInProgressFrame(target=in_progress),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
+        self.assertEqual(down[-1].text, "queued")
+
+    async def test_cancel_frame_in_progress_leaves_other_frames_alone(self):
+        processor = _CancelInProgressProcessor()
+        queued = TextFrame(text="queued")
+        frames_to_send = [
+            TextFrame(text="in progress"),
+            SleepFrame(sleep=0.1),
+            queued,
+            _CancelInProgressFrame(target=queued),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [False])
+        self.assertEqual([f.text for f in down[1:]], ["in progress", "queued"])
+
+    async def test_an_interruption_after_cancel_frame_in_progress_still_interrupts(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            _CancelInProgressFrame(target=in_progress),
+            TextFrame(text="next"),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+        ]
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, InterruptionFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
+
+    async def test_interruptible_flag_decides_for_a_frame(self):
+        """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""
+
+        @dataclass
+        class MarkerFrame(DataFrame):
+            text: str
+            interruptible: bool = field(default=False, init=False)
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        kept = TextFrame(text="kept")
+        kept.interruptible = False
+        dropped = MarkerFrame(text="dropped")
+        dropped.interruptible = True
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+        frames_to_send = [kept, dropped, SleepFrame(), InterruptionFrame()]
+        expected_down_frames = [InterruptionFrame, TextFrame]
+        received, _ = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual([f.text for f in received if isinstance(f, TextFrame)], ["kept"])
+
+    async def test_broadcast_frame(self):
+        """Test that broadcast_frame creates two separate frames with fresh IDs."""
+        downstream_frames: list[Frame] = []
+        upstream_frames: list[Frame] = []
+
+        class BroadcastTestProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.broadcast_frame(
+                        BroadcastTestFrame, text="hello", value=42, items=["a", "b"]
+                    )
+                else:
+                    await self.push_frame(frame, direction)
+
+        class CaptureProcessor(FrameProcessor):
+            def __init__(self, capture_list: list[Frame], direction: FrameDirection):
+                super().__init__()
+                self._capture_list = capture_list
+                self._capture_direction = direction
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if direction == self._capture_direction and isinstance(frame, BroadcastTestFrame):
+                    self._capture_list.append(frame)
+                await self.push_frame(frame, direction)
+
+        up_capture = CaptureProcessor(upstream_frames, FrameDirection.UPSTREAM)
+        broadcaster = BroadcastTestProcessor()
+        down_capture = CaptureProcessor(downstream_frames, FrameDirection.DOWNSTREAM)
+
+        pipeline = Pipeline([up_capture, broadcaster, down_capture])
+
+        frames_to_send = [TextFrame(text="trigger")]
+        expected_down_frames = [BroadcastTestFrame]
+        expected_up_frames = [BroadcastTestFrame]
+
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+
+        # Verify we got one frame in each direction
+        self.assertEqual(len(downstream_frames), 1)
+        self.assertEqual(len(upstream_frames), 1)
+
+        down_frame = downstream_frames[0]
+        up_frame = upstream_frames[0]
+
+        # Verify the frames have different IDs (they are separate instances)
+        self.assertNotEqual(down_frame.id, up_frame.id)
+
+        # Verify the frames have the correct field values
+        self.assertEqual(down_frame.text, "hello")
+        self.assertEqual(down_frame.value, 42)
+        self.assertEqual(down_frame.items, ["a", "b"])
+        self.assertEqual(up_frame.text, "hello")
+        self.assertEqual(up_frame.value, 42)
+        self.assertEqual(up_frame.items, ["a", "b"])
+
+        # Verify the items lists are shared references (no deep copy)
+        self.assertIs(down_frame.items, up_frame.items)
+
+    async def test_broadcast_frame_instance(self):
+        """Test that broadcast_frame_instance shallow-copies all fields except id and name."""
+        downstream_frames: list[Frame] = []
+        upstream_frames: list[Frame] = []
+        original_frame: list[Frame] = []
+
+        class BroadcastInstanceTestProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, BroadcastTestFrame):
+                    # Set some non-init fields on the frame
+                    frame.pts = 12345
+                    frame.metadata = {"key": "value", "nested": {"a": 1}}
+                    original_frame.append(frame)
+                    await self.broadcast_frame_instance(frame)
+                else:
+                    await self.push_frame(frame, direction)
+
+        class CaptureProcessor(FrameProcessor):
+            def __init__(self, capture_list: list[Frame], direction: FrameDirection):
+                super().__init__()
+                self._capture_list = capture_list
+                self._capture_direction = direction
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if direction == self._capture_direction and isinstance(frame, BroadcastTestFrame):
+                    self._capture_list.append(frame)
+                await self.push_frame(frame, direction)
+
+        up_capture = CaptureProcessor(upstream_frames, FrameDirection.UPSTREAM)
+        broadcaster = BroadcastInstanceTestProcessor()
+        down_capture = CaptureProcessor(downstream_frames, FrameDirection.DOWNSTREAM)
+
+        pipeline = Pipeline([up_capture, broadcaster, down_capture])
+
+        # Create a frame with mutable fields to test shallow copying
+        test_frame = BroadcastTestFrame(text="test", value=99, items=["x", "y", "z"])
+
+        frames_to_send = [test_frame]
+        expected_down_frames = [BroadcastTestFrame]
+        expected_up_frames = [BroadcastTestFrame]
+
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+
+        # Verify we got one frame in each direction
+        self.assertEqual(len(downstream_frames), 1)
+        self.assertEqual(len(upstream_frames), 1)
+        self.assertEqual(len(original_frame), 1)
+
+        orig = original_frame[0]
+        down_frame = downstream_frames[0]
+        up_frame = upstream_frames[0]
+
+        # Verify the frames have different IDs and names (fresh values)
+        self.assertNotEqual(down_frame.id, orig.id)
+        self.assertNotEqual(up_frame.id, orig.id)
+        self.assertNotEqual(down_frame.id, up_frame.id)
+        self.assertNotEqual(down_frame.name, orig.name)
+        self.assertNotEqual(up_frame.name, orig.name)
+
+        # Verify init fields are copied correctly
+        self.assertEqual(down_frame.text, "test")
+        self.assertEqual(down_frame.value, 99)
+        self.assertEqual(down_frame.items, ["x", "y", "z"])
+        self.assertEqual(up_frame.text, "test")
+        self.assertEqual(up_frame.value, 99)
+        self.assertEqual(up_frame.items, ["x", "y", "z"])
+
+        # Verify non-init fields (except id/name) are copied
+        self.assertEqual(down_frame.pts, 12345)
+        self.assertEqual(down_frame.metadata, {"key": "value", "nested": {"a": 1}})
+        self.assertEqual(up_frame.pts, 12345)
+        self.assertEqual(up_frame.metadata, {"key": "value", "nested": {"a": 1}})
+
+        # Verify mutable fields are shallow-copied (shared references)
+        self.assertIs(down_frame.items, orig.items)
+        self.assertIs(up_frame.items, orig.items)
+        self.assertIs(down_frame.metadata, orig.metadata)
+        self.assertIs(up_frame.metadata, orig.metadata)
+
+    async def test_terminal_frames_survive_interruption(self):
+        """Test that EndFrame survives interruption (it is uninterruptible).
+
+        This test simulates issue #3524 where an InterruptionFrame during slow
+        processing would cause terminal frames to be lost, freezing the pipeline.
+        """
+        received_frames: list[Frame] = []
+
+        class DelayAndInterruptProcessor(FrameProcessor):
+            """This processor delays processing and then generates an interruption.
+
+            When processing a TextFrame, it sleeps and then pushes an
+            InterruptionFrame to simulate what happens when interruption occurs
+            while a terminal frame is in the queue.
+            """
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Delay to allow EndFrame to be queued
+                    await asyncio.sleep(0.1)
+                    # Push interruption - this should NOT discard the EndFrame
+                    await self.push_frame(InterruptionFrame(), direction)
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayAndInterruptProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        # Verify EndFrame was received by our capture processor (survived interruption)
+        # Note: run_test filters EndFrame from expected_down_frames when send_end_frame=True,
+        # but our capture processor sees it before that filtering.
+        end_frames = [f for f in received_frames if isinstance(f, EndFrame)]
+        self.assertEqual(len(end_frames), 1, "EndFrame should survive interruption")
+
+    async def test_stop_frame_survives_interruption(self):
+        """Test that StopFrame survives interruption (it is uninterruptible).
+
+        Similar to test_terminal_frames_survive_interruption but specifically
+        for StopFrame.
+        """
+        received_frames: list[Frame] = []
+
+        class DelayAndInterruptProcessor(FrameProcessor):
+            """This processor delays processing and then generates an interruption."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Delay to allow StopFrame to be queued
+                    await asyncio.sleep(0.1)
+                    # Push interruption - this should NOT discard the StopFrame
+                    await self.push_frame(InterruptionFrame(), direction)
+                await self.push_frame(frame, direction)
+
+        class CaptureFrameProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                received_frames.append(frame)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayAndInterruptProcessor(), CaptureFrameProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+            StopFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TextFrame,
+            StopFrame,
         ]
         await run_test(
             pipeline,
@@ -110,3 +547,212 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
             send_end_frame=False,
         )
+
+        # Verify StopFrame was received (survived interruption)
+        stop_frames = [f for f in received_frames if isinstance(f, StopFrame)]
+        self.assertEqual(len(stop_frames), 1, "StopFrame should survive interruption")
+
+    async def test_broadcast_interruption_allows_subsequent_code(self):
+        """Test that broadcast_interruption() returns immediately, allowing the
+        caller to run code afterwards (e.g. push an urgent frame)."""
+        code_after_ran = False
+
+        class InterruptOnTextProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                nonlocal code_after_ran
+
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    await self.broadcast_interruption()
+
+                    code_after_ran = True
+                    await self.push_frame(OutputTransportMessageUrgentFrame(message="done"))
+                else:
+                    await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([InterruptOnTextProcessor()])
+
+        frames_to_send = [
+            TextFrame(text="trigger"),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            OutputTransportMessageUrgentFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertTrue(code_after_ran, "Code after broadcast_interruption() should execute")
+
+    async def test_pause_frames_until_holds_then_delivers_in_order(self):
+        """Frames arriving before the condition is met are delivered once it is."""
+        ready = asyncio.Event()
+        received = []
+
+        class HoldingProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await self.pause_processing_all_frames_until(ready.wait)
+                elif isinstance(frame, TextFrame):
+                    received.append(frame.text)
+                await self.push_frame(frame, direction)
+
+        async def release_later():
+            await asyncio.sleep(0.2)
+            self.assertEqual(received, [], "frames should be held while not ready")
+            ready.set()
+
+        release = asyncio.create_task(release_later())
+        await run_test(
+            HoldingProcessor(),
+            frames_to_send=[TextFrame(text="a"), TextFrame(text="b"), SleepFrame(sleep=0.4)],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+        await release
+
+        self.assertEqual(received, ["a", "b"])
+
+    async def test_pause_frames_until_resumes_when_never_ready(self):
+        """A condition that is never met must not leave the processor paused.
+
+        The pause holds both frame queues, so a processor left paused could
+        not process the frames that shut it down.
+        """
+        never = asyncio.Event()
+        received = []
+
+        class HoldingProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await self.pause_processing_all_frames_until(never.wait, timeout=0.2)
+                elif isinstance(frame, TextFrame):
+                    received.append(frame.text)
+                await self.push_frame(frame, direction)
+
+        await asyncio.wait_for(
+            run_test(
+                HoldingProcessor(),
+                frames_to_send=[TextFrame(text="a"), SleepFrame(sleep=0.5)],
+                expected_down_frames=[TextFrame],
+            ),
+            timeout=10,
+        )
+
+        self.assertEqual(received, ["a"])
+
+    async def test_pause_frames_until_holds_both_queues(self):
+        """Data frames already routed to the process queue must be held too.
+
+        The two queues pause independently, so frames that have already moved
+        to the process queue keep draining unless it is held as well.
+        """
+        processor = FrameProcessor()
+        processor.create_task = lambda coro, name=None: asyncio.create_task(coro)
+
+        await processor.pause_processing_all_frames_until(asyncio.Event().wait, timeout=5.0)
+
+        self.assertTrue(processor._FrameProcessor__should_block_system_frames)
+        self.assertTrue(processor._FrameProcessor__should_block_frames)
+
+    async def test_pause_frames_until_is_a_no_op_in_direct_mode(self):
+        """Direct mode bypasses the queues the pause acts on, so the call warns."""
+        ready = asyncio.Event()
+        processor = FrameProcessor(enable_direct_mode=True)
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, format="{message}")
+        try:
+            await processor.pause_processing_all_frames_until(ready.wait)
+            self.assertIn("direct mode", sink.getvalue())
+        finally:
+            logger.remove(handler_id)
+
+    async def test_start_frame_is_processed_first(self):
+        """A processor holds every frame it receives until its StartFrame.
+
+        Processors are set up concurrently, so one that connects during setup
+        can push frames at a processor that has not started yet. Those frames
+        wait, and the StartFrame is processed ahead of them even when what is
+        waiting is itself a system frame.
+        """
+        processed: list[str] = []
+
+        class RecordingProcessor(FrameProcessor):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                processed.append(type(frame).__name__)
+
+        processor = RecordingProcessor()
+        await processor.setup(frame_processor_setup(TaskManager()))
+        try:
+            await processor.queue_frame(TextFrame(text="early"))
+            await processor.queue_frame(UserStartedSpeakingFrame())
+
+            await asyncio.sleep(0.1)
+            self.assertEqual(processed, [], "no frame should be processed before the StartFrame")
+
+            await processor.queue_frame(StartFrame())
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(processed, ["StartFrame", "UserStartedSpeakingFrame", "TextFrame"])
+        finally:
+            await processor.cleanup()
+
+
+class TestPushErrorUsability(unittest.IsolatedAsyncioTestCase):
+    """The usability verdict push_error derives from an error's category, and
+    the ways a caller can override it."""
+
+    def _processor(self):
+        from unittest.mock import AsyncMock
+
+        from pipecat.processors.filters.identity_filter import IdentityFilter
+
+        processor = IdentityFilter()
+        processor.push_frame = AsyncMock()
+        return processor
+
+    def _permanent_error(self):
+        """An exception whose HTTP status classifies as a permanent category."""
+
+        class FakeApiError(Exception):
+            status_code = 400
+
+        return FakeApiError("bad request")
+
+    async def test_permanent_category_marks_processor_unusable(self):
+        processor = self._processor()
+        await processor.push_error("bad request", exception=self._permanent_error())
+        self.assertFalse(processor.is_usable)
+        await processor.cleanup()
+
+    async def test_explicit_category_overrides_exception_classification(self):
+        """A caller that knows better can keep the processor usable by passing
+        a non-permanent category — e.g. an LLM service reporting a provider
+        rejection as APPLICATION after removing the rejected context message,
+        where the exception alone would classify as a permanent invalid
+        request."""
+        from pipecat.utils.errors import ErrorCategory
+
+        processor = self._processor()
+        await processor.push_error(
+            "bad request",
+            exception=self._permanent_error(),
+            category=ErrorCategory.APPLICATION,
+        )
+        self.assertTrue(processor.is_usable)
+        await processor.cleanup()
+
+    async def test_force_treat_as_permanent_wins_over_transient_category(self):
+        processor = self._processor()
+        await processor.push_error("kept failing", force_treat_as_permanent=True)
+        self.assertFalse(processor.is_usable)
+        await processor.cleanup()
+
+
+if __name__ == "__main__":
+    unittest.main()

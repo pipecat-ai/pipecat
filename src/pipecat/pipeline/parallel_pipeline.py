@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,8 +11,8 @@ sub-pipelines concurrently, with coordination for system frames and proper
 handling of pipeline lifecycle events.
 """
 
+import weakref
 from itertools import chain
-from typing import Dict, List
 
 from loguru import logger
 
@@ -46,12 +46,17 @@ class ParallelPipeline(BasePipeline):
         super().__init__()
 
         if len(args) == 0:
-            raise Exception(f"ParallelPipeline needs at least one argument")
+            raise Exception("ParallelPipeline needs at least one argument")
 
         self._pipelines = []
 
-        self._seen_ids = set()
-        self._frame_counter: Dict[int, int] = {}
+        # Frames that have come out of a branch, so the copies from the other
+        # branches are dropped. Held weakly: a frame no branch holds can't come
+        # out again, so an entry goes away with its frame.
+        self._seen_frames: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
+        self._frame_counter: dict[int, int] = {}
+        self._synchronizing: bool = False
+        self._buffered_frames: list[tuple[Frame, FrameDirection]] = []
 
         logger.debug(f"Creating {self} pipelines")
 
@@ -91,7 +96,7 @@ class ParallelPipeline(BasePipeline):
         return self._pipelines
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list["FrameProcessor"]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor
@@ -104,7 +109,7 @@ class ParallelPipeline(BasePipeline):
         """
         return self._pipelines
 
-    def processors_with_metrics(self) -> List[FrameProcessor]:
+    def processors_with_metrics(self) -> list[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel branches.
 
         Returns:
@@ -122,14 +127,15 @@ class ParallelPipeline(BasePipeline):
             TypeError: If any processor list argument is not actually a list.
         """
         await super().setup(setup)
-        for p in self._pipelines:
-            await p.setup(setup)
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
+        await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all its branches."""
         await super().cleanup()
-        for p in self._pipelines:
-            await p.cleanup()
+        await self._cleanup_processors(self._pipelines)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel branches with lifecycle coordination.
@@ -141,8 +147,22 @@ class ParallelPipeline(BasePipeline):
         await super().process_frame(frame, direction)
 
         # Parallel pipeline synchronized frames.
+        #
+        # - StartFrame: If a fast branch completes first, processors in
+        #   other branches that haven't received StartFrame yet could
+        #   receive other frames before it, causing errors.
+        #
+        # - EndFrame: If EndFrame escapes from a fast branch, downstream
+        #   processors (e.g. output transport) begin shutting down while
+        #   other branches still have frames to flush, causing lost output.
+        #
+        # - CancelFrame: PipelineWorker waits for CancelFrame to reach the
+        #   pipeline sink. If it escapes from a fast branch while slower
+        #   branches are still running, the task considers cancellation
+        #   complete prematurely.
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             self._frame_counter[frame.id] = len(self._pipelines)
+            self._synchronizing = True
             await self.pause_processing_system_frames()
             await self.pause_processing_frames()
 
@@ -151,10 +171,18 @@ class ParallelPipeline(BasePipeline):
             await p.queue_frame(frame, direction)
 
     async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
-        """Push frames while avoiding duplicates using frame ID tracking."""
-        if frame.id not in self._seen_ids:
-            self._seen_ids.add(frame.id)
-            await self.push_frame(frame, direction)
+        """Push frames while avoiding duplicates using frame ID tracking.
+
+        During lifecycle frame synchronization, non-lifecycle frames are buffered
+        to prevent them from escaping the parallel pipeline before all branches
+        have finished processing the lifecycle frame.
+        """
+        if frame.id not in self._seen_frames:
+            self._seen_frames[frame.id] = frame
+            if self._synchronizing:
+                self._buffered_frames.append((frame, direction))
+            else:
+                await self.push_frame(frame, direction)
 
     async def _pipeline_sink_push_frame(self, frame: Frame, direction: FrameDirection):
         # Parallel pipeline synchronized frames.
@@ -167,8 +195,21 @@ class ParallelPipeline(BasePipeline):
 
             # Only push the frame when all pipelines have processed it.
             if frame_counter == 0:
-                await self._parallel_push_frame(frame, direction)
+                self._synchronizing = False
+                # StartFrame should always go before any other frame.
+                if isinstance(frame, StartFrame):
+                    await self._parallel_push_frame(frame, direction)
+                    await self._flush_buffered_frames()
+                else:
+                    await self._flush_buffered_frames()
+                    await self._parallel_push_frame(frame, direction)
                 await self.resume_processing_system_frames()
                 await self.resume_processing_frames()
         else:
             await self._parallel_push_frame(frame, direction)
+
+    async def _flush_buffered_frames(self):
+        """Flush frames that were buffered during lifecycle frame synchronization."""
+        while len(self._buffered_frames) > 0:
+            frame, direction = self._buffered_frames.pop(0)
+            await self.push_frame(frame, direction)

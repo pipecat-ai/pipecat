@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,9 +7,31 @@
 import asyncio
 import struct
 import unittest
+import warnings
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame
+from pipecat.audio.utils import create_stream_resampler
+from pipecat.clocks.system_clock import SystemClock
+from pipecat.frames.frames import (
+    AudioBufferStartRecordingFrame,
+    AudioBufferStopRecordingFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    EndFrame,
+    InputAudioRawFrame,
+    OutputAudioRawFrame,
+    StartFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 
 class _PassthroughResampler:
@@ -18,14 +40,67 @@ class _PassthroughResampler:
     ) -> bytes:  # pragma: no cover - trivial
         return audio
 
+    async def reset(self):  # pragma: no cover - trivial
+        pass
+
+
+async def _make_processor(
+    *, buffer_size: int = 0, start: bool = True, auto_start: bool = False
+) -> AudioBufferProcessor:
+    """Create a processor ready to record.
+
+    Calls setup() and sends a StartFrame through the public process_frame path so that
+    the processor is fully initialised (task manager set, sample rate configured,
+    __started flag set) without needing a full pipeline.
+
+    When ``start`` is True the processor starts recording before returning; pass
+    ``start=False`` to leave recording off (e.g. to test frame-driven start).
+    """
+    processor = AudioBufferProcessor(
+        sample_rate=16000,
+        num_channels=2,
+        buffer_size=buffer_size,
+        auto_start_recording=auto_start,
+    )
+    processor._input_resampler = _PassthroughResampler()
+    processor._output_resampler = _PassthroughResampler()
+
+    task_manager = TaskManager()
+    await processor.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=task_manager,
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
+
+    await processor.process_frame(
+        StartFrame(audio_out_sample_rate=16000), FrameDirection.DOWNSTREAM
+    )
+    if start:
+        await processor.start_recording()
+    return processor
+
+
+async def _capture_track_audio(processor: AudioBufferProcessor) -> tuple[bytes, bytes]:
+    """Flush the processor and return (user_track, bot_track) from on_track_audio_data."""
+    captured = {}
+    event = asyncio.Event()
+
+    async def on_track_audio_data(_, user, bot, sample_rate, num_channels):
+        captured["user"] = user
+        captured["bot"] = bot
+        event.set()
+
+    processor.add_event_handler("on_track_audio_data", on_track_audio_data)
+    await processor.stop_recording()
+    await asyncio.wait_for(event.wait(), timeout=1)
+    return captured["user"], captured["bot"]
+
 
 class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.processor = AudioBufferProcessor(sample_rate=16000, num_channels=2, buffer_size=4)
-        self.processor._input_resampler = _PassthroughResampler()
-        self.processor._output_resampler = _PassthroughResampler()
-        self.processor._update_sample_rate(StartFrame(audio_out_sample_rate=16000))
-        await self.processor.start_recording()
+        self.processor = await _make_processor(buffer_size=4)
 
     async def asyncTearDown(self):
         if getattr(self.processor, "_recording", False):
@@ -52,7 +127,7 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
         self.processor.add_event_handler("on_track_audio_data", on_track_audio_data)
 
         frame = InputAudioRawFrame(audio=user_audio, sample_rate=16000, num_channels=1)
-        await self.processor._process_recording(frame)
+        await self.processor.process_frame(frame, FrameDirection.DOWNSTREAM)
 
         await asyncio.wait_for(audio_event.wait(), timeout=1)
         await asyncio.wait_for(track_event.wait(), timeout=1)
@@ -94,7 +169,7 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
         self.processor.add_event_handler("on_track_audio_data", on_track_audio_data)
 
         frame = OutputAudioRawFrame(audio=bot_audio, sample_rate=16000, num_channels=1)
-        await self.processor._process_recording(frame)
+        await self.processor.process_frame(frame, FrameDirection.DOWNSTREAM)
 
         await asyncio.wait_for(audio_event.wait(), timeout=1)
         await asyncio.wait_for(track_event.wait(), timeout=1)
@@ -115,3 +190,1103 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(merged_audio[6:8], bot_audio[2:4])
         self.assertEqual(len(self.processor._user_audio_buffer), 0)
         self.assertEqual(len(self.processor._bot_audio_buffer), 0)
+
+
+class TestSilenceInjectionGuards(unittest.IsolatedAsyncioTestCase):
+    """Tests that silence is not injected mid-utterance (fix for crackling artifacts).
+
+    Each test verifies the audio alignment in the flushed tracks to confirm that
+    silence is only added by _align_track_buffers at flush time (end of the buffer),
+    never injected mid-stream while the affected track is actively producing audio.
+    """
+
+    async def test_no_silence_injected_into_bot_buffer_while_bot_speaking(self):
+        """Bot audio must appear at the start of the bot track, not after mid-stream silence.
+
+        Timeline:
+          1. User sends 4 bytes  (bot not speaking → normal sync, no-op since bot is at 0)
+          2. Bot starts speaking
+          3. User sends 4 more bytes  (bot speaking → sync skipped; bot stays at 0)
+          4. Bot sends 4 bytes of known audio
+
+        Expected final bot track (8 bytes total after _align_track_buffers at flush):
+          [bot_audio][silence_padding]  ← audio first, silence only at the end
+
+        With the bug the bot track would be:
+          [silence_injected_mid_stream][bot_audio]  ← silence inserted before the audio
+        """
+        p = await _make_processor()
+
+        bot_audio = b"\xaa\xbb\xcc\xdd"
+
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x05\x06\x07\x08", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(
+            OutputAudioRawFrame(audio=bot_audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        _, bot_track = await _capture_track_audio(p)
+        await p.cleanup()
+
+        # Audio must appear at the beginning of the bot track (not after injected silence).
+        self.assertEqual(bot_track[:4], bot_audio)
+        self.assertEqual(bot_track[4:], b"\x00" * 4)
+
+    async def test_no_silence_injected_into_user_buffer_while_user_speaking(self):
+        """User audio must appear at the start of the user track, not after mid-stream silence.
+
+        Timeline:
+          1. Bot sends 4 bytes  (user not speaking → normal sync, no-op since user is at 0)
+          2. User starts speaking
+          3. Bot sends 4 more bytes  (user speaking → sync skipped; user stays at 0)
+          4. User sends 4 bytes of known audio
+
+        Expected final user track (8 bytes total after _align_track_buffers at flush):
+          [user_audio][silence_padding]  ← audio first, silence only at the end
+
+        With the bug the user track would be:
+          [silence_injected_mid_stream][user_audio]
+        """
+        p = await _make_processor()
+
+        user_audio = b"\xaa\xbb\xcc\xdd"
+
+        await p.process_frame(
+            OutputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            OutputAudioRawFrame(audio=b"\x05\x06\x07\x08", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(
+            InputAudioRawFrame(audio=user_audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        await p.cleanup()
+
+        self.assertEqual(user_track[:4], user_audio)
+        self.assertEqual(user_track[4:], b"\x00" * 4)
+
+    async def test_silence_resumes_into_bot_buffer_after_bot_stops_speaking(self):
+        """After bot stops speaking, the bot buffer is synced again on user audio arrival.
+
+        Timeline:
+          1. User sends 4 bytes  (user=4, bot=0)
+          2. Bot starts speaking
+          3. User sends 4 more bytes  (sync skipped; user=8, bot=0)
+          4. Bot stops speaking
+          5. User sends 4 more bytes  (sync resumes; bot gets 8 bytes silence, user=12)
+
+        Expected final bot track (12 bytes): 8 bytes silence then no more audio (bot never
+        sent audio, _align_track_buffers pads bot to 12).
+        The key assertion: bot has 8 bytes of silence at positions 0-7, confirming that
+        the sync at step 5 did inject 8 bytes (positions 0-7 of the bot buffer).
+        """
+        p = await _make_processor()
+
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x05\x06\x07\x08", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x09\x0a\x0b\x0c", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        _, bot_track = await _capture_track_audio(p)
+        await p.cleanup()
+
+        # The sync at step 5 targets len(user)=8, so bot must have 8 bytes of silence
+        # written before user's third chunk was added.
+        self.assertEqual(bot_track[:8], b"\x00" * 8)
+
+    async def test_silence_resumes_into_user_buffer_after_user_stops_speaking(self):
+        """After user stops speaking, the user buffer is synced again on bot audio arrival.
+
+        Timeline:
+          1. Bot sends 4 bytes  (user=0, bot=4)
+          2. User starts speaking
+          3. Bot sends 4 more bytes  (sync skipped; user=0, bot=8)
+          4. User stops speaking
+          5. Bot sends 4 more bytes  (sync resumes; user gets 8 bytes silence, bot=12)
+
+        Expected: user track has 8 bytes of silence at positions 0-7.
+        """
+        p = await _make_processor()
+
+        await p.process_frame(
+            OutputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            OutputAudioRawFrame(audio=b"\x05\x06\x07\x08", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        await p.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await p.process_frame(
+            OutputAudioRawFrame(audio=b"\x09\x0a\x0b\x0c", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        await p.cleanup()
+
+        self.assertEqual(user_track[:8], b"\x00" * 8)
+
+
+class TestMuteGapSilenceInsertion(unittest.IsolatedAsyncioTestCase):
+    """Tests for _fill_buffer_silence_gap (user buffer path).
+
+    When the microphone is muted, no InputAudioRawFrame arrives. Without gap
+    detection the next utterance is appended directly after the previous one,
+    making two utterances spoken seconds apart sound concatenated.
+
+    These tests verify that silence proportional to the wall-clock gap is
+    inserted into the user buffer so the recorded timeline stays accurate.
+    """
+
+    # 16-bit mono at 16 kHz → 2 bytes per sample
+    _BYTES_PER_SECOND = 16000 * 2
+
+    def _silence_for_gap(self, elapsed: float, frame_bytes: int) -> int:
+        """Expected silence bytes for a given elapsed time and incoming frame size."""
+        frame_duration = frame_bytes / self._BYTES_PER_SECOND
+        gap = elapsed - frame_duration
+        if gap <= 0.2:
+            return 0
+        n = int(gap * self._BYTES_PER_SECOND)
+        return n - (n % 2)  # 16-bit alignment
+
+    async def _send_user_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def _send_bot_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            OutputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def test_no_silence_when_no_prior_timestamp(self):
+        """First user frame must not trigger silence insertion when there is no prior timestamp."""
+        p = await _make_processor()
+        p._last_user_buffer_update_time = None
+
+        audio = b"\x01\x02\x03\x04"
+        await self._send_user_frame(p, audio)
+
+        self.assertEqual(len(p._user_audio_buffer), 4)
+        self.assertEqual(bytes(p._user_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_no_silence_for_gap_below_threshold(self):
+        """A 100 ms gap (below the 200 ms threshold) must not insert any silence."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_user_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 0.1  # 100 ms later
+            await self._send_user_frame(p, audio)
+
+        self.assertEqual(len(p._user_audio_buffer), 4)
+        self.assertEqual(bytes(p._user_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_silence_proportional_to_mute_gap(self):
+        """A 1-second mute gap must insert ~1 second of silence before the new audio."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_user_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0  # 1-second gap
+            await self._send_user_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        self.assertEqual(len(p._user_audio_buffer), expected_silence + len(audio))
+        # Silence prefix.
+        self.assertEqual(bytes(p._user_audio_buffer[:expected_silence]), b"\x00" * expected_silence)
+        # Audio at the end.
+        self.assertEqual(bytes(p._user_audio_buffer[-len(audio) :]), audio)
+        await p.cleanup()
+
+    async def test_two_utterances_separated_by_mute_have_silence_gap(self):
+        """Two utterances with a muted-mic gap between them must not be concatenated.
+
+        This is the original bug report: without the fix the second utterance is
+        appended directly after the first with no silence, making them sound like
+        one continuous utterance.
+        """
+        p = await _make_processor()
+        utterance = b"\x11\x22\x33\x44"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Utterance 1 is already in the buffer at t=0.
+            mock_time.monotonic.return_value = 0.0
+            p._last_user_buffer_update_time = 0.0
+            p._user_audio_buffer.extend(utterance)
+
+            # One second later the user unmutes and speaks utterance 2.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_user_frame(p, utterance)
+
+        # Must be longer than both utterances back-to-back (the bug).
+        self.assertGreater(len(p._user_audio_buffer), len(utterance) * 2)
+        # Utterance 1 at the start.
+        self.assertEqual(bytes(p._user_audio_buffer[: len(utterance)]), utterance)
+        # Utterance 2 at the end.
+        self.assertEqual(bytes(p._user_audio_buffer[-len(utterance) :]), utterance)
+        # Everything in between must be silence.
+        silence_region = bytes(p._user_audio_buffer[len(utterance) : -len(utterance)])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        await p.cleanup()
+
+    async def test_bot_audio_during_mute_advances_timestamp_preventing_double_counting(self):
+        """Bot audio that syncs the user buffer must advance the user-buffer timestamp.
+
+        Timeline (all times mocked):
+          t=0.0  prior user activity — timestamp is pinned here
+          t=1.0  bot speaks; _last_user_buffer_update_time advances to 1.0
+          t=2.0  user unmutes and speaks
+
+        The gap fill must measure from t=1.0 (last sync by bot audio), not from
+        t=0.0 (last real user audio). Without this guard the silence would be
+        doubled (~2 s instead of ~1 s).
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Pin timestamp at t=0 (simulates prior user audio with no frames sent).
+            p._last_user_buffer_update_time = 0.0
+
+            # Bot speaks at t=1 → must advance _last_user_buffer_update_time to 1.0.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_bot_frame(p, audio)
+
+            # User unmutes at t=2.
+            mock_time.monotonic.return_value = 2.0
+            await self._send_user_frame(p, audio)
+
+        expected_silence_1s = self._silence_for_gap(2.0 - 1.0, len(audio))
+        expected_silence_2s = self._silence_for_gap(2.0 - 0.0, len(audio))
+
+        actual_silence = len(p._user_audio_buffer) - len(audio)
+        # Gap should be ~1 s worth of silence, not ~2 s.
+        self.assertAlmostEqual(actual_silence, expected_silence_1s, delta=4)
+        self.assertNotAlmostEqual(actual_silence, expected_silence_2s, delta=4)
+        await p.cleanup()
+
+    async def test_bot_buffer_synced_to_user_position_after_gap_fill(self):
+        """After gap silence is inserted in the user buffer, the bot buffer is synced.
+
+        The sync targets the user buffer length *after* the silence is inserted
+        but *before* the new user audio is appended, so both buffers share the
+        same temporal reference point.
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_user_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0
+            await self._send_user_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        # Bot buffer should equal the silence that was inserted (user position
+        # after silence, before the new audio frame was appended).
+        self.assertEqual(len(p._bot_audio_buffer), expected_silence)
+        self.assertEqual(bytes(p._bot_audio_buffer), b"\x00" * expected_silence)
+        await p.cleanup()
+
+    async def test_reset_recording_clears_timestamp(self):
+        """stop_recording must reset _last_user_buffer_update_time to None."""
+        p = await _make_processor()
+        p._last_user_buffer_update_time = 999.0
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 1000.0
+            await p.stop_recording()
+
+        self.assertIsNone(p._last_user_buffer_update_time)
+        await p.cleanup()
+
+    async def test_buffer_flush_resets_timestamp_to_flush_time(self):
+        """After a buffer flush, the timestamp is set to the flush time (not None).
+
+        This ensures that when the next user frame arrives after a flush the gap
+        is measured from the flush point, not from a stale earlier timestamp.
+        """
+        audio = b"\x01\x02\x03\x04\x05\x06\x07\x08"  # 8 bytes == buffer_size
+        p = await _make_processor(buffer_size=len(audio))
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 5.0
+            p._last_user_buffer_update_time = 0.0
+
+            flushed = asyncio.Event()
+
+            async def on_audio_data(*_):
+                flushed.set()
+
+            p.add_event_handler("on_audio_data", on_audio_data)
+            await self._send_user_frame(p, audio)
+            # _reset_primary_audio_buffers is called synchronously inside
+            # process_frame once buffer_size is hit, so no wait is needed —
+            # but we yield to let any background tasks settle.
+            await asyncio.sleep(0)
+
+        # Timestamp should be set to the mocked flush time, not None.
+        self.assertIsNotNone(p._last_user_buffer_update_time)
+        self.assertEqual(p._last_user_buffer_update_time, 5.0)
+        await p.cleanup()
+
+
+class TestBotSilenceGapInsertion(unittest.IsolatedAsyncioTestCase):
+    """Tests for _fill_buffer_silence_gap (bot buffer path).
+
+    Mirror of TestMuteGapSilenceInsertion for the bot-audio path. When the
+    bot is briefly idle between utterances (e.g. progressive hold messages
+    spoken while a slow function call runs), no OutputAudioRawFrame arrives.
+    Without gap detection on the bot side the next utterance is appended
+    directly after the previous one, making two utterances spoken seconds
+    apart sound concatenated in the recording.
+
+    These tests verify that silence proportional to the wall-clock gap is
+    inserted into the bot buffer so the recorded timeline stays accurate.
+    """
+
+    # 16-bit mono at 16 kHz → 2 bytes per sample
+    _BYTES_PER_SECOND = 16000 * 2
+
+    def _silence_for_gap(self, elapsed: float, frame_bytes: int) -> int:
+        """Expected silence bytes for a given elapsed time and incoming frame size."""
+        frame_duration = frame_bytes / self._BYTES_PER_SECOND
+        gap = elapsed - frame_duration
+        if gap <= 0.2:
+            return 0
+        n = int(gap * self._BYTES_PER_SECOND)
+        return n - (n % 2)  # 16-bit alignment
+
+    async def _send_user_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def _send_bot_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            OutputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def test_no_silence_when_no_prior_timestamp(self):
+        """First bot frame must not trigger silence insertion when there is no prior timestamp."""
+        p = await _make_processor()
+        p._last_bot_buffer_update_time = None
+
+        audio = b"\x01\x02\x03\x04"
+        await self._send_bot_frame(p, audio)
+
+        self.assertEqual(len(p._bot_audio_buffer), 4)
+        self.assertEqual(bytes(p._bot_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_no_silence_for_gap_below_threshold(self):
+        """A 100 ms gap (below the 200 ms threshold) must not insert any silence."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 0.1  # 100 ms later
+            await self._send_bot_frame(p, audio)
+
+        self.assertEqual(len(p._bot_audio_buffer), 4)
+        self.assertEqual(bytes(p._bot_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_silence_proportional_to_idle_gap(self):
+        """A 1-second idle gap must insert ~1 second of silence before the new audio."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0  # 1-second gap
+            await self._send_bot_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        self.assertEqual(len(p._bot_audio_buffer), expected_silence + len(audio))
+        # Silence prefix.
+        self.assertEqual(bytes(p._bot_audio_buffer[:expected_silence]), b"\x00" * expected_silence)
+        # Audio at the end.
+        self.assertEqual(bytes(p._bot_audio_buffer[-len(audio) :]), audio)
+        await p.cleanup()
+
+    async def test_two_utterances_separated_by_pause_have_silence_gap(self):
+        """Two bot utterances spoken seconds apart must not be concatenated.
+
+        This is the bug report for the progressive hold messages: without
+        the fix the second hold line is appended directly after the first
+        with no silence, making them sound like one continuous utterance
+        in the recording.
+        """
+        p = await _make_processor()
+        utterance = b"\x11\x22\x33\x44"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Utterance 1 is already in the buffer at t=0.
+            mock_time.monotonic.return_value = 0.0
+            p._last_bot_buffer_update_time = 0.0
+            p._bot_audio_buffer.extend(utterance)
+
+            # One second later the bot speaks utterance 2.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_bot_frame(p, utterance)
+
+        # Must be longer than both utterances back-to-back (the bug).
+        self.assertGreater(len(p._bot_audio_buffer), len(utterance) * 2)
+        # Utterance 1 at the start.
+        self.assertEqual(bytes(p._bot_audio_buffer[: len(utterance)]), utterance)
+        # Utterance 2 at the end.
+        self.assertEqual(bytes(p._bot_audio_buffer[-len(utterance) :]), utterance)
+        # Everything in between must be silence.
+        silence_region = bytes(p._bot_audio_buffer[len(utterance) : -len(utterance)])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        await p.cleanup()
+
+    async def test_user_audio_during_pause_advances_timestamp_preventing_double_counting(self):
+        """User audio that syncs the bot buffer must advance the bot-buffer timestamp.
+
+        Timeline (all times mocked):
+          t=0.0  prior bot activity — timestamp is pinned here
+          t=1.0  user speaks; _last_bot_buffer_update_time advances to 1.0
+          t=2.0  bot resumes speaking
+
+        The gap fill must measure from t=1.0 (last sync by user audio), not from
+        t=0.0 (last real bot audio). Without this guard the silence would be
+        doubled (~2 s instead of ~1 s).
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Pin bot timestamp at t=0 (simulates prior bot audio with no frames sent).
+            p._last_bot_buffer_update_time = 0.0
+
+            # User speaks at t=1 → must advance _last_bot_buffer_update_time to 1.0.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_user_frame(p, audio)
+
+            # Snapshot the bot buffer size right after the user frame; everything
+            # added after this is from the bot frame (gap fill + new audio).
+            bot_len_after_user = len(p._bot_audio_buffer)
+
+            # Bot resumes at t=2.
+            mock_time.monotonic.return_value = 2.0
+            await self._send_bot_frame(p, audio)
+
+        # New bytes added by the bot frame = gap fill + audio frame.
+        bot_frame_contribution = len(p._bot_audio_buffer) - bot_len_after_user
+        gap_fill_bytes = bot_frame_contribution - len(audio)
+
+        expected_silence_1s = self._silence_for_gap(2.0 - 1.0, len(audio))
+        expected_silence_2s = self._silence_for_gap(2.0 - 0.0, len(audio))
+
+        # Gap fill should reflect a 1 s gap (since user frame advanced the
+        # bot timestamp), not a 2 s gap (which would happen without the
+        # advance, double-counting the silence the user-sync already added).
+        self.assertAlmostEqual(gap_fill_bytes, expected_silence_1s, delta=4)
+        self.assertNotAlmostEqual(gap_fill_bytes, expected_silence_2s, delta=4)
+        await p.cleanup()
+
+    async def test_user_buffer_synced_to_bot_position_after_gap_fill(self):
+        """After gap silence is inserted in the bot buffer, the user buffer is synced.
+
+        The sync targets the bot buffer length *after* the silence is inserted
+        but *before* the new bot audio is appended, so both buffers share the
+        same temporal reference point.
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0
+            await self._send_bot_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        # User buffer should equal the silence that was inserted (bot position
+        # after silence, before the new audio frame was appended).
+        self.assertEqual(len(p._user_audio_buffer), expected_silence)
+        self.assertEqual(bytes(p._user_audio_buffer), b"\x00" * expected_silence)
+        await p.cleanup()
+
+    async def test_reset_recording_clears_bot_timestamp(self):
+        """stop_recording must reset _last_bot_buffer_update_time to None."""
+        p = await _make_processor()
+        p._last_bot_buffer_update_time = 999.0
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 1000.0
+            await p.stop_recording()
+
+        self.assertIsNone(p._last_bot_buffer_update_time)
+        await p.cleanup()
+
+    async def test_buffer_flush_resets_bot_timestamp_to_flush_time(self):
+        """After a buffer flush, the bot timestamp is set to the flush time (not None)."""
+        audio = b"\x01\x02\x03\x04\x05\x06\x07\x08"  # 8 bytes == buffer_size
+        p = await _make_processor(buffer_size=len(audio))
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 5.0
+            p._last_bot_buffer_update_time = 0.0
+
+            flushed = asyncio.Event()
+
+            async def on_audio_data(*_):
+                flushed.set()
+
+            p.add_event_handler("on_audio_data", on_audio_data)
+            await self._send_bot_frame(p, audio)
+            await asyncio.sleep(0)
+
+        # Timestamp should be set to the mocked flush time, not None.
+        self.assertIsNotNone(p._last_bot_buffer_update_time)
+        self.assertEqual(p._last_bot_buffer_update_time, 5.0)
+        await p.cleanup()
+
+
+class TestResamplingAcrossPauses(unittest.IsolatedAsyncioTestCase):
+    """Audio resumed after a pause doesn't start with audio from before it.
+
+    The 24 kHz audio is resampled to the processor's 16 kHz, and the
+    resampler's filter holds the last few milliseconds it was given.
+    """
+
+    async def asyncSetUp(self):
+        self.processor = await _make_processor()
+        self.processor._input_resampler = create_stream_resampler()
+        self.processor._output_resampler = create_stream_resampler()
+
+    async def asyncTearDown(self):
+        await self.processor.cleanup()
+
+    async def _send(self, frame):
+        await self.processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def _send_user_audio(self, sample: int, ms: int):
+        for _ in range(ms // 20):
+            audio = struct.pack("<480h", *([sample] * 480))
+            await self._send(InputAudioRawFrame(audio=audio, sample_rate=24000, num_channels=1))
+
+    async def _send_bot_reply(self, sample: int, ms: int):
+        await self._send(BotStartedSpeakingFrame())
+        for _ in range(ms // 20):
+            audio = struct.pack("<480h", *([sample] * 480))
+            await self._send(OutputAudioRawFrame(audio=audio, sample_rate=24000, num_channels=1))
+        await self._send(BotStoppedSpeakingFrame())
+
+    async def test_bot_reply_doesnt_start_with_the_end_of_the_previous_one(self):
+        await self._send_bot_reply(1000, ms=100)
+        await self._send_user_audio(0, ms=200)
+        await self._send_bot_reply(0, ms=100)
+
+        _, bot = await _capture_track_audio(self.processor)
+
+        # 100 ms at 16 kHz, 16-bit.
+        self.assertEqual(bot[3200:], bytes(len(bot) - 3200))
+
+    async def test_unmuted_user_audio_doesnt_start_with_audio_from_before_the_mute(self):
+        await self._send_user_audio(1000, ms=100)
+        await self._send(UserMuteStartedFrame())
+        await self._send_bot_reply(0, ms=200)
+        await self._send(UserMuteStoppedFrame())
+        await self._send_user_audio(0, ms=100)
+
+        user, _ = await _capture_track_audio(self.processor)
+
+        # 100 ms at 16 kHz, 16-bit.
+        self.assertEqual(user[3200:], bytes(len(user) - 3200))
+
+
+class TestRecordingControlFrames(unittest.IsolatedAsyncioTestCase):
+    """Tests for frame-driven recording control.
+
+    AudioBufferStartRecordingFrame / AudioBufferStopRecordingFrame let any
+    upstream processor start and stop recording from within the frame flow,
+    triggering the same start_recording() / stop_recording() methods as the
+    direct API.
+    """
+
+    async def test_start_recording_frame_enables_recording(self):
+        """A start frame turns recording on so subsequent audio is buffered."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_audio_ignored_before_start_recording_frame(self):
+        """Audio arriving before a start frame is not buffered."""
+        p = await _make_processor(start=False)
+
+        await p.process_frame(
+            InputAudioRawFrame(audio=b"\x01\x02\x03\x04", sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stop_recording_frame_flushes_and_disables(self):
+        """A stop frame flushes buffered audio and turns recording off."""
+        p = await _make_processor()
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        captured = {}
+        event = asyncio.Event()
+
+        async def on_track_audio_data(_, user, bot, sample_rate, num_channels):
+            captured["user"] = user
+            event.set()
+
+        p.add_event_handler("on_track_audio_data", on_track_audio_data)
+        await p.process_frame(AudioBufferStopRecordingFrame(), FrameDirection.DOWNSTREAM)
+
+        await asyncio.wait_for(event.wait(), timeout=1)
+        self.assertEqual(captured["user"], audio)
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_recording_control_frames_passed_downstream(self):
+        """Control frames are re-pushed so other processors also react."""
+        processor = AudioBufferProcessor(sample_rate=16000, num_channels=2)
+
+        await run_test(
+            processor,
+            frames_to_send=[
+                AudioBufferStartRecordingFrame(),
+                AudioBufferStopRecordingFrame(),
+            ],
+            expected_down_frames=[
+                AudioBufferStartRecordingFrame,
+                AudioBufferStopRecordingFrame,
+            ],
+        )
+
+
+class TestAutoStartRecording(unittest.IsolatedAsyncioTestCase):
+    """Tests for the auto_start_recording constructor option.
+
+    With auto_start_recording=True the processor starts recording as soon as
+    it handles the StartFrame, without an explicit start_recording() call or
+    an AudioBufferStartRecordingFrame.
+    """
+
+    async def test_auto_start_begins_recording_on_start_frame(self):
+        """Recording is active right after pipeline start; audio is buffered."""
+        p = await _make_processor(start=False, auto_start=True)
+        self.assertTrue(p._recording)
+
+        audio = struct.pack("<hh", 1000, -1000)
+        await p.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        user_track, _ = await _capture_track_audio(p)
+        self.assertEqual(user_track, audio)
+        await p.cleanup()
+
+    async def test_auto_start_disabled_by_default(self):
+        """Without the option, the StartFrame does not begin recording."""
+        p = await _make_processor(start=False)
+        self.assertFalse(p._recording)
+        await p.cleanup()
+
+    async def test_auto_start_fires_started_event(self):
+        """on_recording_started fires when auto-start kicks in."""
+        p = AudioBufferProcessor(sample_rate=16000, auto_start_recording=True)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await run_test(p, frames_to_send=[], expected_down_frames=[])
+        await asyncio.wait_for(fired.wait(), timeout=1)
+
+
+class TestRecordingLifecycleEvents(unittest.IsolatedAsyncioTestCase):
+    """Tests for the on_recording_started / on_recording_stopped events.
+
+    These fire only on actual recording state transitions, decoupling the
+    code that triggers recording (a direct call or a control frame) from
+    code that wants to react to it (UI indicators, logging, etc.).
+    """
+
+    async def test_started_event_fires_on_start(self):
+        """on_recording_started fires when recording transitions to active."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.start_recording()
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_fires_via_frame(self):
+        """on_recording_started fires when started by a control frame."""
+        p = await _make_processor(start=False)
+
+        fired = asyncio.Event()
+        p.add_event_handler("on_recording_started", lambda _: fired.set())
+
+        await p.process_frame(AudioBufferStartRecordingFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(fired.wait(), timeout=1)
+        await p.cleanup()
+
+    async def test_started_event_not_refired_when_already_recording(self):
+        """A redundant start (already recording) does not re-fire the event."""
+        p = await _make_processor()  # already recording
+
+        started = []
+        p.add_event_handler("on_recording_started", lambda _: started.append(True))
+
+        await p.start_recording()
+        await asyncio.sleep(0.05)  # give any erroneously-scheduled handler a chance
+        self.assertEqual(len(started), 0)
+        await p.cleanup()
+
+    async def test_redundant_start_preserves_buffered_audio(self):
+        """A redundant start (already recording) does not reset the buffers."""
+        p = await _make_processor()  # already recording
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        self.assertTrue(p.has_audio())
+
+        await p.start_recording()
+        self.assertTrue(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_fires_with_final_audio_already_emitted(self):
+        """on_recording_stopped fires; the final audio handler runs as part of stop."""
+        p = await _make_processor()
+
+        await p.process_frame(
+            InputAudioRawFrame(
+                audio=struct.pack("<hh", 1000, -1000), sample_rate=16000, num_channels=1
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        audio_fired = asyncio.Event()
+        stopped_fired = asyncio.Event()
+        p.add_event_handler("on_audio_data", lambda *_: audio_fired.set())
+        p.add_event_handler("on_recording_stopped", lambda _: stopped_fired.set())
+
+        await p.stop_recording()
+
+        await asyncio.wait_for(audio_fired.wait(), timeout=1)
+        await asyncio.wait_for(stopped_fired.wait(), timeout=1)
+        # By the time stop signals, recording is off and buffers are cleared.
+        self.assertFalse(p._recording)
+        self.assertFalse(p.has_audio())
+        await p.cleanup()
+
+    async def test_stopped_event_not_fired_when_not_recording(self):
+        """Stopping when not recording (e.g. EndFrame before start) does not fire."""
+        p = await _make_processor(start=False)
+
+        stopped = []
+        p.add_event_handler("on_recording_stopped", lambda _: stopped.append(True))
+
+        await p.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(stopped), 0)
+        await p.cleanup()
+
+
+TURN_SAMPLE_RATE = 16000
+
+# 0.1s of mono audio. Every run of speech below is one chunk, so a turn's audio
+# is one chunk per run its speaker contributed.
+TURN_CHUNK = b"\x11\x00" * 1600
+
+
+def _user_run():
+    """One run of user speech, paced as a real mic would deliver it."""
+    return [
+        UserStartedSpeakingFrame(),
+        SleepFrame(sleep=0.05),
+        InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.05),
+        UserStoppedSpeakingFrame(),
+        SleepFrame(sleep=0.2),
+    ]
+
+
+def _bot_run():
+    """One run of bot speech.
+
+    Bot audio is a DataFrame and queues, while the speaking frames are
+    SystemFrames that skip the queue, so it needs time to drain before
+    BotStoppedSpeakingFrame closes the run.
+    """
+    return [
+        BotStartedSpeakingFrame(),
+        SleepFrame(sleep=0.05),
+        OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.1),
+        BotStoppedSpeakingFrame(),
+        SleepFrame(sleep=0.2),
+    ]
+
+
+class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
+    """The turn audio events report each speaker once per turn."""
+
+    async def _turn_events(self, frames):
+        """Run frames through a recording processor, returning its turn audio events."""
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE,
+            num_channels=1,
+            enable_turn_audio=True,
+            auto_start_recording=True,
+        )
+        events = []
+
+        @processor.event_handler("on_user_turn_audio")
+        async def on_user(buffer, turn):
+            events.append(("user", turn.turn_number, bytes(turn.audio)))
+
+        @processor.event_handler("on_bot_turn_audio")
+        async def on_bot(buffer, turn):
+            events.append(("bot", turn.turn_number, bytes(turn.audio)))
+
+        await run_test(
+            processor,
+            frames_to_send=frames,
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=TURN_SAMPLE_RATE, audio_out_sample_rate=TURN_SAMPLE_RATE
+            ),
+        )
+        return events
+
+    async def test_reports_each_speaker_once_for_a_turn(self):
+        events = await self._turn_events([*_user_run(), *_bot_run()])
+
+        # Turn 1 opens with the pipeline, so the first exchange lands there.
+        self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
+
+    async def test_joins_several_runs_of_speech_in_a_turn(self):
+        # The user pauses mid-thought and the bot resumes after a function call,
+        # so each speaks twice within one turn.
+        events = await self._turn_events([*_user_run(), *_user_run(), *_bot_run(), *_bot_run()])
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK * 2), ("bot", 1, TURN_CHUNK * 2)])
+
+    async def test_numbers_successive_turns(self):
+        events = await self._turn_events([*_user_run(), *_bot_run(), *_user_run(), *_bot_run()])
+
+        self.assertEqual(
+            events,
+            [
+                ("user", 1, TURN_CHUNK),
+                ("bot", 1, TURN_CHUNK),
+                ("user", 2, TURN_CHUNK),
+                ("bot", 2, TURN_CHUNK),
+            ],
+        )
+
+    async def test_reports_barged_in_audio_under_the_interrupted_turn(self):
+        # The user barges in while the bot is speaking, which ends turn 1 and
+        # starts turn 2 before the bot's cut-off audio is closed out.
+        events = await self._turn_events(
+            [
+                *_user_run(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.1),
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+                *_bot_run(),
+            ]
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("user", 1, TURN_CHUNK),
+                ("bot", 1, TURN_CHUNK),
+                ("user", 2, TURN_CHUNK),
+                ("bot", 2, TURN_CHUNK),
+            ],
+        )
+
+    async def test_silent_speaker_is_not_reported(self):
+        # The bot greets and the user never replies, so turn 1 has no user audio.
+        events = await self._turn_events(_bot_run())
+
+        self.assertEqual(events, [("bot", 1, TURN_CHUNK)])
+
+    async def test_turn_audio_needs_turn_tracking(self):
+        # Turn boundaries come from the tracker, so without one there is nothing
+        # to report. Say so rather than going quiet.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE, num_channels=1, enable_turn_audio=True
+        )
+        await processor.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=TaskManager(),
+                pipeline_worker=SimpleNamespace(  # type: ignore[arg-type]
+                    app_resources=None, turn_tracking_observer=None
+                ),
+            )
+        )
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.logger") as mock_logger:
+            await processor.process_frame(
+                StartFrame(audio_out_sample_rate=TURN_SAMPLE_RATE), FrameDirection.DOWNSTREAM
+            )
+
+        mock_logger.warning.assert_called_once()
+        self.assertIn("enable_turn_tracking", mock_logger.warning.call_args[0][0])
+        await processor.cleanup()
+
+    async def test_deprecated_events_still_report_each_run_of_speech(self):
+        # The superseded events keep their old shape: one call per run of
+        # speech, four arguments, no turn number.
+        processor = AudioBufferProcessor(
+            sample_rate=TURN_SAMPLE_RATE,
+            num_channels=1,
+            enable_turn_audio=True,
+            auto_start_recording=True,
+        )
+        runs = []
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @processor.event_handler("on_user_turn_audio_data")
+            async def on_user(buffer, audio, sample_rate, num_channels):
+                runs.append(("user", bytes(audio)))
+
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, DeprecationWarning)
+        self.assertIn("on_user_turn_audio", str(caught[0].message))
+
+        # Two runs of user speech in one turn produce two calls.
+        await run_test(
+            processor,
+            frames_to_send=[*_user_run(), *_user_run(), *_bot_run()],
+            pipeline_params=PipelineParams(
+                audio_in_sample_rate=TURN_SAMPLE_RATE, audio_out_sample_rate=TURN_SAMPLE_RATE
+            ),
+        )
+
+        self.assertEqual(runs, [("user", TURN_CHUNK), ("user", TURN_CHUNK)])
+
+    async def test_open_mic_audio_stays_out_of_the_interrupted_turn(self):
+        # The mic keeps delivering while the bot speaks, so at a barge-in the
+        # user's buffer holds the pre-roll leading into their interruption. That
+        # audio belongs to the turn starting, not the one being interrupted.
+        events = await self._turn_events(
+            [
+                *_user_run(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                OutputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.1),
+                UserStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InputAudioRawFrame(audio=TURN_CHUNK, sample_rate=TURN_SAMPLE_RATE, num_channels=1),
+                SleepFrame(sleep=0.05),
+                UserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.2),
+            ]
+        )
+
+        turn_1_user = next(audio for who, turn, audio in events if who == "user" and turn == 1)
+        self.assertEqual(turn_1_user, TURN_CHUNK)
+
+    async def test_reports_the_turn_in_progress_when_recording_stops(self):
+        # Stopping the recording leaves the turn open, and ending the pipeline
+        # closes it. A conversation's last turn arrives this way.
+        events = await self._turn_events(
+            [*_user_run(), *_bot_run(), AudioBufferStopRecordingFrame(), SleepFrame(sleep=0.2)]
+        )
+
+        self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
+
+
+if __name__ == "__main__":
+    unittest.main()

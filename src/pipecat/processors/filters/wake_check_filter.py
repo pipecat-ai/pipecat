@@ -1,29 +1,42 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Wake phrase detection filter for Pipecat transcription processing.
 
+.. deprecated:: 0.0.106
+    Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
+    Will be removed in 2.0.0.
+
 This module provides a frame processor that filters transcription frames,
 only allowing them through after wake phrases have been detected. Includes
 keepalive functionality to maintain conversation flow after wake detection.
 """
 
-import re
 import time
 from enum import Enum
-from typing import List
 
 from loguru import logger
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.deprecation import deprecated
+from pipecat.utils.string import compile_phrase_pattern
 
 
+@deprecated(
+    "`WakeCheckFilter` is deprecated since 0.0.106 and will be removed in 2.0.0. "
+    "Use `WakePhraseUserTurnStartStrategy` instead."
+)
 class WakeCheckFilter(FrameProcessor):
     """Frame processor that filters transcription frames based on wake phrase detection.
+
+    .. deprecated:: 0.0.106
+        Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead,
+        which integrates with the user turn strategy system and supports configurable
+        timeouts and single-activation mode. Will be removed in 2.0.0.
 
     This filter monitors transcription frames for configured wake phrases and only
     passes frames through after a wake phrase has been detected. Maintains a
@@ -62,23 +75,21 @@ class WakeCheckFilter(FrameProcessor):
             self.wake_timer = 0.0
             self.accumulator = ""
 
-    def __init__(self, wake_phrases: List[str], keepalive_timeout: float = 3):
+    def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 3):
         """Initialize the wake phrase filter.
 
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
+                Blank entries are ignored.
             keepalive_timeout: Duration in seconds to keep passing frames after
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
-        self._wake_patterns = []
-        for name in wake_phrases:
-            pattern = re.compile(
-                r"\b" + r"\s*".join(re.escape(word) for word in name.split()) + r"\b", re.IGNORECASE
-            )
-            self._wake_patterns.append(pattern)
+        self._wake_patterns = [
+            compile_phrase_pattern(phrase) for phrase in wake_phrases if phrase.strip()
+        ]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames, filtering transcriptions based on wake detection.
@@ -91,6 +102,9 @@ class WakeCheckFilter(FrameProcessor):
 
         try:
             if isinstance(frame, TranscriptionFrame):
+                if not self._wake_patterns:
+                    return
+
                 p = self._participant_states.get(frame.user_id)
                 if p is None:
                     p = WakeCheckFilter.ParticipantState(frame.user_id)
@@ -126,6 +140,4 @@ class WakeCheckFilter(FrameProcessor):
             else:
                 await self.push_frame(frame, direction)
         except Exception as e:
-            error_msg = f"Error in wake word filter: {e}"
-            logger.exception(error_msg)
-            await self.push_error(ErrorFrame(error_msg))
+            await self.push_error(error_msg=f"Error in wake word filter: {e}", exception=e)

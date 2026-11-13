@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,7 +13,6 @@ understanding frame flow between processors.
 
 from dataclasses import fields, is_dataclass
 from enum import Enum, auto
-from typing import Dict, Optional, Set, Tuple, Type, Union
 
 from loguru import logger
 
@@ -75,10 +74,10 @@ class DebugLogObserver(BaseObserver):
 
     def __init__(
         self,
-        frame_types: Optional[
-            Union[Tuple[Type[Frame], ...], Dict[Type[Frame], Optional[Tuple[Type, FrameEndpoint]]]]
-        ] = None,
-        exclude_fields: Optional[Set[str]] = None,
+        frame_types: tuple[type[Frame], ...]
+        | dict[type[Frame], tuple[type, FrameEndpoint] | None]
+        | None = None,
+        exclude_fields: set[str] | None = None,
         **kwargs,
     ):
         """Initialize the debug log observer.
@@ -136,7 +135,7 @@ class DebugLogObserver(BaseObserver):
         elif isinstance(value, (bytes, bytearray)):
             return f"{len(value)} bytes"
         elif hasattr(value, "get_messages_for_logging") and callable(
-            getattr(value, "get_messages_for_logging")
+            value.get_messages_for_logging
         ):
             # Special case for OpenAI context
             return f"{value.__class__.__name__} with messages: {value.get_messages_for_logging()}"

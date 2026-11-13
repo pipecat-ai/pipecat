@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deixis — UIAgent demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Reading room</h1>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <main>
+      <article aria-label="Octopus cognition">
+        <h2>What octopuses can teach us about minds</h2>
+        <p class="lede">
+          A short tour of the strangest cognitive machine on Earth.
+          Select any paragraph and ask the assistant to explain it,
+          rephrase it, or place it in context.
+        </p>
+
+        <p>
+          An octopus has roughly five hundred million neurons, about
+          the same as a dog. But the wiring is unlike any vertebrate
+          brain. Two thirds of those neurons live in the arms, not in
+          the central brain. Each arm runs a substantial amount of
+          its own motor planning and sensory integration locally,
+          which is why a severed octopus arm will continue to react
+          to touch and even grab nearby food for several minutes.
+        </p>
+
+        <p>
+          Their skin is its own information system. Underneath are
+          millions of pigment cells called chromatophores, each one
+          opened or closed by a tiny ring of muscles. Layered below
+          those are iridophores and leucophores, which scatter or
+          reflect light. Together they let an octopus reproduce the
+          color and texture of a coral, a rock, or a sandy bottom in
+          fractions of a second. The remarkable detail is that
+          octopuses are mostly colorblind, and yet they match colors
+          accurately. The leading hypothesis is that the skin itself
+          has photoreceptors and senses light directly.
+        </p>
+
+        <p>
+          Cephalopods edit their RNA at extraordinary rates. Most
+          animals make small, occasional substitutions in messenger
+          RNA before it is translated into protein. Octopuses,
+          squids, and cuttlefish make tens of thousands of edits, and
+          a substantial fraction occur in the genes that build
+          neurons. This may be how they fine-tune neural function in
+          response to temperature without slow generations of natural
+          selection. The trade-off appears to be a much slower rate
+          of underlying genetic evolution.
+        </p>
+
+        <p>
+          They solve novel problems. Captive octopuses learn to open
+          screw-top jars, navigate mazes, distinguish individual
+          human caretakers, and remember which ones have been
+          unkind. There is at least one careful study in which an
+          octopus, given a transparent box containing food, opened
+          it the long way around rather than through the obvious
+          flap, suggesting some kind of mental simulation rather than
+          pure trial and error.
+        </p>
+
+        <p>
+          Their relationship to time is strange. Most octopus species
+          live one or two years, breed once, and die soon after, in a
+          process driven by hormonal signals from the optic gland. A
+          single animal can therefore acquire a remarkable range of
+          skills, only to lose them on a schedule. From a human
+          standpoint this looks tragic. From an evolutionary
+          standpoint it is simply the cost of investing everything in
+          a brief, intense life.
+        </p>
+
+        <p>
+          Studying octopuses tends to widen the definition of mind.
+          They evolved their cognition independently of vertebrates,
+          starting from a common ancestor more than five hundred
+          million years ago, when the most sophisticated neural
+          tissue on the planet was probably a nerve net. Whatever
+          they do with their distributed brains, they arrived at it
+          on a separate evolutionary line. The result is a working
+          example of intelligence built on a different plan, which
+          is exactly the kind of comparison that a single-example
+          field of study most needs.
+        </p>
+      </article>
+    </main>
+
+    <div id="status" aria-live="polite"></div>
+    <audio id="bot-audio" autoplay data-a11y-exclude></audio>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

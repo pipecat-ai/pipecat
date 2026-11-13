@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,8 @@ import asyncio
 import fractions
 import time
 from collections import deque
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -36,25 +38,44 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.connection import (
+    AUDIO_TRANSCEIVER_INDEX,
+    SCREEN_VIDEO_TRANSCEIVER_INDEX,
+    VIDEO_TRANSCEIVER_INDEX,
+    SmallWebRTCConnection,
+    SmallWebRTCTrack,
+)
+from pipecat.transports.video_in_sampler import _capture_framerate, _VideoInSamplers
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.shared import acquires, releases
+from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 try:
-    import cv2
     from aiortc import VideoStreamTrack
     from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
     from av import AudioFrame, AudioResampler, VideoFrame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use the SmallWebRTC, you need to `uv add "pipecat-ai[webrtc]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 CAM_VIDEO_SOURCE = "camera"
 SCREEN_VIDEO_SOURCE = "screenVideo"
 MIC_AUDIO_SOURCE = "microphone"
+
+# SmallWebRTC has one peer, so all its video samplers are kept under one id.
+_PEER_ID = "peer"
+
+# The source each of the connection's receivers carries.
+_SOURCES_BY_RECEIVER = {
+    AUDIO_TRANSCEIVER_INDEX: MIC_AUDIO_SOURCE,
+    VIDEO_TRANSCEIVER_INDEX: CAM_VIDEO_SOURCE,
+    SCREEN_VIDEO_TRANSCEIVER_INDEX: SCREEN_VIDEO_SOURCE,
+}
 
 
 class SmallWebRTCCallbacks(BaseModel):
@@ -64,11 +85,15 @@ class SmallWebRTCCallbacks(BaseModel):
         on_app_message: Called when an application message is received.
         on_client_connected: Called when a client establishes connection.
         on_client_disconnected: Called when a client disconnects.
+        on_track_status: Called with the source (``"microphone"``, ``"camera"`` or
+            ``"screenVideo"``) and whether the peer is sending it, when the peer
+            turns a source on or off.
     """
 
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
+    on_track_status: Callable[[str, bool], Awaitable[None]]
 
 
 class RawAudioTrack(AudioStreamTrack):
@@ -78,14 +103,17 @@ class RawAudioTrack(AudioStreamTrack):
     supporting queued audio data with proper synchronization.
     """
 
-    def __init__(self, sample_rate):
+    def __init__(self, sample_rate: int, auto_silence: bool = True):
         """Initialize the raw audio track.
 
         Args:
             sample_rate: The audio sample rate in Hz.
+            auto_silence: If True, emit silence when the queue is empty. If False,
+                wait until audio data is available.
         """
         super().__init__()
         self._sample_rate = sample_rate
+        self._auto_silence = auto_silence
         self._samples_per_10ms = sample_rate * 10 // 1000
         self._bytes_per_10ms = self._samples_per_10ms * 2  # 16-bit (2 bytes per sample)
         self._timestamp = 0
@@ -118,11 +146,21 @@ class RawAudioTrack(AudioStreamTrack):
 
         return future
 
+    def stop(self):
+        """Stop the track, and end the writes waiting on audio it will never send."""
+        for _chunk, future in self._chunk_queue:
+            if future is not None and not future.done():
+                future.set_result(False)
+
+        self._chunk_queue.clear()
+        super().stop()
+
     async def recv(self):
         """Return the next audio frame for WebRTC transmission.
 
         Returns:
-            An AudioFrame containing the next audio data or silence.
+            An AudioFrame containing the next audio data, or silence if the queue is empty
+            and ``auto_silence`` is True.
         """
         # Compute required wait time for synchronization
         if self._timestamp > 0:
@@ -130,12 +168,19 @@ class RawAudioTrack(AudioStreamTrack):
             if wait > 0:
                 await asyncio.sleep(wait)
 
-        if self._chunk_queue:
+        if not self._chunk_queue:
+            if self._auto_silence:
+                chunk = bytes(self._bytes_per_10ms)
+            else:
+                while not self._chunk_queue:
+                    await asyncio.sleep(0.005)
+                chunk, future = self._chunk_queue.popleft()
+                if future and not future.done():
+                    future.set_result(True)
+        else:
             chunk, future = self._chunk_queue.popleft()
             if future and not future.done():
                 future.set_result(True)
-        else:
-            chunk = bytes(self._bytes_per_10ms)  # silence
 
         # Convert the byte data to an ndarray of int16 samples
         samples = np.frombuffer(chunk, dtype=np.int16)
@@ -203,13 +248,6 @@ class SmallWebRTCClient:
     messaging through the SmallWebRTCConnection interface.
     """
 
-    FORMAT_CONVERSIONS = {
-        "yuv420p": cv2.COLOR_YUV2RGB_I420,
-        "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
-        "nv12": cv2.COLOR_YUV2RGB_NV12,
-        "gray": cv2.COLOR_GRAY2RGB,
-    }
-
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         """Initialize the WebRTC client.
 
@@ -223,19 +261,18 @@ class SmallWebRTCClient:
 
         self._audio_output_track = None
         self._video_output_track = None
-        self._audio_input_track: Optional[AudioStreamTrack] = None
-        self._video_input_track: Optional[VideoStreamTrack] = None
-        self._screen_video_track: Optional[VideoStreamTrack] = None
+        self._audio_input_track: SmallWebRTCTrack | None = None
+        self._video_input_track: SmallWebRTCTrack | None = None
+        self._screen_video_track: SmallWebRTCTrack | None = None
 
         self._params = None
-        self._audio_in_channels = None
-        self._in_sample_rate = None
-        self._out_sample_rate = None
-        self._leave_counter = 0
+        self._audio_in_channels = 0
+        self._in_sample_rate = 0
+        self._out_sample_rate = 0
 
-        # We are always resampling it for 16000 if the sample_rate that we receive is bigger than that.
-        # otherwise we face issues with Silero VAD
-        self._pipecat_resampler = AudioResampler("s16", "mono", 16000)
+        # Audio resampler - will be configured during setup with target sample rate/layout
+        self._audio_in_resampler = None
+        self._audio_in_layout = None
 
         @self._webrtc_connection.event_handler("connected")
         async def on_connected(connection: SmallWebRTCConnection):
@@ -256,6 +293,14 @@ class SmallWebRTCClient:
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message, connection.pc_id)
 
+        @self._webrtc_connection.event_handler("track-status")
+        async def on_track_status(
+            connection: SmallWebRTCConnection, receiver_index: int, enabled: bool
+        ):
+            source = _SOURCES_BY_RECEIVER.get(receiver_index)
+            if source:
+                await self._callbacks.on_track_status(source, enabled)
+
     def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
         """Convert a video frame to RGB format based on the input format.
 
@@ -267,17 +312,49 @@ class SmallWebRTCClient:
             The converted RGB frame as a NumPy array.
 
         Raises:
+            ImportError: If OpenCV is not installed.
             ValueError: If the format is unsupported.
         """
         if format_name.startswith("rgb"):  # Already in RGB, no conversion needed
             return frame_array
 
-        conversion_code = SmallWebRTCClient.FORMAT_CONVERSIONS.get(format_name)
+        try:
+            import cv2
+        except ModuleNotFoundError as e:
+            raise ImportError(
+                "Receiving non-RGB video frames requires OpenCV. Install it with "
+                '`uv add "pipecat-ai[webrtc-video]"`.'
+            ) from e
+
+        format_conversions = {
+            "yuv420p": cv2.COLOR_YUV2RGB_I420,
+            "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
+            "nv12": cv2.COLOR_YUV2RGB_NV12,
+            "gray": cv2.COLOR_GRAY2RGB,
+        }
+
+        conversion_code = format_conversions.get(format_name)
 
         if conversion_code is None:
             raise ValueError(f"Unsupported format: {format_name}")
 
         return cv2.cvtColor(frame_array, conversion_code)
+
+    def video_source_enabled(self, video_source: str) -> bool:
+        """Whether the peer is sending a video source.
+
+        Args:
+            video_source: ``"camera"`` or ``"screenVideo"``.
+
+        Returns:
+            Whether the source's track is present and the peer hasn't turned it off.
+        """
+        track = (
+            self._video_input_track
+            if video_source == CAM_VIDEO_SOURCE
+            else self._screen_video_track
+        )
+        return track is not None and track.is_enabled()
 
     async def read_video_frame(self, video_source: str):
         """Read video frames from the WebRTC connection.
@@ -303,13 +380,25 @@ class SmallWebRTCClient:
 
             try:
                 frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
-            except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+            except TimeoutError:
+                if (
+                    self._webrtc_connection.is_connected()
+                    and video_track
+                    and video_track.is_enabled()
+                ):
                     logger.warning("Timeout: No video frame received within the specified time.")
                     # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
             except MediaStreamError:
-                logger.warning("Received an unexpected media stream error while reading the video.")
+                # Track is dead — every subsequent `recv()` would raise the same
+                # error and busy-loop the generator at ~100Hz. Clear the track
+                # reference so the loop parks on the `is None` gate above; a
+                # renegotiation that repopulates the track will resume frames.
+                logger.warning("Media stream error while reading the video; clearing track.")
+                if video_source == CAM_VIDEO_SOURCE:
+                    self._video_input_track = None
+                else:
+                    self._screen_video_track = None
                 frame = None
 
             if frame is None or not isinstance(frame, VideoFrame):
@@ -332,6 +421,7 @@ class SmallWebRTCClient:
                 format="RGB",
             )
             image_frame.transport_source = video_source
+            image_frame.pts = frame.pts
 
             del frame  # free original VideoFrame
             del image_bytes  # reference kept in image_frame
@@ -346,6 +436,9 @@ class SmallWebRTCClient:
         Yields:
             InputAudioRawFrame objects containing audio data from the peer.
         """
+        # setup() builds the resampler before the reader task is started.
+        assert self._audio_in_resampler is not None
+
         while True:
             if self._audio_input_track is None:
                 await asyncio.sleep(0.01)
@@ -353,12 +446,21 @@ class SmallWebRTCClient:
 
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
-            except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+            except TimeoutError:
+                if (
+                    self._webrtc_connection.is_connected()
+                    and self._audio_input_track
+                    and self._audio_input_track.is_enabled()
+                ):
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
-                logger.warning("Received an unexpected media stream error while reading the audio.")
+                # Track is dead — every subsequent `recv()` would raise the same
+                # error and busy-loop the generator at ~100Hz. Clear the track
+                # reference so the loop parks on the `is None` gate above; a
+                # renegotiation that repopulates the track will resume frames.
+                logger.warning("Media stream error while reading the audio; clearing track.")
+                self._audio_input_track = None
                 frame = None
 
             if frame is None or not isinstance(frame, AudioFrame):
@@ -366,33 +468,31 @@ class SmallWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            if frame.sample_rate > self._in_sample_rate:
-                resampled_frames = self._pipecat_resampler.resample(frame)
-                for resampled_frame in resampled_frames:
-                    # 16-bit PCM bytes
-                    pcm_array = resampled_frame.to_ndarray().astype(np.int16)
-                    pcm_bytes = pcm_array.tobytes()
-                    del pcm_array  # free NumPy array immediately
+            # Resample if needed, otherwise use the frame as-is. The resampler
+            # also converts to the configured channel layout, so frames whose
+            # layout doesn't already match must go through it even when the
+            # rate already matches (e.g. aiortc decodes to stereo regardless
+            # of the source track) — otherwise interleaved bytes get labeled
+            # with the wrong channel count.
+            frames_to_process = (
+                self._audio_in_resampler.resample(frame)
+                if frame.sample_rate != self._in_sample_rate
+                or frame.layout.name != self._audio_in_layout
+                else [frame]
+            )
 
-                    audio_frame = InputAudioRawFrame(
-                        audio=pcm_bytes,
-                        sample_rate=resampled_frame.sample_rate,
-                        num_channels=self._audio_in_channels,
-                    )
-                    del pcm_bytes  # reference kept in audio_frame
-
-                    yield audio_frame
-            else:
-                # 16-bit PCM bytes
-                pcm_array = frame.to_ndarray().astype(np.int16)
+            for processed_frame in frames_to_process:
+                # Convert to 16-bit PCM bytes
+                pcm_array = processed_frame.to_ndarray().astype(np.int16)
                 pcm_bytes = pcm_array.tobytes()
                 del pcm_array  # free NumPy array immediately
 
                 audio_frame = InputAudioRawFrame(
                     audio=pcm_bytes,
-                    sample_rate=frame.sample_rate,
+                    sample_rate=self._in_sample_rate,
                     num_channels=self._audio_in_channels,
                 )
+                audio_frame.pts = frame.pts
                 del pcm_bytes  # reference kept in audio_frame
 
                 yield audio_frame
@@ -427,36 +527,37 @@ class SmallWebRTCClient:
             return True
         return False
 
-    async def setup(self, _params: TransportParams, frame):
+    async def setup(self, _params: TransportParams, setup: FrameProcessorSetup):
         """Set up the client with transport parameters.
 
         Args:
             _params: Transport configuration parameters.
-            frame: The initialization frame containing setup data.
+            setup: Configuration object containing setup parameters.
         """
         self._audio_in_channels = _params.audio_in_channels
-        self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
-        self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
+        self._in_sample_rate = _params.audio_in_sample_rate or setup.audio_in_sample_rate
+        self._out_sample_rate = _params.audio_out_sample_rate or setup.audio_out_sample_rate
         self._params = _params
-        self._leave_counter += 1
+        self._audio_in_layout = "stereo" if self._audio_in_channels == 2 else "mono"
+        self._audio_in_resampler = AudioResampler(
+            "s16", self._audio_in_layout, self._in_sample_rate
+        )
 
+    @acquires("connection")
     async def connect(self):
         """Establish the WebRTC connection."""
         if self._webrtc_connection.is_connected():
             # already initialized
             return
 
-        logger.info(f"Connecting to Small WebRTC")
+        logger.info("Connecting to Small WebRTC")
         await self._webrtc_connection.connect()
 
+    @releases("connection")
     async def disconnect(self):
         """Disconnect from the WebRTC peer."""
-        self._leave_counter -= 1
-        if self._leave_counter > 0:
-            return
-
         if self.is_connected and not self.is_closing:
-            logger.info(f"Disconnecting to Small WebRTC")
+            logger.info("Disconnecting to Small WebRTC")
             self._closing = True
             await self._webrtc_connection.disconnect()
             await self._handle_peer_disconnected()
@@ -466,11 +567,22 @@ class SmallWebRTCClient:
     ):
         """Send an application message through the WebRTC connection.
 
+        Messages sent before the data channel is open (e.g. while the peer
+        connection is still being established) are buffered by the connection
+        and flushed, in order, once the channel opens.
+
         Args:
             frame: The message frame to send.
         """
-        if self._can_send():
-            self._webrtc_connection.send_app_message(frame.message)
+        if self.is_closing:
+            message_type = (
+                frame.message.get("type", "unknown")
+                if isinstance(frame.message, dict)
+                else type(frame.message).__name__
+            )
+            logger.debug(f"Discarding app message '{message_type}': peer connection is closing.")
+            return
+        self._webrtc_connection.send_app_message(frame.message)
 
     async def _handle_client_connected(self):
         """Handle client connection establishment."""
@@ -482,7 +594,10 @@ class SmallWebRTCClient:
         self._video_input_track = self._webrtc_connection.video_input_track()
         self._screen_video_track = self._webrtc_connection.screen_video_input_track()
         if self._params.audio_out_enabled:
-            self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
+            self._audio_output_track = RawAudioTrack(
+                sample_rate=self._out_sample_rate,
+                auto_silence=self._params.audio_out_auto_silence,
+            )
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
 
         if self._params.video_out_enabled:
@@ -498,6 +613,8 @@ class SmallWebRTCClient:
         self._audio_input_track = None
         self._video_input_track = None
         self._screen_video_track = None
+        if self._audio_output_track:
+            self._audio_output_track.stop()
         self._audio_output_track = None
         self._video_output_track = None
 
@@ -506,6 +623,8 @@ class SmallWebRTCClient:
         self._audio_input_track = None
         self._video_input_track = None
         self._screen_video_track = None
+        if self._audio_output_track:
+            self._audio_output_track.stop()
         self._audio_output_track = None
         self._video_output_track = None
 
@@ -567,10 +686,34 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        self._image_requests = {}
+        self._video_samplers = _VideoInSamplers()
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    def _supports_video_in_source(self, video_source: str) -> bool:
+        """Whether this transport captures a video source listed in ``video_in_sources``.
+
+        Args:
+            video_source: The video source.
+
+        Returns:
+            Whether the source is the camera or the screen share.
+        """
+        return video_source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport and establish the WebRTC connection.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(self._params, setup)
+        await self._client.connect()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames including user image requests.
@@ -584,27 +727,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if isinstance(frame, UserImageRequestFrame):
             await self.request_participant_image(frame)
 
-    async def start(self, frame: StartFrame):
-        """Start the input transport and establish WebRTC connection.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(self._params, frame)
-        await self._client.connect()
-        await self.set_transport_ready(frame)
-        if not self._receive_audio_task and self._params.audio_in_enabled:
-            self._receive_audio_task = self.create_task(self._receive_audio())
-        if not self._receive_video_task and self._params.video_in_enabled:
-            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
-
     async def _stop_tasks(self):
         """Stop all background tasks."""
         if self._receive_audio_task:
@@ -613,6 +735,33 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if self._receive_video_task:
             await self.cancel_task(self._receive_video_task)
             self._receive_video_task = None
+        if self._receive_screen_video_task:
+            await self.cancel_task(self._receive_screen_video_task)
+            self._receive_screen_video_task = None
+
+    async def _teardown(self):
+        """Cancel receive tasks and disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._stop_tasks()
+        await self._client.disconnect()
+
+    async def start(self, frame: StartFrame):
+        """Start receiving media from the WebRTC connection.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+
+        if not self._receive_audio_task and self._params.audio_in_enabled:
+            self._receive_audio_task = self.create_task(self._receive_audio())
+        if not self._receive_video_task and self._params.video_in_enabled:
+            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
+
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and disconnect from WebRTC.
@@ -621,8 +770,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and disconnect immediately.
@@ -631,8 +779,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._stop_tasks()
-        await self._client.disconnect()
+        await self._teardown()
 
     async def _receive_audio(self):
         """Background task for receiving audio frames from WebRTC."""
@@ -654,26 +801,16 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         try:
             video_iterator = self._client.read_video_frame(video_source)
             async for video_frame in video_iterator:
-                if video_frame:
-                    await self.push_video_frame(video_frame)
-
-                    # Check if there are any pending image requests and create UserImageRawFrame
-                    if self._image_requests:
-                        for req_id, request_frame in list(self._image_requests.items()):
-                            if request_frame.video_source == video_source:
-                                # Create UserImageRawFrame using the current video frame
-                                image_frame = UserImageRawFrame(
-                                    user_id=request_frame.user_id,
-                                    request=request_frame,
-                                    image=video_frame.image,
-                                    size=video_frame.size,
-                                    format=video_frame.format,
-                                )
-                                image_frame.transport_source = video_source
-                                # Push the frame to the pipeline
-                                await self.push_video_frame(image_frame)
-                                # Remove from pending requests
-                                del self._image_requests[req_id]
+                if not video_frame:
+                    continue
+                due, request_frame = self._video_samplers.sample(_PEER_ID, video_source)
+                if not due:
+                    continue
+                if request_frame:
+                    video_frame.text = request_frame.text
+                    video_frame.append_to_context = request_frame.append_to_context
+                    video_frame.request = request_frame
+                await self.push_video_frame(video_frame)
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -684,9 +821,8 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         Args:
             message: The application message to process.
         """
-        logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        frame = InputTransportMessageFrame(message=message)
-        await self.push_frame(frame)
+        logger.trace(f"Received app message inside SmallWebRTCInputTransport  {message}")
+        await self.broadcast_frame(InputTransportMessageFrame, message=message)
 
     # Add this method similar to DailyInputTransport.request_participant_image
     async def request_participant_image(self, frame: UserImageRequestFrame):
@@ -700,13 +836,20 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         """
         logger.debug(f"Requesting image from participant: {frame.user_id}")
 
-        # Store the request
-        request_id = f"{frame.function_name}:{frame.tool_call_id}"
-        self._image_requests[request_id] = frame
-
         # Default to camera if no source specified
         if frame.video_source is None:
             frame.video_source = CAM_VIDEO_SOURCE
+
+        if not self._client.video_source_enabled(frame.video_source):
+            error = f"The peer isn't sending {frame.video_source} video."
+            await self._answer_image_requests([frame], error)
+            return
+
+        # A request for a source that isn't being captured starts receiving it,
+        # passing on every frame.
+        if not self._video_samplers.is_capturing(_PEER_ID, frame.video_source):
+            self._video_samplers.capture(_PEER_ID, frame.video_source, None)
+        self._video_samplers.add_request(_PEER_ID, frame.video_source, frame)
         # If we're not already receiving video, try to get a frame now
         if (
             frame.video_source == CAM_VIDEO_SOURCE
@@ -725,15 +868,40 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 self._receive_video(SCREEN_VIDEO_SOURCE)
             )
 
+    async def stop_video(self, video_source: str):
+        """Answer the image requests waiting on a video source the peer turned off.
+
+        The source stays captured, so its frames are sampled again if it's turned
+        back on.
+
+        Args:
+            video_source: ``"camera"`` or ``"screenVideo"``.
+        """
+        requests = self._video_samplers.take_requests(_PEER_ID, video_source)
+        error = f"The peer turned off its {video_source} video."
+        await self._answer_image_requests(requests, error)
+
+    async def remove_all_video(self):
+        """Stop sampling video and answer the waiting image requests, e.g. on disconnect."""
+        requests = self._video_samplers.clear()
+        await self._answer_image_requests(requests, "The peer disconnected.")
+
     async def capture_participant_media(
         self,
         source: str = CAM_VIDEO_SOURCE,
+        framerate: int | None = None,
     ):
         """Capture media from a specific participant.
 
         Args:
             source: Media source to capture from. ("camera", "microphone", or "screenVideo")
+            framerate: For a video source, frames per second to pass on. ``0`` passes
+                on only the frames that answer image requests, and ``None`` passes on
+                every frame.
         """
+        if source in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+            self._video_samplers.capture(_PEER_ID, source, framerate)
+
         # If we're not already receiving video, try to get a frame now
         if (
             source == MIC_AUDIO_SOURCE
@@ -784,25 +952,39 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the transport and establish the WebRTC connection.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+
+        await self._client.setup(self._params, setup)
+        await self._client.connect()
+
+    async def cleanup(self):
+        """Release resources during teardown."""
+        await super().cleanup()
+        await self._teardown()
 
     async def start(self, frame: StartFrame):
-        """Start the output transport and establish WebRTC connection.
+        """Start the output transport.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
 
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        await self._client.setup(self._params, frame)
-        await self._client.connect()
         await self.set_transport_ready(frame)
+
+    async def _teardown(self):
+        """Disconnect the WebRTC client.
+
+        Idempotent so it can run from ``stop()``, ``cancel()``, and
+        ``cleanup()`` without duplicating work.
+        """
+        await self._client.disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the output transport and disconnect from WebRTC.
@@ -811,7 +993,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._client.disconnect()
+        await self._teardown()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and disconnect immediately.
@@ -820,7 +1002,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._client.disconnect()
+        await self._teardown()
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
@@ -860,14 +1042,26 @@ class SmallWebRTCTransport(BaseTransport):
 
     Provides bidirectional audio and video streaming over WebRTC connections
     with support for application messaging and connection event handling.
+
+    Event handlers available:
+
+    - on_client_connected(transport, client): Client connected to WebRTC session
+    - on_client_disconnected(transport, client): Client disconnected from WebRTC session
+    - on_client_message(transport, message, client): Received a data channel message
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            ...
     """
 
     def __init__(
         self,
         webrtc_connection: SmallWebRTCConnection,
         params: TransportParams,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the WebRTC transport.
 
@@ -884,18 +1078,30 @@ class SmallWebRTCTransport(BaseTransport):
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
+            on_track_status=self._on_track_status,
         )
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input: Optional[SmallWebRTCInputTransport] = None
-        self._output: Optional[SmallWebRTCOutputTransport] = None
+        self._input: SmallWebRTCInputTransport | None = None
+        self._output: SmallWebRTCOutputTransport | None = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+    def get_client_id(self, client: Any) -> str:
+        """The id of a client, as passed to ``on_client_connected``.
+
+        Args:
+            client: The client, as passed to the transport's client events.
+
+        Returns:
+            The peer connection's id.
+        """
+        return client.pc_id
 
     def input(self) -> SmallWebRTCInputTransport:
         """Get the input transport processor.
@@ -917,7 +1123,7 @@ class SmallWebRTCTransport(BaseTransport):
         """
         if not self._output:
             self._output = SmallWebRTCOutputTransport(
-                self._client, self._params, name=self._input_name
+                self._client, self._params, name=self._output_name
             )
         return self._output
 
@@ -947,23 +1153,77 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""
+        # Capture the configured video sources before the event handlers run, so
+        # a handler that captures a source itself takes precedence.
+        if self._input:
+            for video_source, source_params in self._params.video_in_sources.items():
+                if self._input._supports_video_in_source(video_source):
+                    framerate = 0 if source_params.on_request_only else source_params.framerate
+                    await self._input.capture_participant_media(
+                        source=video_source, framerate=framerate
+                    )
+
         await self._call_event_handler("on_client_connected", webrtc_connection)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, webrtc_connection):
         """Handle client disconnection events."""
+        if self._input:
+            await self._input.remove_all_video()
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
+
+    async def _on_track_status(self, source: str, enabled: bool):
+        """Handle the peer turning a source on or off."""
+        if self._input and source != MIC_AUDIO_SOURCE and not enabled:
+            await self._input.stop_video(source)
 
     async def capture_participant_video(
         self,
+        participant_id: str | None = None,
+        framerate: int | None | NotGiven = NOT_GIVEN,
         video_source: str = CAM_VIDEO_SOURCE,
+        *,
+        on_request_only: bool = False,
     ):
-        """Capture video from a specific participant.
+        """Capture the peer's camera or screen share at a framerate.
 
         Args:
+            participant_id: The peer's id, as from :meth:`get_client_id`.
+                SmallWebRTC has one peer, so the id isn't used to select it.
+
+                .. deprecated:: 1.13.0
+                    Pass ``participant_id`` first, as on other transports. Calls
+                    without it, ``capture_participant_video(video_source=...)``
+                    or ``capture_participant_video("camera")``, keep their old
+                    meaning, passing on every frame unless ``framerate`` is given.
+                    Will be removed in 2.0.0.
+
+            framerate: Frames per second to pass on, 30 if not given, or ``None``
+                for every frame. It doesn't apply with ``on_request_only``.
             video_source: Video source to capture from ("camera" or "screenVideo").
+            on_request_only: Pass on only the frames that answer image requests.
         """
+        if participant_id is None or participant_id in (CAM_VIDEO_SOURCE, SCREEN_VIDEO_SOURCE):
+            warn_deprecated(
+                "`SmallWebRTCTransport.capture_participant_video(participant_id=None)` is "
+                "deprecated since 1.13.0 and will be removed in 2.0.0. "
+                "Use `capture_participant_video(participant_id, framerate, video_source)` "
+                "instead.",
+                stacklevel=2,
+            )
+            # The deprecated form is (video_source, framerate=None).
+            if participant_id is not None:
+                video_source = participant_id
+            framerate = framerate if is_given(framerate) else None
+        elif not is_given(framerate):
+            framerate = 30
+        framerate = _capture_framerate(
+            framerate, on_request_only, "SmallWebRTCTransport.capture_participant_video"
+        )
+
         if self._input:
-            await self._input.capture_participant_media(source=video_source)
+            await self._input.capture_participant_media(source=video_source, framerate=framerate)
 
     async def capture_participant_audio(
         self,

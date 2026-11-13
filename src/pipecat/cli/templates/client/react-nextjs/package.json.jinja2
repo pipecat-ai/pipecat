@@ -1,0 +1,33 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build --turbopack",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+{%- for name, version in ui_dependencies.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
+    "@fontsource-variable/geist": "^5.3.0",
+{%- for name, version in transport_packages.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
+    "next": "^16",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^25",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^16",
+    "typescript": "^6"
+  }
+}

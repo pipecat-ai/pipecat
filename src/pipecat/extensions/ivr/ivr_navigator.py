@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,15 +11,18 @@ using LLM-based decision making and DTMF tone generation.
 """
 
 from enum import Enum
-from typing import List, Optional
 
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    EndFrame,
     Frame,
+    InterruptionFrame,
     LLMContextFrame,
+    LLMFullResponseEndFrame,
     LLMMessagesUpdateFrame,
     LLMTextFrame,
     OutputDTMFUrgentFrame,
@@ -28,10 +31,14 @@ from pipecat.frames.frames import (
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
+from pipecat.processors.aggregators.llm_context import LLMContextMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
+from pipecat.utils.text.pattern_pair_aggregator import (
+    MatchAction,
+    PatternMatch,
+    PatternPairAggregator,
+)
 
 
 class IVRStatus(Enum):
@@ -66,7 +73,7 @@ class IVRProcessor(FrameProcessor):
         *,
         classifier_prompt: str,
         ivr_prompt: str,
-        ivr_vad_params: Optional[VADParams] = None,
+        ivr_vad_params: VADParams | None = None,
     ):
         """Initialize the IVR processor.
 
@@ -82,7 +89,7 @@ class IVRProcessor(FrameProcessor):
         self._classifier_prompt = classifier_prompt
 
         # Store saved context messages
-        self._saved_messages: List[dict] = []
+        self._saved_messages: list[LLMContextMessage] = []
 
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
@@ -92,18 +99,18 @@ class IVRProcessor(FrameProcessor):
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_ivr_status_changed")
 
-    def update_saved_messages(self, messages: List[dict]) -> None:
+    def update_saved_messages(self, messages: list[LLMContextMessage]) -> None:
         """Update the saved context messages.
 
         Sets the messages that are saved when switching between
         conversation and IVR navigation modes.
 
         Args:
-            messages: List of message dictionaries to save.
+            messages: List of context messages to save.
         """
         self._saved_messages = messages
 
-    def _get_conversation_history(self) -> List[dict]:
+    def _get_conversation_history(self) -> list[LLMContextMessage]:
         """Get saved context messages without the system message.
 
         Returns:
@@ -114,15 +121,15 @@ class IVRProcessor(FrameProcessor):
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
-        self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", remove_match=True)
+        self._aggregator.add_pattern("dtmf", "<dtmf>", "</dtmf>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_action)
 
         # Register mode pattern
-        self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", remove_match=True)
+        self._aggregator.add_pattern("mode", "<mode>", "</mode>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("mode", self._handle_mode_action)
 
         # Register IVR pattern
-        self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", remove_match=True)
+        self._aggregator.add_pattern("ivr", "<ivr>", "</ivr>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("ivr", self._handle_ivr_action)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -139,16 +146,36 @@ class IVRProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
             # Set the classifier prompt and push it upstream
-            messages = [{"role": "system", "content": self._classifier_prompt}]
+            messages: list[LLMContextMessage] = [
+                {"role": "developer", "content": self._classifier_prompt}
+            ]
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
+        elif isinstance(frame, InterruptionFrame):
+            # Drop the text of the interrupted response, including a tag left open
+            await self._aggregator.handle_interruption()
+            await self.push_frame(frame, direction)
+
         elif isinstance(frame, LLMTextFrame):
             # Process text through the pattern aggregator
-            result = await self._aggregator.aggregate(frame.text)
-            if result:
+            async for result in self._aggregator.aggregate(frame.text):
                 # Push aggregated text that doesn't contain XML patterns
-                await self.push_frame(LLMTextFrame(result), direction)
+                await self.push_frame(
+                    AggregatedTextFrame(text=result.text, text_type=result.type),
+                    direction,
+                )
+
+        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
+            # Flush any remaining text from the aggregator
+            remaining = await self._aggregator.flush()
+            if remaining:
+                await self.push_frame(
+                    AggregatedTextFrame(text=remaining.text, text_type=remaining.type),
+                    direction,
+                )
+            # Push the end frame
+            await self.push_frame(frame, direction)
 
         else:
             await self.push_frame(frame, direction)
@@ -159,7 +186,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing DTMF content.
         """
-        value = match.content
+        value = match.text
         logger.debug(f"DTMF detected: {value}")
 
         try:
@@ -180,7 +207,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing IVR status content.
         """
-        status = match.content
+        status = match.text
         logger.trace(f"IVR status detected: {status}")
 
         # Convert string to enum, with validation
@@ -211,7 +238,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing mode content.
         """
-        mode = match.content
+        mode = match.text
         logger.debug(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()
@@ -243,7 +270,7 @@ class IVRProcessor(FrameProcessor):
         logger.debug("IVR detected - switching to IVR navigation mode")
 
         # Create new context with IVR system prompt and saved messages
-        messages = [{"role": "system", "content": self._ivr_prompt}]
+        messages: list[LLMContextMessage] = [{"role": "developer", "content": self._ivr_prompt}]
 
         # Add saved conversation history if available
         conversation_history = self._get_conversation_history()
@@ -390,7 +417,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         *,
         llm: LLMService,
         ivr_prompt: str,
-        ivr_vad_params: Optional[VADParams] = None,
+        ivr_vad_params: VADParams | None = None,
     ):
         """Initialize the IVR navigator.
 
@@ -424,7 +451,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             # Extract messages and pass to IVR processor
             all_messages = frame.context.get_messages()
 

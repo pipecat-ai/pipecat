@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,21 +11,9 @@ and BCP 47 standards, supporting both language-only and language-region
 combinations for various speech and text processing services.
 """
 
-import sys
-from enum import Enum
+from enum import StrEnum
 
-if sys.version_info < (3, 11):
-
-    class StrEnum(str, Enum):
-        """String enumeration base class for Python < 3.11 compatibility."""
-
-        def __new__(cls, value):
-            """Create a new instance of the StrEnum."""
-            obj = str.__new__(cls, value)
-            obj._value_ = value
-            return obj
-else:
-    from enum import StrEnum
+from loguru import logger
 
 
 class Language(StrEnum):
@@ -62,7 +50,9 @@ class Language(StrEnum):
     AR_SA = "ar-SA"
     AR_SY = "ar-SY"
     AR_TN = "ar-TN"
+    AR_XA = "ar-XA"
     AR_YE = "ar-YE"
+    AR_001 = "ar-001"
 
     # Assamese
     AS = "as"
@@ -80,6 +70,7 @@ class Language(StrEnum):
 
     # Belarusian
     BE = "be"
+    BE_BY = "be-BY"
 
     # Bulgarian
     BG = "bg"
@@ -96,6 +87,10 @@ class Language(StrEnum):
     # Breton
     BR = "br"
 
+    # Bodo
+    BRX = "brx"
+    BRX_IN = "brx-IN"
+
     # Bosnian
     BS = "bs"
     BS_BA = "bs-BA"
@@ -106,6 +101,12 @@ class Language(StrEnum):
 
     # Cebuano
     CEB = "ceb"
+    CEB_PH = "ceb-PH"
+
+    # Central Kurdish
+    CKB = "ckb"
+    CKB_IQ = "ckb-IQ"
+    CKB_IR = "ckb-IR"
 
     # Mandarin Chinese
     CMN = "cmn"
@@ -126,8 +127,13 @@ class Language(StrEnum):
     # German
     DE = "de"
     DE_AT = "de-AT"
+    DE_BE = "de-BE"
     DE_CH = "de-CH"
     DE_DE = "de-DE"
+
+    # Dogri
+    DOI = "doi"
+    DOI_IN = "doi-IN"
 
     # Greek
     EL = "el"
@@ -135,6 +141,7 @@ class Language(StrEnum):
 
     # English
     EN = "en"
+    EN_AB = "en-AB"
     EN_AU = "en-AU"
     EN_CA = "en-CA"
     EN_GB = "en-GB"
@@ -149,6 +156,7 @@ class Language(StrEnum):
     EN_SG = "en-SG"
     EN_TZ = "en-TZ"
     EN_US = "en-US"
+    EN_WL = "en-WL"
     EN_ZA = "en-ZA"
 
     # Esperanto
@@ -178,6 +186,7 @@ class Language(StrEnum):
     ES_US = "es-US"
     ES_UY = "es-UY"
     ES_VE = "es-VE"
+    ES_419 = "es-419"
 
     # Estonian
     ET = "et"
@@ -189,6 +198,7 @@ class Language(StrEnum):
 
     # Persian
     FA = "fa"
+    FA_AF = "fa-AF"
     FA_IR = "fa-IR"
 
     # Fulah
@@ -247,6 +257,7 @@ class Language(StrEnum):
 
     # Haitian Creole
     HT = "ht"
+    HT_HT = "ht-HT"
 
     # Hungarian
     HU = "hu"
@@ -285,6 +296,7 @@ class Language(StrEnum):
     # Javanese
     JV = "jv"
     JV_ID = "jv-ID"
+    JV_JV = "jv-JV"
     JW = "jw"  # Fal requires for Javanese
 
     # Georgian
@@ -293,6 +305,10 @@ class Language(StrEnum):
 
     # Kabuverdianu
     KEA = "kea"
+
+    # Kabyle
+    KAB = "kab"
+    KAB_DZ = "kab-DZ"
 
     # Kazakh
     KK = "kk"
@@ -306,9 +322,17 @@ class Language(StrEnum):
     KN = "kn"
     KN_IN = "kn-IN"
 
+    # Konkani
+    KOK = "kok"
+    KOK_IN = "kok-IN"
+
     # Korean
     KO = "ko"
     KO_KR = "ko-KR"
+
+    # Kashmiri
+    KS = "ks"
+    KS_IN = "ks-IN"
 
     # Kurdish
     KU = "ku"
@@ -319,9 +343,11 @@ class Language(StrEnum):
 
     # Latin
     LA = "la"
+    LA_VA = "la-VA"
 
     # Luxembourgish
     LB = "lb"
+    LB_LU = "lb-LU"
 
     # Lingala
     LN = "ln"
@@ -346,6 +372,7 @@ class Language(StrEnum):
 
     # Malagasy
     MG = "mg"
+    MG_MG = "mg-MG"
 
     # Maori
     MI = "mi"
@@ -354,6 +381,10 @@ class Language(StrEnum):
     MK = "mk"
     MK_MK = "mk-MK"
 
+    # Maithili
+    MAI = "mai"
+    MAI_IN = "mai-IN"
+
     # Malayalam
     ML = "ml"
     ML_IN = "ml-IN"
@@ -361,6 +392,10 @@ class Language(StrEnum):
     # Mongolian
     MN = "mn"
     MN_MN = "mn-MN"
+
+    # Manipuri
+    MNI = "mni"
+    MNI_IN = "mni-IN"
 
     # Marathi
     MR = "mr"
@@ -384,9 +419,11 @@ class Language(StrEnum):
     NB_NO = "nb-NO"
     NO = "no"
     NN = "nn"  # Norwegian Nynorsk
+    NN_NO = "nn-NO"
 
     # Nepali
     NE = "ne"
+    NE_IN = "ne-IN"
     NE_NP = "ne-NP"
 
     # Dutch
@@ -434,9 +471,15 @@ class Language(StrEnum):
 
     # Sanskrit
     SA = "sa"
+    SA_IN = "sa-IN"
+
+    # Santali
+    SAT = "sat"
+    SAT_IN = "sat-IN"
 
     # Sindhi
     SD = "sd"
+    SD_IN = "sd-IN"
 
     # Sinhala
     SI = "si"
@@ -477,8 +520,11 @@ class Language(StrEnum):
 
     # Swahili
     SW = "sw"
+    SW_BI = "sw-BI"
     SW_KE = "sw-KE"
+    SW_RW = "sw-RW"
     SW_TZ = "sw-TZ"
+    SW_UG = "sw-UG"
 
     # Tamil
     TA = "ta"
@@ -569,3 +615,67 @@ class Language(StrEnum):
     # Zulu
     ZU = "zu"
     ZU_ZA = "zu-ZA"
+
+
+def resolve_language(
+    language: Language, language_map: dict[Language, str], use_base_code: bool = True
+) -> str:
+    """Resolve a Language enum to a service-specific language code.
+
+    Checks the language map first, then falls back to extracting the appropriate
+    code format with a warning if not found in the verified list.
+
+    Args:
+        language: The Language enum value to convert.
+        language_map: Dictionary mapping Language enums to service language codes.
+        use_base_code: If True, a regional variant resolves through its base
+                      language: the map's code for the base language (e.g.
+                      'eng' for 'en-US' when the map has ``Language.EN: "eng"``),
+                      or the base code itself (e.g. 'en') when the map has no
+                      entry for it. If False, uses full language code as-is.
+
+    Returns:
+        The resolved language code for the service.
+
+    Examples::
+
+        # Service expecting base codes (e.g., Cartesia)
+        >>> LANGUAGE_MAP = {Language.EN: "en", Language.ES: "es"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'en'."
+        "en"
+
+        # Service with its own code per base language (e.g., ElevenLabs STT)
+        >>> LANGUAGE_MAP = {Language.EN: "eng", Language.ES: "spa"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'eng'."
+        "eng"
+
+        # Service expecting full codes (e.g., AWS)
+        >>> LANGUAGE_MAP = {Language.EN_US: "en-US", Language.ES_ES: "es-ES"}
+        >>> resolve_language(Language.EN_GB, LANGUAGE_MAP, use_base_code=False)
+        # Logs: "Language en-GB not verified. Using 'en-GB'."
+        "en-GB"
+    """
+    # Check if language is in the verified map
+    result = language_map.get(language)
+
+    if result is not None:
+        return result
+
+    # Not in map - fall back with warning
+    lang_str = str(language)
+
+    if use_base_code:
+        # Extract base code (e.g., "en" from "en-US"), then prefer the map's code
+        # for that base language when the service names it differently.
+        base_code = lang_str.split("-")[0].lower()
+        try:
+            base_code = language_map.get(Language(base_code), base_code)
+        except ValueError:
+            pass
+        logger.warning(f"Language {language} not verified. Using base code '{base_code}'.")
+        return base_code
+    else:
+        logger.warning(f"Language {language} not verified. Using '{lang_str}'.")
+        return lang_str

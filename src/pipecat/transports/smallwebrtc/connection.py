@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,8 +13,10 @@ for real-time communication applications.
 
 import asyncio
 import json
+import os
 import time
-from typing import Any, List, Literal, Optional, Union
+import uuid
+from typing import Any, Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
@@ -22,24 +24,70 @@ from pydantic import BaseModel, TypeAdapter
 from pipecat.utils.base_object import BaseObject
 
 try:
+    import aiortc.rtcsctptransport as _sctp_transport
     from aiortc import (
-        MediaStreamTrack,
+        RTCBundlePolicy,
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
         RTCSessionDescription,
     )
+    from aiortc.jitterbuffer import JitterBuffer
     from aiortc.rtcrtpreceiver import RemoteStreamTrack
     from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use the SmallWebRTC, you need to `uv add "pipecat-ai[webrtc]"`.')
+    raise ImportError(f"Missing module: {e}") from e
+
+# Packets the screen share receiver's jitter buffer holds, which bounds the
+# size of a frame it can assemble. aiortc's 128 packets (about 150 KB) is
+# smaller than a keyframe of a detailed, high-resolution screen share, so such
+# a keyframe is dropped, the next keyframe requested is as large, and no frame
+# ever decodes. 512 packets, libwebrtc's initial packet buffer size, fit frames
+# of about 600 KB. The capacity doesn't delay frames, but it is how many packets
+# arrive before a lost one is given up on, so the camera keeps aiortc's default.
+# aiortc has no setting for this, so the buffer is replaced as the track is
+# wrapped.
+SCREEN_VIDEO_JITTER_BUFFER_CAPACITY = 512
+
+# Clamp aiortc's SCTP DATA-chunk payload size so the on-wire UDP packet fits
+# inside the smallest-MTU path we're likely to see (IPv6 minimum 1280,
+# Tailscale overlays default to 1280, some consumer VPNs are lower).
+#
+# aiortc hardcodes USERDATA_MAX_LENGTH = 1200. After adding SCTP (28) +
+# DTLS/GCM (~29) + UDP (8) + IPv6 (40) headers that produces a ~1305-byte
+# UDP datagram — over the 1280 MTU. The kernel rejects it with EMSGSIZE,
+# SCTP retransmits at the same size, and the data channel silently stalls.
+# aiortc has no PMTU discovery (RFC 8831 §6), so there is no auto-recovery.
+#
+# 1100 brings the worst-case datagram to ~1205 bytes (~75 bytes of slack).
+# Throughput cost is negligible: RTVI control frames fragment across one
+# extra chunk at most, and audio uses RTP (a separate path).
+#
+# There is no public API to set this — RTCConfiguration exposes no MTU knob
+# and all method references are bare module-global lookups, so patching the
+# module attribute before any RTCSctpTransport is instantiated is the only
+# option short of forking aiortc.
+#
+# Remove once aiortc ships DPLPMTUD (RFC 8899) or exposes this as a
+# configurable parameter.
+_SCTP_MAX_CHUNK_SIZE_DEFAULT = 1100
+_sctp_max_chunk_size = int(
+    os.environ.get("PIPECAT_SCTP_MAX_CHUNK_SIZE", _SCTP_MAX_CHUNK_SIZE_DEFAULT)
+)
+_sctp_transport.USERDATA_MAX_LENGTH = _sctp_max_chunk_size
+logger.debug(f"[SCTP] USERDATA_MAX_LENGTH set to {_sctp_max_chunk_size}")
 
 SIGNALLING_TYPE = "signalling"
 AUDIO_TRANSCEIVER_INDEX = 0
 VIDEO_TRANSCEIVER_INDEX = 1
 SCREEN_VIDEO_TRANSCEIVER_INDEX = 2
+
+# Maximum number of messages to queue while the data channel is not yet open.
+MAX_MESSAGE_QUEUE_SIZE = 50
+# Seconds to wait for the data channel to open after the peer connection is established.
+DATA_CHANNEL_TIMEOUT_SECS = 10
 
 
 class TrackStatusMessage(BaseModel):
@@ -84,8 +132,8 @@ class SignallingMessage:
         outbound: Types of messages that can be sent to peers.
     """
 
-    Inbound = Union[TrackStatusMessage]  # in case we need to add new messages in the future
-    outbound = Union[RenegotiateMessage]
+    Inbound = TrackStatusMessage  # in case we need to add new messages in the future
+    outbound = RenegotiateMessage
 
 
 class SmallWebRTCTrack:
@@ -95,19 +143,26 @@ class SmallWebRTCTrack:
     enable/disable control and frame discarding for audio and video streams.
     """
 
-    def __init__(self, receiver):
+    def __init__(self, receiver, jitter_buffer_capacity: int | None = None):
         """Initialize the WebRTC track wrapper.
 
         Args:
             receiver: The RemoteStreamTrack receiver instance.
+            jitter_buffer_capacity: Packets the video receiver's jitter buffer
+                holds, or ``None`` for aiortc's default.
         """
         self._receiver = receiver
         # Configuring the receiver for not consuming the track by default to prevent memory grow
         self._receiver._enabled = False
+        if jitter_buffer_capacity is not None:
+            receiver._RTCRtpReceiver__jitter_buffer = JitterBuffer(
+                capacity=jitter_buffer_capacity, is_video=True
+            )
         self._track = receiver.track
         self._enabled = True
         self._last_recv_time: float = 0.0
-        self._idle_task: Optional[asyncio.Task] = None
+        self._idle_task: asyncio.Task | None = None
+        self._renegotiation_task: asyncio.Task | None = None
         self._idle_timeout: float = 2.0  # seconds before discarding old frames
 
     def set_enabled(self, enabled: bool) -> None:
@@ -140,7 +195,7 @@ class SmallWebRTCTrack:
                 remote_track._queue.get_nowait()  # Remove the oldest frame
                 remote_track._queue.task_done()
 
-    async def recv(self) -> Optional[Frame]:
+    async def recv(self) -> Frame | None:
         """Receive the next frame from the track.
 
         Enables the internal receiving state and starts idle watcher.
@@ -208,7 +263,7 @@ class SmallWebRTCConnection(BaseObject):
 
     def __init__(
         self,
-        ice_servers: Optional[Union[List[str], List[IceServer]]] = None,
+        ice_servers: list[str] | list[IceServer] | None = None,
         connection_timeout_secs: int = 60,
     ):
         """Initialize the WebRTC connection.
@@ -222,11 +277,11 @@ class SmallWebRTCConnection(BaseObject):
         """
         super().__init__()
         if not ice_servers:
-            self.ice_servers: List[IceServer] = []
+            self.ice_servers: list[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
-            self.ice_servers = ice_servers
+            self.ice_servers = cast(list[IceServer], ice_servers)
         elif all(isinstance(s, str) for s in ice_servers):
-            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
+            self.ice_servers = [IceServer(urls=s) for s in cast(list[str], ice_servers)]
         else:
             raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
@@ -245,6 +300,7 @@ class SmallWebRTCConnection(BaseObject):
         self._register_event_handler("app-message")
         self._register_event_handler("track-started")
         self._register_event_handler("track-ended")
+        self._register_event_handler("track-status")
         # connection states
         self._register_event_handler("connecting")
         self._register_event_handler("connected")
@@ -274,17 +330,24 @@ class SmallWebRTCConnection(BaseObject):
     def _initialize(self):
         """Initialize the peer connection and associated components."""
         logger.debug("Initializing new peer connection")
-        rtc_config = RTCConfiguration(iceServers=self.ice_servers)
+        # With aiortc's default (balanced) policy, the screen share's transceiver is
+        # left off the bundled transport, so its packets never reach it.
+        rtc_config = RTCConfiguration(
+            iceServers=self.ice_servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE
+        )
 
-        self._answer: Optional[RTCSessionDescription] = None
+        self._answer: RTCSessionDescription | None = None
         self._pc = RTCPeerConnection(rtc_config)
-        self._pc_id = self.name
+        self._pc_id = f"{self.name}-{uuid.uuid4().hex}"
         self._setup_listeners()
         self._data_channel = None
         self._renegotiation_in_progress = False
         self._last_received_time = None
+        self._outgoing_messages_queue = []
+        self._data_channel_enabled = True
         self._pending_app_messages = []
         self._connecting_timeout_task = None
+        self._data_channel_timeout_task = None
 
     def _setup_listeners(self):
         """Set up event listeners for the peer connection."""
@@ -293,10 +356,17 @@ class SmallWebRTCConnection(BaseObject):
         def on_datachannel(channel):
             self._data_channel = channel
 
+            # A channel created by the remote peer is already open when aiortc
+            # emits "datachannel" (readyState is set before the event), so no
+            # "open" event will follow — flush immediately in that case.
+            if channel.readyState == "open":
+                self._flush_message_queue()
+
             # Flush queued messages once the data channel is open
             @channel.on("open")
             async def on_open():
                 logger.debug("Data channel is open!")
+                self._flush_message_queue()
 
             @channel.on("message")
             async def on_message(message):
@@ -308,7 +378,7 @@ class SmallWebRTCConnection(BaseObject):
                     else:
                         json_message = json.loads(message)
                         if json_message["type"] == SIGNALLING_TYPE and json_message.get("message"):
-                            self._handle_signalling_message(json_message["message"])
+                            await self._handle_signalling_message(json_message["message"])
                         else:
                             if self.is_connected():
                                 await self._call_event_handler("app-message", json_message)
@@ -316,7 +386,7 @@ class SmallWebRTCConnection(BaseObject):
                                 logger.debug("Client not connected. Queuing app-message.")
                                 self._pending_app_messages.append(json_message)
                 except Exception as e:
-                    logger.exception(f"Error parsing JSON message {message}, {e}")
+                    logger.error(f"Error parsing JSON message {message}, {e}")
 
         # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
         # So, in case we loose connection, this event will not be triggered
@@ -356,10 +426,10 @@ class SmallWebRTCConnection(BaseObject):
         self.force_transceivers_to_send_recv()
 
         # this answer does not contain the ice candidates, which will be gathered later, after the setLocalDescription
-        logger.debug(f"Creating answer")
+        logger.debug("Creating answer")
         local_answer = await self._pc.createAnswer()
         await self._pc.setLocalDescription(local_answer)
-        logger.debug(f"Setting the answer after the local description is created")
+        logger.debug("Setting the answer after the local description is created")
         self._answer = self._pc.localDescription
 
     async def initialize(self, sdp: str, type: str):
@@ -384,10 +454,10 @@ class SmallWebRTCConnection(BaseObject):
             # and aiortc does not handle that pretty well.
             video_input_track = self.video_input_track()
             if video_input_track:
-                await self.video_input_track().discard_old_frames()
+                await video_input_track.discard_old_frames()
             screen_video_input_track = self.screen_video_input_track()
             if screen_video_input_track:
-                await self.screen_video_input_track().discard_old_frames()
+                await screen_video_input_track.discard_old_frames()
             if video_input_track or screen_video_input_track:
                 # This prevents an issue where sometimes the WebRTC connection can be established
                 # before the bot is ready to receive video. When that happens, we can lose a couple
@@ -421,8 +491,13 @@ class SmallWebRTCConnection(BaseObject):
         async def delayed_task():
             await asyncio.sleep(2)
             self._renegotiation_in_progress = False
+            # A renegotiation arriving inside the two seconds replaces this task.
+            if self._renegotiation_task is asyncio.current_task():
+                self._renegotiation_task = None
 
-        asyncio.create_task(delayed_task())
+        # Held on self so the task cannot be collected before it clears the flag,
+        # which would leave renegotiation blocked for the rest of the session.
+        self._renegotiation_task = asyncio.create_task(delayed_task())
 
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""
@@ -499,9 +574,12 @@ class SmallWebRTCConnection(BaseObject):
         self._track_map.clear()
         if self._pc:
             await self._pc.close()
+        self._outgoing_messages_queue.clear()
+        self._data_channel_enabled = True
         self._pending_app_messages.clear()
         self._track_map = {}
         self._cancel_monitoring_connecting_state()
+        self._cancel_data_channel_timeout()
 
     def get_answer(self):
         """Get the SDP answer for the current connection.
@@ -550,6 +628,44 @@ class SmallWebRTCConnection(BaseObject):
             self._connecting_timeout_task.cancel()
         self._connecting_timeout_task = None
 
+    def _start_data_channel_timeout(self) -> None:
+        """Start a timeout to detect if the data channel fails to open after connection.
+
+        Schedules a background task that fires ``DATA_CHANNEL_TIMEOUT_SECS`` seconds after
+        the peer connection reaches the *connected* state.  If the data channel has not
+        opened by then, the queued messages are discarded, a warning is logged, and future
+        calls to :meth:`send_app_message` will silently drop messages instead of queuing
+        them (fall-back to "discard" mode).
+
+        The task is automatically cancelled when the data channel opens successfully (see
+        :meth:`_flush_message_queue`) or when the connection is closed (see
+        :meth:`_close`).
+        """
+
+        async def timeout_handler():
+            await asyncio.sleep(DATA_CHANNEL_TIMEOUT_SECS)
+            if not self._data_channel or self._data_channel.readyState != "open":
+                logger.warning(
+                    f"Data channel not established within {DATA_CHANNEL_TIMEOUT_SECS}s after "
+                    "connection. Clearing message queue and disabling future queueing."
+                )
+                self._outgoing_messages_queue.clear()
+                self._data_channel_enabled = False
+
+        self._data_channel_timeout_task = asyncio.create_task(timeout_handler())
+
+    def _cancel_data_channel_timeout(self) -> None:
+        """Cancel the data-channel open timeout task, if any.
+
+        Should be called when the data channel opens successfully (the timeout is no longer
+        needed) or when the connection is being torn down.  If the task is still pending it
+        will be cancelled and the reference cleared.
+        """
+        if self._data_channel_timeout_task and not self._data_channel_timeout_task.done():
+            logger.debug("Cancelling the data channel timeout task")
+            self._data_channel_timeout_task.cancel()
+        self._data_channel_timeout_task = None
+
     async def _handle_new_connection_state(self):
         """Handle changes in the peer connection state."""
         state = self._pc.connectionState
@@ -557,6 +673,9 @@ class SmallWebRTCConnection(BaseObject):
             self._monitoring_connecting_state()
         else:
             self._cancel_monitoring_connecting_state()
+
+        if state == "connected" and not self._data_channel_timeout_task:
+            self._start_data_channel_timeout()
 
         if state == "connected" and not self._connect_invoked:
             # We are going to wait until the pipeline is ready before triggering the event
@@ -650,12 +769,25 @@ class SmallWebRTCConnection(BaseObject):
             return None
 
         receiver = transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver
-        video_track = SmallWebRTCTrack(receiver) if receiver else None
+        video_track = (
+            SmallWebRTCTrack(receiver, SCREEN_VIDEO_JITTER_BUFFER_CAPACITY) if receiver else None
+        )
         self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX] = video_track
         return video_track
 
     def send_app_message(self, message: Any):
         """Send an application message through the data channel.
+
+        If the data channel is open the message is sent immediately.  Otherwise,
+        the message is placed in an in-memory queue so it can be flushed once the
+        channel opens, subject to the following constraints:
+
+        * Queueing is only attempted when ``_data_channel_enabled`` is ``True``.  It is
+          set to ``False`` when the data-channel open timeout fires (see
+          :meth:`_start_data_channel_timeout`), after which messages are silently
+          discarded.
+        * The queue will not grow beyond ``MAX_MESSAGE_QUEUE_SIZE`` entries.
+          Messages that arrive when the queue is full are discarded with a warning.
 
         Args:
             message: The message to send (will be JSON serialized).
@@ -663,9 +795,32 @@ class SmallWebRTCConnection(BaseObject):
         json_message = json.dumps(message)
         if self._data_channel and self._data_channel.readyState == "open":
             self._data_channel.send(json_message)
+        elif self._data_channel_enabled:
+            if len(self._outgoing_messages_queue) < MAX_MESSAGE_QUEUE_SIZE:
+                logger.debug("Data channel not ready, queuing message")
+                self._outgoing_messages_queue.append(json_message)
+            else:
+                logger.warning(
+                    f"Message queue is full ({MAX_MESSAGE_QUEUE_SIZE} messages). Discarding message."
+                )
         else:
             # The client might choose never to create a data channel.
-            logger.trace("Data channel not ready, discarding message!")
+            logger.trace("Data channel unavailable and queueing disabled. Discarding message.")
+
+    def _flush_message_queue(self):
+        """Flush all queued messages through the now-open data channel.
+
+        Called when the data channel transitions to the *open* state.  Cancels
+        the data-channel open timeout (it is no longer needed) and sends every
+        message that was buffered while the channel was unavailable.
+        """
+        self._cancel_data_channel_timeout()
+        if not self._data_channel:
+            return
+        logger.debug("Data channel is open, flushing queued messages")
+        while self._outgoing_messages_queue:
+            message = self._outgoing_messages_queue.pop(0)
+            self._data_channel.send(message)
 
     def ask_to_renegotiate(self):
         """Request renegotiation of the WebRTC connection."""
@@ -677,7 +832,7 @@ class SmallWebRTCConnection(BaseObject):
             {"type": SIGNALLING_TYPE, "message": RenegotiateMessage().model_dump()}
         )
 
-    def _handle_signalling_message(self, message):
+    async def _handle_signalling_message(self, message):
         """Handle incoming signaling messages."""
         logger.debug(f"Signalling message received: {message}")
         inbound_adapter = TypeAdapter(SignallingMessage.Inbound)
@@ -689,3 +844,11 @@ class SmallWebRTCConnection(BaseObject):
                 )()
                 if track:
                     track.set_enabled(signalling_message.enabled)
+                await self._call_event_handler(
+                    "track-status", signalling_message.receiver_index, signalling_message.enabled
+                )
+
+    async def add_ice_candidate(self, candidate):
+        """Handle incoming ICE candidates."""
+        logger.debug(f"Adding remote candidate: {candidate}")
+        await self.pc.addIceCandidate(candidate)

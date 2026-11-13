@@ -1,4 +1,4 @@
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,10 +11,10 @@ key on the telephone keypad, facilitating the handling of input in
 telecommunication applications.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class KeypadEntry(str, Enum):
+class KeypadEntry(StrEnum):
     """DTMF keypad entries for phone system integration.
 
     Parameters:

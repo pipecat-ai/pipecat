@@ -1,15 +1,75 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Speech-to-Text service implementation using OpenAI's transcription API."""
+"""OpenAI Speech-to-Text service implementations.
 
-from typing import Optional
+Provides two STT services:
 
-from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
+- ``OpenAISTTService``: REST-based transcription using the Audio API
+  (Whisper / GPT transcription models).
+- ``OpenAIRealtimeSTTService``: WebSocket-based streaming transcription
+  using the Realtime API in transcription-only mode.
+"""
+
+import base64
+import json
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
+
+from loguru import logger
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.protocol import State
+
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
+    TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
+from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.whisper.base_stt import (
+    BaseWhisperSTTService,
+    Transcription,
+)
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+
+
+def _is_diarization_model(model: str) -> bool:
+    return "diarize" in model
+
+
+@dataclass
+class OpenAISTTSettings(BaseWhisperSTTService.Settings):
+    """Settings for the OpenAI STT service.
+
+    Parameters:
+        keywords: Words or phrases that guide transcription of the input audio, such
+            as product names or acronyms. Supported by ``"gpt-transcribe"``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
+    """
+
+    keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -17,54 +77,831 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    With ``include_prob_metrics=True``, GPT transcription models report per-token
+    logprobs and Whisper models report per-segment logprobs. Diarization models
+    support neither, so they report no probabilities.
+
+    Diarization models (e.g. ``"gpt-4o-transcribe-diarize"``) label each speaker:
+    every contiguous speaker run of a segment is emitted as its own frame with
+    OpenAI's speaker label (e.g. ``"A"``) as ``speaker.label``.
     """
+
+    Settings = OpenAISTTSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
-        model: str = "gpt-4o-transcribe",
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        language: Optional[Language] = Language.EN,
-        prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        language: Language | None = Language.EN,
+        prompt: str | None = None,
+        temperature: float | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = OPENAI_TTFS_P99,
         **kwargs,
     ):
         """Initialize OpenAI STT service.
 
         Args:
-            model: Model to use — either gpt-4o or Whisper. Defaults to "gpt-4o-transcribe".
+            model: Transcription model to use. Defaults to ``"gpt-transcribe"``.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
             api_key: OpenAI API key. Defaults to None.
             base_url: API base URL. Defaults to None.
             language: Language of the audio input. Defaults to English.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAISTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
+
             prompt: Optional text to guide the model's style or continue a previous segment.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAISTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
+
             temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAISTTService.Settings(temperature=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to BaseWhisperSTTService.
         """
+        # --- 1. Hardcoded defaults ---
+        _language = language or Language.EN
+        default_settings = self.Settings(
+            model="gpt-transcribe",
+            language=_language,
+            prompt=None,
+            temperature=None,
+            keywords=None,
+            speaker_format=None,
+        )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if prompt is not None:
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
+            default_settings.prompt = prompt
+        if temperature is not None:
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
+            default_settings.temperature = temperature
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            model=model,
             api_key=api_key,
             base_url=base_url,
-            language=language,
-            prompt=prompt,
-            temperature=temperature,
+            settings=default_settings,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
 
+        # Model already reported as unable to supply probabilities, so that
+        # warning is logged once per model rather than once per utterance.
+        self._prob_metrics_warned_model: str | None = None
+
     async def _transcribe(self, audio: bytes) -> Transcription:
-        assert self._language is not None  # Assigned in the BaseWhisperSTTService class
+        assert self._settings.language is not None
+
+        model = assert_given(self._settings.model)
+        assert model is not None
 
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self.model_name,
-            "language": self._language,
+            "model": model,
+            "language": self._settings.language,
         }
 
-        if self._prompt is not None:
-            kwargs["prompt"] = self._prompt
+        if _is_diarization_model(model):
+            # Speakers come back only in "diarized_json", and diarization models
+            # require a chunking strategy for audio longer than 30 seconds.
+            kwargs["response_format"] = "diarized_json"
+            kwargs["chunking_strategy"] = "auto"
 
-        if self._temperature is not None:
-            kwargs["temperature"] = self._temperature
+        if self._include_prob_metrics:
+            # GPT transcription models return logprobs alongside a "json" response;
+            # Whisper models carry per-segment logprobs in "verbose_json" instead.
+            # Diarization models support neither and reject the logprobs request.
+            if model.startswith("whisper"):
+                kwargs["response_format"] = "verbose_json"
+            elif _is_diarization_model(model):
+                if self._prob_metrics_warned_model != model:
+                    self._prob_metrics_warned_model = model
+                    logger.warning(
+                        f"{self}: {model} does not support probability metrics; "
+                        "transcription results will carry no probability."
+                    )
+            else:
+                kwargs["response_format"] = "json"
+                kwargs["include"] = ["logprobs"]
+
+        if self._settings.prompt is not None:
+            kwargs["prompt"] = self._settings.prompt
+
+        if self._settings.temperature is not None:
+            kwargs["temperature"] = self._settings.temperature
+
+        if self._settings.keywords:
+            kwargs["keywords"] = self._settings.keywords
 
         return await self._client.audio.transcriptions.create(**kwargs)
+
+    def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
+        """Return a diarized response's ``(segment text, speaker)`` pairs."""
+        # A diarized response's segments carry a speaker; Whisper's verbose
+        # segments don't. Read it by attribute so older openai releases, which
+        # lack the diarized response type, still work.
+        segments = getattr(response, "segments", None)
+        if not segments or getattr(segments[0], "speaker", None) is None:
+            return None
+        return [(segment.text.strip(), getattr(segment, "speaker", None)) for segment in segments]
+
+
+@dataclass
+class OpenAIRealtimeSTTSettings(STTSettings):
+    """Settings for OpenAIRealtimeSTTService.
+
+    Parameters:
+        prompt: Optional prompt text to guide transcription style. Not supported by
+            ``"gpt-realtime-whisper"``.
+        noise_reduction: Noise reduction mode. ``"near_field"`` for close
+            microphones, ``"far_field"`` for distant microphones, or ``None``
+            to disable.
+        delay: How long the model waits before emitting transcription text, trading
+            latency for accuracy. Only supported by ``"gpt-realtime-whisper"``.
+    """
+
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noise_reduction: Literal["near_field", "far_field"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
+class OpenAIRealtimeSTTService(WebsocketSTTService):
+    """OpenAI Realtime Speech-to-Text service using WebSocket transcription sessions.
+
+    Uses OpenAI's Realtime API in transcription-only mode for real-time streaming
+    speech recognition with optional server-side VAD and noise reduction. The model
+    does not generate conversational responses — only transcription output.
+
+    This service supports two VAD modes:
+
+    **Local VAD** (default): Disable server-side VAD and use
+    a local VAD processor in the pipeline instead. When a
+    ``VADUserStoppedSpeakingFrame`` is received, the service commits the
+    audio buffer so that the server begins transcription for the completed
+    speech segment.
+
+    **Server-side VAD** (``turn_detection={"type": "server_vad"}``): The OpenAI server
+    performs voice-activity detection. The service proposes turn boundaries when the
+    server detects them, and recommends the external user turn strategies that resolve
+    those proposals into turn frames. Do **not** use a separate VAD processor in the
+    pipeline in this mode. Requires a model that supports turn detection —
+    ``gpt-transcribe`` does, the default ``gpt-realtime-whisper`` does not.
+
+    Audio is sent as 24 kHz 16-bit mono PCM as required by the OpenAI Realtime
+    API. If the pipeline runs at a different sample rate (e.g. 16 kHz for Silero
+    VAD compatibility), audio is automatically upsampled before sending.
+
+    Example::
+
+        stt = OpenAIRealtimeSTTService(
+            api_key="sk-...",
+            settings=OpenAIRealtimeSTTService.Settings(
+                model="gpt-realtime-whisper",
+                noise_reduction="near_field",
+            ),
+        )
+    """
+
+    Settings = OpenAIRealtimeSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str | None = None,
+        base_url: str = "wss://api.openai.com/v1/realtime",
+        language: Language | None = Language.EN,
+        prompt: str | None = None,
+        turn_detection: dict | Literal[False] | None = False,
+        noise_reduction: Literal["near_field", "far_field"] | None = None,
+        should_interrupt: bool = True,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = OPENAI_REALTIME_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the OpenAI Realtime STT service.
+
+        Args:
+            api_key: OpenAI API key for authentication.
+            model: Transcription model. For low-latency streaming
+                transcription, use ``"gpt-realtime-whisper"``. Other
+                supported transcription models include ``"gpt-transcribe"``
+                and ``"gpt-live-transcribe"``.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            base_url: WebSocket base URL for the Realtime API.
+                Defaults to ``"wss://api.openai.com/v1/realtime"``.
+            language: Language of the audio input. Defaults to English.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            prompt: Optional prompt text to guide transcription style
+                or provide keyword hints. Not supported by
+                ``"gpt-realtime-whisper"``.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(prompt=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            turn_detection: Server-side VAD configuration. Defaults to
+                ``False`` (disabled), which relies on a local VAD
+                processor in the pipeline. Pass a dict to enable it — at
+                minimum ``{"type": "server_vad"}``, optionally with custom
+                settings (e.g. ``{"type": "server_vad", "threshold": 0.5}``).
+                Requires a model that supports turn detection; see ``model``.
+                ``None`` omits the field entirely, leaving the session's own
+                default in place.
+            noise_reduction: Noise reduction mode. ``"near_field"`` for
+                close microphones, ``"far_field"`` for distant
+                microphones, or ``None`` to disable.
+
+                .. deprecated:: 0.0.106
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(noise_reduction=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            should_interrupt: Whether to interrupt bot output when
+                speech is detected by server-side VAD. Only applies when
+                turn detection is enabled. Passed along to the user turn
+                strategies this service recommends, which own the interruption;
+                a user-supplied ``user_turn_strategies`` overrides the
+                recommendation and this setting with it. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            **kwargs: Additional arguments passed to parent
+                WebsocketSTTService.
+        """
+        if websocket_connect is None:
+            raise ImportError(
+                "websockets is required for OpenAIRealtimeSTTService. "
+                'Install it with: uv add "pipecat-ai[openai]"'
+            )
+
+        # --- 1. Hardcoded defaults ---
+        default_settings = self.Settings(
+            model=OPENAI_REALTIME_WHISPER_MODEL,
+            language=Language.EN,
+            prompt=None,
+            noise_reduction=None,
+            delay=None,
+        )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if language is not None and language != Language.EN:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
+        if prompt is not None:
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
+            default_settings.prompt = prompt
+        if noise_reduction is not None:
+            self._warn_init_param_moved_to_settings(
+                "noise_reduction", "noise_reduction", deprecated_since="0.0.106"
+            )
+            default_settings.noise_reduction = noise_reduction
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        self._omit_unsupported_prompt(default_settings)
+
+        super().__init__(
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._base_url = base_url
+
+        self._turn_detection = turn_detection
+        self._should_interrupt = should_interrupt
+
+        self._receive_task = None
+        self._session_ready = False
+
+        # Server-side VAD is disabled by default (turn_detection=False).
+        # Set to None or a dict to enable server-side VAD.
+        self._server_vad_enabled = turn_detection is not False
+
+    @staticmethod
+    def _omit_unsupported_prompt(settings: OpenAIRealtimeSTTSettings) -> dict[str, Any]:
+        """Drop prompt settings that are not accepted by the selected model."""
+        if settings.model == OPENAI_REALTIME_WHISPER_MODEL and settings.prompt:
+            old_prompt = settings.prompt
+            settings.prompt = None
+            logger.warning(
+                f"{OPENAI_REALTIME_WHISPER_MODEL} does not support the prompt parameter; "
+                "omitting prompt from OpenAI Realtime transcription session."
+            )
+            return {"prompt": old_prompt}
+        return {}
+
+    @staticmethod
+    def _language_to_code(language: Language) -> str:
+        """Convert a Language enum value to an ISO-639-1 code.
+
+        Args:
+            language: The Language enum value.
+
+        Returns:
+            Two-letter ISO-639-1 language code.
+        """
+        # Language value is e.g. "en", "en-US", "fr", "zh".
+        return str(language).split("-")[0].lower()
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate processing metrics.
+
+        Returns:
+            True, as this service supports metrics generation.
+        """
+        return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 24 kHz the Realtime API takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return OPENAI_SAMPLE_RATE
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when server-side VAD drives turns.
+
+        With server-side VAD enabled the OpenAI server detects speech boundaries
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. With ``turn_detection=False``
+        (the default) the server emits no VAD events and the defaults are left in
+        place. Applied unless the user passed their own ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._server_vad_enabled:
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
+        return frame
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and send session update if needed.
+
+        Sends a ``session.update`` to the server when the session is active.
+
+        Args:
+            delta: A :class:`STTSettings` (or ``OpenAIRealtimeSTTService.Settings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        for field_name, previous_value in self._omit_unsupported_prompt(self._settings).items():
+            changed.setdefault(field_name, previous_value)
+
+        if changed and self._session_ready:
+            await self._send_session_update()
+
+        return changed
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close WebSocket connection.
+
+        Args:
+            frame: The end frame triggering service shutdown.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close WebSocket connection.
+
+        Args:
+            frame: The cancel frame triggering service cancellation.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Send audio data to the transcription session.
+
+        Audio is streamed over the WebSocket. Transcription results arrive
+        asynchronously via the receive task and are pushed as
+        ``InterimTranscriptionFrame`` or ``TranscriptionFrame``.
+
+        Args:
+            audio: Raw audio bytes (16-bit mono PCM at the pipeline
+                sample rate). Automatically resampled to 24 kHz.
+
+        Yields:
+            None — results are delivered via the WebSocket receive task.
+        """
+        await self._send_audio(audio)
+        yield None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames from the pipeline.
+
+        Extends the base STT service to handle local VAD events when
+        server-side VAD is disabled. On ``VADUserStoppedSpeakingFrame``,
+        commits the audio buffer so the server begins transcription for
+        the completed speech segment.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        # Handle local VAD events when server-side VAD is disabled.
+        if not self._server_vad_enabled:
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
+                await self._commit_audio_buffer()
+
+    # ------------------------------------------------------------------
+    # WebSocket connection management
+    # ------------------------------------------------------------------
+
+    async def _connect(self):
+        """Connect to the transcription endpoint and start receiving."""
+        await super()._connect()
+        await self._connect_websocket()
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+    async def _disconnect(self):
+        """Disconnect and clean up background tasks."""
+        await super()._disconnect()
+        if self._receive_task:
+            await self.cancel_task(self._receive_task, timeout=1.0)
+            self._receive_task = None
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Establish the WebSocket connection to the transcription endpoint."""
+        try:
+            # `__init__` raises if websockets isn't installed, so these symbols
+            # are non-None by the time any method runs.
+            assert websocket_connect is not None and State is not None
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            self._session_ready = False
+            url = f"{self._base_url}?intent=transcription"
+            self._websocket = await self._websocket_connect(
+                uri=url,
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                },
+            )
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Error connecting to OpenAI Realtime STT: {e}",
+                exception=e,
+            )
+            self._websocket = None
+
+    async def _disconnect_websocket(self):
+        """Close the WebSocket connection."""
+        try:
+            self._session_ready = False
+            if self._websocket:
+                await self._websocket.close()
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Error disconnecting: {e}",
+                exception=e,
+            )
+        finally:
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
+
+    async def _ws_send(self, message: dict):
+        """Send a JSON message over the WebSocket.
+
+        Args:
+            message: The message dict to serialize and send.
+        """
+        try:
+            if not self._disconnecting and self._websocket:
+                await self._websocket.send(json.dumps(message))
+        except Exception as e:
+            if self._disconnecting or not self._websocket:
+                return
+            await self.push_error(
+                error_msg=f"Error sending message: {e}",
+                exception=e,
+            )
+
+    # ------------------------------------------------------------------
+    # Client events
+    # ------------------------------------------------------------------
+
+    async def _send_session_update(self):
+        """Send ``session.update`` to configure the transcription session."""
+        transcription: dict = {"model": self._settings.model}
+
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
+        language_code = self._language_to_code(language) if language else None
+        if language_code:
+            transcription["language"] = language_code
+
+        if self._settings.prompt:
+            transcription["prompt"] = self._settings.prompt
+
+        if self._settings.delay:
+            transcription["delay"] = self._settings.delay
+
+        input_audio: dict = {
+            "format": {
+                "type": "audio/pcm",
+                "rate": OPENAI_SAMPLE_RATE,
+            },
+            "transcription": transcription,
+        }
+
+        # Turn detection
+        if self._turn_detection is False:
+            input_audio["turn_detection"] = None
+        elif self._turn_detection is not None:
+            input_audio["turn_detection"] = self._turn_detection
+
+        # Noise reduction
+        if self._settings.noise_reduction:
+            input_audio["noise_reduction"] = {
+                "type": self._settings.noise_reduction,
+            }
+
+        await self._ws_send(
+            {
+                "type": "session.update",
+                "session": {
+                    "type": "transcription",
+                    "audio": {
+                        "input": input_audio,
+                    },
+                },
+            }
+        )
+
+    async def _send_audio(self, audio: bytes):
+        """Send audio data via ``input_audio_buffer.append``.
+
+        Args:
+            audio: Raw audio bytes at 24 kHz.
+        """
+        if not audio:
+            return
+        payload = base64.b64encode(audio).decode("utf-8")
+        await self._ws_send(
+            {
+                "type": "input_audio_buffer.append",
+                "audio": payload,
+            }
+        )
+
+    async def _commit_audio_buffer(self):
+        """Commit the current audio buffer for transcription."""
+        await self._ws_send({"type": "input_audio_buffer.commit"})
+
+    async def _clear_audio_buffer(self):
+        """Clear the current audio buffer."""
+        await self._ws_send({"type": "input_audio_buffer.clear"})
+
+    # ------------------------------------------------------------------
+    # Server event handling
+    # ------------------------------------------------------------------
+
+    async def _receive_messages(self):
+        """Receive and dispatch server events from the transcription session.
+
+        Called by ``WebsocketService._receive_task_handler`` which wraps
+        this method with automatic reconnection on connection errors.
+        """
+        if not self._websocket:
+            raise Exception("Websocket not connected")
+        async for message in self._websocket:
+            try:
+                evt = json.loads(message)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse WebSocket message")
+                continue
+
+            evt_type = evt.get("type", "")
+
+            if evt_type == "session.created":
+                await self._handle_session_created(evt)
+            elif evt_type == "session.updated":
+                await self._handle_session_updated(evt)
+            elif evt_type == "conversation.item.input_audio_transcription.delta":
+                await self._handle_transcription_delta(evt)
+            elif evt_type == "conversation.item.input_audio_transcription.completed":
+                await self._handle_transcription_completed(evt)
+            elif evt_type == "conversation.item.input_audio_transcription.failed":
+                await self._handle_transcription_failed(evt)
+            elif evt_type == "input_audio_buffer.speech_started":
+                await self._handle_speech_started(evt)
+            elif evt_type == "input_audio_buffer.speech_stopped":
+                await self._handle_speech_stopped(evt)
+            elif evt_type == "input_audio_buffer.committed":
+                logger.trace(f"Audio buffer committed: item_id={evt.get('item_id', '')}")
+            elif evt_type == "error":
+                await self._handle_error(evt)
+            else:
+                logger.trace(f"Unhandled event: {evt_type}")
+
+    async def _handle_session_created(self, evt: dict):
+        """Handle ``session.created``.
+
+        Sent immediately after connecting. We respond by configuring the
+        session with our desired settings.
+
+        Args:
+            evt: The session created event from the server.
+        """
+        logger.debug("Transcription session created, sending configuration")
+        await self._send_session_update()
+
+    async def _handle_session_updated(self, evt: dict):
+        """Handle ``session.updated``.
+
+        The session is now fully configured and ready to transcribe.
+
+        Args:
+            evt: The session updated event from the server.
+        """
+        logger.debug("Transcription session configured and ready")
+        self._session_ready = True
+
+    async def _handle_transcription_delta(self, evt: dict):
+        """Handle incremental transcription text.
+
+        For ``gpt-realtime-whisper``, ``gpt-live-transcribe``, and
+        ``gpt-transcribe``, deltas contain low-latency streaming
+        partial text.
+
+        Args:
+            evt: The delta event from the server.
+        """
+        delta = evt.get("delta", "")
+        if delta:
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    delta,
+                    self._user_id,
+                    time_now_iso8601(),
+                    result=evt,
+                )
+            )
+
+    async def _handle_transcription_completed(self, evt: dict):
+        """Handle a completed transcription for a speech segment.
+
+        Pushes a ``TranscriptionFrame`` and records the result for
+        tracing.
+
+        Args:
+            evt: The completed event containing the full transcript.
+        """
+        transcript = evt.get("transcript", "")
+        if transcript:
+            # Report usage before the transcription frame so tracing can
+            # attach it to the STT span the frame closes.
+            await self.emit_stt_usage_metrics()
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    result=evt,
+                )
+            )
+            await self._handle_transcription_trace(transcript, True)
+
+    @traced_stt
+    async def _handle_transcription_trace(
+        self,
+        transcript: str,
+        is_final: bool,
+        language: Language | None = None,
+    ):
+        """Record transcription result for tracing.
+
+        Args:
+            transcript: The transcribed text.
+            is_final: Whether this is a final transcription result.
+            language: Optional language of the transcription.
+        """
+        pass
+
+    async def _handle_speech_started(self, evt: dict):
+        """Handle server-side VAD speech start.
+
+        Proposes a turn start, which the user turn strategies resolve into a
+        ``UserStartedSpeakingFrame`` and an interruption.
+
+        Args:
+            evt: The ``input_audio_buffer.speech_started`` event.
+        """
+        logger.debug("Server VAD: speech started")
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+
+    async def _handle_speech_stopped(self, evt: dict):
+        """Handle server-side VAD speech stop.
+
+        Proposes a turn stop. The audio buffer is automatically committed by the
+        server when VAD is enabled.
+
+        Args:
+            evt: The ``input_audio_buffer.speech_stopped`` event.
+        """
+        logger.debug("Server VAD: speech stopped")
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+    async def _handle_transcription_failed(self, evt: dict):
+        """Handle a transcription failure for a speech segment.
+
+        Logs the error but does not treat it as fatal — the session
+        remains active for subsequent turns.
+
+        Args:
+            evt: The failed event containing error details.
+        """
+        error = evt.get("error", {})
+        error_msg = error.get("message", "Transcription failed")
+        await self.push_error(error_msg=f"OpenAI Realtime STT error: {error_msg}")
+
+    async def _handle_error(self, evt: dict):
+        """Handle a fatal error from the transcription session.
+
+        Raises an exception so that ``WebsocketService`` can decide
+        whether to attempt reconnection.
+
+        Args:
+            evt: The error event.
+        """
+        error = evt.get("error", {})
+        error_msg = error.get("message", "Unknown error")
+        error_code = error.get("code", "")
+        msg = f"OpenAI Realtime STT error [{error_code}]: {error_msg}"
+        await self.push_error(error_msg=msg)
+        raise Exception(msg)

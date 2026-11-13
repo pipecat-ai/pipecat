@@ -1,0 +1,82 @@
+{#
+Pipeline Component Macros
+Reusable pipeline stages that can be composed together
+#}
+
+{# Transport input stage #}
+{% macro input_stage() %}
+transport.input(),
+{% endmacro %}
+
+{# STT stage #}
+{% macro stt_stage() %}
+stt,
+{% endmacro %}
+
+{# Context aggregator user stage #}
+{% macro context_user_stage() %}
+user_aggregator,
+{% endmacro %}
+
+{# LLM stage #}
+{% macro llm_stage() %}
+llm,
+{% endmacro %}
+
+{# TTS stage #}
+{% macro tts_stage() %}
+tts,
+{% endmacro %}
+
+{# Video service stage (avatars) #}
+{% macro video_stage(video_service) %}
+{% if video_service %}
+video,
+{% endif %}
+{% endmacro %}
+
+{# Transport output stage #}
+{% macro output_stage() %}
+transport.output(),
+{% endmacro %}
+
+{# Recording stage #}
+{% macro recording_stage(recording) %}
+{% if recording %}
+audio_buffer,
+{% endif %}
+{% endmacro %}
+
+{# Context aggregator assistant stage #}
+{% macro context_assistant_stage() %}
+assistant_aggregator,
+{% endmacro %}
+
+{# Complete cascade pipeline assembly #}
+{% macro cascade_pipeline(bot_type, transcription, recording, video_service) %}
+pipeline = Pipeline([
+    {{ input_stage() }}
+    {{ stt_stage() }}
+    {{ context_user_stage() }}
+    {{ llm_stage() }}
+    {{ tts_stage() }}
+    {{ video_stage(video_service) }}
+    {{ output_stage() }}
+    {{ recording_stage(recording) }}
+    {{ context_assistant_stage() }}
+])
+{% endmacro %}
+
+{# Complete realtime pipeline assembly #}
+{% macro realtime_pipeline(bot_type, transcription, recording, video_service) %}
+pipeline = Pipeline([
+    {{ input_stage() }}
+    {{ context_user_stage() }}
+    {{ llm_stage() }}
+    {{ video_stage(video_service) }}
+    {{ output_stage() }}
+    {{ recording_stage(recording) }}
+    {{ context_assistant_stage() }}
+])
+{% endmacro %}
+

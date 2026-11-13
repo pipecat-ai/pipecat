@@ -1,0 +1,304 @@
+# The user says something whole. The model must answer with ● and speech.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: complete
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: complete_answer_travel
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Let me start with a fun one. If you could travel anywhere in the world right now, where
+      would you go and why?
+  turns:
+  - user: I'd go to Japan because I love the culture.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply engages with the user's wish to visit Japan
+- name: complete_answer_travel_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Let me start with a fun one. If you could travel anywhere in the world right now, where
+      would you go and why?
+  turns:
+  - user: i'd go to japan because i love the culture
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply engages with the user's wish to visit Japan
+- name: complete_request_flight
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Can you help me book a flight to New York next week?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_request_flight_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: can you help me book a flight to new york next week
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_question_capital
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: What's the capital of Germany?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply says the capital of Germany is Berlin
+- name: complete_question_capital_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: what's the capital of germany
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply says the capital of Germany is Berlin
+- name: complete_statement
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi there. What's on your mind?
+  turns:
+  - user: I'm planning a trip to Japan next spring.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_statement_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi there. What's on your mind?
+  turns:
+  - user: i'm planning a trip to japan next spring
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_with_filler_prefix
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: Hmm, I'd go to Japan, mostly for the food.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_with_filler_prefix_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: hmm i'd go to japan mostly for the food
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_ends_with_question_back
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I'd pick Italy, for the history. What about you?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_ends_with_question_back_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i'd pick italy for the history what about you
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_two_sentences
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What do you do for work?
+  turns:
+  - user: I'm a nurse. I work nights at a hospital downtown.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_two_sentences_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What do you do for work?
+  turns:
+  - user: i'm a nurse i work nights at a hospital downtown
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_correction
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Got it, a table for two on Friday.
+  turns:
+  - user: Actually, make it Saturday instead.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_correction_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Got it, a table for two on Friday.
+  turns:
+  - user: actually make it saturday instead
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_repeat_request
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your appointment is confirmed for Tuesday at three in the afternoon.
+  turns:
+  - user: Sorry, can you say that again?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply repeats or restates the appointment details
+- name: complete_repeat_request_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your appointment is confirmed for Tuesday at three in the afternoon.
+  turns:
+  - user: sorry can you say that again
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+    - event: response
+      eval: the reply repeats or restates the appointment details
+- name: complete_favor_question
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: Can you do me a favor?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: complete_favor_question_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: can you do me a favor
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true

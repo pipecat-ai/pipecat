@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,64 +9,322 @@
 This module provides an audio filter implementation using ai-coustics' AIC SDK to
 enhance audio streams in real time. It mirrors the structure of other filters like
 the Koala filter and integrates with Pipecat's input transport pipeline.
+
+Classes:
+    AICFilter: For aic-sdk (uses 'aic_sdk' module)
+    AICModelManager: Singleton manager for read-only AIC Model instances.
 """
 
-from typing import List, Optional
+import asyncio
+from collections.abc import Callable
+from pathlib import Path
+from threading import Lock
 
 import numpy as np
+from aic_sdk import (
+    Model,
+    ParameterOutOfRangeError,
+    ProcessorAsync,
+    ProcessorConfig,
+    ProcessorParameter,
+    # Exported at runtime but absent from aic-sdk's type stub.
+    set_sdk_id,  # type: ignore[attr-defined]
+)
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
-try:
-    # AIC SDK (https://ai-coustics.github.io/aic-sdk-py/api/)
-    from aic import AICModelType, AICParameter, Model
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use the AIC filter, you need to `pip install pipecat-ai[aic]`.")
-    raise Exception(f"Missing module: {e}")
+# Telemetry identifier registered with the AIC SDK; identifies pipecat to the
+# vendor's usage pipeline. Kept private (leading underscore) to avoid making it
+# accidental public API.
+_AIC_SDK_PIPECAT_ID = 6
+
+
+class AICModelManager:
+    """Singleton manager for read-only AIC Model instances with reference counting.
+
+    Caches Model instances by path or (model_id + download_dir). Multiple
+    AICFilter instances using the same model share one Model; the manager
+    acquires on first use and releases when the last reference is dropped.
+    """
+
+    _cache: dict[str, tuple[Model, int]] = {}  # key -> (model, ref_count)
+    _lock = Lock()
+    _loading: dict[
+        str, asyncio.Task[Model]
+    ] = {}  # key -> load task (deduplicates concurrent loads)
+
+    @classmethod
+    def _increment_reference(cls, cache_key: str, entry: tuple[Model, int]) -> tuple[Model, str]:
+        """Increment reference count for cached entry. Caller must hold _lock."""
+        cached_model, ref_count = entry
+        cls._cache[cache_key] = (cached_model, ref_count + 1)
+        logger.debug(f"AIC model cache key={cache_key!r} ref_count={ref_count + 1}")
+        return cached_model, cache_key
+
+    @classmethod
+    def _store_new_reference(cls, cache_key: str, model: Model) -> tuple[Model, str]:
+        """Store new model in cache with ref count 1. Caller must hold _lock."""
+        cls._cache[cache_key] = (model, 1)
+        logger.debug(f"AIC model cached key={cache_key!r} ref_count=1")
+        return model, cache_key
+
+    @classmethod
+    async def _load_model_from_file(
+        cls,
+        cache_key: str,
+        *,
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
+    ) -> Model:
+        """Run the actual load (file or download). Separate to allow create_task and deduplication."""
+        if model_path is not None:
+            logger.debug(f"Loading AIC model from file: {model_path}")
+            model_path_str = str(model_path)
+
+        elif model_id is not None and model_download_dir is not None:
+            logger.debug(f"Downloading AIC model: {model_id}")
+            model_download_dir.mkdir(parents=True, exist_ok=True)
+            model_path_str = await Model.download_async(model_id, str(model_download_dir))
+            logger.debug(f"Model downloaded to: {model_path_str}")
+
+        else:
+            raise ValueError("Unexpected model_path or (model_id and model_download_dir) state.")
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: Model.from_file(model_path_str))
+
+    @staticmethod
+    def _get_cache_key(
+        *,
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
+    ) -> str:
+        """Build a stable cache key for the model.
+
+        Args:
+            model_path: Path to a local .aicmodel file.
+            model_id: Model identifier (See https://artifacts.ai-coustics.io/ for available models).
+            model_download_dir: Directory used for downloading models.
+
+        Returns:
+            A string key unique per (path) or (model_id + download_dir).
+        """
+        if model_path is not None:
+            return f"path:{model_path.resolve()}"
+
+        if model_id is not None and model_download_dir is not None:
+            return f"id:{model_id}:{model_download_dir.resolve()}"
+
+        raise ValueError("Either model_path or (model_id and model_download_dir) must be set.")
+
+    @classmethod
+    async def acquire(
+        cls,
+        *,
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
+    ) -> tuple[Model, str]:
+        """Get or load a Model and increment its reference count.
+
+        Call this when starting a filter. Store the returned key and pass it
+        to release() when stopping the filter.
+
+        Args:
+            model_path: Path to a local .aicmodel file. If set, model_id is ignored.
+            model_id: Model identifier to download from CDN.
+            model_download_dir: Directory for downloading models. Required if
+                model_id is used.
+
+        Returns:
+            Tuple of (shared Model instance, cache key for release).
+
+        Raises:
+            ValueError: If neither model_path nor (model_id + model_download_dir)
+                is provided, or if model_id is set without model_download_dir.
+        """
+        cache_key = cls._get_cache_key(
+            model_path=model_path,
+            model_id=model_id,
+            model_download_dir=model_download_dir,
+        )
+
+        with cls._lock:
+            entry = cls._cache.get(cache_key)
+            if entry is not None:
+                return cls._increment_reference(cache_key, entry)
+
+            # Deduplicate concurrent loads for the same key
+            load_task = cls._loading.get(cache_key)
+            if load_task is None:
+                load_task = asyncio.create_task(
+                    cls._load_model_from_file(
+                        cache_key,
+                        model_path=model_path,
+                        model_id=model_id,
+                        model_download_dir=model_download_dir,
+                    )
+                )
+                cls._loading[cache_key] = load_task
+
+        try:
+            model = await load_task
+        finally:
+            with cls._lock:
+                cls._loading.pop(cache_key, None)
+
+        with cls._lock:
+            entry = cls._cache.get(cache_key)
+            if entry is not None:
+                return cls._increment_reference(cache_key, entry)
+            return cls._store_new_reference(cache_key, model)
+
+    @classmethod
+    def release(cls, key: str) -> None:
+        """Release a reference to a cached model.
+
+        Call this when stopping a filter, with the key returned from
+        get_model(). When the last reference is released, the model
+        is removed from the cache.
+
+        Args:
+            key: Cache key returned by get_model().
+        """
+        with cls._lock:
+            entry = cls._cache.get(key)
+
+            if entry is None:
+                logger.warning(f"AIC model release unknown key={key!r}")
+                return
+
+            model, ref_count = entry
+            ref_count -= 1
+
+            if ref_count <= 0:
+                del cls._cache[key]
+                logger.debug(f"AIC model evicted key={key!r}")
+            else:
+                cls._cache[key] = (model, ref_count)
+                logger.debug(f"AIC model key={key!r} ref_count={ref_count}")
 
 
 class AICFilter(BaseAudioFilter):
     """Audio filter using ai-coustics' AIC SDK for real-time enhancement.
 
     Buffers incoming audio to the model's preferred block size and processes
-    planar frames in-place using float32 samples in the linear -1..+1 range.
+    frames using float32 samples normalized to the range -1 to +1.
     """
 
     def __init__(
         self,
         *,
-        license_key: str = "",
-        model_type: AICModelType = AICModelType.QUAIL_L,
-        enhancement_level: Optional[float] = 1.0,
-        voice_gain: Optional[float] = 1.0,
-        noise_gate_enable: Optional[bool] = True,
+        license_key: str,
+        model_id: str | None = None,
+        model_path: Path | None = None,
+        model_download_dir: Path | None = None,
+        enhancement_level: float | None = None,
     ) -> None:
         """Initialize the AIC filter.
 
         Args:
             license_key: ai-coustics license key for authentication.
-            model_type: Model variant to load.
+            model_id: Model identifier to download from CDN. Required if model_path
+                is not provided. See https://artifacts.ai-coustics.io/ for available models.
+            model_path: Optional path to a local .aicmodel file. If provided,
+                model_id is ignored and no download occurs.
+            model_download_dir: Directory for downloading models as a Path object.
+                Defaults to a cache directory in user's home folder.
             enhancement_level: Optional overall enhancement strength (0.0..1.0).
-            voice_gain: Optional linear gain applied to detected speech (0.0..4.0).
-            noise_gate_enable: Optional enable/disable noise gate (default: True).
+                If None, the model default is used.
+
+        Raises:
+            ValueError: If neither model_id nor model_path is provided, or if
+                enhancement_level is out of range.
         """
+        # Set SDK ID for telemetry identification.
+        set_sdk_id(_AIC_SDK_PIPECAT_ID)
+
+        if model_id is None and model_path is None:
+            raise ValueError(
+                "Either 'model_id' or 'model_path' must be provided. "
+                "See https://artifacts.ai-coustics.io/ for available models."
+            )
+
+        if enhancement_level is not None and not 0.0 <= enhancement_level <= 1.0:
+            raise ValueError("'enhancement_level' must be between 0.0 and 1.0.")
+
         self._license_key = license_key
-        self._model_type = model_type
-
+        self._model_id = model_id
+        self._model_path = model_path
+        self._model_download_dir = model_download_dir or (
+            Path.home() / ".cache" / "pipecat" / "aic-models"
+        )
         self._enhancement_level = enhancement_level
-        self._voice_gain = voice_gain
-        self._noise_gate_enable = noise_gate_enable
+        self._bypass = False
 
-        self._enabled = True
         self._sample_rate = 0
         self._aic_ready = False
         self._frames_per_block = 0
         self._audio_buffer = bytearray()
-        # Model will be created in start() since the API now requires sample_rate
-        self._aic = None
+
+        # Audio format constants
+        self._bytes_per_sample = 2  # int16 = 2 bytes
+        self._dtype = np.int16
+        self._scale = (
+            32768.0  # 2^15, for normalizing int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
+        )
+
+        # AIC SDK objects; models are shared via AICModelManager
+        self._model_cache_key: str | None = None
+        self._model = None
+        self._processor = None
+        self._processor_ctx = None
+        self._pre_process_tap: Callable[[np.ndarray, int], None] | None = None
+
+        # Pre-allocated buffers (resized in start() once frames_per_block is known)
+        self._in_f32: np.ndarray | None = None
+        self._out_i16: np.ndarray | None = None
+
+    def _apply_enhancement_level(self):
+        """Apply enhancement_level if configured and supported by the active model."""
+        if self._processor_ctx is None or self._enhancement_level is None:
+            return
+
+        try:
+            self._processor_ctx.set_parameter(
+                ProcessorParameter.EnhancementLevel, self._enhancement_level
+            )
+        except ParameterOutOfRangeError as e:
+            logger.warning(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
+            self._enhancement_level = None
+
+    def _apply_bypass(self):
+        """Apply bypass parameter to the active processor."""
+        if self._processor_ctx is None:
+            return
+
+        self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
+
+    def set_pre_process_tap(self, tap: Callable[[np.ndarray, int], None] | None):
+        """Set a callable that receives the input audio before enhancement.
+
+        The filter calls ``tap(block, sample_rate)`` with each float32 block,
+        normalized to the range -1 to +1, before it enhances the block. The
+        filter writes each new block into the same buffer, so the tap must copy
+        the data that it keeps. The filter does not remove the tap when it
+        stops. The caller that sets the tap must also remove it.
+
+        The tap gets no audio when the enhancement processor fails to
+        initialize, because the filter then passes audio through unchanged.
+
+        Args:
+            tap: The callable to call for each block, or None to remove the tap.
+        """
+        self._pre_process_tap = tap
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -79,58 +337,89 @@ class AICFilter(BaseAudioFilter):
         """
         self._sample_rate = sample_rate
 
+        # Acquire shared read-only model from singleton manager
+        self._model, self._model_cache_key = await AICModelManager.acquire(
+            model_path=self._model_path,
+            model_id=self._model_id,
+            model_download_dir=self._model_download_dir,
+        )
+
+        # Get optimal block size for this sample rate
+        self._frames_per_block = self._model.get_optimal_block_size(self._sample_rate)
+
+        # Allocate processing buffers now that we know the block size
+        self._in_f32 = np.zeros(self._frames_per_block, dtype=np.float32)
+        self._out_i16 = np.zeros(self._frames_per_block, dtype=np.int16)
+
+        # Create configuration
+        config = ProcessorConfig.optimal(
+            self._model,
+            sample_rate=self._sample_rate,
+        )
+
+        # Create async processor
         try:
-            # Create model with required runtime parameters
-            self._aic = Model(
-                model_type=self._model_type,
-                license_key=self._license_key or None,
-                sample_rate=self._sample_rate,
-                channels=1,
-            )
-            self._frames_per_block = self._aic.optimal_num_frames()
-
-            # Optional parameter configuration
-            if self._enhancement_level is not None:
-                self._aic.set_parameter(
-                    AICParameter.ENHANCEMENT_LEVEL,
-                    float(self._enhancement_level if self._enabled else 0.0),
-                )
-            if self._voice_gain is not None:
-                self._aic.set_parameter(AICParameter.VOICE_GAIN, float(self._voice_gain))
-            if self._noise_gate_enable is not None:
-                self._aic.set_parameter(
-                    AICParameter.NOISE_GATE_ENABLE, 1.0 if bool(self._noise_gate_enable) else 0.0
-                )
-
-            self._aic_ready = True
-
-            # Log processor information
-            logger.debug(f"ai-coustics filter started:")
-            logger.debug(f"  Sample rate: {self._sample_rate} Hz")
-            logger.debug(f"  Frames per chunk: {self._frames_per_block}")
-            logger.debug(f"  Enhancement strength: {int(self._enhancement_level * 100)}%")
-            logger.debug(f"  Optimal input buffer size: {self._aic.optimal_num_frames()} samples")
-            logger.debug(f"  Optimal sample rate: {self._aic.optimal_sample_rate()} Hz")
-            logger.debug(
-                f"  Current algorithmic latency: {self._aic.processing_latency() / self._sample_rate * 1000:.2f}ms"
-            )
+            self._processor = ProcessorAsync(self._model, self._license_key, config)
         except Exception as e:  # noqa: BLE001 - surfacing SDK initialization errors
             logger.error(f"AIC model initialization failed: {e}")
-            self._aic_ready = False
+            self._processor = None
+
+        self._aic_ready = self._processor is not None
+
+        if not self._aic_ready:
+            logger.debug("ai-coustics filter is not ready.")
+            return
+
+        assert self._processor is not None  # necessarily true
+
+        # Get context for parameter control
+        self._processor_ctx = self._processor.get_context()
+
+        # Apply initial control parameters
+        self._apply_bypass()
+        self._apply_enhancement_level()
+
+        # Log processor information
+        logger.debug("ai-coustics filter started:")
+        logger.debug(f"  Model ID: {self._model.get_id()}")
+        logger.debug(f"  Sample rate: {self._sample_rate} Hz")
+        logger.debug(f"  Frames per chunk: {self._frames_per_block}")
+        if self._enhancement_level is not None:
+            logger.debug(f"  Enhancement level: {self._enhancement_level}")
+        else:
+            logger.debug("  Enhancement level not configured; using the model's default behavior.")
+        logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
+        logger.debug(
+            f"  Optimal block size for {self._sample_rate} Hz: "
+            f"{self._model.get_optimal_block_size(self._sample_rate)}"
+        )
+        logger.debug(
+            f"  Audio delay: {self._processor_ctx.get_audio_delay()} samples "
+            f"({self._processor_ctx.get_audio_delay() / self._sample_rate * 1000:.2f}ms)"
+        )
 
     async def stop(self):
-        """Clean up the AIC model when stopping.
+        """Terminate the AIC sessions and release the models when stopping.
 
         Returns:
             None
         """
-        try:
-            if self._aic is not None:
-                self._aic.close()
-        finally:
-            self._aic = None
-            self._aic_ready = False
-            self._audio_buffer.clear()
+        # Terminate independently so one failure doesn't strand the other session.
+        if self._processor is not None:
+            try:
+                await self._processor.terminate_session_async()
+            except Exception as e:  # noqa: BLE001 - teardown is best-effort
+                logger.debug(f"AIC processor session termination failed: {e}")
+
+        self._processor = None
+        self._processor_ctx = None
+        self._model = None
+        self._aic_ready = False
+        self._audio_buffer.clear()
+
+        if self._model_cache_key is not None:
+            AICModelManager.release(self._model_cache_key)
+            self._model_cache_key = None
 
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames to enable/disable filtering.
@@ -142,11 +431,11 @@ class AICFilter(BaseAudioFilter):
             None
         """
         if isinstance(frame, FilterEnableFrame):
-            self._enabled = frame.enable
-            if self._aic is not None:
+            self._bypass = not frame.enable
+            if self._processor_ctx is not None:
                 try:
-                    level = float(self._enhancement_level if self._enabled else 0.0)
-                    self._aic.set_parameter(AICParameter.ENHANCEMENT_LEVEL, level)
+                    self._apply_bypass()
+                    self._apply_enhancement_level()
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"AIC set_parameter failed: {e}")
 
@@ -157,43 +446,51 @@ class AICFilter(BaseAudioFilter):
         model's required block length. Returns enhanced audio data.
 
         Args:
-            audio: Raw audio data as bytes to be filtered (int16 PCM, planar).
+            audio: Raw audio data as bytes (int16 PCM).
 
         Returns:
-            Enhanced audio data as bytes (int16 PCM, planar).
+            Enhanced audio data as bytes (int16 PCM).
         """
-        if not self._aic_ready or self._aic is None:
+        if not self._aic_ready:
             return audio
 
+        # _aic_ready is only set once start() has set all three
+        assert self._processor is not None
+        assert self._in_f32 is not None
+        assert self._out_i16 is not None
+
         self._audio_buffer.extend(audio)
+        available_frames = len(self._audio_buffer) // self._bytes_per_sample
+        num_blocks = available_frames // self._frames_per_block
 
-        filtered_chunks: List[bytes] = []
+        if num_blocks == 0:
+            return b""
 
-        # Number of int16 samples currently buffered
-        available_frames = len(self._audio_buffer) // 2
+        block_size = self._frames_per_block * self._bytes_per_sample
+        total_size = num_blocks * block_size
+        blocks_data = bytes(self._audio_buffer[:total_size])
+        self._audio_buffer = self._audio_buffer[total_size:]
 
-        while available_frames >= self._frames_per_block:
-            # Consume exactly one block worth of frames
-            samples_to_consume = self._frames_per_block * 1
-            bytes_to_consume = samples_to_consume * 2
-            block_bytes = bytes(self._audio_buffer[:bytes_to_consume])
+        filtered_chunks: list[bytes] = []
 
-            # Convert to float32 in -1..+1 range and reshape to planar (channels, frames)
-            block_i16 = np.frombuffer(block_bytes, dtype=np.int16)
-            block_f32 = (block_i16.astype(np.float32) / 32768.0).reshape(
-                (1, self._frames_per_block)
-            )
+        for i in range(num_blocks):
+            start = i * block_size
+            block_i16 = np.frombuffer(blocks_data[start : start + block_size], dtype=self._dtype)
 
-            # Process planar in-place; returns ndarray (same shape)
-            out_f32 = self._aic.process(block_f32)
+            # Reuse input buffer, in-place divide
+            np.copyto(self._in_f32, block_i16)
+            self._in_f32 /= self._scale
 
-            # Convert back to int16 bytes, planar layout
-            out_i16 = np.clip(out_f32 * 32768.0, -32768, 32767).astype(np.int16)
-            filtered_chunks.append(out_i16.reshape(-1).tobytes())
+            if self._pre_process_tap is not None:
+                self._pre_process_tap(self._in_f32, self._sample_rate)
 
-            # Slide buffer
-            self._audio_buffer = self._audio_buffer[bytes_to_consume:]
-            available_frames = len(self._audio_buffer) // 2
+            out_f32 = await self._processor.process_async(self._in_f32)
 
-        # Do not flush incomplete frames; keep them buffered for the next call
+            # Convert float32 output back to int16
+            np.multiply(out_f32, self._scale, out=self._in_f32)  # reuse in_f32 as temp
+            np.clip(self._in_f32, -self._scale, self._scale - 1, out=self._in_f32)
+            np.copyto(self._out_i16, self._in_f32.astype(self._dtype))
+
+            filtered_chunks.append(self._out_i16.tobytes())
+
         return b"".join(filtered_chunks)

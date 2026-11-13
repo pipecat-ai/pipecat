@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,20 +8,14 @@
 
 import base64
 import json
-from typing import Optional
+from typing import Any, cast
 
 import aiohttp
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.utils import (
-    alaw_to_pcm,
-    create_stream_resampler,
-    pcm_to_alaw,
-    pcm_to_ulaw,
-    ulaw_to_pcm,
-)
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -30,9 +24,11 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
-    StartFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class TelnyxFrameSerializer(FrameSerializer):
@@ -47,31 +43,68 @@ class TelnyxFrameSerializer(FrameSerializer):
     credentials to be provided.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for TelnyxFrameSerializer.
 
         Parameters:
-            telnyx_sample_rate: Sample rate used by Telnyx, defaults to 8000 Hz.
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Telnyx sends, defaults to 8000 Hz.
+            audio_out_sample_rate: Sample rate of the audio sent to Telnyx, defaults to 8000 Hz.
+            telnyx_sample_rate: Sample rate used by Telnyx.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             inbound_encoding: Audio encoding for data sent to Telnyx (e.g., "PCMU").
             outbound_encoding: Audio encoding for data received from Telnyx (e.g., "PCMU").
             auto_hang_up: Whether to automatically terminate call on EndFrame.
         """
 
-        telnyx_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        audio_in_sample_rate: int = 8000
+        audio_out_sample_rate: int = 8000
+        telnyx_sample_rate: int | None = None
+        sample_rate: int | None = None
         inbound_encoding: str = "PCMU"
         outbound_encoding: str = "PCMU"
         auto_hang_up: bool = True
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("telnyx_sample_rate") is not None:
+                warn_deprecated(
+                    "`TelnyxFrameSerializer.InputParams.telnyx_sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["telnyx_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["telnyx_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`TelnyxFrameSerializer.InputParams.sample_rate` is deprecated since 1.16.0 "
+                    "and will be removed in 2.0.0. Use `PipelineParams.audio_in_sample_rate` "
+                    "instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(
         self,
         stream_id: str,
         outbound_encoding: str,
         inbound_encoding: str,
-        call_control_id: Optional[str] = None,
-        api_key: Optional[str] = None,
-        params: Optional[InputParams] = None,
+        call_control_id: str | None = None,
+        api_key: str | None = None,
+        params: InputParams | None = None,
     ):
         """Initialize the TelnyxFrameSerializer.
 
@@ -83,36 +116,30 @@ class TelnyxFrameSerializer(FrameSerializer):
             api_key: Your Telnyx API key (required for auto hang-up).
             params: Configuration parameters.
         """
+        params = params or TelnyxFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: TelnyxFrameSerializer.InputParams = params
+
+        # Validate hangup-related parameters if auto_hang_up is enabled
+        if self._params.auto_hang_up:
+            missing_credentials = []
+            if not call_control_id:
+                missing_credentials.append("call_control_id")
+            if not api_key:
+                missing_credentials.append("api_key")
+
+            if missing_credentials:
+                raise ValueError(
+                    f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
+                )
+
         self._stream_id = stream_id
         self._call_control_id = call_control_id
         self._api_key = api_key
-        self._params = params or TelnyxFrameSerializer.InputParams()
         self._params.outbound_encoding = outbound_encoding
         self._params.inbound_encoding = inbound_encoding
 
-        self._telnyx_sample_rate = self._params.telnyx_sample_rate
-        self._sample_rate = 0  # Pipeline input rate
-
-        self._input_resampler = create_stream_resampler()
-        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
-
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
-
-    async def setup(self, frame: StartFrame):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            frame: The StartFrame containing pipeline configuration.
-        """
-        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Telnyx WebSocket format.
@@ -138,26 +165,20 @@ class TelnyxFrameSerializer(FrameSerializer):
             await self._hang_up_call()
             return None
         elif isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
-            data = frame.audio
+            data = await self._resample_audio_out(frame)
+            if not data:
+                return None
 
-            # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
             if self._params.inbound_encoding == "PCMU":
-                serialized_data = await pcm_to_ulaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
-                )
+                serialized_data = g711.pcm_to_ulaw(data)
             elif self._params.inbound_encoding == "PCMA":
-                serialized_data = await pcm_to_alaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
-                )
+                serialized_data = g711.pcm_to_alaw(data)
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
-
-            if serialized_data is None or len(serialized_data) == 0:
-                # Ignoring in case we don't have audio
-                return None
 
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
@@ -166,6 +187,10 @@ class TelnyxFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
+            return json.dumps(frame.message)
 
         # Return None for unhandled frames
         return None
@@ -173,14 +198,10 @@ class TelnyxFrameSerializer(FrameSerializer):
     async def _hang_up_call(self):
         """Hang up the Telnyx call using Telnyx's REST API."""
         try:
-            call_control_id = self._call_control_id
-            api_key = self._api_key
-
-            if not call_control_id or not api_key:
-                logger.warning(
-                    "Cannot hang up Telnyx call: call_control_id and api_key must be provided"
-                )
-                return
+            # __init__ guarantees these are non-None whenever auto_hang_up is True,
+            # which is the only path that reaches this method.
+            call_control_id = cast(str, self._call_control_id)
+            api_key = cast(str, self._api_key)
 
             # Telnyx API endpoint for hanging up a call
             endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/hangup"
@@ -207,7 +228,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                                     f"Telnyx call {call_control_id} was already terminated"
                                 )
                                 return
-                        except:
+                        except Exception:
                             pass  # Fall through to log the raw error
 
                         # Log other 422 errors
@@ -225,7 +246,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Telnyx call: {e}")
+            logger.error(f"Failed to hang up Telnyx call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Telnyx WebSocket data to Pipecat frames.
@@ -242,44 +263,36 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data}")
+            return None
 
-        if message["event"] == "media":
-            payload_base64 = message["media"]["payload"]
+        if message.get("event") == "media":
+            payload_base64 = message.get("media", {}).get("payload")
+            if not payload_base64:
+                return None
             payload = base64.b64decode(payload_base64)
 
-            # Input: Convert Telnyx's 8kHz encoded audio to PCM at pipeline input rate
             if self._params.outbound_encoding == "PCMU":
-                deserialized_data = await ulaw_to_pcm(
-                    payload,
-                    self._telnyx_sample_rate,
-                    self._sample_rate,
-                    self._input_resampler,
-                )
+                deserialized_data = g711.ulaw_to_pcm(payload)
             elif self._params.outbound_encoding == "PCMA":
-                deserialized_data = await alaw_to_pcm(
-                    payload,
-                    self._telnyx_sample_rate,
-                    self._sample_rate,
-                    self._input_resampler,
-                )
+                deserialized_data = g711.alaw_to_pcm(payload)
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")
 
-            if deserialized_data is None or len(deserialized_data) == 0:
-                # Ignoring in case we don't have audio
+            audio = await self._resample_audio_in(deserialized_data)
+            if not audio:
                 return None
 
-            audio_frame = InputAudioRawFrame(
-                audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
-            )
-            return audio_frame
-        elif message["event"] == "dtmf":
+            return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
+        elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
             try:
                 return InputDTMFFrame(KeypadEntry(digit))
-            except ValueError as e:
+            except ValueError:
                 # Handle case where string doesn't match any enum value
                 return None
         else:

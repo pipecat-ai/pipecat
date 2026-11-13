@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,25 +7,19 @@
 """AWS Transcribe Speech-to-Text service implementation.
 
 This module provides a WebSocket-based connection to AWS Transcribe for real-time
-speech-to-text transcription with support for single and multiple language identification.
-
-Features:
-
-- Single language mode: Transcribe audio in a specific language
-- Multi-language mode: Automatically identify and transcribe from multiple languages
-- Real-time language detection with confidence scores
-- Support for various audio formats and sample rates
+speech-to-text transcription with support for multiple languages and audio formats.
 """
 
-import asyncio
 import json
-import os
 import random
 import string
-import warnings
-from typing import AsyncGenerator, List, Optional
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Literal, cast
 
 from loguru import logger
+from websockets import Subprotocol
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -33,241 +27,175 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
-    TranscriptionFrame,
 )
-from pipecat.services.aws.config import AWSInputParams
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.aws.utils import (
     build_event_message,
     decode_event,
     get_presigned_url,
+    resolve_credentials,
 )
-from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
+from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.errors import ErrorCategory, extract_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    import websockets
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise Exception(f"Missing module: {e}")
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
-def language_to_aws_language(language: Language) -> Optional[str]:
-    """Convert a Language enum to ElevenLabs language code.
+@dataclass
+class AWSTranscribeSTTSettings(STTSettings):
+    """Settings for AWSTranscribeSTTService.
 
-    Source:
-        https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
-
-    Args:
-        language: The Language enum value to convert.
-
-    Returns:
-        The corresponding ElevenLabs language code, or None if not supported.
+    Parameters:
+        partial_results_stability: How stable interim results should be, trading
+            accuracy against latency: ``"low"`` is the most accurate, ``"high"``
+            the fastest. AWS binds this to a connection, so updating it at
+            runtime triggers a reconnect. See
+            https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html#streaming-partial-result-stabilization.
+        show_speaker_label: Enable speaker diarization. Each contiguous speaker
+            run of a final result is emitted as its own frame with AWS's speaker
+            label (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results
+            are not labelled. Updating it at runtime triggers a reconnect.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
-    BASE_LANGUAGES = {
-        Language.AF: "af-ZA",
-        Language.AF_ZA: "af-ZA",
-        Language.AR: "ar-SA",
-        Language.AR_AE: "ar-AE",
-        Language.AR_SA: "ar-SA",
-        Language.EU: "eu-ES",
-        Language.EU_ES: "eu-ES",
-        Language.CA: "ca-ES",
-        Language.CA_ES: "ca-ES",
-        Language.ZH: "zh-CN",
-        Language.ZH_CN: "zh-CN",
-        Language.ZH_TW: "zh-TW",
-        Language.ZH_HK: "zh-HK",
-        Language.YUE: "zh-HK",
-        Language.HR: "hr-HR",
-        Language.HR_HR: "hr-HR",
-        Language.CS: "cs-CZ",
-        Language.CS_CZ: "cs-CZ",
-        Language.DA: "da-DK",
-        Language.DA_DK: "da-DK",
-        Language.NL: "nl-NL",
-        Language.NL_NL: "nl-NL",
-        Language.EN: "en-US",
-        Language.EN_AU: "en-AU",
-        Language.EN_GB: "en-GB",
-        Language.EN_IN: "en-IN",
-        Language.EN_IE: "en-IE",
-        Language.EN_NZ: "en-NZ",
-        Language.EN_ZA: "en-ZA",
-        Language.EN_US: "en-US",
-        Language.FA: "fa-IR",
-        Language.FA_IR: "fa-IR",
-        Language.FI: "fi-FI",
-        Language.FI_FI: "fi-FI",
-        Language.FR: "fr-FR",
-        Language.FR_FR: "fr-FR",
-        Language.FR_CA: "fr-CA",
-        Language.GL: "gl-ES",
-        Language.GL_ES: "gl-ES",
-        Language.KA: "ka-GE",
-        Language.KA_GE: "ka-GE",
-        Language.DE: "de-DE",
-        Language.DE_DE: "de-DE",
-        Language.DE_CH: "de-CH",
-        Language.EL: "el-GR",
-        Language.EL_GR: "el-GR",
-        Language.HE: "he-IL",
-        Language.HE_IL: "he-IL",
-        Language.HI: "hi-IN",
-        Language.HI_IN: "hi-IN",
-        Language.ID: "id-ID",
-        Language.ID_ID: "id-ID",
-        Language.IT: "it-IT",
-        Language.IT_IT: "it-IT",
-        Language.JA: "ja-JP",
-        Language.JA_JP: "ja-JP",
-        Language.KO: "ko-KR",
-        Language.KO_KR: "ko-KR",
-        Language.LV: "lv-LV",
-        Language.LV_LV: "lv-LV",
-        Language.MS: "ms-MY",
-        Language.MS_MY: "ms-MY",
-        Language.NB: "no-NO",
-        Language.NB_NO: "no-NO",
-        Language.NO: "no-NO",
-        Language.PL: "pl-PL",
-        Language.PL_PL: "pl-PL",
-        Language.PT: "pt-PT",
-        Language.PT_PT: "pt-PT",
-        Language.PT_BR: "pt-BR",
-        Language.RO: "ro-RO",
-        Language.RO_RO: "ro-RO",
-        Language.RU: "ru-RU",
-        Language.RU_RU: "ru-RU",
-        Language.SR: "sr-RS",
-        Language.SR_RS: "sr-RS",
-        Language.SK: "sk-SK",
-        Language.SK_SK: "sk-SK",
-        Language.SO: "so-SO",
-        Language.SO_SO: "so-SO",
-        Language.ES: "es-ES",
-        Language.ES_ES: "es-ES",
-        Language.ES_US: "es-US",
-        Language.SV: "sv-SE",
-        Language.SV_SE: "sv-SE",
-        Language.TL: "tl-PH",
-        Language.FIL: "tl-PH",
-        Language.FIL_PH: "tl-PH",
-        Language.TH: "th-TH",
-        Language.TH_TH: "th-TH",
-        Language.UK: "uk-UA",
-        Language.UK_UA: "uk-UA",
-        Language.VI: "vi-VN",
-        Language.VI_VN: "vi-VN",
-        Language.ZU: "zu-ZA",
-        Language.ZU_ZA: "zu-ZA",
-    }
 
-    result = BASE_LANGUAGES.get(language)
+    partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    show_speaker_label: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    if not result:
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
-class AWSTranscribeSTTService(STTService):
+class AWSTranscribeSTTService(WebsocketSTTService):
     """AWS Transcribe Speech-to-Text service using WebSocket streaming.
 
     Provides real-time speech transcription using AWS Transcribe's streaming API.
-    Supports single and multi-language identification, configurable sample rates,
-    and both interim and final transcription results.
+    Supports multiple languages, configurable sample rates, and both interim and
+    final transcription results.
     """
+
+    Settings = AWSTranscribeSTTSettings
+    _settings: Settings
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Treat rejected credentials as recoverable.
+
+        Every connection is signed afresh, so a rejected signature can be an
+        expired one rather than a misconfigured service, and reconnecting is
+        what clears it.
+        """
+        if extract_http_status_code(exception) in (401, 403):
+            return ErrorCategory.CONNECTIVITY
+        return None
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        region: Optional[str] = "us-east-1",
-        sample_rate: int = 16000,
-        language: Language = Language.EN,
-        params: Optional[AWSInputParams] = None,
+        api_key: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_session_token: str | None = None,
+        region: str | None = None,
+        sample_rate: int | None = None,
+        language: Language | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AWS Transcribe STT service.
 
         Args:
-            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
-            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
-            aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
-            region: AWS region for the service. Defaults to "us-east-1".
-            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
+            api_key: AWS secret access key. If None, falls back to environment
+                variables and the default botocore credential chain (instance
+                profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_access_key_id: AWS access key ID. Same fallback behaviour as
+                ``api_key``.
+            aws_session_token: AWS session token for temporary credentials.
+            region: AWS region for the service.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
+                AWS Transcribe only supports 8000 or 16000 Hz; other values are
+                clamped to 16000 Hz at connect time.
+            language: Language for transcription.
 
-                .. deprecated:: 0.0.86
-                    The 'sample_rate' parameter is deprecated and will be removed in a future version.
-                    Use 'params' instead.
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
 
-            language: Language for transcription. Defaults to English.
-
-                .. deprecated:: 0.0.86
-                    The 'language' parameter is deprecated and will be removed in a future version.
-                    Use 'params' instead.
-
-            params: Additional configuration parameters for AWS Transcribe service.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            language=Language.EN,
+            partial_results_stability="high",
+            show_speaker_label=False,
+            speaker_format=None,
+        )
 
-        # Initialize params with defaults or use provided params
-        self._params = params or AWSInputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
 
-        if sample_rate:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'sample_rate' parameter is deprecated and will be removed in a future version. Use 'params' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if not self._params.sample_rate:
-                self._params.sample_rate = sample_rate
+        # 3. (No step 3, as there's no params object to apply)
 
-        if language:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'language' parameter is deprecated and will be removed in a future version. Use 'params' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if not self._params.language_code:
-                self._params.language_code = language_to_aws_language(language)
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
-        if self._params.sample_rate not in [8000, 16000]:
-            logger.warning(
-                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {self._params.sample_rate} Hz to 16000 Hz."
-            )
-            self._params.sample_rate = 16000
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
 
-        # Convert media encoding to AWS format
-        self._params.media_encoding = self.get_service_encoding(self._params.media_encoding)
+        # Init-only connection config (not runtime-updatable).
+        self._media_encoding = "linear16"
+        self._number_of_channels = 1
+        self._enable_channel_identification = False
 
-        self._credentials = {
-            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region": region or os.getenv("AWS_REGION", "us-east-1"),
-        }
+        # Explicit or environment keys. Without them, each connection is signed
+        # with keys from the default chain (see `_signing_credentials`).
+        self._credentials = resolve_credentials(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=api_key,
+            aws_session_token=aws_session_token,
+            region=region,
+        )
+        self._aws_session = None
 
-        self._ws_client = None
-        self._connection_lock = asyncio.Lock()
-        self._connecting = False
         self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as AWS Transcribe STT supports metrics generation.
+        """
+        return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, 16000 Hz unless the input is at 8000 or 16000 Hz.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return self.sample_rate if self.sample_rate in (8000, 16000) else 16000
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -283,36 +211,38 @@ class AWSTranscribeSTTService(STTService):
         }
         return encoding_map.get(encoding, encoding)
 
-    async def start(self, frame: StartFrame):
-        """Initialize the connection when the service starts.
+    def _speaker_words(self, alternative: dict[str, Any]) -> list[tuple[str, Any]] | None:
+        """Return a diarized alternative's ``(word, speaker)`` pairs, or ``None``.
+
+        Punctuation items carry no speaker; they stay in the transcript and end
+        up in the run of the word before them.
+        """
+        if not self._settings.show_speaker_label:
+            return None
+        return [
+            (item.get("Content", ""), item.get("Speaker"))
+            for item in alternative.get("Items") or []
+            if item.get("Type") == "pronunciation"
+        ]
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if a connection setting changed."""
+        changed = await super()._update_settings(delta)
+
+        if changed.keys() - self.Settings.LOCAL_FIELDS and self._websocket:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Start frame signaling service initialization.
-
-        Raises:
-            RuntimeError: If WebSocket connection cannot be established after retries.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        logger.info("Starting AWS Transcribe service...")
-        retry_count = 0
-        max_retries = 3
-
-        while retry_count < max_retries:
-            try:
-                await self._connect()
-                if self._ws_client and self._ws_client.state is State.OPEN:
-                    logger.info("Successfully established WebSocket connection")
-                    return
-                logger.warning("WebSocket connection not established after connect")
-            except Exception as e:
-                logger.error(
-                    f"{self} Failed to connect (attempt {retry_count + 1}/{max_retries}): {e}"
-                )
-                retry_count += 1
-                if retry_count < max_retries:
-                    await asyncio.sleep(1)  # Wait before retrying
-
-        raise RuntimeError("Failed to establish WebSocket connection after multiple attempts")
+        await super().setup(setup)
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from AWS Transcribe.
@@ -332,7 +262,7 @@ class AWSTranscribeSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data and send to AWS Transcribe.
 
         Args:
@@ -341,172 +271,179 @@ class AWSTranscribeSTTService(STTService):
         Yields:
             ErrorFrame: If processing fails or connection issues occur.
         """
-        try:
-            # Ensure WebSocket is connected
-            if not self._ws_client or self._ws_client.state is State.CLOSED:
-                logger.debug("WebSocket not connected, attempting to reconnect...")
-                try:
-                    await self._connect()
-                except Exception as e:
-                    logger.error(f"Failed to reconnect: {e}")
-                    yield ErrorFrame("Failed to reconnect to AWS Transcribe", fatal=False)
-                    return
-
-            # Format the audio data according to AWS event stream format
-            event_message = build_event_message(audio)
-
-            # Send the formatted event message
+        if self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._ws_client.send(event_message)
-                # Start metrics after first chunk sent
-                await self.start_processing_metrics()
-                await self.start_ttfb_metrics()
-            except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"Connection closed while sending: {e}")
-                await self._disconnect()
-                # Don't yield error here - we'll retry on next frame
-            except Exception as e:
-                logger.error(f"Error sending audio: {e}")
-                yield ErrorFrame(f"AWS Transcribe error: {str(e)}", fatal=False)
-                await self._disconnect()
+                # Format the audio data according to AWS event stream format
+                event_message = build_event_message(audio)
 
-        except Exception as e:
-            logger.error(f"Error in run_stt: {e}")
-            yield ErrorFrame(f"AWS Transcribe error: {str(e)}", fatal=False)
-            await self._disconnect()
+                # Send the formatted event message
+                await self._websocket.send(event_message)
+            except Exception as e:
+                yield ErrorFrame(error=f"Error sending audio: {e}")
+
+        yield None
 
     async def _connect(self):
-        """Connect to AWS Transcribe with connection state management."""
-        if self._ws_client and self._ws_client.state is State.OPEN and self._receive_task:
-            logger.debug(f"{self} Already connected")
-            return
+        """Connect to the AWS Transcribe service.
 
-        async with self._connection_lock:
-            if self._connecting:
-                logger.debug(f"{self} Connection already in progress")
-                return
+        Establishes websocket connection and starts receive task.
+        """
+        await super()._connect()
 
-            try:
-                self._connecting = True
-                logger.debug(f"{self} Starting connection process...")
+        await self._connect_websocket()
 
-                if self._ws_client:
-                    await self._disconnect()
-
-                language_code = None
-                language_options = None
-                preferred_language = None
-
-                if self._params.identify_multiple_languages or self._params.identify_language:
-                    language_options = []
-                    for lang in self._params.language_options:
-                        aws_lang = self.language_to_service_language(Language(lang))
-                        if aws_lang:
-                            language_options.append(aws_lang)
-                        else:
-                            logger.warning(f"Unsupported language in language_options: {lang}.")
-
-                    if not language_options or len(language_options) < 2:
-                        raise ValueError(
-                            "At least 2 valid languages required for language_options."
-                        )
-
-                    if self._params.preferred_language:
-                        preferred_language = self.language_to_service_language(
-                            Language(self._params.preferred_language)
-                        )
-                        if preferred_language not in language_options:
-                            raise ValueError(
-                                f"Preferred language {preferred_language}is not in language_options."
-                            )
-                else:
-                    if self._params.language_code:
-                        language_code = self.language_to_service_language(
-                            Language(self._params.language_code)
-                        )
-                        if not language_code:
-                            raise ValueError(f"Unsupported language: {self._params.language_code}.")
-                    else:
-                        raise ValueError(
-                            "Must specify language_code when identify_multiple_languages and identify_language are not used"
-                        )
-
-                # Generate random websocket key
-                websocket_key = "".join(
-                    random.choices(
-                        string.ascii_uppercase + string.ascii_lowercase + string.digits,
-                        k=20,
-                    )
-                )
-
-                # Add required headers
-                additional_headers = {
-                    "Origin": "https://localhost",
-                    "Sec-WebSocket-Key": websocket_key,
-                    "Sec-WebSocket-Version": "13",
-                    "Connection": "keep-alive",
-                }
-
-                # Get presigned URL with appropriate language parameters
-                presigned_url = get_presigned_url(
-                    region=self._credentials["region"],
-                    credentials={
-                        "access_key": self._credentials["aws_access_key_id"],
-                        "secret_key": self._credentials["aws_secret_access_key"],
-                        "session_token": self._credentials["aws_session_token"],
-                    },
-                    params=self._params,
-                    language_code=language_code,
-                    language_options=language_options,
-                    preferred_language=preferred_language,
-                )
-
-                logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
-
-                # Connect with the required headers and settings
-                self._ws_client = await websocket_connect(
-                    presigned_url,
-                    additional_headers=additional_headers,
-                    subprotocols=["mqtt"],
-                    ping_interval=None,
-                    ping_timeout=None,
-                    compression=None,
-                )
-
-                logger.debug(f"{self} WebSocket connected, starting receive task...")
-
-                # Start receive task
-                self._receive_task = self.create_task(self._receive_loop())
-
-                logger.info(f"{self} Successfully connected to AWS Transcribe")
-
-            except Exception as e:
-                logger.error(f"{self} Failed to connect to AWS Transcribe: {e}")
-                await self._disconnect()
-                raise
-
-            finally:
-                self._connecting = False
+        # Started even when the connection failed: with no socket the receive
+        # loop goes straight to its reconnect path, which retries the connect.
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        """Disconnect from AWS Transcribe."""
+        """Disconnect from the AWS Transcribe service.
+
+        Sends end-stream message and cleans up.
+        """
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        try:
-            if self._ws_client and self._ws_client.state is State.OPEN:
-                # Send end-stream message
+        # Send end-stream message before closing
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
                 end_stream = {"message-type": "event", "event": "end"}
-                await self._ws_client.send(json.dumps(end_stream))
-            await self._ws_client.close()
+                await self._websocket.send(json.dumps(end_stream))
+            except Exception as e:
+                await self.push_error(error_msg=f"Error sending end-stream: {e}", exception=e)
+
+        await self._disconnect_websocket()
+
+    async def _signing_credentials(self) -> dict[str, str | None]:
+        """Return the keys to sign the next connection's URL with.
+
+        Keys passed in or set in the environment are used as given. Otherwise
+        they come from the default AWS credential chain through an aiobotocore
+        session, which renews temporary credentials as they near expiry, so
+        every connection is signed with current keys.
+
+        Raises:
+            ValueError: If no keys are passed in, set in the environment, or
+                found by the default chain.
+        """
+        if self._credentials.access_key or self._credentials.secret_key:
+            return {
+                "access_key": self._credentials.access_key,
+                "secret_key": self._credentials.secret_key,
+                "session_token": self._credentials.session_token,
+            }
+
+        if self._aws_session is None:
+            try:
+                import aiobotocore.session
+            except ModuleNotFoundError as e:
+                raise ValueError(
+                    "No AWS credentials were given, and the default credential chain "
+                    'needs aiobotocore: `uv add "pipecat-ai[aws]"`.'
+                ) from e
+            self._aws_session = aiobotocore.session.get_session()
+            self._aws_session.set_config_variable("region", self._credentials.region)
+
+        credentials = await self._aws_session.get_credentials()
+        if credentials is None:
+            raise ValueError("No AWS credentials found in the parameters, environment or chain.")
+        frozen = await credentials.get_frozen_credentials()
+        return {
+            "access_key": frozen.access_key,
+            "secret_key": frozen.secret_key,
+            "session_token": frozen.token,
+        }
+
+    async def _connect_websocket(self):
+        """Establish the websocket connection to AWS Transcribe."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            logger.debug("Connecting to AWS Transcribe WebSocket")
+
+            language_code = assert_given(self._settings.language)
+            if not language_code:
+                raise ValueError(f"Unsupported language: {language_code}")
+
+            if self.send_sample_rate != self.sample_rate:
+                logger.debug(
+                    f"{self} resampling audio from {self.sample_rate} Hz to "
+                    f"{self.send_sample_rate} Hz for AWS Transcribe"
+                )
+
+            # Generate random websocket key
+            websocket_key = "".join(
+                random.choices(
+                    string.ascii_uppercase + string.ascii_lowercase + string.digits, k=20
+                )
+            )
+
+            # Add required headers
+            additional_headers = {
+                "Origin": "https://localhost",
+                "Sec-WebSocket-Key": websocket_key,
+                "Sec-WebSocket-Version": "13",
+                "Connection": "keep-alive",
+            }
+
+            # Get presigned URL
+            presigned_url = get_presigned_url(
+                region=self._credentials.region,
+                credentials=await self._signing_credentials(),
+                language_code=language_code,
+                media_encoding=self.get_service_encoding(
+                    self._media_encoding
+                ),  # Convert to AWS format
+                sample_rate=self.send_sample_rate,
+                number_of_channels=self._number_of_channels,
+                enable_partial_results_stabilization=True,
+                partial_results_stability=assert_given(self._settings.partial_results_stability),
+                show_speaker_label=assert_given(self._settings.show_speaker_label),
+                enable_channel_identification=self._enable_channel_identification,
+            )
+
+            logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
+
+            # Connect with the required headers and settings
+            self._websocket = await self._websocket_connect(
+                presigned_url,
+                additional_headers=additional_headers,
+                subprotocols=[Subprotocol("mqtt")],
+                ping_interval=None,
+                ping_timeout=None,
+                compression=None,
+            )
+
+            await self._call_event_handler("on_connected")
+            logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
-            logger.warning(f"{self} Error closing WebSocket connection: {e}")
+            self._websocket = None
+            await self.push_error(
+                error_msg=f"Unable to connect to AWS Transcribe: {e}", exception=e
+            )
+
+    async def _disconnect_websocket(self):
+        """Close the websocket connection to AWS Transcribe."""
+        try:
+            if self._websocket:
+                logger.debug("Disconnecting from AWS Transcribe WebSocket")
+                await self._websocket.close()
+        except Exception as e:
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._ws_client = None
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert internal language enum to AWS Transcribe language code.
+
+        Source:
+        https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
 
         Args:
             language: Internal language enumeration value.
@@ -514,57 +451,324 @@ class AWSTranscribeSTTService(STTService):
         Returns:
             AWS Transcribe compatible language code, or None if unsupported.
         """
-        return language_to_aws_language(language)
+        LANGUAGE_MAP = {
+            # Afrikaans
+            Language.AF: "af-ZA",
+            Language.AF_ZA: "af-ZA",
+            # Albanian
+            Language.SQ: "sq-AL",
+            Language.SQ_AL: "sq-AL",
+            # Amharic
+            Language.AM: "am-ET",
+            Language.AM_ET: "am-ET",
+            # Arabic
+            Language.AR: "ar-SA",  # Default to Modern Standard Arabic
+            Language.AR_AE: "ar-AE",  # Gulf Arabic
+            Language.AR_SA: "ar-SA",  # Modern Standard Arabic
+            # Armenian
+            Language.HY: "hy-AM",
+            Language.HY_AM: "hy-AM",
+            # Basque
+            Language.EU: "eu-ES",
+            Language.EU_ES: "eu-ES",
+            # Belarusian
+            Language.BE: "be-BY",
+            Language.BE_BY: "be-BY",
+            # Bengali
+            Language.BN: "bn-IN",  # AWS streams only the Indian variety
+            Language.BN_IN: "bn-IN",
+            # Bosnian
+            Language.BS: "bs-BA",
+            Language.BS_BA: "bs-BA",
+            # Bulgarian
+            Language.BG: "bg-BG",
+            Language.BG_BG: "bg-BG",
+            # Burmese
+            Language.MY: "my-MM",
+            Language.MY_MM: "my-MM",
+            # Catalan
+            Language.CA: "ca-ES",
+            Language.CA_ES: "ca-ES",
+            # Central Kurdish
+            Language.CKB_IQ: "ckb-IQ",
+            Language.CKB_IR: "ckb-IR",
+            # Chinese
+            Language.ZH: "zh-CN",  # Default to Simplified
+            Language.ZH_CN: "zh-CN",  # Simplified
+            Language.ZH_TW: "zh-TW",  # Traditional
+            Language.ZH_HK: "zh-HK",  # Cantonese (also yue-HK)
+            Language.YUE: "zh-HK",  # Cantonese fallback
+            # Croatian
+            Language.HR: "hr-HR",
+            Language.HR_HR: "hr-HR",
+            # Czech
+            Language.CS: "cs-CZ",
+            Language.CS_CZ: "cs-CZ",
+            # Danish
+            Language.DA: "da-DK",
+            Language.DA_DK: "da-DK",
+            # Dutch
+            Language.NL: "nl-NL",
+            Language.NL_NL: "nl-NL",
+            # English
+            Language.EN: "en-US",  # Default to US
+            Language.EN_AB: "en-AB",  # Scottish
+            Language.EN_AU: "en-AU",  # Australian
+            Language.EN_GB: "en-GB",  # British
+            Language.EN_IN: "en-IN",  # Indian
+            Language.EN_IE: "en-IE",  # Irish
+            Language.EN_NZ: "en-NZ",  # New Zealand
+            Language.EN_US: "en-US",  # US
+            Language.EN_WL: "en-WL",  # Welsh
+            Language.EN_ZA: "en-ZA",  # South African
+            # Estonian
+            Language.ET: "et-ET",  # AWS uses et-ET rather than the BCP 47 et-EE
+            Language.ET_EE: "et-ET",
+            # Persian/Farsi
+            Language.FA: "fa-IR",
+            Language.FA_AF: "fa-AF",
+            Language.FA_IR: "fa-IR",
+            # Finnish
+            Language.FI: "fi-FI",
+            Language.FI_FI: "fi-FI",
+            # French
+            Language.FR: "fr-FR",  # Default to France
+            Language.FR_FR: "fr-FR",
+            Language.FR_CA: "fr-CA",  # Canadian
+            # Galician
+            Language.GL: "gl-ES",
+            Language.GL_ES: "gl-ES",
+            # Georgian
+            Language.KA: "ka-GE",
+            Language.KA_GE: "ka-GE",
+            # German
+            Language.DE: "de-DE",  # Default to Germany
+            Language.DE_DE: "de-DE",
+            Language.DE_CH: "de-CH",  # Swiss
+            # Greek
+            Language.EL: "el-GR",
+            Language.EL_GR: "el-GR",
+            # Gujarati
+            Language.GU: "gu-IN",
+            Language.GU_IN: "gu-IN",
+            # Haitian Creole
+            Language.HT: "ht-HT",
+            Language.HT_HT: "ht-HT",
+            # Hebrew
+            Language.HE: "he-IL",
+            Language.HE_IL: "he-IL",
+            # Hindi
+            Language.HI: "hi-IN",
+            Language.HI_IN: "hi-IN",
+            # Hungarian
+            Language.HU: "hu-HU",
+            Language.HU_HU: "hu-HU",
+            # Icelandic
+            Language.IS: "is-IS",
+            Language.IS_IS: "is-IS",
+            # Indonesian
+            Language.ID: "id-ID",
+            Language.ID_ID: "id-ID",
+            # Italian
+            Language.IT: "it-IT",
+            Language.IT_IT: "it-IT",
+            # Japanese
+            Language.JA: "ja-JP",
+            Language.JA_JP: "ja-JP",
+            # Javanese
+            Language.JV: "jv-ID",
+            Language.JV_ID: "jv-ID",
+            # Kabyle
+            Language.KAB: "kab-DZ",
+            Language.KAB_DZ: "kab-DZ",
+            # Kannada
+            Language.KN: "kn-IN",
+            Language.KN_IN: "kn-IN",
+            # Kazakh
+            Language.KK: "kk-KZ",
+            Language.KK_KZ: "kk-KZ",
+            # Khmer
+            Language.KM: "km-KH",
+            Language.KM_KH: "km-KH",
+            # Korean
+            Language.KO: "ko-KR",
+            Language.KO_KR: "ko-KR",
+            # Latvian
+            Language.LV: "lv-LV",
+            Language.LV_LV: "lv-LV",
+            # Lithuanian
+            Language.LT: "lt-LT",
+            Language.LT_LT: "lt-LT",
+            # Luganda
+            Language.LG: "lg-IN",  # AWS uses lg-IN rather than the BCP 47 lg-UG
+            # Macedonian
+            Language.MK: "mk-MK",
+            Language.MK_MK: "mk-MK",
+            # Malay
+            Language.MS: "ms-MY",
+            Language.MS_MY: "ms-MY",
+            # Malayalam
+            Language.ML: "ml-IN",
+            Language.ML_IN: "ml-IN",
+            # Marathi
+            Language.MR: "mr-IN",
+            Language.MR_IN: "mr-IN",
+            # Nepali
+            Language.NE: "ne-NP",
+            Language.NE_NP: "ne-NP",
+            # Norwegian
+            Language.NB: "no-NO",  # Norwegian Bokmål
+            Language.NB_NO: "no-NO",
+            Language.NO: "no-NO",
+            # Odia
+            Language.OR: "or-IN",
+            Language.OR_IN: "or-IN",
+            # Pashto
+            Language.PS: "ps-AF",
+            Language.PS_AF: "ps-AF",
+            # Polish
+            Language.PL: "pl-PL",
+            Language.PL_PL: "pl-PL",
+            # Portuguese
+            Language.PT: "pt-PT",  # Default to Portugal
+            Language.PT_PT: "pt-PT",
+            Language.PT_BR: "pt-BR",  # Brazilian
+            # Punjabi
+            Language.PA: "pa-IN",
+            Language.PA_IN: "pa-IN",
+            # Romanian
+            Language.RO: "ro-RO",
+            Language.RO_RO: "ro-RO",
+            # Russian
+            Language.RU: "ru-RU",
+            Language.RU_RU: "ru-RU",
+            # Serbian
+            Language.SR: "sr-RS",
+            Language.SR_RS: "sr-RS",
+            # Sinhala
+            Language.SI: "si-LK",
+            Language.SI_LK: "si-LK",
+            # Slovak
+            Language.SK: "sk-SK",
+            Language.SK_SK: "sk-SK",
+            # Slovenian
+            Language.SL: "sl-SI",
+            Language.SL_SI: "sl-SI",
+            # Somali
+            Language.SO: "so-SO",
+            Language.SO_SO: "so-SO",
+            # Spanish
+            Language.ES: "es-ES",  # Default to Spain
+            Language.ES_ES: "es-ES",
+            Language.ES_MX: "es-MX",  # Mexican
+            Language.ES_US: "es-US",  # US Spanish
+            # Sundanese
+            Language.SU: "su-ID",
+            Language.SU_ID: "su-ID",
+            # Swahili
+            Language.SW: "sw-KE",  # Default to Kenya
+            Language.SW_BI: "sw-BI",
+            Language.SW_KE: "sw-KE",
+            Language.SW_RW: "sw-RW",
+            Language.SW_TZ: "sw-TZ",
+            Language.SW_UG: "sw-UG",
+            # Swedish
+            Language.SV: "sv-SE",
+            Language.SV_SE: "sv-SE",
+            # Tagalog/Filipino
+            Language.TL: "tl-PH",
+            Language.FIL: "tl-PH",  # Filipino maps to Tagalog
+            Language.FIL_PH: "tl-PH",
+            # Tamil
+            Language.TA: "ta-IN",
+            Language.TA_IN: "ta-IN",
+            # Telugu
+            Language.TE: "te-IN",
+            Language.TE_IN: "te-IN",
+            # Thai
+            Language.TH: "th-TH",
+            Language.TH_TH: "th-TH",
+            # Turkish
+            Language.TR: "tr-TR",
+            Language.TR_TR: "tr-TR",
+            # Ukrainian
+            Language.UK: "uk-UA",
+            Language.UK_UA: "uk-UA",
+            # Uzbek
+            Language.UZ: "uz-UZ",
+            Language.UZ_UZ: "uz-UZ",
+            # Vietnamese
+            Language.VI: "vi-VN",
+            Language.VI_VN: "vi-VN",
+            # Welsh
+            Language.CY: "cy-WL",  # AWS uses cy-WL rather than the BCP 47 cy-GB
+            Language.CY_GB: "cy-WL",
+            # Zulu
+            Language.ZU: "zu-ZA",
+            Language.ZU_ZA: "zu-ZA",
+        }
+
+        return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
+        pass
 
-    async def _receive_loop(self):
-        """Background task to receive and process messages from AWS Transcribe."""
-        while True:
-            if not self._ws_client or self._ws_client.state is State.CLOSED:
-                logger.warning(f"{self} WebSocket closed in receive loop")
-                break
+    def _get_websocket(self):
+        """Get the current WebSocket connection.
 
+        Returns:
+            The WebSocket connection.
+
+        Raises:
+            Exception: If WebSocket is not connected.
+        """
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _receive_messages(self):
+        """Receive and process websocket messages.
+
+        Continuously processes messages from the websocket connection.
+        """
+        async for response in self._get_websocket():
             try:
-                response = await self._ws_client.recv()
-
                 headers, payload = decode_event(response)
 
-                message_type = headers.get(":message-type")
-
-                if message_type == "event":
+                if headers.get(":message-type") == "event":
                     # Process transcription results
                     results = payload.get("Transcript", {}).get("Results", [])
-                    if len(results) > 0:
+                    if results:
                         result = results[0]
                         alternatives = result.get("Alternatives", [])
                         if alternatives:
                             transcript = alternatives[0].get("Transcript", "")
-                            detected_language = result.get(
-                                "LanguageCode", "en-US"
-                            )  # defaults to english
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
+                                # Technically `_settings.language` could be a raw string, but
+                                # Language is a StrEnum so downstream handles either.
+                                language = cast(
+                                    "Language | None", assert_given(self._settings.language)
+                                )
                                 if is_final:
-                                    await self.push_frame(
-                                        TranscriptionFrame(
-                                            transcript,
-                                            self._user_id,
-                                            time_now_iso8601(),
-                                            detected_language,
-                                            result=result,
-                                        )
+                                    runs = self._diarized_runs(
+                                        transcript, self._speaker_words(alternatives[0])
+                                    )
+                                    # Report usage before the transcription
+                                    # frame so tracing can attach it to the
+                                    # STT span the frame closes.
+                                    await self.emit_stt_usage_metrics()
+                                    await self._push_transcription_runs(
+                                        runs, language=language, result=result
                                     )
                                     await self._handle_transcription(
                                         transcript,
                                         is_final,
-                                        detected_language,
+                                        language,
                                     )
                                 else:
                                     await self.push_frame(
@@ -572,28 +776,15 @@ class AWSTranscribeSTTService(STTService):
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            detected_language,
+                                            language,
                                             result=result,
                                         )
                                     )
-
-                elif message_type == "exception":
+                elif headers.get(":message-type") == "exception":
                     error_msg = payload.get("Message", "Unknown error")
-                    logger.error(f"{self} Exception from AWS: {error_msg}")
-                    await self.push_frame(
-                        ErrorFrame(f"AWS Transcribe error: {error_msg}", fatal=False)
-                    )
+                    await self.push_error(error_msg=f"AWS Transcribe error: {error_msg}")
                 else:
-                    logger.debug(f"{self} Other message type received: {message_type}")
-                    logger.debug(f"{self} Headers: {headers}")
+                    logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
-
-            except websockets.exceptions.ConnectionClosed as e:
-                logger.error(
-                    f"{self} WebSocket connection closed in receive loop with code {e.code}: {e.reason}"
-                )
-                break
             except Exception as e:
-                logger.error(f"{self} Unexpected error in receive loop: {e}")
-                # Consider whether to break or continue based on error type
-                break
+                logger.warning(f"Error processing message: {e}")

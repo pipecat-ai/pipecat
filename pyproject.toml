@@ -9,133 +9,204 @@ description = "An open source framework for voice (and multimodal) assistants"
 license = "BSD-2-Clause"
 license-files = ["LICENSE"]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["webrtc", "audio", "video", "ai"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Communications :: Conferencing",
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Multimedia :: Video",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 dependencies = [
-    "aiofiles>=24.1.0,<25",
-    "aiohttp>=3.11.12,<4",
-    "audioop-lts~=0.2.1; python_version>='3.13'",
-    "docstring_parser~=0.16",
+    "aiofiles>=24.1.0,<27",
+    "aiohttp>=3.14.4,<4",
+    "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
+    "loudness>=0.2.0,<1",
     "Markdown>=3.7,<4",
-    "nltk>=3.9.1,<4",
+    "sentencex==1.0.34",
     "numpy>=1.26.4,<3",
-    "Pillow>=11.1.0,<12",
-    "protobuf~=5.29.3",
+    "Pillow>=11.1.0,<14",
+    "protobuf>=5.29.6,<7",
     "pydantic>=2.10.6,<3",
-    "pyloudnorm~=0.1.1",
-    "resampy~=0.4.3",
-    "soxr~=0.5.0",
-    "openai>=1.74.0,<=1.99.1",
-    # Pinning numba to resolve package dependencies
-    "numba==0.61.2",
-    "wait_for2>=0.4.1; python_version<'3.12'",
+    # pydantic <2.13 has no cp314 wheels; pin a floor so 3.14 resolves
+    "pydantic>=2.13; python_full_version >= '3.14'",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "pipecat-resampler>=0.2.0,<1",
+    "soundfile~=0.13.1",
+    "openai>=1.74.0,<4",
+    "typing_extensions>=4.9",
+    "wait_for2>=0.4.1,<1; python_version<'3.12'",
+    "websockets>=13.1",
+    "pyyaml>=6,<7",
+    "num2words>=0.5.14",
+    # Required by LocalSmartTurnAnalyzerV3
+    # Inlined here instead of using a self-referential extra for Poetry compatibility.
+    "onnxruntime>=1.24.3,<2",
 ]
 
 [project.urls]
+Homepage = "https://pipecat.ai"
+Documentation = "https://docs.pipecat.ai/"
 Source = "https://github.com/pipecat-ai/pipecat"
-Website = "https://pipecat.ai"
+Issues = "https://github.com/pipecat-ai/pipecat/issues"
+Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
+
+[project.scripts]
+# The Pipecat CLI ships with pipecat-ai, but its dependencies are optional (the `cli`
+# extra). These console scripts target a graceful-degradation shim that prints an
+# install hint when the `cli` extra isn't installed (rather than an ImportError).
+pipecat = "pipecat.cli.main:run"
+pc = "pipecat.cli.main:run"
 
 [project.optional-dependencies]
-aic = [ "aic-sdk~=1.0.1" ]
-anthropic = [ "anthropic~=0.49.0" ]
-assemblyai = [ "pipecat-ai[websockets-base]" ]
-asyncai = [ "pipecat-ai[websockets-base]" ]
-aws = [ "aioboto3~=15.0.0", "pipecat-ai[websockets-base]" ]
-aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.1.0; python_version>='3.12'" ]
-azure = [ "azure-cognitiveservices-speech~=1.42.0"]
-cartesia = [ "cartesia~=2.0.3", "pipecat-ai[websockets-base]" ]
+aic = [ "aic-sdk~=3.4.0" ]
+anthropic = [ "anthropic>=0.49.0,<2" ]
+assemblyai = []
+asyncai = []
+aws = [ "aiobotocore>=3,<4" ]
+aws-nova-sonic = [ "aws_sdk_bedrock_runtime>=0.6.0,<0.10; python_version>='3.12'" ]
+azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
+baseten = []
+bland = []
+cartesia = []
+camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
+cloudflare = [ "httpx[http2]>=0.27,<1" ]
+crusoe = []
+daily = [ "daily-python>=0.36.0,<1" ]
+deepgram = [ "deepgram-sdk>=6.1.1,<8" ]
 deepseek = []
-daily = [ "daily-python~=0.19.9" ]
-deepgram = [ "deepgram-sdk~=4.7.0" ]
-elevenlabs = [ "pipecat-ai[websockets-base]" ]
-fal = [ "fal-client~=0.5.9" ]
+elevenlabs = []
+evals = [ "pipecat-ai[cli]", "pipecat-ai[kokoro]", "pipecat-ai[moonshine]" ]
+expressivity = [ "huggingface_hub>=0.30,<2", "tokenizers>=0.23,<1" ]
+fal = []
 fireworks = []
-fish = [ "ormsgpack~=1.7.0", "pipecat-ai[websockets-base]" ]
-gladia = [ "pipecat-ai[websockets-base]" ]
-google = [ "google-cloud-speech>=2.33.0,<3", "google-cloud-texttospeech>=2.31.0,<3", "google-genai>=1.41.0,<2", "pipecat-ai[websockets-base]" ]
+fish = [ "ormsgpack>=1.7.0,<2" ]
+funasr = [ "funasr[knf]>=1.4.5", "torch>=2.5.0,<3" ]
+gladia = []
+google = [
+  "google-cloud-speech>=2.33.0,<3",
+  "google-cloud-texttospeech>=2.31.0,<3",
+  "google-genai>=3.2.0,<4",
+  "httpx[http2]>=0.27,<1",
+]
+gradium = []
 grok = []
-groq = [ "groq~=0.23.0" ]
-gstreamer = [ "pygobject~=3.50.0" ]
-heygen = [ "livekit>=1.0.13", "pipecat-ai[websockets-base]" ]
-hume = [ "hume>=0.11.2" ]
+groq = [ "groq>=0.23.0,<2" ]
+gstreamer = [ "pygobject>=3.52.0,<4" ]
+heygen = [ "livekit>=1.0.13,<2" ]
+hume = [ "hume>=0.11.2,<1", "httpx[http2]>=0.27,<1" ]
+inception = []
 inworld = []
-krisp = [ "pipecat-ai-krisp~=0.4.0" ]
+jev = [ "pipecat-ai[typesafe]" ]
+keenable = [ "pipecat-ai[mcp]" ]
 koala = [ "pvkoala~=2.0.3" ]
-langchain = [ "langchain~=0.3.20", "langchain-community~=0.3.20", "langchain-openai~=0.3.9" ]
-livekit = [ "livekit~=1.0.13", "livekit-api~=1.0.5", "tenacity>=8.2.3,<10.0.0" ]
-lmnt = [ "pipecat-ai[websockets-base]" ]
+kokoro = [ "kokoro-onnx>=0.5.0,<1", "requests>=2.32.5,<3" ]
+langchain = [ "langchain>=1.2.13,<2", "langchain-community>=0.4.1,<1", "langchain-openai>=1.1.12,<2" ]
+lemonslice = [ "pipecat-ai[daily]" ]
+livekit = [ "livekit>=1.0.13,<2", "livekit-api>=1.0.5,<2", "tenacity>=8.2.3,<10.0.0", "pyjwt>=2.12.0,<3" ]
 local = [ "pyaudio~=0.2.14" ]
-mcp = [ "mcp[cli]>=1.11.0,<2" ]
-mem0 = [ "mem0ai~=0.1.94" ]
-mistral = []
+local-smart-turn = [ "coremltools>=8.0", "transformers>=5.10.0,<6", "torch>=2.5.0,<3" ]
+mcp = [ "mcp[cli]>=2.1.1,<3" ]
+mem0 = [ "mem0ai>=2,<3" ]
+meta = []
+minimax = []
+mistral = ["mistralai>=2.0.0,<3"]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
-moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0" ]
-nim = []
-neuphonic = [ "pipecat-ai[websockets-base]" ]
-noisereduce = [ "noisereduce~=3.0.3" ]
-openai = [ "pipecat-ai[websockets-base]" ]
-openpipe = [ "openpipe~=4.50.0" ]
+moondream = [ "accelerate>=1.10.0,<2", "einops>=0.8.0,<1", "pyvips[binary]>=3.0.0,<4", "timm>=1.0.13,<2", "transformers>=5.10.0,<6" ]
+moonshine = [ "moonshine-voice>=0.1.5" ]
+moq = [ "moq-rs~=0.5.1", "cryptography>=45.0.0" ]
+nebius = []
+neuphonic = []
+novita = []
+nvidia = [ "nvidia-riva-client>=2.25.1,<3", "protobuf>=6.31.1,<7" ]
+ollama = []
+openai = [ "httpx[http2]>=0.27,<1" ]
+openclaw = []
+rnnoise = [ "pyrnnoise~=0.4.5" ]
 openrouter = []
 perplexity = []
-playht = [ "pipecat-ai[websockets-base]" ]
+pgmq = ["pgmq>=1.0.6,<1.1", "asyncpg>=0.30.0"]
+piper = [ "piper-tts>=1.3.0,<2", "requests>=2.32.5,<3" ]
+pocket-tts = [ "pocket-tts>=2.1.0,<3" ]
 qwen = []
-rime = [ "pipecat-ai[websockets-base]" ]
-riva = [ "nvidia-riva-client~=2.21.1" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.117.0", "pipecat-ai-small-webrtc-prebuilt>=1.0.0"]
+redis = ["redis[hiredis]>=5.0.0"]
+# Pinning numba to resolve package dependencies
+resampy = [ "resampy~=0.4.3", "numba>=0.61.2,<1" ]
+resembleai = []
+rime = [ "rime-api~=0.4.0", "rimelabs-sdk==0.1.0a29" ]
+runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt>=1.4.0"]
+sagemaker = [ "aws_sdk_sagemaker_runtime_http2>=0.6.0,<0.10; python_version>='3.12'" ]
 sambanova = []
-sarvam = [ "pipecat-ai[websockets-base]" ]
+sarvam = [ "sarvamai==0.1.28" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
-local-smart-turn = [ "coremltools>=8.0", "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
-local-smart-turn-v3 = [ "transformers", "onnxruntime>=1.20.1,<2" ]
-remote-smart-turn = []
-silero = [ "onnxruntime>=1.20.1,<2" ]
-simli = [ "simli-ai~=0.1.10"]
-soniox = [ "pipecat-ai[websockets-base]" ]
-soundfile = [ "soundfile~=0.13.0" ]
-speechmatics = [ "speechmatics-rt>=0.4.0" ]
+silero = []
+simli = [ "simli-ai~=2.1.0"]
+sip = [ "baresip-python>=0.6.0,<0.7", "opencv-python-headless>=4.11.0.86,<5" ]
+smallest = []
+soniox = []
+soundfile = []
+soxr = [ "soxr~=1.0.0" ]
+speechify = []
+speechmatics = ["speechmatics-agent-stt~=0.3.0"]
 strands = [ "strands-agents>=1.9.1,<2" ]
-tavus=[]
+tavus = [ "pipecat-ai[daily]" ]
 together = []
-tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelemetry-instrumentation>=0.54b0" ]
-ultravox = [ "transformers>=4.48.0", "vllm>=0.9.0" ]
-webrtc = [ "aiortc>=1.13.0,<2", "opencv-python>=4.11.0.86,<5" ]
-websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.117.0" ]
-websockets-base = [ "websockets>=13.1,<16.0" ]
-whisper = [ "faster-whisper~=1.1.1" ]
+tone = [ "pipecat-ai[expressivity]" ]
+tracing = [ "opentelemetry-sdk>=1.33.0,<2", "opentelemetry-api>=1.33.0,<2", "opentelemetry-instrumentation>=0.54b0,<1" ]
+typesafe = [ "httpx[http2]>=0.27,<1" ]
+ultravox = []
+vonage-video-connector = [ "vonage-video-connector~=1.0.3; python_version>='3.11' and platform_system=='Linux'" ]
+webrtc = [ "aiortc>=1.14.0,<2", "opencv-python-headless>=4.11.0.86,<5" ]
+webrtc-video = [ "pipecat-ai[webrtc]" ]
+websocket = [ "fastapi>=0.115.6,<1" ]
+whisper = [ "faster-whisper~=1.2.1" ]
+xai = []
+xtts = []
+zoom-ai = [ "httpx[http2]>=0.27,<1" ]
+
+# CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
+# install stays lean; install with `pip install "pipecat-ai[cli]"`.
+cli = [
+    "typer>=0.20.0,<1",
+    "rich>=13.0.0,<14",
+    "jinja2>=3.1.0,<4",
+    "questionary>=2.0.0,<3",
+    "ruff>=0.12.1,<1",
+    "pipecat-ai-context-hub>=0.9.0,<1",
+]
 
 [dependency-groups]
 dev = [
-    "build~=1.2.2",
-    "coverage~=7.9.1",
-    "grpcio-tools~=1.67.1",
-    "pip-tools~=7.4.1",
-    "pre-commit~=4.2.0",
-    "pyright>=1.1.404,<1.2",
-    "pytest~=8.4.1",
-    "pytest-asyncio~=1.1.0",
-    "pytest-aiohttp==1.1.0",
+    "build~=1.4.0",
+    "coverage~=7.13.4",
+    "grpcio-tools>=1.67.1,<2",
+    "pip-tools~=7.5.3",
+    "pre-commit~=4.5.1",
+    "pyright==1.1.414",
+    "pytest>=9.0.0,<10",
+    "pytest-asyncio>=1.0.0,<2",
+    "pytest-aiohttp>=1.0.0,<2",
+    "pytest-cov>=7.0.0,<8",
+    "pytest-xdist>=3.8.0,<4",
     "ruff>=0.12.11,<1",
-    "setuptools~=78.1.1",
+    "setuptools~=83.0.0",
     "setuptools_scm~=8.3.1",
-    "python-dotenv>=1.0.1,<2.0.0",
+    "towncrier~=25.8.0",
 ]
 
 docs = [
     "sphinx>=8.1.3",
     "sphinx-rtd-theme",
-    "sphinx-markdown-builder",
-    "sphinx-autodoc-typehints",
-    "toml",
 ]
 
 [tool.setuptools.packages.find]
@@ -143,31 +214,26 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pipecat" = ["py.typed"]
-"pipecat.audio.dtmf" = [
-    "src/pipecat/audio/dtmf/dtmf-0.wav",
-    "src/pipecat/audio/dtmf/dtmf-1.wav",
-    "src/pipecat/audio/dtmf/dtmf-2.wav",
-    "src/pipecat/audio/dtmf/dtmf-3.wav",
-    "src/pipecat/audio/dtmf/dtmf-4.wav",
-    "src/pipecat/audio/dtmf/dtmf-5.wav",
-    "src/pipecat/audio/dtmf/dtmf-6.wav",
-    "src/pipecat/audio/dtmf/dtmf-7.wav",
-    "src/pipecat/audio/dtmf/dtmf-8.wav",
-    "src/pipecat/audio/dtmf/dtmf-9.wav",
-    "src/pipecat/audio/dtmf/dtmf-pound.wav",
-    "src/pipecat/audio/dtmf/dtmf-star.wav",
+"pipecat.audio.dtmf" = ["*.wav"]
+"pipecat.audio.turn.smart_turn.data" = ["*.onnx"]
+"pipecat.audio.vad.data" = ["*.onnx"]
+"pipecat.flows" = ["flow_config.schema.json"]
+"pipecat.frames" = ["frames.proto"]
+"pipecat.services.aws.nova_sonic" = ["ready.wav"]
+# CLI project-scaffolding templates (jinja + client TS/JS/JSON/CSS trees). The
+# `.gitignore` patterns are listed explicitly because glob `*` does not match dotfiles.
+"pipecat.cli" = [
+    "templates/**/*",
+    "templates/**/.gitignore",
+    # Agent-readiness files written by `pipecat init` (AGENTS.md + CLAUDE.md).
+    "agent_templates/**/*",
 ]
-"pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
-"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.0.onnx"]
 
 [tool.pytest.ini_options]
-addopts = "--verbose"
+addopts = "--verbose -n auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
-filterwarnings = [
-    "ignore:'audioop' is deprecated:DeprecationWarning",
-]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
@@ -179,24 +245,70 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
+    "ASYNC", # Blocking calls and other misuse inside async functions
+    "B", # Likely bugs and design problems
     "D", # Docstring rules
+    "F", # Pyflakes
     "I", # Import rules
+    "RUF006", # asyncio tasks nothing holds a reference to
+    "UP", # Modern Python
 ]
 ignore = [
+    # Async rules that do not fit this codebase.
+    #
+    # ASYNC109 objects to a `timeout` parameter on an async function, which is
+    # how cancellation is spelled throughout pipecat's own API, and ASYNC240
+    # prescribes trio.Path or anyio.path for filesystem work; pipecat runs on
+    # asyncio, and the calls it flags are in CLI and startup paths.
+    "ASYNC109",
+    "ASYNC240",
+    #
+    # ASYNC110 is a deferral: its one site polls a queue in the audio output
+    # path, and swapping it for an Event means restructuring a real-time loop.
+    "ASYNC110",
+    #
+    # Bugbear rules that do not fit this codebase.
+    #
+    # Base classes leave optional hooks empty so subclasses override only what
+    # they need. Marking them abstract, as B027 wants, would instead force every
+    # subclass to implement them, and BaseObject is a shared-behaviour base
+    # rather than an interface, so it has no abstract methods to declare.
+    "B024",
+    "B027",
+    #
+    # Bugbear rules worth adopting, each on its own once someone takes the
+    # sweep. Every entry below is a deferral, not a rejection: drop the line and
+    # fix what it reports.
+    "B007", # unused loop control variable — 23 sites, cosmetic
+    "B904", # `raise ... from` — 48 sites, better tracebacks, no behaviour change
+    "B905", # `zip(strict=)` — 18 sites, each needs its own length-invariant call
+    #
     "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
+    # Unused imports are selected in .pre-commit-config.yaml instead, so they are
+    # only stripped at commit time, not mid-development. A `--extend-select` on the
+    # command line overrides this entry, so the hook still reports and fixes them.
+    "F401",
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# Typer reads a CLI parameter's configuration from its default, so calling these
+# in a default argument is the documented idiom rather than a shared-state bug.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.lint.per-file-ignores]
-# Skip docstring checks for non-source code
-"examples/**/*.py" = ["D"]
-"tests/**/*.py" = ["D"]
-"scripts/**/*.py" = ["D"]
+# Skip docstring checks for non-source code. ASYNC230 and RUF006 are enforced in
+# the framework, where a blocked event loop stalls a live session and a collected
+# task drops one, and left off the demo and test code around it: both findings
+# there want a per-site rewrite that would bury what the file is teaching.
+"examples/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"tests/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"scripts/**/*.py" = ["D", "ASYNC230", "RUF006"]
+"evals/**/*.py" = ["D", "ASYNC230", "RUF006"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]
 # Skip specific rules for generated protobuf files
 "**/*_pb2.py" = ["D"]
-"src/pipecat/services/__init__.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -205,3 +317,55 @@ convention = "google"
 command_line = "--module pytest"
 source = ["src"]
 omit = ["*/tests/*"]
+
+[tool.towncrier]
+package = "pipecat"
+package_dir = "src"
+filename = "CHANGELOG.md"
+directory = "changelog"
+start_string = "<!-- towncrier release notes start -->\n"
+template = "changelog/_template.md.j2"
+title_format = "## [{version}] - {project_date}"
+issue_format = "[#{issue}](https://github.com/pipecat-ai/pipecat/pull/{issue})"
+underlines = ["", "", ""]
+wrap = true
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "performance"
+name = "Performance"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "other"
+name = "Other"
+showcontent = true

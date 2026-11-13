@@ -1,12 +1,16 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import unittest
 
-from pipecat.utils.string import match_endofsentence, parse_start_end_tags
+from pipecat.utils.string import (
+    longest_trailing_partial_match,
+    match_endofsentence,
+    parse_start_end_tags,
+)
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
@@ -153,6 +157,84 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         for sentence in latin_script_sentences:
             assert match_endofsentence(sentence), f"Failed for Latin script: {sentence}"
 
+    async def test_endofsentence_cjk_with_lookahead(self):
+        """Test sentence detection for CJK text with lookahead characters.
+
+        This tests the NLTK fallback path: NLTK returns entire text as one
+        sentence because it doesn't support CJK languages, but unambiguous
+        punctuation is detected via the fallback scan.
+        """
+        # Japanese: sentence + lookahead character
+        assert match_endofsentence("こんにちは。元") == 6
+        assert match_endofsentence("元気ですか？は") == 6
+        assert match_endofsentence("ありがとう！次") == 6
+
+        # Chinese: sentence + lookahead character
+        assert match_endofsentence("你好世界。下") == 5
+        assert match_endofsentence("你好吗？我") == 4
+
+        # Korean: sentence + lookahead character
+        assert match_endofsentence("안녕하세요。다") == 6
+
+        # Multiple CJK sentences with lookahead - should return first sentence
+        assert match_endofsentence("こんにちは。元気ですか？は") == 6
+
+        # Indic script with lookahead
+        assert match_endofsentence("हैलो।अ") == 5
+
+        # Arabic with lookahead
+        assert match_endofsentence("مرحبا؟ك") == 6
+
+    async def test_endofsentence_latin_not_affected_by_fallback(self):
+        """Verify that the CJK fallback does not change behavior for Latin text."""
+        # These should still return 0 - Latin "." is NOT in the unambiguous set
+        assert not match_endofsentence("Mr. S")
+        assert not match_endofsentence("Ok, Mr. Smith let's ")
+        assert not match_endofsentence("The number pi is 3.14159")
+        assert not match_endofsentence("America, or the U.S")
+
+        # These should still return correct values via NLTK path
+        assert match_endofsentence("This is a sentence. This is another one") == 19
+        assert match_endofsentence("For information, call 411.") == 26
+
+    async def test_endofsentence_numbered_list_marker(self):
+        # A line-start list marker is not a sentence on its own.
+        assert not match_endofsentence("1. T")
+        assert not match_endofsentence("  12. The")
+        assert not match_endofsentence("Options:\n1. Take")
+        assert match_endofsentence("1. Take a walk.\n2. Read") == 15
+        assert match_endofsentence("Pick one.\n1. Walk") == 9
+        # Numbers that end a sentence still split.
+        assert match_endofsentence("The answer is 1. Next") == 16
+        assert match_endofsentence("1990.\nThat was the year") == 5
+        # The marker stays masked when an unfinished quote triggers a recheck.
+        assert not match_endofsentence('1. She said, "Dr. Smith')
+        # Languages whose rules never start a sentence at a digit still split
+        # between items.
+        for language in ("de", "da", "fi", "cs", "sk", "ca"):
+            assert match_endofsentence("1. Zug nehmen.\n2. Auto", language=language) == 14
+
+    async def test_endofsentence_numbered_list_multilingual(self):
+        # (language, first item, start of the next item)
+        cases = [
+            ("en", "Options:\n1. Take the train.", "\n2. Drive"),
+            ("fr", "Voici les options :\n1. Prendre le train.", "\n2. Prendre"),
+            ("de", "Optionen:\n1. Den Zug nehmen.", "\n2. Mit"),
+            ("es", "Opciones:\n1. Tomar el tren.", "\n2. Ir"),
+            ("it", "Opzioni:\n1. Prendi il treno.", "\n2. Vai"),
+            ("pt", "Opções:\n1. Pegar o trem.", "\n2. Ir"),
+            ("ru", "Варианты:\n1. Поехать на поезде.", "\n2. Поехать"),
+            ("hi", "विकल्प:\n1. ट्रेन लें।", "\n2. कार"),
+            ("hi", "विकल्प:\n१. ट्रेन लें।", "\n२. कार"),
+            ("ar", "الخيارات:\n1. ركوب القطار.", "\n2. قيادة"),
+            ("ar", "الخيارات:\n١. ركوب القطار.", "\n٢. قيادة"),
+            ("ja", "選択肢：\n1. 電車に乗る。", "\n2. 車で"),
+            ("zh", "选项：\n1. 坐火车。", "\n2. 开车"),
+        ]
+        for language, first, rest in cases:
+            with self.subTest(language=language, text=first + rest):
+                assert match_endofsentence(first + rest, language=language) == len(first)
+
     async def test_endofsentence_streaming_tokens(self):
         """Test the specific use case of streaming LLM tokens."""
 
@@ -196,25 +278,25 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
         # (<a>, </a>)
         assert parse_start_end_tags("Hello from <a>Pipecat</a>!", [("<a>", "</a>")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 0) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 6) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
 
         # (spell(, ))
         assert parse_start_end_tags("Hello from spell(Pipecat)!", [("spell(", ")")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from spell(Pipecat", [("spell(", ")")], None, 0) == (
             ("spell(", ")"),
-            24,
+            17,
         )
 
     async def test_multiple(self):
@@ -223,12 +305,58 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             "Hello from <a>Pipecat</a>! Hello <a>World</a>!", [("<a>", "</a>")], None, 0
         ) == (
             None,
-            46,
+            45,
         )
 
         assert parse_start_end_tags(
             "Hello from <a>Pipecat</a>! Hello <a>World", [("<a>", "</a>")], None, 0
         ) == (
             ("<a>", "</a>"),
-            41,
+            36,
         )
+
+    async def test_several_pairs(self):
+        tags = [("<a>", "</a>"), ("spell(", ")")]
+        # A tag of any pair opens, not only the first pair's.
+        assert parse_start_end_tags("Hello spell(Pip", tags, None, 0) == (("spell(", ")"), 12)
+        assert parse_start_end_tags("<a>Hi</a> and spell(Pipecat) now", tags, None, 0) == (
+            None,
+            28,
+        )
+
+    async def test_a_pair_with_one_delimiter(self):
+        tags = [("**", "**")]
+        assert parse_start_end_tags("It's **back", tags, None, 0) == (("**", "**"), 7)
+        assert parse_start_end_tags("It's **back up** now", tags, None, 0) == (None, 16)
+
+
+class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_and_no_match(self):
+        assert longest_trailing_partial_match("", ["<a>"]) == 0
+        assert longest_trailing_partial_match("Hello", []) == 0
+        assert longest_trailing_partial_match("Hello", ["<a>"]) == 0
+
+    async def test_single_candidate(self):
+        assert longest_trailing_partial_match("Hello <", ["<think>"]) == 1
+        assert longest_trailing_partial_match("Hello <thin", ["<think>"]) == 5
+        # A complete candidate is not a partial match (proper prefixes only).
+        assert longest_trailing_partial_match("Hello <think>", ["<think>"]) == 0
+
+    async def test_text_shorter_than_candidate(self):
+        assert longest_trailing_partial_match("<th", ["<think>"]) == 3
+
+    async def test_multiple_candidates_longest_wins(self):
+        # "<te" matches "<test>" (3) over the shared "<t" prefix of "<think>" (2).
+        assert longest_trailing_partial_match("Hi <te", ["<think>", "<test>"]) == 3
+        assert longest_trailing_partial_match("Hi <th", ["<think>", "<test>"]) == 3
+        # Shared prefix alone matches both; length is the same either way.
+        assert longest_trailing_partial_match("Hi <t", ["<think>", "<test>"]) == 2
+        # Candidate order doesn't change the result.
+        assert longest_trailing_partial_match("Hi <te", ["<test>", "<think>"]) == 3
+
+    async def test_single_char_candidate_has_no_proper_prefix(self):
+        assert longest_trailing_partial_match("Hello <", ["<"]) == 0
+
+
+if __name__ == "__main__":
+    unittest.main()

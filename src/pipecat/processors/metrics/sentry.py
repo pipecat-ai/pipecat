@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,8 +16,8 @@ try:
     import sentry_sdk
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Sentry, you need to `pip install pipecat-ai[sentry]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use Sentry, you need to `uv add "pipecat-ai[sentry]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
@@ -53,9 +53,7 @@ class SentryMetrics(FrameProcessorMetrics):
         await super().setup(task_manager)
         if self._sentry_available:
             self._sentry_queue = asyncio.Queue()
-            self._sentry_task = self.task_manager.create_task(
-                self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
-            )
+            self._sentry_task = self.create_task(self._sentry_task_handler())
 
     async def cleanup(self):
         """Clean up Sentry resources and flush pending transactions.
@@ -70,15 +68,23 @@ class SentryMetrics(FrameProcessorMetrics):
             logger.trace(f"{self} Flushing Sentry metrics")
             sentry_sdk.flush(timeout=5.0)
 
-    async def start_ttfb_metrics(self, report_only_initial_ttfb):
+    async def start_ttfb_metrics(
+        self, *, start_time: float | None = None, report_only_initial_ttfb: bool
+    ):
         """Start tracking time-to-first-byte metrics.
 
         Args:
+            start_time: Optional start timestamp override.
             report_only_initial_ttfb: Whether to report only the initial TTFB measurement.
         """
-        await super().start_ttfb_metrics(report_only_initial_ttfb)
+        # The base class clears this flag once the initial TTFB is measured, so
+        # read it first.
+        should_report_ttfb = self._should_report_ttfb
+        await super().start_ttfb_metrics(
+            start_time=start_time, report_only_initial_ttfb=report_only_initial_ttfb
+        )
 
-        if self._should_report_ttfb and self._sentry_available:
+        if should_report_ttfb and self._sentry_available:
             self._ttfb_metrics_tx = sentry_sdk.start_transaction(
                 op="ttfb",
                 name=f"TTFB for {self._processor_name()}",
@@ -87,23 +93,32 @@ class SentryMetrics(FrameProcessorMetrics):
                 f"{self} Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
             )
 
-    async def stop_ttfb_metrics(self):
+    async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop tracking time-to-first-byte metrics.
 
-        Queues the TTFB transaction for completion and transmission to Sentry.
+        Args:
+            end_time: Optional end timestamp override.
+
+        Returns:
+            MetricsFrame produced by the base class, or None if not measuring.
+            Returning the frame is required so ``FrameProcessor.stop_ttfb_metrics``
+            can push it downstream to observers.
         """
-        await super().stop_ttfb_metrics()
+        frame = await super().stop_ttfb_metrics(end_time=end_time)
 
         if self._sentry_available and self._ttfb_metrics_tx:
             await self._sentry_queue.put(self._ttfb_metrics_tx)
             self._ttfb_metrics_tx = None
 
-    async def start_processing_metrics(self):
+        return frame
+
+    async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start tracking frame processing metrics.
 
-        Creates a new Sentry transaction to track processing performance.
+        Args:
+            start_time: Optional start timestamp override.
         """
-        await super().start_processing_metrics()
+        await super().start_processing_metrics(start_time=start_time)
 
         if self._sentry_available:
             self._processing_metrics_tx = sentry_sdk.start_transaction(
@@ -114,16 +129,24 @@ class SentryMetrics(FrameProcessorMetrics):
                 f"{self} Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
             )
 
-    async def stop_processing_metrics(self):
+    async def stop_processing_metrics(self, *, end_time: float | None = None):
         """Stop tracking frame processing metrics.
 
-        Queues the processing transaction for completion and transmission to Sentry.
+        Args:
+            end_time: Optional end timestamp override.
+
+        Returns:
+            MetricsFrame produced by the base class, or None if not measuring.
+            Returning the frame is required so ``FrameProcessor.stop_processing_metrics``
+            can push it downstream to observers.
         """
-        await super().stop_processing_metrics()
+        frame = await super().stop_processing_metrics(end_time=end_time)
 
         if self._sentry_available and self._processing_metrics_tx:
             await self._sentry_queue.put(self._processing_metrics_tx)
             self._processing_metrics_tx = None
+
+        return frame
 
     async def _sentry_task_handler(self):
         """Background task handler for completing Sentry transactions."""

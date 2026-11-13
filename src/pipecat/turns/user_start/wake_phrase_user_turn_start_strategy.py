@@ -1,0 +1,306 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""User turn start strategy that gates interaction behind wake phrase detection."""
+
+import asyncio
+import enum
+import re
+
+from loguru import logger
+
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    Frame,
+    ProposedUserStartedSpeakingFrame,
+    TranscriptionFrame,
+    UserSpeakingFrame,
+    UserStartedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.utils.string import compile_phrase_pattern
+
+
+class _WakeState(enum.Enum):
+    """Internal state for wake phrase detection."""
+
+    IDLE = "idle"
+    AWAKE = "awake"
+
+
+class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
+    """User turn start strategy that requires a wake phrase before interaction.
+
+    Starts a turn when it hears a wake phrase in a final transcription,
+    and then, until a configurable timeout, whenever the user starts speaking
+    or a final transcription arrives, which covers speech VAD missed. Use
+    ``single_activation=True`` to require the wake phrase before every turn.
+    Speech before the wake phrase is dropped from the aggregation.
+
+    It starts turns on its own, so use it as the only start strategy::
+
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[WakePhraseUserTurnStartStrategy(phrases=["hey pipecat"])],
+            ),
+        )
+
+    To combine it with other start strategies, such as
+    ``MinWordsUserTurnStartStrategy``, put them in a ``StrategyMode.ALL`` list,
+    where it's one more condition a turn needs. In a ``StrategyMode.FIRST``
+    list next to other start strategies it has to come first: until it hears
+    the wake phrase, it keeps the strategies after it from seeing frames, and
+    once awake it starts turns itself, so the strategies after it no longer
+    decide. That is deprecated, along with
+    :class:`~pipecat.turns.types.ProcessFrameResult`.
+
+    Event handlers available:
+
+    - on_wake_phrase_detected: Called when a wake phrase is matched.
+    - on_wake_phrase_timeout: Called when the inactivity timeout expires
+      (timeout mode only).
+
+    Example::
+
+        # Timeout mode (default): wake phrase unlocks interaction for 10s
+        strategy = WakePhraseUserTurnStartStrategy(
+            phrases=["hey pipecat", "ok pipecat"],
+            timeout=10.0,
+        )
+
+        # Single activation: wake phrase required before every turn
+        strategy = WakePhraseUserTurnStartStrategy(
+            phrases=["hey pipecat"],
+            single_activation=True,
+        )
+
+        @strategy.event_handler("on_wake_phrase_detected")
+        async def on_wake_phrase_detected(strategy, phrase):
+            ...
+
+        @strategy.event_handler("on_wake_phrase_timeout")
+        async def on_wake_phrase_timeout(strategy):
+            ...
+
+    Args:
+        phrases: List of wake phrases to detect. Entries that are blank after
+            stripping punctuation are ignored.
+        timeout: Inactivity timeout in seconds before returning to IDLE.
+            In timeout mode, the timer resets on activity (user, bot speech).
+            In single activation mode, acts as a keepalive window — the strategy
+            stays AWAKE for this duration after wake phrase detection, allowing
+            the current turn to complete before returning to IDLE.
+        single_activation: If True, the wake phrase is required before every
+            turn. The strategy returns to IDLE after each turn completes.
+        **kwargs: Additional keyword arguments passed to parent.
+    """
+
+    def __init__(
+        self,
+        *,
+        phrases: list[str],
+        timeout: float = 10.0,
+        single_activation: bool = False,
+        **kwargs,
+    ):
+        """Initialize the wake phrase user turn start strategy.
+
+        Args:
+            phrases: List of wake phrases to detect. Entries that are blank after
+                stripping punctuation are ignored.
+            timeout: Inactivity timeout in seconds before returning to IDLE.
+                In timeout mode, the timer resets on activity. In single activation
+                mode, acts as a keepalive window after wake phrase detection.
+            single_activation: If True, the wake phrase is required before every
+                turn. The strategy returns to IDLE after each turn completes.
+            **kwargs: Additional keyword arguments passed to parent.
+        """
+        super().__init__(**kwargs)
+        self._timeout = timeout
+        self._single_activation = single_activation
+
+        # The transcript is matched with its punctuation stripped, so the phrases are too.
+        self._patterns: list[tuple[str, re.Pattern]] = []
+        for phrase in phrases:
+            normalized = self._strip_punctuation(phrase).strip()
+            if normalized:
+                self._patterns.append((phrase, compile_phrase_pattern(normalized)))
+
+        self._state = _WakeState.IDLE
+        self._accumulated_text = ""
+
+        self._timeout_event = asyncio.Event()
+        self._timeout_task: asyncio.Task | None = None
+
+        self._register_event_handler("on_wake_phrase_detected")
+        self._register_event_handler("on_wake_phrase_timeout")
+
+    @property
+    def state(self) -> _WakeState:
+        """Returns the current wake state."""
+        return self._state
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the strategy.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        if not self._timeout_task:
+            self._timeout_task = self.task_manager.create_task(
+                self._timeout_task_handler(),
+                f"{self}::_timeout_task_handler",
+            )
+
+    async def cleanup(self):
+        """Cleanup the strategy."""
+        await super().cleanup()
+        if self._timeout_task:
+            await self.task_manager.cancel_task(self._timeout_task)
+            self._timeout_task = None
+
+    async def handle_user_turn_started(self):
+        """Ready the strategy for a new user turn.
+
+        In timeout mode, preserves state and refreshes the timeout — a turn
+        starting is the activity that keeps the strategy awake. In single
+        activation mode, does nothing: the keepalive timeout (started when the
+        wake phrase was detected) handles the transition back to IDLE.
+        """
+        if self._state == _WakeState.AWAKE:
+            if not self._single_activation:
+                self._refresh_timeout()
+
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
+        """Process an incoming frame for wake phrase detection or passthrough.
+
+        Args:
+            frame: The frame to be processed.
+
+        Returns:
+            ``ProcessFrameResult.STOP`` until the wake phrase is heard, which
+            keeps the strategies after this one in a ``StrategyMode.FIRST``
+            list from seeing the frame. That gating is deprecated.
+        """
+        await super().process_frame(frame)
+
+        if self._state == _WakeState.IDLE:
+            return await self._process_idle(frame)
+        await self._process_awake(frame)
+        return None
+
+    async def _process_idle(self, frame: Frame) -> ProcessFrameResult:
+        """Process a frame while in IDLE state.
+
+        Only final ``TranscriptionFrame`` instances are checked for wake phrase
+        matches. When a match is found, a user turn start is triggered.
+        Transcription frames that don't match have their text cleared so that
+        pre-wake-phrase speech is not added to the LLM context. All frames
+        return STOP, for a ``StrategyMode.FIRST`` list.
+        """
+        if isinstance(frame, TranscriptionFrame):
+            if self._check_wake_phrase(frame.text):
+                await self.report_user_turn_started()
+                return ProcessFrameResult.STOP
+            await self.trigger_reset_aggregation()
+
+        return ProcessFrameResult.STOP
+
+    async def _process_awake(self, frame: Frame):
+        """Process a frame while in AWAKE state.
+
+        Starts a turn when the user starts speaking or a final
+        transcription arrives, and refreshes the timeout on activity frames
+        (timeout mode only).
+        """
+        if isinstance(
+            frame,
+            (
+                VADUserStartedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                TranscriptionFrame,
+            ),
+        ):
+            await self.report_user_turn_started()
+        if not self._single_activation:
+            if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
+                self._refresh_timeout()
+            elif isinstance(frame, TranscriptionFrame):
+                self._refresh_timeout()
+            elif isinstance(frame, VADUserStartedSpeakingFrame):
+                self._refresh_timeout()
+
+    @staticmethod
+    def _strip_punctuation(text: str) -> str:
+        """Strip punctuation from text, keeping only letters, digits, and whitespace."""
+        return re.sub(r"[^\w\s]", "", text)
+
+    def _check_wake_phrase(self, text: str) -> bool:
+        """Check if the accumulated text contains a wake phrase.
+
+        Punctuation is stripped before matching so that STT output like
+        "Hey, Pipecat!" still matches the phrase "hey pipecat".
+
+        Args:
+            text: New transcription text to append and check.
+
+        Returns:
+            True if a wake phrase was found, False otherwise.
+        """
+        self._accumulated_text += " " + self._strip_punctuation(text)
+        # Cap accumulated text to prevent unbounded growth.
+        if len(self._accumulated_text) > 250:
+            self._accumulated_text = self._accumulated_text[-250:]
+
+        for phrase, pattern in self._patterns:
+            if pattern.search(self._accumulated_text):
+                logger.debug(f"{self} wake phrase detected: {phrase!r}")
+                self._transition_to_awake(phrase)
+                return True
+
+        return False
+
+    def _transition_to_awake(self, phrase: str):
+        """Transition from IDLE to AWAKE state."""
+        self._state = _WakeState.AWAKE
+        self._accumulated_text = ""
+        self._refresh_timeout()
+        self.task_manager.create_task(
+            self._call_event_handler("on_wake_phrase_detected", phrase),
+            f"{self}::on_wake_phrase_detected",
+        )
+
+    def _transition_to_idle(self):
+        """Transition from AWAKE to IDLE state."""
+        logger.debug(f"{self} wake phrase timeout, returning to IDLE")
+        self._state = _WakeState.IDLE
+        self._accumulated_text = ""
+        self.task_manager.create_task(
+            self._call_event_handler("on_wake_phrase_timeout"),
+            f"{self}::on_wake_phrase_timeout",
+        )
+
+    def _refresh_timeout(self):
+        """Refresh the inactivity timeout."""
+        self._timeout_event.set()
+
+    async def _timeout_task_handler(self):
+        """Background task that monitors inactivity timeout."""
+        while True:
+            try:
+                await asyncio.wait_for(
+                    self._timeout_event.wait(),
+                    timeout=self._timeout,
+                )
+                self._timeout_event.clear()
+            except TimeoutError:
+                if self._state == _WakeState.AWAKE:
+                    self._transition_to_idle()

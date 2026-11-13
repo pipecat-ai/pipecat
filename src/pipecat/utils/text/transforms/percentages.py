@@ -1,0 +1,41 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Expand percentage expressions into spoken form for TTS."""
+
+import re
+
+from num2words import num2words
+
+from pipecat.frames.frames import TextType
+
+_PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
+
+
+def _percent_to_words(match: re.Match) -> str:
+    value = match.group(1).replace(",", "")
+    if match.group(2):
+        value += "." + match.group(2)
+    number_str = num2words(float(value), lang="en")
+    return f"{number_str} percent"
+
+
+async def expand_percentages(text: str, text_type: str | TextType) -> str:
+    """Expand percentage expressions to their spoken form.
+
+    Args:
+        text: Input text possibly containing percentage expressions.
+        text_type: Text type of the text frame (unused).
+
+    Returns:
+        Text with percentages replaced by spoken equivalents.
+
+    Example::
+
+        result = await expand_percentages("50% off today", "*")
+        # "fifty percent off today"
+    """
+    return _PERCENT_RE.sub(_percent_to_words, text)

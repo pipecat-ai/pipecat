@@ -1,0 +1,595 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import json
+import os
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
+from pipecat.runner.types import (
+    CallData,
+    ExotelCallData,
+    TelnyxCallData,
+    WebSocketRunnerArguments,
+)
+from pipecat.runner.utils import (
+    _create_telephony_transport,
+    _maybe_apply_daily_dialin,
+    create_transport,
+    get_transport_client_id,
+    maybe_capture_participant_camera,
+    maybe_capture_participant_screen,
+    parse_telephony_websocket,
+)
+
+try:
+    import daily  # noqa: F401
+
+    DAILY_AVAILABLE = True
+except ImportError:
+    DAILY_AVAILABLE = False
+
+try:
+    import baresip  # noqa: F401
+
+    BARESIP_AVAILABLE = True
+except ImportError:
+    BARESIP_AVAILABLE = False
+
+
+class TestCallData(unittest.TestCase):
+    """CallData gives typed attribute access while staying dict-compatible."""
+
+    def test_attribute_access_with_alias(self):
+        cd = CallData.model_validate(
+            {"stream_id": "MZ1", "call_id": "CA1", "from": "+1555", "to": "+1666"}
+        )
+        # Wire keys "from"/"to" map onto from_number/to_number (no keyword clash).
+        self.assertEqual(cd.from_number, "+1555")
+        self.assertEqual(cd.to_number, "+1666")
+        self.assertEqual(cd.call_id, "CA1")
+
+    def test_dict_compat_access(self):
+        cd = CallData.model_validate({"stream_id": "MZ1", "from": "+1555"})
+        # Subscript / get / in use the original wire keys.
+        self.assertEqual(cd["from"], "+1555")
+        self.assertEqual(cd["stream_id"], "MZ1")
+        self.assertEqual(cd.get("from"), "+1555")
+        self.assertEqual(cd.get("to", "n/a"), "n/a")  # unset -> default
+        self.assertIn("from", cd)
+        self.assertNotIn("to", cd)  # unset fields aren't "in"
+
+    def test_unset_fields_are_none(self):
+        cd = CallData.model_validate({"call_id": "CA1"})
+        self.assertIsNone(cd.to_number)
+        self.assertEqual(cd.body, {})
+
+    def test_extra_provider_keys_preserved(self):
+        cd = CallData.model_validate({"call_id": "CA1", "weird_provider_field": "x"})
+        # extra="allow": unmodeled keys remain reachable via dict access.
+        self.assertEqual(cd["weird_provider_field"], "x")
+
+    def test_call_data_is_a_base_field(self):
+        """call_data lives on the base, so any runner_args exposes it (defaults None),
+        letting bots read runner_args.call_data uniformly without getattr guards."""
+        from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
+
+        self.assertIsNone(RunnerArguments().call_data)
+        self.assertIsNone(DailyRunnerArguments(room_url="https://example.daily.co/room").call_data)
+
+
+class MockAsyncIterator:
+    """Mock async iterator for WebSocket messages."""
+
+    def __init__(self, messages):
+        self.messages = messages
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index >= len(self.messages):
+            raise StopAsyncIteration
+        message = self.messages[self.index]
+        self.index += 1
+        return message
+
+
+class TestParseTelephonyWebSocket(unittest.IsolatedAsyncioTestCase):
+    async def test_no_messages_raises_value_error(self):
+        """Test that no messages raises ValueError."""
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([])
+
+        with self.assertRaises(ValueError) as context:
+            await parse_telephony_websocket(mock_websocket)
+
+        self.assertIn("WebSocket closed before receiving", str(context.exception))
+
+    async def test_one_message_logs_warning_and_continues(self):
+        """Test that one message logs warning but continues processing."""
+        twilio_message = json.dumps(
+            {
+                "event": "start",
+                "start": {
+                    "streamSid": "MZ123",
+                    "callSid": "CA123",
+                    "customParameters": {"user_id": "test_user"},
+                },
+            }
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([twilio_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "twilio")
+        self.assertEqual(call_data["stream_id"], "MZ123")
+        self.assertEqual(call_data["call_id"], "CA123")
+
+    async def test_two_messages_normal_operation(self):
+        """Test normal operation with two messages."""
+        first_message = json.dumps({"event": "connected"})
+        twilio_message = json.dumps(
+            {
+                "event": "start",
+                "start": {
+                    "streamSid": "MZ456",
+                    "callSid": "CA456",
+                    "customParameters": {},
+                },
+            }
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([first_message, twilio_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "twilio")
+        self.assertEqual(call_data["stream_id"], "MZ456")
+        self.assertEqual(call_data["call_id"], "CA456")
+
+    async def test_twilio_promotes_from_to_custom_params(self):
+        """Twilio from/to TwiML stream params are promoted for a uniform typed API."""
+        twilio_message = json.dumps(
+            {
+                "event": "start",
+                "start": {
+                    "streamSid": "MZ789",
+                    "callSid": "CA789",
+                    "customParameters": {"from_number": "+1555", "to_number": "+1666"},
+                },
+            }
+        )
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([twilio_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "twilio")
+        self.assertEqual(call_data.from_number, "+1555")
+        self.assertEqual(call_data.to_number, "+1666")
+        # Raw custom params still available under body.
+        self.assertEqual(call_data.body["to_number"], "+1666")
+
+    async def test_telnyx_detection(self):
+        """Test Telnyx provider detection."""
+        telnyx_message = json.dumps(
+            {
+                "stream_id": "stream_123",
+                "start": {
+                    "call_control_id": "cc_123",
+                    "media_format": {"encoding": "PCMU"},
+                    "from": "+15551234567",
+                    "to": "+15559876543",
+                },
+            }
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([telnyx_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "telnyx")
+        self.assertIsInstance(call_data, TelnyxCallData)
+        self.assertEqual(call_data["stream_id"], "stream_123")
+        # Telnyx's call_control_id is normalized onto the common call_id field.
+        self.assertEqual(call_data["call_id"], "cc_123")
+        # Provider-specific field is typed on the subclass.
+        self.assertEqual(call_data.outbound_encoding, "PCMU")
+
+    async def test_plivo_detection(self):
+        """Test Plivo provider detection."""
+        plivo_message = json.dumps(
+            {"start": {"streamId": "stream_plivo_123", "callId": "call_plivo_123"}}
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([plivo_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "plivo")
+        self.assertEqual(call_data["stream_id"], "stream_plivo_123")
+        self.assertEqual(call_data["call_id"], "call_plivo_123")
+
+    async def test_exotel_detection(self):
+        """Test Exotel provider detection."""
+        exotel_message = json.dumps(
+            {
+                "event": "start",
+                "start": {
+                    "stream_sid": "stream_exo_123",
+                    "call_sid": "call_exo_123",
+                    "account_sid": "acc_123",
+                    "from": "+15551111111",
+                    "to": "+15552222222",
+                },
+            }
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([exotel_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "exotel")
+        self.assertIsInstance(call_data, ExotelCallData)
+        self.assertEqual(call_data["stream_id"], "stream_exo_123")
+        self.assertEqual(call_data["call_id"], "call_exo_123")
+        self.assertEqual(call_data["account_sid"], "acc_123")
+
+
+class TestParseTelephonyIdempotent(unittest.IsolatedAsyncioTestCase):
+    async def test_second_call_returns_cached_parse(self):
+        """The single-use stream is consumed once; a second call returns the cache."""
+        twilio_message = json.dumps(
+            {"event": "start", "start": {"streamSid": "MZ1", "callSid": "CA1"}}
+        )
+        ws = MagicMock()
+        # One iterator, exhausted after the first parse. A second *real* parse would
+        # raise ValueError ("closed before receiving"); the cache must prevent that.
+        ws.iter_text.return_value = MockAsyncIterator([twilio_message])
+
+        first = await parse_telephony_websocket(ws)
+        second = await parse_telephony_websocket(ws)
+
+        self.assertEqual(first, second)
+        self.assertEqual(first[0], "twilio")
+        self.assertEqual(first[1]["call_id"], "CA1")
+
+
+class TestParseEvalConnect(unittest.IsolatedAsyncioTestCase):
+    async def test_eval_connect_detected_from_first_message(self):
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_audio=True)
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(flags)])
+
+        transport_type, call_data = await parse_telephony_websocket(ws)
+
+        self.assertEqual(transport_type, "eval")
+        self.assertEqual(EvalConnectionFlags.model_validate(call_data.body), flags)
+
+    async def test_eval_connect_leaves_the_next_message_unread(self):
+        # The harness's client-ready follows eval-connect and must reach the bot.
+        messages = MockAsyncIterator(
+            [eval_connect_message(EvalConnectionFlags()), json.dumps({"type": "client-ready"})]
+        )
+        ws = MagicMock()
+        ws.iter_text.return_value = messages
+
+        await parse_telephony_websocket(ws)
+
+        self.assertEqual(messages.index, 1)
+
+
+class TestCreateTransportExposesCallData(unittest.IsolatedAsyncioTestCase):
+    async def test_telephony_call_data_set_on_runner_args(self):
+        """create_transport exposes the parsed handshake on runner_args for the bot."""
+        twilio_message = json.dumps(
+            {"event": "start", "start": {"streamSid": "MZ9", "callSid": "CA9"}}
+        )
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([twilio_message])
+        args = WebSocketRunnerArguments(websocket=ws)  # transport_type=None -> telephony
+
+        sentinel = object()
+        with patch(
+            "pipecat.runner.utils._create_telephony_transport",
+            new=AsyncMock(return_value=sentinel),
+        ):
+            result = await create_transport(args, {"twilio": lambda: MagicMock()})
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(args.transport_type, "twilio")
+        self.assertIsNotNone(args.call_data)
+        # Both styles work: typed attribute access and dict-style subscript.
+        self.assertEqual(args.call_data.call_id, "CA9")
+        self.assertEqual(args.call_data["call_id"], "CA9")
+
+
+class TestTwilioSerializerFromEnv(unittest.IsolatedAsyncioTestCase):
+    """The Twilio serializer reads credentials and region from Twilio's env var names."""
+
+    async def _serializer(self, env: dict[str, str]):
+        from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+
+        twilio_message = json.dumps(
+            {"event": "start", "start": {"streamSid": "MZ9", "callSid": "CA9"}}
+        )
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([twilio_message])
+        transport_type, call_data = await parse_telephony_websocket(ws)
+
+        with patch.dict(os.environ, env, clear=True):
+            transport = await _create_telephony_transport(
+                ws, FastAPIWebsocketParams(), transport_type, call_data
+            )
+        return transport._params.serializer
+
+    async def test_auth_token(self):
+        serializer = await self._serializer(
+            {"TWILIO_ACCOUNT_SID": "ACxxxx", "TWILIO_AUTH_TOKEN": "token"}
+        )
+        self.assertEqual(serializer._auth_token, "token")
+        self.assertIsNone(serializer._api_key_sid)
+
+    async def test_api_key(self):
+        serializer = await self._serializer(
+            {
+                "TWILIO_ACCOUNT_SID": "ACxxxx",
+                "TWILIO_API_KEY": "SKxxxx",
+                "TWILIO_API_SECRET": "secret",
+            }
+        )
+        self.assertEqual(serializer._api_key_sid, "SKxxxx")
+        self.assertEqual(serializer._api_key_secret, "secret")
+
+    async def test_region_and_edge(self):
+        serializer = await self._serializer(
+            {
+                "TWILIO_ACCOUNT_SID": "ACxxxx",
+                "TWILIO_AUTH_TOKEN": "token",
+                "TWILIO_REGION": "ie1",
+                "TWILIO_EDGE": "dublin",
+            }
+        )
+        self.assertEqual(serializer._region, "ie1")
+        self.assertEqual(serializer._edge, "dublin")
+
+    async def test_auth_token_and_api_key_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not both"):
+            await self._serializer(
+                {
+                    "TWILIO_ACCOUNT_SID": "ACxxxx",
+                    "TWILIO_AUTH_TOKEN": "token",
+                    "TWILIO_API_KEY": "SKxxxx",
+                    "TWILIO_API_SECRET": "secret",
+                }
+            )
+
+
+class TestCreateTransportEval(unittest.IsolatedAsyncioTestCase):
+    async def test_eval_connect_builds_the_eval_transport_with_its_flags(self):
+        from pipecat.evals.fastapi_transport import EvalFastAPIWebsocketTransport
+        from pipecat.evals.serializer import EvalSerializer
+        from pipecat.evals.transport import EvalTransportParams
+
+        flags = EvalConnectionFlags(skip_tts=True, capture_bot_audio=True)
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(flags)])
+        args = WebSocketRunnerArguments(websocket=ws)
+
+        transport = await create_transport(args, {"eval": lambda: EvalTransportParams()})
+
+        self.assertIsInstance(transport, EvalFastAPIWebsocketTransport)
+        self.assertEqual(args.transport_type, "eval")
+        self.assertIsInstance(transport._params.serializer, EvalSerializer)
+        self.assertTrue(transport._params.serializer._capture_audio)
+
+    async def test_eval_connect_without_eval_params_raises(self):
+        ws = MagicMock()
+        ws.iter_text.return_value = MockAsyncIterator([eval_connect_message(EvalConnectionFlags())])
+        args = WebSocketRunnerArguments(websocket=ws)
+
+        with self.assertRaises(ValueError) as context:
+            await create_transport(args, {"twilio": lambda: MagicMock()})
+
+        self.assertIn("'eval'", str(context.exception))
+
+
+@unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
+    async def test_sip_runner_args_build_sip_transport(self):
+        from pipecat.runner.types import SIPRunnerArguments
+        from pipecat.transports.sip.transport import SIPParams, SIPTransport
+
+        args = SIPRunnerArguments(
+            user="1001",
+            domain="example.com",
+            password="secret",
+            audio_codecs=("PCMU/8000/1",),
+            auth_user="trunk-user",
+            extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478"),
+            reg_interval=0,
+            rtp_timeout=30,
+            instance_id="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+            native_log_level="debug",
+            sip_trace=True,
+            net_interface="127.0.0.1",
+            jitter_buffer_mode="fixed",
+            jitter_buffer_ms=(40, 60),
+        )
+        transport = await create_transport(
+            args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
+        )
+
+        self.assertIsInstance(transport, SIPTransport)
+        self.assertEqual(transport._connection.aor, "sip:1001@example.com")
+        self.assertEqual(transport._connection._settings.net_interface, "127.0.0.1")
+        self.assertEqual(transport._connection._settings.jitter_buffer_mode, "fixed")
+        self.assertEqual(transport._connection._settings.jitter_buffer_ms, (40, 60))
+        self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
+        self.assertEqual(transport._connection._account.auth_user, "trunk-user")
+        self.assertEqual(
+            transport._connection._account.extra_params,
+            ("medianat=ice", "stunserver=stun:stun.example.com:3478"),
+        )
+        self.assertEqual(transport._connection._account.reg_interval, 0)
+        self.assertEqual(transport._connection._settings.rtp_timeout, 30)
+        self.assertEqual(
+            transport._connection._settings.instance_id,
+            "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        )
+        self.assertEqual(transport._connection._settings.native_log_level, "debug")
+        self.assertTrue(transport._connection._settings.sip_trace)
+
+
+BODY_CLIENT = {
+    "username": "trunk-0a1b2c3d-9f8e7d6c5b4a3f2e",
+    "password": "per-call-secret",
+    "domain": "acme.sip-us.daily.co",
+    "transport": "tcp",
+}
+
+
+def _sip_params():
+    from pipecat.transports.sip.transport import SIPParams
+
+    return SIPParams(audio_in_enabled=True, audio_out_enabled=True)
+
+
+SIP_PARAMS = {"sip": _sip_params}
+
+
+class TestCreateTransportPlainArguments(unittest.IsolatedAsyncioTestCase):
+    """create_transport resolves a SIP account from plain runner arguments (the normal layer)."""
+
+    @unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+    async def test_body_sip_client_builds_sip_transport(self):
+        from pipecat.runner.types import RunnerArguments
+        from pipecat.transports.sip.transport import SIPTransport
+
+        args = RunnerArguments(
+            body={"sip_client": BODY_CLIENT, "call": {"From": "+1"}}, session_id="call-1"
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            transport = await create_transport(args, SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+        self.assertIsInstance(transport, SIPTransport)
+        self.assertEqual(
+            transport._connection.aor, "sip:trunk-0a1b2c3d-9f8e7d6c5b4a3f2e@acme.sip-us.daily.co"
+        )
+        self.assertEqual(transport._connection._account.transport, "tcp")
+
+    @unittest.skipUnless(BARESIP_AVAILABLE, "requires baresip-python")
+    async def test_environment_account_builds_sip_transport(self):
+        from pipecat.runner.types import RunnerArguments
+
+        env = {"SIP_USER": "1001", "SIP_PASS": "secret", "SIP_DOMAIN": "sip.example.com"}
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            transport = await create_transport(RunnerArguments(), SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+        self.assertEqual(transport._connection.aor, "sip:1001@sip.example.com")
+
+    async def test_never_provisions(self):
+        from pipecat.runner.types import RunnerArguments
+
+        with (
+            patch.dict("os.environ", {"DAILY_API_KEY": "test-key"}, clear=True),
+            patch("pipecat.runner.sip.DailyRESTHelper") as helper_cls,
+        ):
+            with self.assertRaises(ValueError):
+                await create_transport(RunnerArguments(), SIP_PARAMS)
+            with self.assertRaises(ValueError):
+                await create_transport(RunnerArguments(body={"transport": "sip"}), SIP_PARAMS)
+
+        helper_cls.assert_not_called()
+
+    @unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")
+    async def test_daily_arguments_keep_the_daily_branch(self):
+        from pipecat.runner.types import DailyRunnerArguments
+
+        args = DailyRunnerArguments(
+            room_url="https://x.daily.co/r", token="t", body={"sip_client": BODY_CLIENT}
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pipecat.transports.daily.transport.DailyTransport") as daily_cls,
+        ):
+            await create_transport(args, {"daily": lambda: MagicMock(), **SIP_PARAMS})
+
+        daily_cls.assert_called_once()
+        self.assertEqual(daily_cls.call_args.args[0], "https://x.daily.co/r")
+
+
+@unittest.skipUnless(DAILY_AVAILABLE, "requires the daily-python SDK")
+class TestMaybeApplyDailyDialin(unittest.IsolatedAsyncioTestCase):
+    def _params(self):
+        from pipecat.transports.daily.transport import DailyParams
+
+        return DailyParams()
+
+    def test_dialin_body_populates_params(self):
+        params = self._params()
+        body = {
+            "dialin_settings": {"call_id": "c1", "call_domain": "d1"},
+            "daily_api_key": "key123",
+            "daily_api_url": "https://example.test/v1",
+        }
+        _maybe_apply_daily_dialin(params, body)
+
+        self.assertIsNotNone(params.dialin_settings)
+        self.assertEqual(params.dialin_settings.call_id, "c1")
+        self.assertEqual(params.dialin_settings.call_domain, "d1")
+        self.assertEqual(params.api_key, "key123")
+        self.assertEqual(params.api_url, "https://example.test/v1")
+
+    def test_noop_for_non_dialin_body(self):
+        for body in (None, {}, {"something": "else"}):
+            params = self._params()
+            _maybe_apply_daily_dialin(params, body)
+            self.assertIsNone(params.dialin_settings)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestGetTransportClientId(unittest.TestCase):
+    def test_is_deprecated_and_asks_the_transport(self):
+        transport = MagicMock()
+        transport.get_client_id.return_value = "User-1234"
+
+        with self.assertWarns(DeprecationWarning):
+            client_id = get_transport_client_id(transport, {"id": "User-1234"})
+
+        self.assertEqual(client_id, "User-1234")
+        transport.get_client_id.assert_called_once_with({"id": "User-1234"})
+
+
+class TestMaybeCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
+    async def test_is_deprecated(self):
+        class OtherTransport:
+            pass
+
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_camera(OtherTransport(), {"id": "User-1234"})
+        with self.assertWarns(DeprecationWarning):
+            await maybe_capture_participant_screen(OtherTransport(), {"id": "User-1234"})

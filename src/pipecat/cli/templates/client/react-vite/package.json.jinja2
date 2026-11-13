@@ -1,0 +1,38 @@
+{
+  "name": "{{ project_name }}",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+{%- for name, version in ui_dependencies.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
+    "@fontsource-variable/geist": "^5.3.0",
+{%- for name, version in transport_packages.items() %}
+    "{{ name }}": "{{ version }}",
+{%- endfor %}
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10",
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^25",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6",
+    "eslint": "^10",
+    "eslint-plugin-react-hooks": "^7",
+    "eslint-plugin-react-refresh": "^0",
+    "globals": "^17",
+    "typescript": "~6",
+    "typescript-eslint": "^8",
+    "vite": "^8.0.16"
+  }
+}

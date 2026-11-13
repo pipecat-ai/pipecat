@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,26 +11,35 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 try:
     from azure.cognitiveservices.speech import (
+        CancellationReason,
+        ProfanityOption,
+        PropertyId,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -42,8 +51,75 @@ try:
     from azure.cognitiveservices.speech.dialog import AudioConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use Azure, you need to `uv add "pipecat-ai[azure]"`.')
+    raise ImportError(f"Missing module: {e}") from e
+
+
+AzureProfanity = Literal["raw", "masked", "removed"]
+"""How Azure handles profanity in transcripts.
+
+* ``"raw"`` — return the text as recognized, no masking.
+* ``"masked"`` — replace profane words with ``****`` (Azure default).
+* ``"removed"`` — drop profane words from the output.
+"""
+
+_PROFANITY_OPTIONS: dict[AzureProfanity, ProfanityOption] = {
+    "raw": ProfanityOption.Raw,
+    "masked": ProfanityOption.Masked,
+    "removed": ProfanityOption.Removed,
+}
+
+AzurePostProcessing = Literal["TrueText", "PostRefinement"]
+"""Post-processing Azure applies to recognition results before returning them.
+
+* ``"TrueText"`` — display formatting (punctuation, capitalization).
+* ``"PostRefinement"`` — post-stream refinement: a more accurate final result
+  built from broader audio context, leaving interim results untouched.
+"""
+
+
+@dataclass
+class AzureSTTSettings(STTSettings):
+    """Settings for AzureSTTService.
+
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.
+
+    Parameters:
+        profanity: How Azure handles profanity in transcripts. One of
+            ``"raw"``, ``"masked"``, or ``"removed"`` (see ``AzureProfanity``).
+            Store-mode default is ``None`` (Azure SDK default = ``"masked"``).
+            Use ``"raw"`` for non-English deployments where Azure's profanity
+            list is over-eager and masks ordinary words (e.g. Italian names
+            containing common substrings), which breaks downstream fuzzy
+            matching and LLM reasoning. See `SpeechConfig.set_profanity
+            <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
+        segmentation_silence_timeout_ms: How much silence Azure allows inside a
+            phrase, in milliseconds, before it finalizes the recognition and
+            emits a ``TranscriptionFrame``. Azure accepts 100–5000; its default
+            is 500. Store-mode default is ``None`` (keep Azure's default).
+            Lower values finalize sooner, at the cost of splitting phrases that
+            contain pauses; higher values keep slow or hesitant speech in one
+            transcript. See `phrase segmentation
+            <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-recognize-speech#change-how-silence-is-handled>`_.
+        post_processing_option: Post-processing Azure applies before returning
+            results, either ``"TrueText"`` or ``"PostRefinement"`` (see
+            ``AzurePostProcessing``); only one applies at a time. Store-mode
+            default is ``None`` (keep Azure's default). ``"PostRefinement"``
+            replaces each segment's final result with a more accurate one built
+            from broader audio context, leaving interim results untouched; Azure
+            notes very short phrases often come back unchanged. See
+            `post-processing
+            <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-post-processing>`_.
+    """
+
+    profanity: AzureProfanity | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    segmentation_silence_timeout_ms: int | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    post_processing_option: AzurePostProcessing | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class AzureSTTService(STTService):
@@ -54,14 +130,20 @@ class AzureSTTService(STTService):
     provides real-time transcription results with timing information.
     """
 
+    Settings = AzureSTTSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: str,
-        region: str,
-        language: Language = Language.EN_US,
-        sample_rate: Optional[int] = None,
-        endpoint_id: Optional[str] = None,
+        region: str | None = None,
+        language: Language | None = Language.EN_US,
+        sample_rate: int | None = None,
+        private_endpoint: str | None = None,
+        endpoint_id: str | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = AZURE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -69,29 +151,83 @@ class AzureSTTService(STTService):
         Args:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region for the Speech service (e.g., 'eastus').
+                Required unless ``private_endpoint`` is provided.
             language: Language for speech recognition. Defaults to English (US).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AzureSTTService.Settings(language=...)`` instead.
+                    Will be removed in 2.0.0.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            private_endpoint: Private endpoint for STT behind firewall.
+                See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
-        self._speech_config = SpeechConfig(
-            subscription=api_key,
-            region=region,
-            speech_recognition_language=language_to_azure_language(language),
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            language=Language.EN_US,
+            profanity=None,
+            segmentation_silence_timeout_ms=None,
+            post_processing_option=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None and language != Language.EN_US:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        recognition_language = assert_given(
+            default_settings.language
+        ) or language_to_azure_language(Language.EN_US)
+
+        if not region and not private_endpoint:
+            raise ValueError("Either 'region' or 'private_endpoint' must be provided.")
+
+        if private_endpoint:
+            if region:
+                logger.warning(
+                    "Both 'region' and 'private_endpoint' provided; 'region' will be ignored."
+                )
+            self._speech_config = SpeechConfig(
+                subscription=api_key,
+                endpoint=private_endpoint,
+                speech_recognition_language=recognition_language,
+            )
+        else:
+            self._speech_config = SpeechConfig(
+                subscription=api_key,
+                region=region,
+                speech_recognition_language=recognition_language,
+            )
 
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
 
+        self._apply_profanity()
+        self._apply_segmentation_silence_timeout()
+        self._apply_post_processing_option()
+
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings = {
-            "region": region,
-            "language": language_to_azure_language(language),
-            "sample_rate": sample_rate,
-        }
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.
@@ -101,7 +237,88 @@ class AzureSTTService(STTService):
         """
         return True
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert a Language enum to Azure service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Azure-specific language identifier, or None if not supported.
+        """
+        return language_to_azure_language(language)
+
+    def _apply_profanity(self):
+        """Apply the current ``profanity`` setting to the speech config.
+
+        A no-op when profanity is ``None`` (keeps the Azure SDK default of
+        ``"masked"``).
+        """
+        # Annotate the local so pyright solves ``assert_given``'s TypeVar to the
+        # literal instead of widening it to ``str`` (which wouldn't be a valid
+        # ``_PROFANITY_OPTIONS`` key).
+        profanity: AzureProfanity | None = assert_given(self._settings.profanity)
+        if profanity is not None:
+            self._speech_config.set_profanity(_PROFANITY_OPTIONS[profanity])
+
+    def _apply_segmentation_silence_timeout(self):
+        """Apply the current ``segmentation_silence_timeout_ms`` setting.
+
+        A no-op when the setting is ``None`` (keeps Azure's default of 500 ms).
+        """
+        timeout_ms = assert_given(self._settings.segmentation_silence_timeout_ms)
+        if timeout_ms is not None:
+            self._speech_config.set_property(
+                PropertyId.Speech_SegmentationSilenceTimeoutMs, str(timeout_ms)
+            )
+
+    def _apply_post_processing_option(self):
+        """Apply the current ``post_processing_option`` setting.
+
+        A no-op when the setting is ``None`` (keeps Azure's default).
+        """
+        option = assert_given(self._settings.post_processing_option)
+        if option is not None:
+            self._speech_config.set_property(
+                PropertyId.SpeechServiceResponse_PostProcessingOption, option
+            )
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if a recognizer setting changed."""
+        changed = await super()._update_settings(delta)
+
+        if "language" in changed:
+            self._speech_config.speech_recognition_language = assert_given(
+                self._settings.language
+            ) or language_to_azure_language(Language.EN_US)
+
+        if "profanity" in changed:
+            self._apply_profanity()
+
+        if "segmentation_silence_timeout_ms" in changed:
+            self._apply_segmentation_silence_timeout()
+
+        if "post_processing_option" in changed:
+            self._apply_post_processing_option()
+
+        # These settings are baked into the recognizer at connect time, so a
+        # live change only takes effect after a reconnect.
+        if (
+            changed.keys()
+            & {
+                "language",
+                "profanity",
+                "segmentation_silence_timeout_ms",
+                "post_processing_option",
+            }
+            and self._audio_stream
+        ):
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
 
         Feeds audio data to the Azure speech recognizer for processing.
@@ -111,98 +328,124 @@ class AzureSTTService(STTService):
             audio: Raw audio bytes to process.
 
         Yields:
-            None - actual transcription frames are pushed via callbacks.
+            Frame: Either None for successful processing or ErrorFrame on failure.
         """
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-        if self._audio_stream:
-            self._audio_stream.write(audio)
-        yield None
+        try:
+            if self._audio_stream:
+                self._audio_stream.write(audio)
+            yield None
+        except Exception as e:
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def start(self, frame: StartFrame):
-        """Start the speech recognition service.
-
-        Initializes the Azure speech recognizer with audio stream configuration
-        and begins continuous speech recognition.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: Frame indicating the start of processing.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
+        await super().setup(setup)
+        await self._connect()
 
-        if self._audio_stream:
-            return
-
-        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
-        self._audio_stream = PushAudioInputStream(stream_format)
-
-        audio_config = AudioConfig(stream=self._audio_stream)
-
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=self._speech_config, audio_config=audio_config
-        )
-        self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
-        self._speech_recognizer.start_continuous_recognition_async()
+    async def cleanup(self):
+        """Release resources at pipeline teardown."""
+        await super().cleanup()
+        await self._disconnect()
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
-
-        Cleanly shuts down the Azure speech recognizer and closes audio streams.
 
         Args:
             frame: Frame indicating the end of processing.
         """
         await super().stop(frame)
-
-        if self._speech_recognizer:
-            self._speech_recognizer.stop_continuous_recognition_async()
-
-        if self._audio_stream:
-            self._audio_stream.close()
+        await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the speech recognition service.
-
-        Immediately stops recognition and closes resources.
 
         Args:
             frame: Frame indicating cancellation.
         """
         await super().cancel(frame)
+        await self._disconnect()
 
+    async def _connect(self):
+        """Initialize the Azure speech recognizer and begin continuous recognition."""
+        if self._audio_stream:
+            return
+
+        try:
+            stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+            self._audio_stream = PushAudioInputStream(stream_format)
+
+            audio_config = AudioConfig(stream=self._audio_stream)
+
+            self._speech_recognizer = SpeechRecognizer(
+                speech_config=self._speech_config, audio_config=audio_config
+            )
+            self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
+            self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.canceled.connect(self._on_handle_canceled)
+            self._speech_recognizer.start_continuous_recognition_async()
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Uncaught exception during initialization: {e}", exception=e
+            )
+
+    async def _disconnect(self):
+        """Stop recognition and close audio streams."""
         if self._speech_recognizer:
             self._speech_recognizer.stop_continuous_recognition_async()
+            self._speech_recognizer = None
 
         if self._audio_stream:
             self._audio_stream.close()
+            self._audio_stream = None
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
+        pass
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            # Technically either source could be a raw string, but Language is
+            # a StrEnum so downstream handles either.
+            language = cast(
+                "Language | None",
+                getattr(event.result, "language", None) or assert_given(self._settings.language),
+            )
+            # Azure's ``RecognizedSpeech`` event is by definition the final
+            # recognition for an utterance — mark the frame as such so that
+            # downstream turn-stop strategies (``SpeechTimeoutUserTurnStop``
+            # and friends) can take their finalized fast-path instead of
+            # waiting for VAD events that may never arrive on short replies.
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
                 time_now_iso8601(),
                 language,
                 result=event,
+                finalized=True,
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
             )
+            # Report usage before the transcription frame so tracing can attach
+            # it to the STT span the frame closes (submissions run in order).
+            asyncio.run_coroutine_threadsafe(self.emit_stt_usage_metrics(), self.get_event_loop())
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            # Technically either source could be a raw string, but Language is
+            # a StrEnum so downstream handles either.
+            language = cast(
+                "Language | None",
+                getattr(event.result, "language", None) or assert_given(self._settings.language),
+            )
             frame = InterimTranscriptionFrame(
                 event.result.text,
                 self._user_id,
@@ -211,3 +454,13 @@ class AzureSTTService(STTService):
                 result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_canceled(self, event):
+        details = event.result.cancellation_details
+        if details.reason == CancellationReason.Error:
+            error_msg = f"Azure STT recognition canceled: {details.reason}"
+            if details.error_details:
+                error_msg += f" - {details.error_details}"
+            asyncio.run_coroutine_threadsafe(
+                self.push_error(error_msg=error_msg), self.get_event_loop()
+            )

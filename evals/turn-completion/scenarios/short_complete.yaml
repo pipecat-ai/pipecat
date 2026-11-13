@@ -1,0 +1,263 @@
+# One or two words that fully answer the question. The trap is treating
+# brevity as incompleteness.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: short_complete
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: short_yes
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Would you like me to book that for you?
+  turns:
+  - user: Yes.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_yes_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Would you like me to book that for you?
+  turns:
+  - user: 'yes'
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_no_thanks
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Would you like me to add anything else to the order?
+  turns:
+  - user: No thanks.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_no_thanks_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Would you like me to add anything else to the order?
+  turns:
+  - user: no thanks
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_one_word_place
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go?
+  turns:
+  - user: Japan.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_one_word_place_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go?
+  turns:
+  - user: japan
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_number
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● How many people will be joining you?
+  turns:
+  - user: Four.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_number_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● How many people will be joining you?
+  turns:
+  - user: four
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_name
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Great, and what's your name?
+  turns:
+  - user: Mark.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_name_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Great, and what's your name?
+  turns:
+  - user: mark
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_goodbye
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Anything else I can help with?
+  turns:
+  - user: Nope, that's all. Bye.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_goodbye_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Anything else I can help with?
+  turns:
+  - user: nope that's all bye
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_sure
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Should I go ahead and send the confirmation email?
+  turns:
+  - user: Sure.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_sure_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Should I go ahead and send the confirmation email?
+  turns:
+  - user: sure
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_day
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: Tuesday.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_day_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: tuesday
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_thanks
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Done. Your flight is booked for next Wednesday.
+  turns:
+  - user: Thanks!
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: short_thanks_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Done. Your flight is booked for next Wednesday.
+  turns:
+  - user: thanks
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true

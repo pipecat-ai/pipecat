@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,44 +10,47 @@ This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, and SSML features.
 """
 
-import asyncio
-import os
-from typing import AsyncGenerator, List, Optional
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from xml.sax.saxutils import escape
 
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
+from pipecat.services.aws.utils import resolve_credentials
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 try:
-    import aioboto3
+    import aiobotocore.session
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise Exception(f"Missing module: {e}")
+    logger.error('In order to use AWS services, you need to `uv add "pipecat-ai[aws]"`.')
+    raise ImportError(f"Missing module: {e}") from e
 
 
-def language_to_aws_language(language: Language) -> Optional[str]:
+def language_to_aws_language(language: Language) -> str:
     """Convert a Language enum to AWS Polly language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding AWS Polly language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Arabic
         Language.AR: "arb",
         Language.AR_AE: "ar-AE",
@@ -68,8 +71,10 @@ def language_to_aws_language(language: Language) -> Optional[str]:
         Language.EN: "en-US",  # Default to US English
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
         Language.EN_IN: "en-IN",
         Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
         Language.EN_US: "en-US",
         Language.EN_ZA: "en-ZA",
         # Finnish
@@ -119,7 +124,33 @@ def language_to_aws_language(language: Language) -> Optional[str]:
         Language.CY_GB: "cy-GB",
     }
 
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+@dataclass
+class AWSPollyTTSSettings(TTSSettings):
+    """Settings for AWSPollyTTSService.
+
+    Parameters:
+        engine: TTS engine to use ('standard', 'neural', etc.).
+        pitch: Voice pitch adjustment (for standard engine only).
+        rate: Speech rate adjustment.
+        volume: Voice volume adjustment.
+        lexicon_names: List of pronunciation lexicons to apply.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
+    """
+
+    engine: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSPollyTTSService(TTSService):
@@ -130,8 +161,19 @@ class AWSPollyTTSService(TTSService):
     options including prosody controls.
     """
 
+    Settings = AWSPollyTTSSettings
+    _settings: Settings
+
+    @deprecated(
+        "`AWSPollyTTSService.InputParams` is deprecated since 0.0.105 and will be removed in "
+        "2.0.0. Use `AWSPollyTTSService.Settings` instead."
+    )
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``AWSPollyTTSService.Settings`` directly via the ``settings`` parameter instead.
+            Will be removed in 2.0.0.
 
         Parameters:
             engine: TTS engine to use ('standard', 'neural', etc.).
@@ -142,64 +184,103 @@ class AWSPollyTTSService(TTSService):
             lexicon_names: List of pronunciation lexicons to apply.
         """
 
-        engine: Optional[str] = None
-        language: Optional[Language] = Language.EN
-        pitch: Optional[str] = None
-        rate: Optional[str] = None
-        volume: Optional[str] = None
-        lexicon_names: Optional[List[str]] = None
+        engine: str | None = None
+        language: Language | None = Language.EN
+        pitch: str | None = None
+        rate: str | None = None
+        volume: str | None = None
+        lexicon_names: list[str] | None = None
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        region: Optional[str] = None,
-        voice_id: str = "Joanna",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        api_key: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_session_token: str | None = None,
+        region: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initializes the AWS Polly TTS service.
 
         Args:
-            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
-            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+            api_key: AWS secret access key. If None, falls back to environment
+                variables and the default botocore credential chain (instance
+                profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_access_key_id: AWS access key ID. Same fallback behaviour as
+                ``api_key``.
             aws_session_token: AWS session token for temporary credentials.
             region: AWS region for Polly service. Defaults to 'us-east-1'.
             voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSPollyTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSPollyTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice="Joanna",
+            language="en-US",
+            engine=None,
+            pitch=None,
+            rate=None,
+            volume=None,
+            lexicon_names=None,
+        )
 
-        params = params or AWSPollyTTSService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
 
-        # Get credentials from environment variables if not provided
-        self._aws_params = {
-            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region_name": region or os.getenv("AWS_REGION", "us-east-1"),
-        }
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.engine = params.engine
+                default_settings.language = params.language if params.language else "en-US"
+                default_settings.pitch = params.pitch
+                default_settings.rate = params.rate
+                default_settings.volume = params.volume
+                default_settings.lexicon_names = params.lexicon_names
 
-        self._aws_session = aioboto3.Session()
-        self._settings = {
-            "engine": params.engine,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "volume": params.volume,
-            "lexicon_names": params.lexicon_names,
-        }
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        self._resampler = create_stream_resampler()
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
 
-        self.set_voice(voice_id)
+        # Explicit or environment keys. Without them, each client takes its
+        # credentials from the session's default chain, which renews them.
+        self._aws_params = resolve_credentials(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=api_key,
+            aws_session_token=aws_session_token,
+            region=region,
+        ).to_boto_kwargs()
+
+        self._aws_session = aiobotocore.session.get_session()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -209,7 +290,7 @@ class AWSPollyTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to AWS Polly language format.
 
         Args:
@@ -223,24 +304,26 @@ class AWSPollyTTSService(TTSService):
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
-        language = self._settings["language"]
+        language = self._settings.language
         ssml += f"<lang xml:lang='{language}'>"
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
-        if self._settings["engine"] == "standard":
-            if self._settings["pitch"]:
-                prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
+        if self._settings.engine == "standard":
+            if self._settings.pitch:
+                prosody_attrs.append(f"pitch='{self._settings.pitch}'")
 
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
-        if self._settings["volume"]:
-            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        if self._settings.rate:
+            prosody_attrs.append(f"rate='{self._settings.rate}'")
+        if self._settings.volume:
+            prosody_attrs.append(f"volume='{self._settings.volume}'")
 
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
-        ssml += text
+        # Escape XML-reserved characters so arbitrary text can't break the
+        # SSML document (Polly rejects it with InvalidSsmlException).
+        ssml += escape(text)
 
         if prosody_attrs:
             ssml += "</prosody>"
@@ -254,52 +337,49 @@ class AWSPollyTTSService(TTSService):
         return ssml
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using AWS Polly.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
-            await self.start_ttfb_metrics()
-
             # Construct the parameters dictionary
             ssml = self._construct_ssml(text)
+            # AWS only supports 8000 and 16000 for PCM.
+            sample_rate = 8000 if self.sample_rate == 8000 else 16000
 
             params = {
                 "Text": ssml,
                 "TextType": "ssml",
                 "OutputFormat": "pcm",
-                "VoiceId": self._voice_id,
-                "Engine": self._settings["engine"],
-                # AWS only supports 8000 and 16000 for PCM. We select 16000.
-                "SampleRate": "16000",
-                "LexiconNames": self._settings["lexicon_names"],
+                "VoiceId": self._settings.voice,
+                "Engine": self._settings.engine,
+                "SampleRate": str(sample_rate),
+                "LexiconNames": self._settings.lexicon_names,
             }
 
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            async with self._aws_session.client("polly", **self._aws_params) as polly:
-                response = await polly.synthesize_speech(**filtered_params)
+            async with self._aws_session.create_client(  # pyright: ignore[reportGeneralTypeIssues]
+                "polly",
+                **self._aws_params,  # pyright: ignore[reportArgumentType]
+            ) as polly:
+                response = await polly.synthesize_speech(**filtered_params)  # pyright: ignore[reportGeneralTypeIssues]
                 if "AudioStream" in response:
                     # Get the streaming body and read it
                     stream = response["AudioStream"]
                     audio_data = await stream.read()
                 else:
                     logger.error(f"{self} No audio stream in response")
-                    audio_data = None
-
-                audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
+                    return
 
                 await self.start_tts_usage_metrics(text)
-
-                yield TTSStartedFrame()
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -307,40 +387,9 @@ class AWSPollyTTSService(TTSService):
                     chunk = audio_data[i : i + CHUNK_SIZE]
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, sample_rate, 1, context_id=context_id)
                         yield frame
 
-                yield TTSStoppedFrame()
         except (BotoCoreError, ClientError) as error:
-            logger.exception(f"{self} error generating TTS: {error}")
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
-
-        finally:
-            yield TTSStoppedFrame()
-
-
-class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService.
-
-    .. deprecated:: 0.0.67
-        `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
-
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize the deprecated PollyTTSService.
-
-        Args:
-            **kwargs: All arguments passed to AWSPollyTTSService.
-        """
-        super().__init__(**kwargs)
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'PollyTTSService' is deprecated, use 'AWSPollyTTSService' instead.",
-                DeprecationWarning,
-            )

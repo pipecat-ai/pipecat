@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,124 +8,313 @@
 
 import base64
 import json
-import uuid
-import warnings
-from typing import AsyncGenerator, List, Literal, Optional, Union
+import re
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any
 
+import aiohttp
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from websockets.protocol import State
 
+from pipecat.adapters.tts.services.cartesia_adapter import (
+    CartesiaEmotion,
+    CartesiaExpressionAdapter,
+)
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
-    StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
-from pipecat.transcriptions.language import Language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.settings import TTSSettings
+from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
+from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
-# Suppress regex warnings from pydub (used by cartesia)
-warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
-
-
-# See .env.example for Cartesia configuration needed
-try:
-    from cartesia import AsyncCartesia
-    from websockets.asyncio.client import connect as websocket_connect
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
-    raise Exception(f"Missing module: {e}")
+# The Cartesia API version these services are written against. The request
+# payloads and message handling below are tied to it, so it is pinned here
+# rather than configured.
+_CARTESIA_API_VERSION = "2026-03-01"
 
 
-def language_to_cartesia_language(language: Language) -> Optional[str]:
+def _resolve_cartesia_version(cartesia_version: str | None) -> str:
+    """Resolve the API version header value, warning on a deprecated override."""
+    if cartesia_version is None:
+        return _CARTESIA_API_VERSION
+
+    warn_deprecated(
+        "`cartesia_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
+        "No replacement. The service sends the API version it is written against, "
+        "so overriding it can break request and response handling.",
+        stacklevel=3,
+    )
+    return cartesia_version
+
+
+class GenerationConfig(BaseModel):
+    """Configuration for Cartesia generation parameters.
+
+    Cartesia interprets these parameters as guidance to ensure natural speech.
+    Test against your content for best results. Applicable to sonic-3 series models.
+
+    Parameters:
+        volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
+        speed: Speed multiplier for generated speech. Valid range: [0.6, 1.5]. Default is 1.0.
+        emotion: Single emotion string to guide the emotional tone. Examples include neutral,
+            angry, excited, content, sad, scared. Over 60 emotions are supported. For best
+            results, use with recommended voices: Leo, Jace, Kyle, Gavin, Maya, Tessa, Dana,
+            and Marian.
+    """
+
+    volume: float | None = None
+    speed: float | None = None
+    emotion: str | None = None
+
+
+def _generation_config(
+    config: GenerationConfig | None, expression: dict[str, Any]
+) -> dict[str, Any] | None:
+    """A request's generation config: the settings', with what its expression asks for."""
+    values = config.model_dump(exclude_none=True) if config else {}
+    return {**values, **expression} or None
+
+
+def language_to_cartesia_language(language: Language) -> str:
     """Convert a Language enum to Cartesia language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Cartesia language code, or None if not supported.
+        The corresponding service language code. Regional codes Cartesia
+        supports (e.g., ``es-MX``) are kept. Any other ``language`` falls back
+        to the base language code (e.g., ``de`` from ``de-CH``) and logs a
+        warning (via ``resolve_language(..., use_base_code=True)``).
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
+        Language.AR: "ar",
+        Language.BG: "bg",
+        Language.BG_BG: "bg-BG",
+        Language.BN: "bn",
+        Language.BN_IN: "bn-IN",
+        Language.CS: "cs",
+        Language.CS_CZ: "cs-CZ",
+        Language.DA: "da",
+        Language.DA_DK: "da-DK",
         Language.DE: "de",
+        Language.DE_AT: "de-AT",
+        Language.DE_DE: "de-DE",
+        Language.EL: "el",
+        Language.EL_GR: "el-GR",
         Language.EN: "en",
+        Language.EN_AU: "en-AU",
+        Language.EN_CA: "en-CA",
+        Language.EN_GB: "en-GB",
+        Language.EN_IE: "en-IE",
+        Language.EN_IN: "en-IN",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_SG: "en-SG",
+        Language.EN_US: "en-US",
+        Language.EN_ZA: "en-ZA",
         Language.ES: "es",
+        Language.ES_AR: "es-AR",
+        Language.ES_CL: "es-CL",
+        Language.ES_CO: "es-CO",
+        Language.ES_DO: "es-DO",
+        Language.ES_ES: "es-ES",
+        Language.ES_MX: "es-MX",
+        Language.ES_PA: "es-PA",
+        Language.ES_PE: "es-PE",
+        Language.ES_PR: "es-PR",
+        Language.ES_US: "es-US",
+        Language.FI: "fi",
+        Language.FI_FI: "fi-FI",
         Language.FR: "fr",
+        Language.FR_BE: "fr-BE",
+        Language.FR_CA: "fr-CA",
+        Language.FR_FR: "fr-FR",
+        Language.GU: "gu",
+        Language.GU_IN: "gu-IN",
+        Language.HE: "he",
+        Language.HE_IL: "he-IL",
         Language.HI: "hi",
+        Language.HI_IN: "hi-IN",
+        Language.HR: "hr",
+        Language.HR_HR: "hr-HR",
+        Language.HU: "hu",
+        Language.HU_HU: "hu-HU",
+        Language.ID: "id",
+        Language.ID_ID: "id-ID",
         Language.IT: "it",
+        Language.IT_IT: "it-IT",
         Language.JA: "ja",
+        Language.JA_JP: "ja-JP",
+        Language.KA: "ka",
+        Language.KA_GE: "ka-GE",
+        Language.KN: "kn",
+        Language.KN_IN: "kn-IN",
         Language.KO: "ko",
+        Language.KO_KR: "ko-KR",
+        Language.ML: "ml",
+        Language.ML_IN: "ml-IN",
+        Language.MR: "mr",
+        Language.MR_IN: "mr-IN",
+        Language.MS: "ms",
+        Language.MS_MY: "ms-MY",
         Language.NL: "nl",
+        Language.NL_BE: "nl-BE",
+        Language.NL_NL: "nl-NL",
+        Language.NB: "no",
+        Language.NO: "no",
+        Language.NB_NO: "no-NO",
+        Language.OR: "or",
+        Language.OR_IN: "or-IN",
+        Language.PA: "pa",
+        Language.PA_IN: "pa-IN",
         Language.PL: "pl",
+        Language.PL_PL: "pl-PL",
         Language.PT: "pt",
+        Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        Language.RO: "ro",
+        Language.RO_RO: "ro-RO",
         Language.RU: "ru",
+        Language.RU_RU: "ru-RU",
+        Language.SK: "sk",
+        Language.SK_SK: "sk-SK",
         Language.SV: "sv",
+        Language.SV_SE: "sv-SE",
+        Language.TA: "ta",
+        Language.TA_IN: "ta-IN",
+        Language.TE: "te",
+        Language.TE_IN: "te-IN",
+        Language.TH: "th",
+        Language.TH_TH: "th-TH",
+        Language.FIL: "tl",
+        Language.TL: "tl",
+        Language.FIL_PH: "tl-PH",
         Language.TR: "tr",
+        Language.TR_TR: "tr-TR",
+        Language.UK: "uk",
+        Language.UK_UA: "uk-UA",
+        Language.UR: "ur",
+        Language.UR_IN: "ur-IN",
+        Language.VI: "vi",
+        Language.VI_VN: "vi-VN",
         Language.ZH: "zh",
+        Language.ZH_CN: "zh-CN",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-class CartesiaTTSService(AudioContextWordTTSService):
+def format_cartesia_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as Cartesia inline phonemes.
+
+    Cartesia reads ``<<…>>`` blocks of ``|``-separated IPA phones, with stress
+    marks directly before the vowel they stress. Each word of the IPA becomes its
+    own block.
+
+    Args:
+        word: The word being pronounced (unused: the block replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The inline phoneme blocks, e.g. ``<<m|ɛ|t|f|ˈ|ɔ|ɹ|m|ɪ|n>>``, or None for an
+        empty pronunciation.
+    """
+    blocks = [
+        "<<" + "|".join(stress_before_vowels(ipa_phones(w))) + ">>"
+        for w in normalize_ipa(ipa).split()
+    ]
+    return " ".join(blocks) or None
+
+
+@dataclass
+class CartesiaTTSSettings(TTSSettings):
+    """Settings for CartesiaTTSService and CartesiaHttpTTSService.
+
+    Parameters:
+        accent: Accent a multilingual voice speaks the language with (e.g. ``british``).
+            The value must be one the voice itself supports, as listed in the ``accents``
+            field of Cartesia's Get Voice response. Unset lets Cartesia pick the closest
+            accent the voice supports for the requested language.
+        generation_config: Generation configuration for Cartesia models. Includes volume,
+            speed (numeric), and emotion (string) parameters.
+        normalization: How Cartesia reads numbers, dates and phone numbers in the
+            transcript. ``"auto"`` (Cartesia's default) follows the request's language,
+            and a language or locale code such as ``"en-GB"`` reads them in that
+            convention whatever language is spoken. ``"off"`` skips normalization and
+            is only for text that is already spelled out: digits and symbols left in
+            the text come out garbled or not at all. Word timestamps, and so the LLM
+            context, carry the original text in every mode.
+        pronunciation_dict_id: The ID of the pronunciation dictionary to use for
+            custom pronunciations.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
+    """
+
+    accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class CartesiaTTSService(WebsocketTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Cartesia's streaming WebSocket API.
     Supports word-level timestamps, audio context management, and various voice
-    customization options including speed and emotion controls.
+    customization options including generation configuration.
     """
+
+    Settings = CartesiaTTSSettings
+    _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
-
-                .. deprecated:: 0.0.68
-                        The `emotion` parameter is deprecated and will be removed in a future version.
+            generation_config: Generation configuration for Cartesia models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
-        language: Optional[Language] = Language.EN
-        speed: Optional[Literal["slow", "normal", "fast"]] = None
-        emotion: Optional[List[str]] = []
+        language: Language | None = Language.EN
+        generation_config: GenerationConfig | None = None
+        pronunciation_dict_id: str | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: str,
-        cartesia_version: str = "2025-04-16",
+        voice_id: str | None = None,
+        cartesia_version: str | None = None,
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model: str = "sonic-2",
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
-        aggregate_sentences: Optional[bool] = True,
+        max_buffer_delay_ms: int | None = None,
+        params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
+        settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -133,58 +322,154 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Args:
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
             url: WebSocket URL for Cartesia TTS API.
-            model: TTS model to use (e.g., "sonic-2").
+            model: TTS model to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
+            max_buffer_delay_ms: Server-side buffering window before generation
+                starts. ``0`` disables server buffering (custom buffering); any
+                value in (0, 5000] enables managed buffering. If ``None``,
+                derived from ``text_aggregation_mode``: ``0`` for ``SENTENCE``
+                (avoids stacking client and server buffering), unset for
+                ``TOKEN`` (uses Cartesia's 3000ms default).
             params: Additional input parameters for voice customization.
-            text_aggregator: Custom text aggregator for processing input text.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaTTSService.Settings(...)`` instead. Will
+                    be removed in 2.0.0.
+
+            extra_headers: Optional additional HTTP headers to send with the
+                WebSocket handshake.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.
+
             **kwargs: Additional arguments passed to the parent service.
         """
-        # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for a
-        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
-        # 3 model, and it's worth it for the better audio quality.
+        # By default, we aggregate sentences before sending to TTS. This adds
+        # ~200-300ms of latency per sentence (waiting for the sentence-ending
+        # punctuation token from the LLM). Setting
+        # text_aggregation_mode=TextAggregationMode.TOKEN streams tokens
+        # directly, which reduces latency. Streaming quality is good but less
+        # tested than sentence aggregation.
+        # TODO: Consider making TOKEN the default for Cartesia in 1.0.
         #
         # We also don't want to automatically push LLM response text frames,
         # because the context aggregators will add them to the LLM context even
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
+
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="sonic-3.6",
+            voice=None,
+            language=Language.EN,
+            accent=None,
+            generation_config=None,
+            pronunciation_dict_id=None,
+            normalization=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.generation_config is not None:
+                    default_settings.generation_config = params.generation_config
+                if params.pronunciation_dict_id is not None:
+                    default_settings.pronunciation_dict_id = params.pronunciation_dict_id
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=False,
             sample_rate=sample_rate,
-            text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
+            push_start_frame=True,
+            settings=default_settings,
             **kwargs,
         )
 
-        params = params or CartesiaTTSService.InputParams()
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Cartesia SSML Tags is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+        )
 
         self._api_key = api_key
-        self._cartesia_version = cartesia_version
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
         self._url = url
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en",
-            "speed": params.speed,
-            "emotion": params.emotion,
-        }
-        self.set_model_name(model)
-        self.set_voice(voice_id)
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
-        self._context_id = None
+        # Audio output format — init-only, not runtime-updatable
+        self._output_container = container
+        self._output_encoding = encoding
+        self._output_sample_rate = 0  # Set in start() from self.sample_rate
+
+        # Cartesia warns against the "middle ground" of client-side sentence
+        # aggregation plus the server's default 3000ms buffer. When the user
+        # doesn't pick a value, send 0 in SENTENCE mode (custom buffering) and
+        # leave it unset in TOKEN mode so the server default applies (managed
+        # buffering).
+        if max_buffer_delay_ms is None and not self._is_streaming_tokens:
+            max_buffer_delay_ms = 0
+        self._max_buffer_delay_ms = max_buffer_delay_ms
+
         self._receive_task = None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -194,17 +479,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the TTS model.
-
-        Args:
-            model: The model name to use for synthesis.
-        """
-        self._model_id = model
-        await super().set_model(model)
-        logger.info(f"Switching TTS model to: [{model}]")
-
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Cartesia language format.
 
         Args:
@@ -215,125 +490,164 @@ class CartesiaTTSService(AudioContextWordTTSService):
         """
         return language_to_cartesia_language(language)
 
-    def _is_cjk_language(self, language: str) -> bool:
-        """Check if the given language is CJK (Chinese, Japanese, Korean).
+    # A set of Cartesia-specific helpers for text transformations
+    @staticmethod
+    def SPELL(text: str) -> str:
+        """Wrap text in Cartesia spell tag."""
+        return f"<spell>{text}</spell>"
+
+    @staticmethod
+    def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
+        """Convenience method to create an emotion tag."""
+        return f'<emotion value="{emotion}" />'
+
+    @staticmethod
+    def PAUSE_TAG(seconds: float) -> str:
+        """Convenience method to create a pause tag."""
+        return f'<break time="{seconds}s" />'
+
+    @staticmethod
+    def VOLUME_TAG(volume: float) -> str:
+        """Convenience method to create a volume tag."""
+        return f'<volume ratio="{volume}" />'
+
+    @staticmethod
+    def SPEED_TAG(speed: float) -> str:
+        """Convenience method to create a speed tag."""
+        return f'<speed ratio="{speed}" />'
+
+    def _is_chinese_or_japanese_language(self, language: str) -> bool:
+        """Check if the given language is Chinese or Japanese.
 
         Args:
             language: The language code to check.
 
         Returns:
-            True if the language is Chinese, Japanese, or Korean.
+            True if the language is Chinese or Japanese.
         """
-        cjk_languages = {"zh", "ja", "ko"}
         base_lang = language.split("-")[0].lower()
-        return base_lang in cjk_languages
+        return base_lang in {"zh", "ja"}
 
-    def _process_word_timestamps_for_language(
-        self, words: List[str], starts: List[float]
-    ) -> List[tuple[str, float]]:
-        """Process word timestamps based on the current language.
+    _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
-        For CJK languages, Cartesia groups related characters in the same timestamp message.
-        For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-        We combine these into single words so the downstream aggregator can add natural
-        spacing between meaningful units rather than individual characters.
+    def _strip_cartesia_tags(self, text: str) -> str:
+        """Remove Cartesia SSML tags from a word-timestamp token.
 
-        For non-CJK languages, words are already properly separated and are used as-is.
+        A tag standing between two alphanumeric characters is replaced by a space,
+        since it is the only thing separating two words (``"to<spell>1234"``).
+        Anywhere else it is removed outright: a space there would not join anything,
+        and it would split a word from its own punctuation
+        (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
+        token no longer matches the text that was sent for synthesis).
+        """
+
+        def replace(match: re.Match) -> str:
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            return " " if before.isalnum() and after.isalnum() else ""
+
+        text = self._CARTESIA_TAG_RE.sub(replace, text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def _normalize_word_timestamps(
+        self, words: list[str], starts: list[float]
+    ) -> list[tuple[str, float]]:
+        """Normalize raw word timestamps from Cartesia before further processing.
+
+        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
+        and drops entries that become empty after stripping. Each entry keeps its own
+        start time, so one entry in is at most one token out, whatever the language.
 
         Args:
             words: List of words/characters from Cartesia.
             starts: List of start timestamps for each word/character.
 
         Returns:
-            List of (word, start_time) tuples processed for the language.
+            List of (word, start_time) tuples.
         """
-        current_language = self._settings.get("language", "en")
+        result = []
+        for word, start in zip(words, starts):
+            cleaned = self._strip_cartesia_tags(word)
+            if cleaned:
+                result.append((cleaned, start))
+        return result
 
-        # Check if this is a CJK language
-        if self._is_cjk_language(current_language):
-            # For CJK languages, combine all characters in this message into one word
-            # using the first character's start time
-            if words and starts:
-                combined_word = "".join(words)
-                first_start = starts[0]
-                return [(combined_word, first_start)]
-            else:
-                return []
-        else:
-            # For non-CJK languages, use as-is
-            return list(zip(words, starts))
+    def _word_timestamps_include_inter_frame_spaces(self) -> bool:
+        """Whether timestamp text should be treated as carrying its own spacing."""
+        current_language = assert_given(self._settings.language)
+        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
 
     def _build_msg(
-        self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
+        self,
+        text: str = "",
+        continue_transcript: bool = True,
+        add_timestamps: bool = True,
+        context_id: str = "",
     ):
         voice_config = {}
         voice_config["mode"] = "id"
-        voice_config["id"] = self._voice_id
-
-        if self._settings["emotion"]:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'emotion' parameter in __experimental_controls is deprecated and will be removed in a future version.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            voice_config["__experimental_controls"] = {}
-            if self._settings["emotion"]:
-                voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
+        voice_config["id"] = self._settings.voice
 
         msg = {
             "transcript": text,
             "continue": continue_transcript,
-            "context_id": self._context_id,
-            "model_id": self.model_name,
+            "context_id": context_id,
+            "model_id": self._settings.model,
             "voice": voice_config,
-            "output_format": self._settings["output_format"],
-            "language": self._settings["language"],
+            "output_format": {
+                "container": self._output_container,
+                "encoding": self._output_encoding,
+                "sample_rate": self._output_sample_rate,
+            },
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": False if self.model_name == "sonic" else True,
+            "use_normalized_timestamps": False,
         }
 
-        if self._settings["speed"]:
-            msg["speed"] = self._settings["speed"]
+        if self._max_buffer_delay_ms is not None:
+            msg["max_buffer_delay_ms"] = self._max_buffer_delay_ms
+
+        if self._settings.language:
+            msg["language"] = self._settings.language
+
+        if assert_given(self._settings.accent):
+            msg["accent"] = self._settings.accent
+
+        generation_config = _generation_config(
+            assert_given(self._settings.generation_config), self.expression_settings
+        )
+        if generation_config:
+            msg["generation_config"] = generation_config
+
+        if self._settings.pronunciation_dict_id:
+            msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+        if assert_given(self._settings.normalization):
+            msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        await super().setup(setup)
+        self._output_sample_rate = self.sample_rate
         await self._connect()
 
-    async def stop(self, frame: EndFrame):
-        """Stop the Cartesia TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Stop the Cartesia TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -344,12 +658,18 @@ class CartesiaTTSService(AudioContextWordTTSService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            logger.debug("Connecting to Cartesia")
-            self._websocket = await websocket_connect(
-                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
+            logger.debug("Connecting to Cartesia TTS")
+            self._websocket = await self._websocket_connect(
+                self._url,
+                additional_headers={
+                    "X-API-Key": self._api_key,
+                    "Cartesia-Version": self._cartesia_version,
+                    **self._extra_headers,
+                },
             )
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -358,68 +678,135 @@ class CartesiaTTSService(AudioContextWordTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Cartesia")
+                logger.debug(f"{self}: Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Cancel the active Cartesia context when the bot is interrupted."""
         await self.stop_all_metrics()
-        if self._context_id:
-            cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
+        if context_id:
+            cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
-            self._context_id = None
+        await super().on_audio_context_interrupted(context_id)
 
-    async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
-        if not self._context_id or not self._websocket:
+    async def on_audio_context_completed(self, context_id: str):
+        """Close the Cartesia context after all audio has been played.
+
+        No close message is needed: the server already considers the context
+        done once it has sent its ``done`` message, which is handled in
+        ``_process_messages``.
+        """
+        await super().on_audio_context_completed(context_id)
+
+    async def flush_audio(self, context_id: str | None = None):
+        """Flush any pending audio and finalize the current context.
+
+        Args:
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text="", continue_transcript=False)
+        msg = self._build_msg(text="", continue_transcript=False, context_id=flush_id)
         await self._websocket.send(msg)
-        self._context_id = None
+
+    async def _update_settings(self, delta: CartesiaTTSSettings) -> dict[str, Any]:
+        """Apply a TTS settings delta, flushing the context if needed.
+
+        Voice, model, and language are locked per Cartesia context. If any of
+        these change, the current context is flushed so the next sentence opens
+        a fresh one with the updated settings.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+
+        if changed.keys() & {"voice", "model", "language"}:
+            if self._turn_context_id:
+                # Finalize the old context's still-pending sentence so its
+                # already-heard prefix still emits progress frames (mirrors the
+                # LLMFullResponseEnd / TTSSpeak close paths). A mid-sentence
+                # settings change would otherwise abandon it before promotion,
+                # dropping that prefix from the transcript.
+                await self._push_sequencer_frames(
+                    await self._aggregated_frame_sequencer.finalize(self._turn_context_id),
+                    self._turn_context_id,
+                )
+            if self._turn_context_id and self.audio_context_available(self._turn_context_id):
+                await self.flush_audio(context_id=self._turn_context_id)
+            # Assign a new turn context ID so subsequent sentences in this
+            # turn open a new Cartesia context with the updated settings.
+            if self._turn_context_id:
+                self._turn_context_id = None
+                self._turn_context_id = self.create_context_id()
+
+        return changed
 
     async def _process_messages(self):
         async for message in self._get_websocket():
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
                 continue
+            ctx_id = msg["context_id"]
             if msg["type"] == "done":
                 await self.stop_ttfb_metrics()
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
-                await self.remove_audio_context(msg["context_id"])
+                await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
+                await self.remove_audio_context(ctx_id)
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
-                processed_timestamps = self._process_word_timestamps_for_language(
+                processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
-                await self.add_word_timestamps(processed_timestamps)
+                # Cartesia reports Chinese and Japanese one character at a time, with
+                # each punctuation mark as its own token. Merging attaches the mark to
+                # the character before it ("す", "。" -> "す。").
+                cjk = self._word_timestamps_include_inter_frame_spaces()
+                await self.add_word_timestamps(
+                    processed_timestamps,
+                    ctx_id,
+                    includes_inter_frame_spaces=True if cjk else None,
+                    pre_merge_tokens=cjk,
+                )
             elif msg["type"] == "chunk":
-                await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=ctx_id,
                 )
-                await self.append_to_audio_context(msg["context_id"], frame)
+                await self.append_to_audio_context(ctx_id, frame)
             elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
-                await self.push_frame(TTSStoppedFrame())
+                await self.push_frame(TTSStoppedFrame(context_id=ctx_id))
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
-                self._context_id = None
+                await self.push_error(error_msg=f"Error: {msg}")
+                self.reset_active_audio_context()
+            elif msg["type"] == "flush_done":
+                # Cartesia emits flush_done as a per-transcript boundary marker
+                # within a context (e.g. when max_buffer_delay_ms=0 causes the
+                # server to flush each submission). We don't need it: each turn
+                # already has its own context_id and audio chunks are tagged
+                # with it. Acknowledge silently.
+                pass
             else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.push_error(error_msg=f"Error, unknown message type: {msg}")
 
     async def _receive_messages(self):
         while True:
@@ -430,41 +817,34 @@ class CartesiaTTSService(AudioContextWordTTSService):
             await self._connect_websocket()
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Cartesia's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._context_id:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame()
-                self._context_id = str(uuid.uuid4())
-                await self.create_audio_context(self._context_id)
-
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text, context_id=context_id)
 
             try:
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
-                yield TTSStoppedFrame()
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class CartesiaHttpTTSService(TTSService):
@@ -475,34 +855,39 @@ class CartesiaHttpTTSService(TTSService):
     integration is preferred.
     """
 
+    Settings = CartesiaTTSSettings
+    _settings: Settings
+    expression_adapter_class = CartesiaExpressionAdapter
+
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
-
-                .. deprecated:: 0.0.68
-                        The `emotion` parameter is deprecated and will be removed in a future version.
+            generation_config: Generation configuration for Cartesia models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
-        language: Optional[Language] = Language.EN
-        speed: Optional[Literal["slow", "normal", "fast"]] = None
-        emotion: Optional[List[str]] = Field(default_factory=list)
+        language: Language | None = Language.EN
+        generation_config: GenerationConfig | None = None
+        pronunciation_dict_id: str | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: str,
-        model: str = "sonic-2",
+        voice_id: str | None = None,
+        model: str | None = None,
         base_url: str = "https://api.cartesia.ai",
-        cartesia_version: str = "2024-11-13",
-        sample_rate: Optional[int] = None,
+        cartesia_version: str | None = None,
+        aiohttp_session: aiohttp.ClientSession | None = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
+        params: InputParams | None = None,
+        extra_headers: dict[str, str] | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Cartesia HTTP TTS service.
@@ -510,41 +895,110 @@ class CartesiaHttpTTSService(TTSService):
         Args:
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "sonic-2").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            model: TTS model to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
+
+                .. deprecated:: 1.8.0
+                    No replacement. The API version is pinned to the one this
+                    service implements. Will be removed in 2.0.0.
+
+            aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
+                If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
+
+            extra_headers: Optional additional HTTP headers to send with each
+                synthesis request.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="sonic-3.6",
+            voice=None,
+            language=Language.EN,
+            accent=None,
+            generation_config=None,
+            pronunciation_dict_id=None,
+            normalization=None,
+        )
 
-        params = params or CartesiaHttpTTSService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.generation_config is not None:
+                    default_settings.generation_config = params.generation_config
+                if params.pronunciation_dict_id is not None:
+                    default_settings.pronunciation_dict_id = params.pronunciation_dict_id
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = base_url
-        self._cartesia_version = cartesia_version
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en",
-            "speed": params.speed,
-            "emotion": params.emotion,
-        }
-        self.set_voice(voice_id)
-        self.set_model_name(model)
+        self._cartesia_version = _resolve_cartesia_version(cartesia_version)
+        self._extra_headers = dict(extra_headers) if extra_headers else {}
 
-        self._client = AsyncCartesia(
-            api_key=api_key,
-            base_url=base_url,
-        )
+        # Audio output format — init-only, not runtime-updatable
+        self._output_container = container
+        self._output_encoding = encoding
+        self._output_sample_rate = 0  # Set in start() from self.sample_rate
+
+        self._session: aiohttp.ClientSession | None = aiohttp_session
+        self._owns_session = aiohttp_session is None
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as Cartesia inline phonemes.
+
+        See :func:`format_cartesia_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The inline phoneme blocks, or None when the pronunciation cannot be used.
+        """
+        return format_cartesia_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -554,7 +1008,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Cartesia language format.
 
         Args:
@@ -565,89 +1019,93 @@ class CartesiaHttpTTSService(TTSService):
         """
         return language_to_cartesia_language(language)
 
-    async def start(self, frame: StartFrame):
-        """Start the Cartesia HTTP TTS service.
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            setup: Configuration object containing setup parameters.
         """
-        await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        await super().setup(setup)
 
-    async def stop(self, frame: EndFrame):
-        """Stop the Cartesia HTTP TTS service.
+        self._output_sample_rate = self.sample_rate
+        if self._owns_session:
+            self._session = aiohttp.ClientSession()
 
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._client.close()
+    async def _close_session(self):
+        """Close the HTTP session if we own it."""
+        if self._owns_session and self._session:
+            await self._session.close()
+            self._session = None
 
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Cartesia HTTP TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._client.close()
+    async def cleanup(self):
+        """Close the owned HTTP session at teardown."""
+        await super().cleanup()
+        await self._close_session()
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Cartesia's HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
-            voice_config = {"mode": "id", "id": self._voice_id}
+            if self._session is None:
+                raise RuntimeError("HTTP session is not initialized; call start() before run_tts()")
 
-            if self._settings["emotion"]:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "The 'emotion' parameter in voice.__experimental_controls is deprecated and will be removed in a future version.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
-                voice_config["__experimental_controls"] = {"emotion": self._settings["emotion"]}
+            voice_config = {"mode": "id", "id": self._settings.voice}
 
-            await self.start_ttfb_metrics()
-
-            payload = {
-                "model_id": self._model_name,
-                "transcript": text,
-                "voice": voice_config,
-                "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
+            output_format = {
+                "container": self._output_container,
+                "encoding": self._output_encoding,
+                "sample_rate": self._output_sample_rate,
             }
 
-            if self._settings["speed"]:
-                payload["speed"] = self._settings["speed"]
+            payload = {
+                "model_id": self._settings.model,
+                "transcript": text,
+                "voice": voice_config,
+                "output_format": output_format,
+            }
 
-            yield TTSStartedFrame()
+            if self._settings.language:
+                payload["language"] = self._settings.language
 
-            session = await self._client._get_session()
+            if assert_given(self._settings.accent):
+                payload["accent"] = self._settings.accent
+
+            generation_config = _generation_config(
+                assert_given(self._settings.generation_config), self.expression_settings
+            )
+            if generation_config:
+                payload["generation_config"] = generation_config
+
+            if self._settings.pronunciation_dict_id:
+                payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+            if assert_given(self._settings.normalization):
+                payload["normalization"] = self._settings.normalization
 
             headers = {
                 "Cartesia-Version": self._cartesia_version,
                 "X-API-Key": self._api_key,
                 "Content-Type": "application/json",
+                **self._extra_headers,
             }
 
             url = f"{self._base_url}/tts/bytes"
 
-            async with session.post(url, json=payload, headers=headers) as response:
+            async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Cartesia API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Cartesia API error: {error_text}"))
-                    raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
+                    yield ErrorFrame(
+                        error=f"Cartesia API error (status {response.status}): {error_text}"
+                    )
+                    return
 
                 audio_data = await response.read()
 
@@ -657,13 +1115,12 @@ class CartesiaHttpTTSService(TTSService):
                 audio=audio_data,
                 sample_rate=self.sample_rate,
                 num_channels=1,
+                context_id=context_id,
             )
 
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()

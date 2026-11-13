@@ -1,0 +1,300 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Tests for SmallestTTSService word-timestamp and continuation handling."""
+
+import asyncio
+import base64
+import json
+
+import pytest
+from websockets.protocol import State
+
+from pipecat.frames.frames import TTSAudioRawFrame, TTSSpeakFrame, TTSTextFrame
+from pipecat.services.smallest.tts import SmallestTTSService
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
+
+CTX = "ctx-1"
+
+
+def _word_msg(word: str, start: float, end: float, request_id: str, word_id: int = 0) -> str:
+    return json.dumps(
+        {
+            "request_id": request_id,
+            "status": "word_timestamp",
+            "data": {"id": word_id, "word": word, "start": start, "end": end},
+        }
+    )
+
+
+def _make_service() -> SmallestTTSService:
+    return SmallestTTSService(api_key="test-key")
+
+
+def test_word_timestamps_enabled_by_default():
+    """Word timestamps are on by default and drive text-frame emission."""
+    service = SmallestTTSService(api_key="test-key")
+    assert service._word_timestamps is True
+    # Word events produce the TTSTextFrames, so the base must not push whole text.
+    assert service._push_text_frames is False
+    assert service._build_msg("hi")["word_timestamps"] is True
+
+
+def test_word_timestamps_disabled_pushes_whole_text():
+    """Disabling word timestamps flips the service back to whole-text frames."""
+    service = SmallestTTSService(api_key="test-key", word_timestamps=False)
+    assert service._word_timestamps is False
+    assert service._push_text_frames is True
+    assert "word_timestamps" not in service._build_msg("hi")
+
+
+def test_build_msg_defaults_to_continuing_context():
+    """Without an explicit override, a fragment continues its context."""
+    service = _make_service()
+    msg = service._build_msg("hi", context_id=CTX)
+    assert msg["context_id"] == CTX
+    assert msg["continue"] is True
+
+
+def test_build_msg_can_close_context():
+    """`continue_transcript=False` marks the fragment as the last one."""
+    service = _make_service()
+    msg = service._build_msg("hi", context_id=CTX, continue_transcript=False)
+    assert msg["continue"] is False
+
+
+def test_build_msg_omits_buffer_delay_by_default():
+    """The server's own default buffering window applies unless overridden."""
+    service = _make_service()
+    assert "max_buffer_delay_ms" not in service._build_msg("hi")
+
+
+def test_build_msg_includes_buffer_delay_when_set():
+    service = SmallestTTSService(api_key="test-key", max_buffer_delay_ms=1500)
+    assert service._build_msg("hi")["max_buffer_delay_ms"] == 1500
+
+
+def test_build_msg_omits_content_filter_by_default():
+    """The server's own default (filter off) applies unless an action is set."""
+    service = _make_service()
+    assert "content_filter" not in service._build_msg("hi")
+
+
+@pytest.mark.parametrize("action", ["reject", "flag"])
+def test_build_msg_enables_content_filter_with_action(action):
+    service = SmallestTTSService(
+        api_key="test-key", settings=SmallestTTSService.Settings(content_filter=action)
+    )
+    assert service._build_msg("hi")["content_filter"] == {"enabled": True, "action": action}
+
+
+def test_build_msg_omits_number_pronunciation_language_by_default():
+    """Numerals are read in the synthesis language unless a language is set."""
+    service = _make_service()
+    assert "number_pronunciation_language" not in service._build_msg("hi")
+
+
+def test_build_msg_maps_number_pronunciation_language():
+    """A Language is mapped to the provider's code, a raw code is sent as-is."""
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language=Language.HI),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "hi"
+
+    service = SmallestTTSService(
+        api_key="test-key",
+        settings=SmallestTTSService.Settings(number_pronunciation_language="auto"),
+    )
+    assert service._build_msg("hi")["number_pronunciation_language"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_flush_audio_closes_the_active_context():
+    """flush_audio sends an empty, `continue: false` fragment for the context."""
+    service = _make_service()
+
+    sent = []
+
+    class FakeWebsocket:
+        state = None  # unused by flush_audio
+
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+    service._websocket = FakeWebsocket()
+    service.get_active_audio_context_id = lambda: CTX
+
+    await service.flush_audio()
+
+    assert len(sent) == 1
+    assert sent[0]["context_id"] == CTX
+    assert sent[0]["continue"] is False
+    assert sent[0]["text"] == ""
+
+
+@pytest.mark.asyncio
+async def test_flush_audio_is_a_noop_without_a_connection():
+    """No message is sent if the websocket isn't connected."""
+    service = _make_service()
+    service._websocket = None
+    service.get_active_audio_context_id = lambda: CTX
+
+    # Should not raise even though there's nowhere to send.
+    await service.flush_audio()
+
+
+async def _drive(service: SmallestTTSService, messages):
+    """Run _receive_messages over a scripted stream, capturing word timestamps."""
+    captured = []
+
+    async def fake_add_word_timestamps(word_times, context_id=None, **kwargs):
+        captured.extend(word_times)
+
+    async def noop(*args, **kwargs):
+        pass
+
+    async def fake_ws():
+        for message in messages:
+            yield message
+
+    service.add_word_timestamps = fake_add_word_timestamps
+    service.append_to_audio_context = noop
+    service.stop_ttfb_metrics = noop
+    service.stop_all_metrics = noop
+    service.get_active_audio_context_id = lambda: CTX
+    service._get_websocket = fake_ws
+
+    await service._receive_messages()
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_word_timestamps_offset_across_requests():
+    """Later requests in a turn are shifted onto the turn's playback timeline.
+
+    Smallest reports per-request timestamps that reset to ~0 each request and
+    only emits one ``complete`` for the whole turn, so the request boundary is
+    detected by a change in ``request_id``. The second request's words must be
+    offset by the prior request's last-word ``end``.
+    """
+    service = _make_service()
+
+    # Request A (id "a"): word at 0.2s, ending at 0.5s.
+    # Request B (id "b", same turn): word at 0.1s -> 0.1 + 0.5 = 0.6s.
+    messages = [
+        _word_msg("Hello", 0.2, 0.5, request_id="a"),
+        _word_msg("World", 0.1, 0.4, request_id="b"),
+    ]
+    captured = await _drive(service, messages)
+
+    assert captured == [("Hello", pytest.approx(0.2)), ("World", pytest.approx(0.6))]
+
+
+@pytest.mark.asyncio
+async def test_offset_accumulates_across_multiple_requests():
+    """The offset compounds across three sequential requests in one turn."""
+    service = _make_service()
+
+    messages = [
+        _word_msg("one", 0.0, 1.0, request_id="a"),
+        _word_msg("two", 0.0, 2.0, request_id="b"),  # offset by 1.0
+        _word_msg("three", 0.5, 1.0, request_id="c"),  # offset by 1.0 + 2.0
+    ]
+    captured = await _drive(service, messages)
+
+    assert captured == [
+        ("one", pytest.approx(0.0)),
+        ("two", pytest.approx(1.0)),
+        ("three", pytest.approx(3.5)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_multiple_words_in_one_request_share_offset():
+    """All words within a request use the same offset; only `end` grows."""
+    service = _make_service()
+
+    messages = [
+        _word_msg("a", 0.0, 0.4, request_id="r1", word_id=0),
+        _word_msg("b", 0.4, 0.9, request_id="r1", word_id=1),
+        _word_msg("c", 0.1, 0.5, request_id="r2", word_id=0),  # offset by 0.9
+    ]
+    captured = await _drive(service, messages)
+
+    assert captured == [
+        ("a", pytest.approx(0.0)),
+        ("b", pytest.approx(0.4)),
+        ("c", pytest.approx(1.0)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_word_timestamp_offset_resets_on_new_turn():
+    """on_turn_context_created (a new LLM turn) clears the accumulated offset."""
+    service = _make_service()
+
+    # First turn: two requests, so the offset accumulates to 0.5.
+    await _drive(
+        service,
+        [
+            _word_msg("Hello", 0.2, 0.5, request_id="a"),
+            _word_msg("World", 0.1, 0.4, request_id="b"),
+        ],
+    )
+    assert service._cumulative_time == pytest.approx(0.5)
+
+    # A new turn resets the timeline.
+    await service.on_turn_context_created("ctx-2")
+    assert service._cumulative_time == 0.0
+    assert service._wt_request_id is None
+
+    captured = await _drive(service, [_word_msg("Fresh", 0.3, 0.6, request_id="c")])
+    assert captured == [("Fresh", pytest.approx(0.3))]
+
+
+class _FakeSpeakingWebsocket:
+    """Answers each text fragment with audio and the timestamp of its first word."""
+
+    state = State.OPEN
+
+    def __init__(self):
+        self._messages: asyncio.Queue[str] = asyncio.Queue()
+
+    async def send(self, data: str):
+        text = json.loads(data)["text"]
+        if text.strip():
+            audio = base64.b64encode(b"\x00\x01" * 1600).decode()
+            self._messages.put_nowait(json.dumps({"status": "chunk", "data": {"audio": audio}}))
+            self._messages.put_nowait(_word_msg(text.split()[0], 0.0, 0.1, request_id="r1"))
+
+    async def close(self):
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        return await self._messages.get()
+
+
+@pytest.mark.asyncio
+async def test_speaks_with_word_timestamps():
+    """Spoken text produces audio and a word frame for each timed word."""
+    service = SmallestTTSService(api_key="test-key", sample_rate=16000, stop_frame_timeout_s=0.2)
+    websocket = _FakeSpeakingWebsocket()
+
+    async def websocket_connect(*args, **kwargs):
+        return websocket
+
+    service._websocket_connect = websocket_connect
+    down, _ = await asyncio.wait_for(
+        run_test(service, frames_to_send=[TTSSpeakFrame("Hello."), SleepFrame(sleep=0.4)]),
+        timeout=5,
+    )
+    assert any(isinstance(f, TTSAudioRawFrame) for f in down)
+    assert [f.text for f in down if isinstance(f, TTSTextFrame)] == ["Hello."]

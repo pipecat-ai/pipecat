@@ -1,0 +1,290 @@
+# Edge cases where the right marker is arguable, so models disagree.
+#
+# Text modality; every scenario shares the judge below. A scenario's
+# context: is the history the assistant aggregator would have left.
+
+name: hard
+
+judge: !include judge_text.yaml
+
+scenarios:
+- name: hard_i_think
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I think...
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_i_think_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i think
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_complete_with_trailing_yeah
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: I'd go to Japan, definitely. Yeah.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_complete_with_trailing_yeah_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● If you could travel anywhere in the world right now, where would you go and why?
+  turns:
+  - user: i'd go to japan definitely yeah
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_complete_with_trailing_um
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: Tuesday works. Um.
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_complete_with_trailing_um_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: tuesday works um
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_question_with_hedge
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: I'm not sure this is the right place to ask, but do you handle billing questions?
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_question_with_hedge_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Hi! How can I help you today?
+  turns:
+  - user: i'm not sure this is the right place to ask but do you handle billing questions
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_answer_then_new_thought_cutoff
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: Tuesday. Oh, and also, could you
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_answer_then_new_thought_cutoff_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Which day works best for you?
+  turns:
+  - user: tuesday oh and also could you
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_listing_done
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What can I get for you?
+  turns:
+  - user: A large pepperoni pizza, a garden salad, and two cokes. That's it.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_listing_done_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What can I get for you?
+  turns:
+  - user: a large pepperoni pizza a garden salad and two cokes that's it
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_listing_and
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What can I get for you?
+  turns:
+  - user: A large pepperoni pizza, a garden salad, and
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_listing_and_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What can I get for you?
+  turns:
+  - user: a large pepperoni pizza a garden salad and
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_ok_alone
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your total comes to twenty four dollars. Should I place the order?
+  turns:
+  - user: Okay.
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_ok_alone_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your total comes to twenty four dollars. Should I place the order?
+  turns:
+  - user: okay
+    expect:
+    - event: llm_marker
+      marker: complete
+      marker_first: true
+      markers: 1
+      text_after: true
+- name: hard_ok_trailing
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your total comes to twenty four dollars. Should I place the order?
+  turns:
+  - user: Okay, but
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_ok_trailing_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● Your total comes to twenty four dollars. Should I place the order?
+  turns:
+  - user: okay but
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_thinking_aloud
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's your account number?
+  turns:
+  - user: It's um, it starts with a four, I think, four seven
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false
+- name: hard_thinking_aloud_stt
+  context:
+  - role: developer
+    content: The user has joined the conversation.
+  - role: assistant
+    content: ● What's your account number?
+  turns:
+  - user: it's um it starts with a four i think four seven
+    expect:
+    - event: llm_marker
+      marker: incomplete
+      marker_first: true
+      markers: 1
+      text_after: false

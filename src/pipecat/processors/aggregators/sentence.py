@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,14 @@ This module provides a frame processor that accumulates text frames into
 complete sentences, only outputting when a sentence-ending pattern is detected.
 """
 
-from pipecat.frames.frames import EndFrame, Frame, InterimTranscriptionFrame, TextFrame
+from pipecat.frames.frames import (
+    EagerTranscriptionFrame,
+    EndFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    InterruptionFrame,
+    TextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import match_endofsentence
 
@@ -46,8 +53,8 @@ class SentenceAggregator(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        # We ignore interim description at this point.
-        if isinstance(frame, InterimTranscriptionFrame):
+        # We ignore interim and eager (provisional) transcriptions at this point.
+        if isinstance(frame, (InterimTranscriptionFrame, EagerTranscriptionFrame)):
             return
 
         if isinstance(frame, TextFrame):
@@ -55,6 +62,9 @@ class SentenceAggregator(FrameProcessor):
             if match_endofsentence(self._aggregation):
                 await self.push_frame(TextFrame(self._aggregation))
                 self._aggregation = ""
+        elif isinstance(frame, InterruptionFrame):
+            self._aggregation = ""
+            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             if self._aggregation:
                 await self.push_frame(TextFrame(self._aggregation))

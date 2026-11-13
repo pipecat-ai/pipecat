@@ -7,53 +7,57 @@ on:
   pull_request:
     branches: [main, develop]
     paths: ['pyproject.toml']
+  # Scheduled and manual runs ignore uv.lock and install the newest allowed
+  # versions, as a user's fresh install would, so upstream releases that break
+  # an install show up without any change here.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   test-compatibility:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10.18', '3.11.13', '3.12.11', '3.13.5']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     name: Python ${{ matrix.python-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install system dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          # A stalled mirror keeps the connection alive well enough that apt's own
+          # timeout never fires, so bound each attempt from outside and retry on a
+          # fresh connection.
+          for attempt in 1 2 3; do
+            sudo timeout 90 apt-get update && break
+            echo "apt-get update attempt $attempt timed out; retrying"
+          done
+          sudo timeout 300 apt-get install -y \
             portaudio19-dev \
             libcairo2-dev \
-            libgirepository1.0-dev \
+            libgirepository-2.0-dev \
             pkg-config
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 'latest'
+          enable-cache: false
 
       - name: Set up Python ${{ matrix.python-version }}
         run: |
           uv python install ${{ matrix.python-version }}
           uv python pin ${{ matrix.python-version }}
 
-      - name: Test uv sync with all extras (Python < 3.13)
-        if: "!startsWith(matrix.python-version, '3.13.')"
+      - name: Test uv sync with all extras
         run: |
-          uv sync --group dev --all-extras --no-extra krisp
-
-      - name: Test uv sync without PyTorch extras (Python 3.13+)
-        if: startsWith(matrix.python-version, '3.13.')
-        run: |
-          uv sync --group dev --all-extras \
-            --no-extra krisp \
-            --no-extra ultravox \
-            --no-extra local-smart-turn \
-            --no-extra moondream \
-            --no-extra mlx-whisper
+          uv sync --group dev --all-extras ${{ github.event_name != 'push' && github.event_name != 'pull_request' && '--upgrade' || '' }}
 
       - name: Verify installation
         run: |

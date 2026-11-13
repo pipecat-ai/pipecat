@@ -1,16 +1,16 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Wake notifier filter for conditional frame-based notifications."""
 
-from typing import Awaitable, Callable, Tuple, Type
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.base_notifier import BaseNotifier
 
 
 class WakeNotifierFilter(FrameProcessor):
@@ -25,7 +25,7 @@ class WakeNotifierFilter(FrameProcessor):
         self,
         notifier: BaseNotifier,
         *,
-        types: Tuple[Type[Frame], ...],
+        types: tuple[type[Frame], ...],
         filter: Callable[[Frame], Awaitable[bool]],
         **kwargs,
     ):

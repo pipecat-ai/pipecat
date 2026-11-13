@@ -1,0 +1,167 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""The bot's eval transport: a WebSocket server speaking RTVI, plus the eval's own behavior.
+
+The harness sets per-connection query flags. ``skip_tts`` silences the
+bot's speech for the session (text mode), applied before
+``on_client_connected`` so a greeting made there is silent too.
+``capture_bot_audio`` forwards the bot's synthesized audio to the harness,
+for transcription and the recording. ``capture_bot_images`` reports each
+image the bot outputs, by size and format. ``trigger_disconnect`` fires the bot's
+``on_client_disconnected`` when the connection ends; it is off by default,
+since bots often cancel their pipeline there and the server serves several
+scenarios in a row.
+
+The input transport also serves the harness's image to a vision bot, which
+has no camera under eval. The user's audio arrives as a continuous stream,
+so nothing else is special on the way in.
+
+The server, :class:`EvalTransport`, is deprecated:
+:class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport` is the
+same transport over a WebSocket the bot accepted itself, which the dev runner
+and Pipecat Cloud both hand it. This module keeps the parameters both use.
+"""
+
+from urllib.parse import parse_qs, urlsplit
+
+from loguru import logger
+
+from pipecat.evals.serializer import EvalSerializer
+from pipecat.frames.frames import (
+    Frame,
+    LLMConfigureOutputFrame,
+    OutputImageRawFrame,
+    UserImageRequestFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transports.websocket.server import (
+    SingleClientWebsocketServerInputTransport,
+    SingleClientWebsocketServerOutputTransport,
+    SingleClientWebsocketServerParams,
+    SingleClientWebsocketServerTransport,
+)
+from pipecat.utils.deprecation import deprecated
+
+SKIP_TTS_QUERY_PARAM = "skip_tts"
+CAPTURE_AUDIO_QUERY_PARAM = "capture_bot_audio"
+CAPTURE_IMAGES_QUERY_PARAM = "capture_bot_images"
+TRIGGER_DISCONNECT_QUERY_PARAM = "trigger_disconnect"
+
+
+def _query_string(websocket) -> str:
+    """The connection URL's query string (handles both websockets API versions)."""
+    # websockets exposes the request target as ``.path`` (legacy) or
+    # ``.request.path`` (newer); both include the query string.
+    path = getattr(websocket, "path", None)
+    if path is None:
+        request = getattr(websocket, "request", None)
+        path = getattr(request, "path", "") if request is not None else ""
+    return urlsplit(path or "").query
+
+
+def _query_flag(websocket, name: str) -> bool:
+    """Whether the client's connection URL set the boolean query param ``name``."""
+    values = parse_qs(_query_string(websocket)).get(name, [])
+    return bool(values) and values[0].strip().lower() in ("1", "true", "yes")
+
+
+class EvalTransportParams(SingleClientWebsocketServerParams):
+    """Parameters of the eval transport, so a bot's ``transport_params`` names it as such."""
+
+    pass
+
+
+class EvalInputTransport(SingleClientWebsocketServerInputTransport):
+    """Input transport that serves the harness's image.
+
+    A vision bot asks for the user's camera image; under eval there is no
+    camera, so the image the harness registered for the turn is served instead.
+    With no image registered, the request is answered with an error, so the
+    function call that made it still finishes.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Serve image requests; otherwise behave like the base input transport."""
+        await super().process_frame(frame, direction)
+        if isinstance(frame, UserImageRequestFrame):
+            await self._serve_user_image(frame)
+
+    async def _serve_user_image(self, request: UserImageRequestFrame) -> None:
+        serializer = self._params.serializer
+        image = None
+        if isinstance(serializer, EvalSerializer):
+            image = await serializer.user_image_frame(request)
+        if image is None:
+            await self._answer_image_requests([request], "No user image is registered.")
+        else:
+            await self.push_frame(image)
+
+
+class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):
+    """Output transport that reports the bot's images to the harness.
+
+    The WebSocket server output has no video, so an image the bot outputs is
+    handed to the serializer as it arrives, whether or not the bot enabled
+    video output; the serializer sends it only when the harness asked.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Report output images; otherwise behave like the base output transport."""
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputImageRawFrame):
+            await self._write_frame(frame)
+
+
+@deprecated(
+    "`EvalTransport` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `EvalFastAPIWebsocketTransport` instead."
+)
+class EvalTransport(SingleClientWebsocketServerTransport):
+    """WebSocket server transport used by the eval harness (see the module docstring).
+
+    .. deprecated:: 1.13.0
+        Use :class:`~pipecat.evals.fastapi_transport.EvalFastAPIWebsocketTransport`
+        instead, which ``create_transport`` builds when an eval harness connects
+        to the dev runner. Will be removed in 2.0.0.
+    """
+
+    def input(self) -> SingleClientWebsocketServerInputTransport:
+        """Return an input transport that can serve harness-provided images."""
+        if not self._input:
+            self._input = EvalInputTransport(
+                self, self._host, self._port, self._params, self._callbacks, name=self._input_name
+            )
+        return self._input
+
+    def output(self) -> SingleClientWebsocketServerOutputTransport:
+        """Return the eval output transport."""
+        if not self._output:
+            self._output = EvalOutputTransport(self, self._params, name=self._output_name)
+        return self._output
+
+    async def _on_client_connected(self, websocket):
+        """Apply per-connection eval flags, then proceed (config before any greeting)."""
+        serializer = getattr(self._params, "serializer", None)
+        if serializer is not None and hasattr(serializer, "set_capture_audio"):
+            serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
+        if serializer is not None and hasattr(serializer, "set_capture_images"):
+            serializer.set_capture_images(_query_flag(websocket, CAPTURE_IMAGES_QUERY_PARAM))
+
+        if self._input is not None:
+            skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)
+            logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
+            await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
+
+        await super()._on_client_connected(websocket)
+
+    async def _emit_client_disconnected(self, websocket):
+        """Fire ``on_client_disconnected`` only when the harness asked for it.
+
+        Bots often cancel their pipeline there, which would end it between scenarios.
+        """
+        if _query_flag(websocket, TRIGGER_DISCONNECT_QUERY_PARAM):
+            await super()._emit_client_disconnected(websocket)

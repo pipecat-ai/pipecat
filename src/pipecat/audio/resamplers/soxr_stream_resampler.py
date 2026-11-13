@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -20,32 +20,66 @@ When to use the SOXRStreamAudioResampler:
 import time
 
 import numpy as np
-import soxr
+from loguru import logger
 
-from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler, SoxrQuality
+from pipecat.utils.deprecation import deprecated
 
-CLEAR_STREAM_AFTER_SECS = 0.2
+try:
+    import soxr
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        'In order to use SOXRStreamAudioResampler, you need to `uv add "pipecat-ai[soxr]"`.'
+    )
+    raise ImportError(f"Missing module: {e}") from e
+
+_EMPTY_AUDIO = np.array([], dtype=np.int16)
 
 
+@deprecated(
+    "`SOXRStreamAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use "
+    "`SincStreamAudioResampler` instead."
+)
 class SOXRStreamAudioResampler(BaseAudioResampler):
     """Audio resampler implementation using the SoX ResampleStream library.
 
     This resampler uses the SoX ResampleStream library configured for very high
-    quality (VHQ) resampling, providing excellent audio quality at the cost
-    of additional computational overhead.
+    quality (VHQ) resampling by default, providing excellent audio quality at
+    the cost of additional computational overhead.
     It keeps an internal history which avoids clicks at chunk boundaries.
 
     Notes:
         - Only supports mono audio (1 channel).
         - Input must be 16-bit signed PCM audio as raw bytes.
+
+    .. deprecated:: 1.16.0
+        Use :class:`~pipecat.audio.resamplers.sinc_stream_resampler.SincStreamAudioResampler`
+        instead. Will be removed in 2.0.0.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        *,
+        quality: SoxrQuality = "VHQ",
+        clear_after_secs: float | None = 0.2,
+        **kwargs,
+    ):
         """Initialize the resampler.
 
         Args:
-            **kwargs: Additional keyword arguments (currently unused).
+            quality: SOXR quality preset. Higher quality means higher CPU cost.
+                One of "VHQ" (default, very high quality), "HQ", "MQ", "LQ",
+                or "QQ" (quick, lowest latency).
+            clear_after_secs: Seconds of inactivity after which the internal
+                resampler state is cleared to avoid audio artefacts from stale
+                history. Set to ``None`` to never clear (recommended for
+                telephony providers that have irregular gaps between chunks).
+                Defaults to ``0.2``.
+            **kwargs: Reserved for forward compatibility; currently ignored.
         """
+        self._quality = quality
+        self._clear_after_secs = clear_after_secs
         self._in_rate: float | None = None
         self._out_rate: float | None = None
         self._last_resample_time: float = 0
@@ -56,19 +90,18 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
         self._out_rate = out_rate
         self._last_resample_time = time.time()
         self._soxr_stream = soxr.ResampleStream(
-            in_rate=in_rate, out_rate=out_rate, num_channels=1, quality="VHQ", dtype="int16"
+            in_rate=in_rate, out_rate=out_rate, num_channels=1, quality=self._quality, dtype="int16"
         )
 
     def _maybe_clear_internal_state(self):
         current_time = time.time()
-        time_since_last_resample = current_time - self._last_resample_time
-        # If more than CLEAR_STREAM_AFTER_SECS seconds have passed, clear the resampler state
-        if time_since_last_resample > CLEAR_STREAM_AFTER_SECS:
-            if self._soxr_stream:
-                self._soxr_stream.clear()
+        if self._clear_after_secs is not None:
+            if current_time - self._last_resample_time > self._clear_after_secs:
+                if self._soxr_stream:
+                    self._soxr_stream.clear()
         self._last_resample_time = current_time
 
-    def _maybe_initialize_sox_stream(self, in_rate: int, out_rate: int):
+    def _maybe_initialize_sox_stream(self, in_rate: int, out_rate: int) -> "soxr.ResampleStream":
         if self._soxr_stream is None:
             self._initialize(in_rate, out_rate)
         else:
@@ -79,6 +112,9 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
                 f"SOXRStreamAudioResampler cannot be reused with different sample rates: "
                 f"expected {self._in_rate}->{self._out_rate}, got {in_rate}->{out_rate}"
             )
+
+        assert self._soxr_stream is not None
+        return self._soxr_stream
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """Resample audio data using soxr.ResampleStream resampler library.
@@ -94,8 +130,29 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
         if in_rate == out_rate:
             return audio
 
-        self._maybe_initialize_sox_stream(in_rate, out_rate)
+        stream = self._maybe_initialize_sox_stream(in_rate, out_rate)
         audio_data = np.frombuffer(audio, dtype=np.int16)
-        resampled_audio = self._soxr_stream.resample_chunk(audio_data)
+        resampled_audio = stream.resample_chunk(audio_data)
         result = resampled_audio.astype(np.int16).tobytes()
         return result
+
+    async def flush(self) -> bytes:
+        """Emit the audio held in the filter and reset it for the next stream.
+
+        Returns:
+            The remaining resampled audio as raw bytes, empty if no audio has
+            been resampled yet.
+        """
+        if not self._soxr_stream:
+            return b""
+
+        tail = self._soxr_stream.resample_chunk(_EMPTY_AUDIO, last=True)
+        self._soxr_stream.clear()
+        self._last_resample_time = time.time()
+        return tail.astype(np.int16).tobytes()
+
+    async def reset(self):
+        """Discard the audio held in the filter and reset it for the next stream."""
+        if self._soxr_stream:
+            self._soxr_stream.clear()
+            self._last_resample_time = time.time()

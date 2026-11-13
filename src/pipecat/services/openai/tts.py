@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,39 +10,72 @@ This module provides integration with OpenAI's text-to-speech API for
 generating high-quality synthetic speech from text input.
 """
 
-from typing import AsyncGenerator, Dict, Literal, Optional
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Literal
 
 from loguru import logger
 from openai import AsyncOpenAI, BadRequestError
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
+from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.deprecation import deprecated
+from pipecat.utils.http import AsyncHTTPClient
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 ValidVoice = Literal[
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
+    "alloy",
+    "ash",
+    "ballad",
+    "cedar",
+    "coral",
+    "echo",
+    "fable",
+    "marin",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+    "verse",
 ]
 
-VALID_VOICES: Dict[str, ValidVoice] = {
+VALID_VOICES: dict[str, ValidVoice] = {
     "alloy": "alloy",
     "ash": "ash",
     "ballad": "ballad",
+    "cedar": "cedar",
     "coral": "coral",
     "echo": "echo",
     "fable": "fable",
-    "onyx": "onyx",
+    "marin": "marin",
     "nova": "nova",
+    "onyx": "onyx",
     "sage": "sage",
     "shimmer": "shimmer",
     "verse": "verse",
 }
+
+
+@dataclass
+class OpenAITTSSettings(TTSSettings):
+    """Settings for OpenAITTSService.
+
+    Parameters:
+        instructions: Instructions to guide voice synthesis behavior.
+        speed: Voice speed control (0.25 to 4.0, default 1.0).
+    """
+
+    instructions: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):
@@ -53,18 +86,41 @@ class OpenAITTSService(TTSService):
     speech synthesis with streaming audio output.
     """
 
-    OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
+    Settings = OpenAITTSSettings
+    _settings: Settings
+
+    @deprecated(
+        "`OpenAITTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `OpenAITTSService.Settings` instead."
+    )
+    class InputParams(BaseModel):
+        """Input parameters for OpenAI TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=OpenAITTSService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
+
+        Parameters:
+            instructions: Instructions to guide voice synthesis behavior.
+            speed: Voice speed control (0.25 to 4.0, default 1.0).
+        """
+
+        instructions: str | None = None
+        speed: float | None = None
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        voice: str = "alloy",
-        model: str = "gpt-4o-mini-tts",
-        sample_rate: Optional[int] = None,
-        instructions: Optional[str] = None,
-        speed: Optional[float] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        http_client: AsyncHTTPClient | None = None,
+        voice: str | None = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
+        instructions: str | None = None,
+        speed: float | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize OpenAI TTS service.
@@ -72,25 +128,99 @@ class OpenAITTSService(TTSService):
         Args:
             api_key: OpenAI API key for authentication. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
+            http_client: Custom async HTTP client for API requests, e.g. one with a
+                longer request timeout. Prefer ``openai.DefaultAsyncHttpxClient``, which
+                keeps the SDK's connection limits and redirect handling; a bare client
+                uses its own defaults instead. The SDK's HTTP client family follows the
+                installed ``openai`` version, so build any ``Timeout`` you pass it from
+                that same family. Defaults to None, which lets the SDK build its own
+                client.
             voice: Voice ID to use for synthesis. Defaults to "alloy".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAITTSService.Settings(voice=...)`` instead.
+                    Will be removed in 2.0.0.
+
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAITTSService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAITTSService.Settings(instructions=...)`` instead.
+                    Will be removed in 2.0.0.
+
             speed: Voice speed control (0.25 to 4.0, default 1.0).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAITTSService.Settings(speed=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            params: Optional synthesis controls (acting instructions, speed, ...).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAITTSService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to TTSService.
         """
-        if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
+        if sample_rate and sample_rate != OPENAI_SAMPLE_RATE:
             logger.warning(
-                f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"OpenAI TTS only supports {OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._speed = speed
-        self.set_model_name(model)
-        self.set_voice(voice)
-        self._instructions = instructions
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gpt-4o-mini-tts",
+            voice="alloy",
+            language=None,
+            instructions=None,
+            speed=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            self._warn_init_param_moved_to_settings("voice", "voice")
+            default_settings.voice = voice
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if instructions is not None:
+            self._warn_init_param_moved_to_settings("instructions", "instructions")
+            default_settings.instructions = instructions
+        if speed is not None:
+            self._warn_init_param_moved_to_settings("speed", "speed")
+            default_settings.speed = speed
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.instructions is not None:
+                    default_settings.instructions = params.instructions
+                if params.speed is not None:
+                    default_settings.speed = params.speed
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -100,15 +230,6 @@ class OpenAITTSService(TTSService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the TTS model to use.
-
-        Args:
-            model: The model name to use for text-to-speech synthesis.
-        """
-        logger.info(f"Switching TTS model to: [{model}]")
-        self.set_model_name(model)
-
     async def start(self, frame: StartFrame):
         """Start the OpenAI TTS service.
 
@@ -116,39 +237,47 @@ class OpenAITTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self.sample_rate != self.OPENAI_SAMPLE_RATE:
+        if self.sample_rate != OPENAI_SAMPLE_RATE:
             logger.warning(
-                f"OpenAI TTS requires {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"OpenAI TTS requires {OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using OpenAI's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        voice = assert_given(self._settings.voice)
+        if voice is None:
+            yield ErrorFrame(error="OpenAI TTS voice must be specified")
+            return
+        if voice not in VALID_VOICES:
+            yield ErrorFrame(
+                error=f"OpenAI TTS voice {voice!r} is not supported "
+                f"(must be one of: {', '.join(sorted(VALID_VOICES))})"
+            )
+            return
         try:
-            await self.start_ttfb_metrics()
-
             # Setup API parameters
             create_params = {
                 "input": text,
-                "model": self.model_name,
-                "voice": VALID_VOICES[self._voice_id],
+                "model": self._settings.model,
+                "voice": VALID_VOICES[voice],
                 "response_format": "pcm",
             }
 
-            if self._instructions:
-                create_params["instructions"] = self._instructions
+            if self._settings.instructions:
+                create_params["instructions"] = self._settings.instructions
 
-            if self._speed:
-                create_params["speed"] = self._speed
+            if self._settings.speed:
+                create_params["speed"] = self._settings.speed
 
             async with self._client.audio.speech.with_streaming_response.create(
                 **create_params
@@ -159,7 +288,7 @@ class OpenAITTSService(TTSService):
                         f"{self} error getting audio (status: {r.status_code}, error: {error})"
                     )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {r.status_code}, error: {error})"
+                        error=f"Error getting audio (status: {r.status_code}, error: {error})"
                     )
                     return
 
@@ -167,12 +296,10 @@ class OpenAITTSService(TTSService):
 
                 CHUNK_SIZE = self.chunk_size
 
-                yield TTSStartedFrame()
                 async for chunk in r.iter_bytes(CHUNK_SIZE):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
-                yield TTSStoppedFrame()
         except BadRequestError as e:
-            logger.exception(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

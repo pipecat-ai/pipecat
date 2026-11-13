@@ -2,3 +2,9 @@ prune docs
 prune examples
 prune scripts
 prune tests
+
+# Ship the CLI scaffolding templates in the sdist (jinja + client trees, incl. dotfiles).
+graft src/pipecat/cli/templates
+
+# Ship the agent-readiness files (AGENTS.md + CLAUDE.md) written by `pipecat init`.
+graft src/pipecat/cli/agent_templates

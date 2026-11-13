@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,16 +16,19 @@ The module consists of three main components:
 - HeyGenTransport: Main transport implementation that coordinates input/output transports
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotConnectedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -35,9 +38,16 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.services.heygen.api import NewSessionRequest
-from pipecat.services.heygen.client import HeyGenCallbacks, HeyGenClient
+from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
+from pipecat.services.heygen.client import (
+    HEY_GEN_SAMPLE_RATE,
+    HeyGenCallbacks,
+    HeyGenClient,
+    ServiceType,
+)
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -66,8 +76,6 @@ class HeyGenInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -79,9 +87,9 @@ class HeyGenInputTransport(BaseInputTransport):
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup input transport resources."""
+        """Release input transport resources."""
         await super().cleanup()
-        await self._client.cleanup()
+        await self._client.stop()
 
     async def start(self, frame: StartFrame):
         """Start the input transport.
@@ -90,11 +98,6 @@ class HeyGenInputTransport(BaseInputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
 
         await self.set_transport_ready(frame)
 
@@ -161,10 +164,21 @@ class HeyGenOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
+        self._resampler = create_stream_resampler(clear_after_secs=None)
 
-        # Whether we have seen a StartFrame already.
-        self._initialized = False
         self._event_id = None
+
+    @property
+    def capabilities(self) -> BotCapabilities:
+        """The media this transport sends to the user.
+
+        The HeyGen avatar publishes its video to the room itself, so the user
+        receives bot video even though this transport sends none.
+
+        Returns:
+            The ``audio_out`` capability, with ``video_out`` set.
+        """
+        return super().capabilities.override(BotCapabilities(video_out=True))
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.
@@ -173,12 +187,13 @@ class HeyGenOutputTransport(BaseOutputTransport):
             setup: The frame processor setup configuration.
         """
         await super().setup(setup)
+
         await self._client.setup(setup)
 
     async def cleanup(self):
-        """Cleanup output transport resources."""
+        """Release output transport resources."""
         await super().cleanup()
-        await self._client.cleanup()
+        await self._client.stop()
 
     async def start(self, frame: StartFrame):
         """Start the output transport.
@@ -187,12 +202,6 @@ class HeyGenOutputTransport(BaseOutputTransport):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-
-        if self._initialized:
-            return
-
-        self._initialized = True
-        await self._client.start(frame, self.audio_chunk_size)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 
@@ -229,8 +238,10 @@ class HeyGenOutputTransport(BaseOutputTransport):
                     logger.warning("self._event_id is already defined!")
                 self._event_id = str(frame.id)
             elif isinstance(frame, BotStoppedSpeakingFrame):
-                await self._client.agent_speak_end(self._event_id)
-                self._event_id = None
+                if self._event_id is not None:
+                    await self._send_resampler_tail(self._event_id)
+                    await self._client.agent_speak_end(self._event_id)
+                    self._event_id = None
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -251,7 +262,9 @@ class HeyGenOutputTransport(BaseOutputTransport):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
-            await self._client.interrupt(self._event_id)
+            if self._event_id is not None:
+                await self._client.interrupt(self._event_id)
+            await self._resampler.reset()
             await self.push_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._client.start_agent_listening()
@@ -263,11 +276,27 @@ class HeyGenOutputTransport(BaseOutputTransport):
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the HeyGen transport.
 
+        Resamples audio to 24kHz if needed before sending.
+
         Args:
             frame: The audio frame to write.
         """
-        await self._client.agent_speak(bytes(frame.audio), self._event_id)
+        audio = frame.audio
+        if frame.sample_rate != HEY_GEN_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, frame.sample_rate, HEY_GEN_SAMPLE_RATE)
+        if self._event_id is None:
+            # No active bot-speech event — drop the chunk rather than send a
+            # message the HeyGen API will reject.
+            logger.warning(f"{self}: dropping audio frame because no event_id is set")
+            return False
+        await self._client.agent_speak(bytes(audio), self._event_id)
         return True
+
+    async def _send_resampler_tail(self, event_id: str):
+        """Send the audio the resampler still holds, so the bot's speech ends whole."""
+        tail = await self._resampler.flush()
+        if tail:
+            await self._client.agent_speak(tail, event_id)
 
 
 class HeyGenParams(TransportParams):
@@ -288,19 +317,28 @@ class HeyGenTransport(BaseTransport):
     When used, the Pipecat bot joins the same virtual room as the HeyGen Avatar and the user.
     This is achieved by using `HeyGenTransport`, which initiates the conversation via
     `HeyGenApi` and obtains a room URL that all participants connect to.
+
+    Event handlers available:
+
+    - on_client_connected(transport, participant): Participant connected to the session
+    - on_client_disconnected(transport, participant): Participant disconnected from the session
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, participant):
+            ...
     """
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
         api_key: str,
-        params: HeyGenParams = HeyGenParams(),
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
-        session_request: NewSessionRequest = NewSessionRequest(
-            avatar_id="Shawn_Therapist_public",
-            version="v2",
-        ),
+        params: HeyGenParams | None = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
+        session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
+        service_type: ServiceType | None = None,
     ):
         """Initialize the HeyGen transport.
 
@@ -313,12 +351,14 @@ class HeyGenTransport(BaseTransport):
             params: HeyGen-specific configuration parameters (default: HeyGenParams())
             input_name: Optional custom name for the input transport
             output_name: Optional custom name for the output transport
-            session_request: Configuration for the HeyGen session (default: uses Shawn_Therapist_public avatar)
+            session_request: Configuration for the HeyGen session
+            service_type: Service type for the avatar session
 
         Note:
             The transport will automatically join the same virtual room as the HeyGen Avatar
             and user through the HeyGenClient, which handles session initialization via HeyGenApi.
         """
+        params = params or HeyGenParams()
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
         self._client = HeyGenClient(
@@ -326,19 +366,28 @@ class HeyGenTransport(BaseTransport):
             session=session,
             params=params,
             session_request=session_request,
+            service_type=service_type,
             callbacks=HeyGenCallbacks(
+                on_connected=self._on_connected,
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
         )
-        self._input: Optional[HeyGenInputTransport] = None
-        self._output: Optional[HeyGenOutputTransport] = None
+        self._input: HeyGenInputTransport | None = None
+        self._output: HeyGenOutputTransport | None = None
         self._HeyGen_participant_id = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_connected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+    async def _on_connected(self):
+        """Handle bot connected to LiveKit room."""
+        await self._call_event_handler("on_connected")
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_participant_disconnected(self, participant_id: str):
         logger.debug(f"HeyGen participant {participant_id} disconnected")
@@ -375,6 +424,8 @@ class HeyGenTransport(BaseTransport):
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, participant: Any):
         """Handle client disconnected events."""

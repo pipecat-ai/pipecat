@@ -1,0 +1,316 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+
+import os
+import re
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.evals.transport import EvalTransportParams
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
+    TextFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.tts import GoogleTTSService
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
+
+load_dotenv(override=True)
+
+
+marker = "|----|"
+# The LLM sometimes writes the separator without its closing "|", so any run
+# of three or more dashes counts, once something other than the separator
+# follows it (a separator still streaming in, like "|--", doesn't match yet).
+marker_pattern = re.compile(r"\|-{3,}\|?(?=[^-|])")
+system_message = f"""
+You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses.
+
+You are expert at transcribing audio to text. You will receive a mixture of audio and text input. When
+asked to transcribe what the user said, output an exact, word-for-word transcription.
+
+Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+
+Each time you answer, you should respond in three parts.
+
+1. Transcribe exactly what the user said.
+2. Output the separator field '{marker}'.
+3. Respond to the user's input in a helpful, creative way using only simple text and punctuation.
+
+Example:
+
+User: How many ounces are in a pound?
+
+You: How many ounces are in a pound?
+{marker}
+There are 16 ounces in a pound.
+"""
+
+
+@dataclass
+class MagicDemoTranscriptionFrame(Frame):
+    text: str
+
+
+class UserAudioCollector(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self._audio_frames = []
+        self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
+        self._user_speaking = False
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            # We could gracefully handle both audio input and text/transcription input ...
+            # but let's leave that as an exercise to the reader. :-)
+            return
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            message = await LLMContext.create_audio_message(audio_frames=self._audio_frames)
+            await self.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
+
+        elif isinstance(frame, InputAudioRawFrame):
+            if self._user_speaking:
+                self._audio_frames.append(frame)
+            else:
+                # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
+                # frames as necessary. Assume all audio frames have the same duration.
+                self._audio_frames.append(frame)
+                frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                buffer_duration = frame_duration * len(self._audio_frames)
+                while buffer_duration > self._start_secs:
+                    self._audio_frames.pop(0)
+                    buffer_duration -= frame_duration
+
+        await self.push_frame(frame, direction)
+
+
+class TranscriptExtractor(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self._accumulator = ""
+        self._processing_llm_response = False
+        self._accumulating_transcript = False
+
+    def reset(self):
+        self._accumulator = ""
+        self._processing_llm_response = False
+        self._accumulating_transcript = False
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._processing_llm_response = True
+            self._accumulating_transcript = True
+        elif isinstance(frame, TextFrame) and self._processing_llm_response:
+            if self._accumulating_transcript:
+                # The separator can be split across text frames, so look for it
+                # in everything received so far.
+                self._accumulator += frame.text
+                match = marker_pattern.search(self._accumulator)
+                if not match:
+                    # do not push this frame
+                    return
+                self._accumulating_transcript = False
+                frame.text = self._accumulator[match.end() :]
+                self._accumulator = self._accumulator[: match.start()]
+            await self.push_frame(frame)
+            return
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._accumulating_transcript:
+                # No separator: speak the whole response rather than nothing.
+                await self.push_frame(TextFrame(text=self._accumulator))
+                self._accumulator = ""
+            await self.push_frame(MagicDemoTranscriptionFrame(text=self._accumulator.strip()))
+            self.reset()
+
+        await self.push_frame(frame, direction)
+
+
+class TranscriptionContextFixup(FrameProcessor):
+    def __init__(self, context):
+        super().__init__()
+        self._context = context
+        self._transcript = "THIS IS A TRANSCRIPT"
+
+    def is_user_audio_message(self, message):
+        # A universal-context audio message is a user message whose content is a
+        # list ending with an "input_audio" part (see
+        # LLMContext.create_audio_message). Don't assume a Google context.
+        if not isinstance(message, dict):
+            return False
+        content = message.get("content")
+        if not content or not isinstance(content, list):
+            return False
+        return message.get("role") == "user" and content[-1].get("type") == "input_audio"
+
+    def swap_user_audio(self):
+        if not self._transcript:
+            return
+        # Search backwards for the most recent user message that still holds
+        # audio and replace its content with the transcript text, so the context
+        # keeps only text. Audio is large in tokens and bandwidth.
+        for message in reversed(self._context.messages):
+            if self.is_user_audio_message(message):
+                message["content"] = self._transcript
+                return
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, MagicDemoTranscriptionFrame):
+            # Swap as soon as the transcript arrives: this guarantees
+            # self._transcript is set when we rewrite the context (the audio
+            # message is already in the context from the LLMMessagesAppendFrame).
+            self._transcript = frame.text
+            self.swap_user_audio()
+            self._transcript = ""
+
+        await self.push_frame(frame, direction)
+
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "eval": lambda: EvalTransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info("Starting bot")
+
+    llm = GoogleLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        settings=GoogleLLMService.Settings(
+            model="gemini-3.6-flash",
+            system_instruction=system_message,
+            # force a certain amount of thinking if you want it
+            # thinking=GoogleLLMService.ThinkingConfig(thinking_level="medium")
+        ),
+    )
+
+    tts = GoogleTTSService(
+        settings=GoogleTTSService.Settings(
+            voice="en-US-Chirp3-HD-Charon",
+            language=Language.EN_US,
+        ),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
+    )
+
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+    audio_collector = UserAudioCollector()
+    pull_transcript_out_of_llm_output = TranscriptExtractor()
+    fixup_context_messages = TranscriptionContextFixup(context)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            audio_collector,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            pull_transcript_out_of_llm_output,
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+            fixup_context_messages,
+        ]
+    )
+
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.add_workers(worker)
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info("Client connected")
+        # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
+        await worker.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await runner.cancel()
+
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

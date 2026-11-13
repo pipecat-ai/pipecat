@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,6 +7,7 @@
 import unittest
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
@@ -21,7 +22,7 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
     async def test_roundtrip(self):
         text_frame = TextFrame(text="hello world")
         frame = await self.serializer.deserialize(await self.serializer.serialize(text_frame))
-        self.assertEqual(text_frame, frame)
+        self.assertEqual(frame.text, text_frame.text)
 
         transcription_frame = TranscriptionFrame(
             text="Hello there!", user_id="123", timestamp="2021-01-01"
@@ -29,10 +30,35 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(
             await self.serializer.serialize(transcription_frame)
         )
-        self.assertEqual(frame, transcription_frame)
+        self.assertEqual(frame.text, transcription_frame.text)
+        self.assertEqual(frame.user_id, transcription_frame.user_id)
+        self.assertEqual(frame.timestamp, transcription_frame.timestamp)
 
         audio_frame = OutputAudioRawFrame(audio=b"1234567890", sample_rate=16000, num_channels=1)
         frame = await self.serializer.deserialize(await self.serializer.serialize(audio_frame))
         self.assertEqual(frame.audio, audio_frame.audio)
         self.assertEqual(frame.sample_rate, audio_frame.sample_rate)
         self.assertEqual(frame.num_channels, audio_frame.num_channels)
+
+    async def test_interruption_frame_roundtrip(self):
+        interruption_frame = InterruptionFrame()
+        frame = await self.serializer.deserialize(
+            await self.serializer.serialize(interruption_frame)
+        )
+        self.assertIsInstance(frame, InterruptionFrame)
+
+    async def test_malformed_message_does_not_prevent_next_frame(self):
+        for data in (b"\x80", b"\x0a\x05x", b"\x00"):
+            with self.subTest(data=data):
+                self.assertIsNone(await self.serializer.deserialize(data))
+
+                text_frame = TextFrame(text="Still connected")
+                frame = await self.serializer.deserialize(
+                    await self.serializer.serialize(text_frame)
+                )
+                self.assertIsInstance(frame, TextFrame)
+                self.assertEqual(frame.text, text_frame.text)
+
+
+if __name__ == "__main__":
+    unittest.main()

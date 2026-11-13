@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,7 +7,7 @@
 """Consumer processor for consuming frames from ProducerProcessor queues."""
 
 import asyncio
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -42,7 +42,7 @@ class ConsumerProcessor(FrameProcessor):
         self._transformer = transformer
         self._direction = direction
         self._producer = producer
-        self._consumer_task: Optional[asyncio.Task] = None
+        self._consumer_task: asyncio.Task | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle lifecycle events.
@@ -70,17 +70,26 @@ class ConsumerProcessor(FrameProcessor):
 
     async def _stop(self, _: EndFrame):
         """Stop the consumer task."""
-        if self._consumer_task:
-            await self.cancel_task(self._consumer_task)
+        await self._cancel_consumer_task()
 
     async def _cancel(self, _: CancelFrame):
         """Cancel the consumer task."""
+        await self._cancel_consumer_task()
+
+    async def cleanup(self):
+        """Clean up the processor and release resources."""
+        await super().cleanup()
+        await self._cancel_consumer_task()
+
+    async def _cancel_consumer_task(self):
+        """Cancel the consumer task, idempotently."""
         if self._consumer_task:
             await self.cancel_task(self._consumer_task)
+            self._consumer_task = None
 
     async def _consumer_task_handler(self):
         """Handle consuming frames from the producer queue."""
         while True:
             frame = await self._queue.get()
             new_frame = await self._transformer(frame)
-            await self.push_frame(new_frame, self._direction)
+            await self.queue_frame(new_frame, self._direction)

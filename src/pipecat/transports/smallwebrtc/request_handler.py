@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,10 +10,12 @@ This module provides a client for handling web requests and managing WebRTC conn
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any
 
+from aiortc.sdp import candidate_from_sdp
 from fastapi import HTTPException
 from loguru import logger
 
@@ -34,9 +36,44 @@ class SmallWebRTCRequest:
 
     sdp: str
     type: str
-    pc_id: Optional[str] = None
-    restart_pc: Optional[bool] = None
-    request_data: Optional[Any] = None
+    pc_id: str | None = None
+    restart_pc: bool | None = None
+    request_data: Any | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Accept both snake_case and camelCase for the request_data field."""
+        if "requestData" in data and "request_data" not in data:
+            data["request_data"] = data.pop("requestData")
+        return cls(**data)
+
+
+@dataclass
+class IceCandidate:
+    """The remote ice candidate object received from the peer connection.
+
+    Parameters:
+        candidate: The ice candidate patch SDP string (Session Description Protocol).
+        sdp_mid: The SDP mid for the candidate patch.
+        sdp_mline_index: The SDP mline index for the candidate patch.
+    """
+
+    candidate: str
+    sdp_mid: str
+    sdp_mline_index: int
+
+
+@dataclass
+class SmallWebRTCPatchRequest:
+    """Small WebRTC transport session arguments for the runner.
+
+    Parameters:
+        pc_id: Identifier for the peer connection.
+        candidates: A list of ICE candidate patches.
+    """
+
+    pc_id: str
+    candidates: list[IceCandidate]
 
 
 class ConnectionMode(Enum):
@@ -59,9 +96,9 @@ class SmallWebRTCRequestHandler:
 
     def __init__(
         self,
-        ice_servers: Optional[List[IceServer]] = None,
+        ice_servers: list[IceServer] | None = None,
         esp32_mode: bool = False,
-        host: Optional[str] = None,
+        host: str | None = None,
         connection_mode: ConnectionMode = ConnectionMode.MULTIPLE,
     ) -> None:
         """Initialize a SmallWebRTC request handler.
@@ -81,9 +118,9 @@ class SmallWebRTCRequestHandler:
         self._connection_mode = connection_mode
 
         # Store connections by pc_id
-        self._pcs_map: Dict[str, SmallWebRTCConnection] = {}
+        self._pcs_map: dict[str, SmallWebRTCConnection] = {}
 
-    def _check_single_connection_constraints(self, pc_id: Optional[str]) -> None:
+    def _check_single_connection_constraints(self, pc_id: str | None) -> None:
         """Check if the connection request satisfies single connection mode constraints.
 
         Args:
@@ -116,7 +153,7 @@ class SmallWebRTCRequestHandler:
                 detail="Cannot create new connection with existing connection active",
             )
 
-    def update_ice_servers(self, ice_servers: Optional[List[IceServer]] = None):
+    def update_ice_servers(self, ice_servers: list[IceServer] | None = None):
         """Update the list of ICE servers used for WebRTC connections."""
         self._ice_servers = ice_servers
 
@@ -124,7 +161,7 @@ class SmallWebRTCRequestHandler:
         self,
         request: SmallWebRTCRequest,
         webrtc_connection_callback: Callable[[Any], Awaitable[None]],
-    ) -> None:
+    ) -> dict[str, str] | None:
         """Handle a SmallWebRTC request and resolve the pending answer.
 
         This method will:
@@ -139,6 +176,10 @@ class SmallWebRTCRequestHandler:
                 SDP, type, and optionally a `pc_id`.
             webrtc_connection_callback (Callable[[Any], Awaitable[None]]): An
                 asynchronous callback function that is invoked with the WebRTC connection.
+
+        Returns:
+            Dictionary containing SDP answer, type, and peer connection ID,
+            or None if no answer is available.
 
         Raises:
             HTTPException: If connection mode constraints are violated
@@ -183,6 +224,8 @@ class SmallWebRTCRequestHandler:
                     )
 
             answer = pipecat_connection.get_answer()
+            if answer is None:
+                raise RuntimeError("SmallWebRTC connection produced no SDP answer")
 
             if self._esp32_mode:
                 from pipecat.runner.utils import smallwebrtc_sdp_munging
@@ -196,6 +239,25 @@ class SmallWebRTCRequestHandler:
             logger.error(f"Error processing SmallWebRTC request: {e}")
             logger.debug(f"SmallWebRTC request details: {request}")
             raise
+
+    async def handle_patch_request(self, request: SmallWebRTCPatchRequest):
+        """Handle a SmallWebRTC patch candidate request."""
+        peer_connection = self._pcs_map.get(request.pc_id)
+
+        if not peer_connection:
+            raise HTTPException(status_code=404, detail="Peer connection not found")
+
+        for c in request.candidates:
+            if c.candidate:
+                candidate = candidate_from_sdp(c.candidate)
+                candidate.sdpMid = c.sdp_mid
+                candidate.sdpMLineIndex = c.sdp_mline_index
+            else:
+                # An empty candidate string is an RFC 8840 end-of-candidates marker
+                # (e.g. sent by Firefox per media line). aiortc signals this by
+                # passing `None` rather than a candidate with an empty SDP.
+                candidate = None
+            await peer_connection.add_ice_candidate(candidate)
 
     async def close(self):
         """Clear the connection map."""

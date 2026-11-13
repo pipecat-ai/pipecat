@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,12 +10,13 @@ This module provides a smart turn analyzer that uses CoreML models for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 from loguru import logger
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
+from pipecat.utils.deprecation import deprecated
 
 try:
     import coremltools as ct
@@ -24,17 +25,24 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use the LocalSmartTurnAnalyzer, you need to `pip install pipecat-ai[local-smart-turn]`."
+        'In order to use the LocalSmartTurnAnalyzer, you need to `uv add "pipecat-ai[local-smart-turn]"`.'
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
+@deprecated(
+    "`LocalCoreMLSmartTurnAnalyzer` is deprecated since 0.0.106 and will be removed in 2.0.0. "
+    "Use `LocalSmartTurnAnalyzerV3` instead."
+)
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     """Local smart turn analyzer using CoreML models.
 
     Provides end-of-turn detection using locally-stored CoreML models,
     enabling offline operation without network dependencies. Optimized
     for Apple Silicon and other CoreML-compatible hardware.
+
+    .. deprecated:: 0.0.106
+        Use :class:`LocalSmartTurnAnalyzerV3` instead. Will be removed in 2.0.0.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
@@ -62,7 +70,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model = ct.models.MLModel(core_ml_model_path)
         logger.debug("Loaded Local Smart Turn")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local CoreML model."""
         inputs = self._turn_processor(
             audio_array,

@@ -1,0 +1,2058 @@
+#
+# Copyright (c) 2024–2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Sarvam AI Speech-to-Text service implementations.
+
+:class:`SarvamSTTService` and :class:`SarvamRealtimeSTTService` stream audio to
+Sarvam's WebSocket APIs for Indian language speech recognition. The former
+covers the transcription endpoint, with Voice Activity Detection and a choice
+of audio formats; the latter targets the realtime endpoint, which adds
+server-side endpointing and in-band configuration updates.
+
+:class:`SarvamHttpSTTService` instead sends each VAD-detected speech segment to
+Sarvam's synchronous REST API and yields the transcription inline, so it also
+suits callers that use ``run_stt()`` directly.
+"""
+
+import asyncio
+import base64
+import io
+import json
+import wave
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field, fields
+from typing import Any, Literal, cast
+from urllib.parse import urlencode
+
+from loguru import logger
+from pydantic import BaseModel
+from websockets.exceptions import ConnectionClosedError
+from websockets.protocol import State
+
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    STTMetadataFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import (
+    SARVAM_HTTP_TTFS_P99,
+    SARVAM_REALTIME_TTFS_P99,
+    SARVAM_TTFS_P99,
+)
+from pipecat.services.stt_service import SegmentedSTTService, STTService, WebsocketSTTService
+from pipecat.services.websocket_service import ReportErrorCallback
+from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
+
+try:
+    from sarvamai import AsyncSarvamAI
+    from sarvamai.core.api_error import ApiError
+    from sarvamai.core.events import EventType
+    from sarvamai.core.request_options import RequestOptions
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error('In order to use Sarvam, you need to `uv add "pipecat-ai[sarvam]"`.')
+    raise ImportError(f"Missing module: {e}") from e
+
+
+def language_to_sarvam_language(language: Language) -> str:
+    """Convert a Language enum to Sarvam's language code format.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The Sarvam language code string.
+    """
+    # Mapping of pipecat Language enum to Sarvam language codes
+    LANGUAGE_MAP = {
+        Language.KOK: "kok-IN",
+        Language.KOK_IN: "kok-IN",
+        Language.MAI: "mai-IN",
+        Language.MAI_IN: "mai-IN",
+        Language.BN: "bn-IN",
+        Language.BN_IN: "bn-IN",
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        Language.SD: "sd-IN",
+        Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        Language.PA: "pa-IN",
+        Language.PA_IN: "pa-IN",
+        Language.OR: "od-IN",
+        Language.OR_IN: "od-IN",
+        Language.EN: "en-IN",
+        Language.EN_IN: "en-IN",
+        Language.AS: "as-IN",
+        Language.AS_IN: "as-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
+    }
+
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+# Sarvam language codes mapped back to pipecat Language values, for the codes
+# Sarvam reports on transcription results.
+_SARVAM_CODE_TO_LANGUAGE = {
+    "bn-IN": Language.BN_IN,
+    "gu-IN": Language.GU_IN,
+    "hi-IN": Language.HI_IN,
+    "kn-IN": Language.KN_IN,
+    "ml-IN": Language.ML_IN,
+    "mr-IN": Language.MR_IN,
+    "ta-IN": Language.TA_IN,
+    "te-IN": Language.TE_IN,
+    "pa-IN": Language.PA_IN,
+    "od-IN": Language.OR_IN,
+    "en-US": Language.EN_US,
+    "en-IN": Language.EN_IN,
+    "as-IN": Language.AS_IN,
+    "ur-IN": Language.UR_IN,
+    "mai-IN": Language.MAI_IN,
+    "sd-IN": Language.SD_IN,
+    "kok-IN": Language.KOK_IN,
+    "ne-IN": Language.NE_IN,
+    "ks-IN": Language.KS_IN,
+    "sa-IN": Language.SA_IN,
+    "sat-IN": Language.SAT_IN,
+    "mni-IN": Language.MNI_IN,
+    "brx-IN": Language.BRX_IN,
+    "doi-IN": Language.DOI_IN,
+}
+
+
+def _language_code_to_language(
+    language_code: str | None, warned: set[str], service: Any
+) -> Language | None:
+    """Map a Sarvam language code to a pipecat Language, or None if unresolved.
+
+    Returns None for Sarvam's own "unknown"/auto-detect placeholder and for
+    any code -- present or future -- the table doesn't have an entry for,
+    rather than guessing a specific language. A code the table doesn't carry
+    only logs a warning once per ``warned`` set, so a long-running session
+    doesn't spam it every turn.
+
+    Args:
+        language_code: The code Sarvam reported, or the configured one.
+        warned: The owning service's set of codes already warned about.
+        service: The owning service, named in the warning.
+    """
+    # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
+    # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
+    if not language_code or language_code == "unknown":
+        return None
+    language = _SARVAM_CODE_TO_LANGUAGE.get(language_code)
+    if language is None and language_code not in warned:
+        warned.add(language_code)
+        logger.warning(
+            f"{service} received Sarvam language code {language_code!r}, which has no "
+            "Language mapping; leaving TranscriptionFrame.language unset for it "
+            "rather than guessing."
+        )
+    return language
+
+
+SarvamMode = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    """Immutable configuration for a Sarvam STT model.
+
+    Parameters:
+        supports_mode: Whether the model accepts mode parameter.
+        supports_language: Whether the model accepts language parameter.
+        default_language: Default language code (None = auto-detect).
+        default_mode: Default mode (None = not applicable).
+    """
+
+    supports_mode: bool
+    supports_language: bool
+    default_language: str | None
+    default_mode: SarvamMode | None
+
+
+MODEL_CONFIGS: dict[str, ModelConfig] = {
+    "saaras:v3": ModelConfig(
+        supports_mode=True,
+        supports_language=True,
+        default_language="unknown",
+        default_mode="transcribe",
+    ),
+    "saaras:v4": ModelConfig(
+        supports_mode=True,
+        supports_language=True,
+        default_language="unknown",
+        default_mode="transcribe",
+    ),
+}
+
+
+def _configured_language_code(settings: STTSettings, config: ModelConfig) -> str | None:
+    """Return the Sarvam language code to send for the configured language.
+
+    ``STTService`` stores the configured language already converted to a Sarvam
+    code, so it is sent as-is. With no language configured, the model's default
+    is sent (``"unknown"``, Sarvam's auto-detect).
+
+    Args:
+        settings: The service's settings.
+        config: The capabilities of the configured model.
+    """
+    return assert_given(settings.language) or config.default_language
+
+
+@dataclass
+class SarvamSTTSettings(STTSettings):
+    """Settings for SarvamSTTService.
+
+    Parameters:
+        vad_signals: Enable VAD signals in response.
+        high_vad_sensitivity: Enable high VAD sensitivity.
+        positive_speech_threshold: VAD probability threshold (0.0-1.0) above which
+            a frame is considered speech.
+        negative_speech_threshold: VAD probability threshold (0.0-1.0) below which
+            a frame is considered silence.
+        min_speech_frames: Minimum consecutive speech frames to start a speech segment.
+        first_turn_min_speech_frames: Minimum speech frames for the first user turn.
+        negative_frames_count: Number of silence frames within the window to end
+            a speech segment.
+        negative_frames_window: Sliding window size (in frames) for counting
+            negative frames.
+        start_speech_volume_threshold: Volume level (dB) below which audio is
+            too quiet to be speech.
+        interrupt_min_speech_frames: Minimum speech frames to register a
+            barge-in/interruption.
+        pre_speech_pad_frames: Number of audio frames to prepend before detected
+            speech onset.
+        num_initial_ignored_frames: Number of leading audio frames to skip at
+            connection start.
+    """
+
+    vad_signals: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    high_vad_sensitivity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    positive_speech_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_speech_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    first_turn_min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_count: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_window: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    start_speech_volume_threshold: float | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    interrupt_min_speech_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pre_speech_pad_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_initial_ignored_frames: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class SarvamSTTService(STTService):
+    """Sarvam speech-to-text service.
+
+    Provides real-time speech recognition using Sarvam's WebSocket API.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_connected(service): Connected to Sarvam WebSocket
+    - on_disconnected(service): Disconnected from Sarvam WebSocket
+    - on_connection_error(service, error): Connection error occurred
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(service):
+            ...
+    """
+
+    Settings = SarvamSTTSettings
+    _settings: Settings
+
+    @deprecated(
+        "`SarvamSTTService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. "
+        "Use `SarvamSTTService.Settings` instead."
+    )
+    class InputParams(BaseModel):
+        """Configuration parameters for Sarvam STT service.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=SarvamSTTService.Settings(...)`` instead.
+            Will be removed in 2.0.0.
+
+        Parameters:
+            language: Target language for transcription.
+                - saaras:v3: Defaults to "unknown" (auto-detect supported)
+                - saaras:v4: Defaults to "unknown" (auto-detect supported)
+            mode: Mode of operation for models that support it. Options: transcribe,
+                translate, verbatim, translit, codemix. Defaults to "transcribe".
+            vad_signals: Enable VAD signals in response. Defaults to None.
+            high_vad_sensitivity: Enable high VAD sensitivity. Defaults to None.
+        """
+
+        language: Language | None = None
+        mode: SarvamMode | None = None
+        vad_signals: bool | None = None
+        high_vad_sensitivity: bool | None = None
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str | None = None,
+        mode: SarvamMode | None = None,
+        sample_rate: int | None = None,
+        input_audio_codec: str = "wav",
+        keyterms: list[str] | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
+        keepalive_timeout: float | None = None,
+        keepalive_interval: float = 5.0,
+        **kwargs,
+    ):
+        """Initialize the Sarvam STT service.
+
+        Args:
+            api_key: Sarvam API key for authentication.
+            model: Sarvam model to use for transcription.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamSTTService.Settings(model=...)`` instead.
+                    Will be removed in 2.0.0.
+
+            mode: Mode of operation. Options: transcribe, translate, verbatim,
+                translit, codemix. Only applicable to models that support it.
+                Defaults to the model's default mode.
+            sample_rate: Audio sample rate. Defaults to 16000 if not specified.
+            input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
+            keyterms: Connection-time recognition hints for saaras:v4. At most 50
+                terms of 64 characters each; put each phrase in a separate item.
+            params: Configuration parameters for Sarvam STT service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamSTTService.Settings(...)`` instead.
+                    Will be removed in 2.0.0.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive.
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
+        # --- 1. Hardcoded defaults ---
+        default_settings = self.Settings(
+            model="saaras:v4",
+            language=None,
+            vad_signals=None,
+            high_vad_sensitivity=None,
+            positive_speech_threshold=None,
+            negative_speech_threshold=None,
+            min_speech_frames=None,
+            first_turn_min_speech_frames=None,
+            negative_frames_count=None,
+            negative_frames_window=None,
+            start_speech_volume_threshold=None,
+            interrupt_min_speech_frames=None,
+            pre_speech_pad_frames=None,
+            num_initial_ignored_frames=None,
+        )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # --- 3. Deprecated params overrides ---
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.language = params.language
+                if params.mode is not None:
+                    mode = params.mode
+                default_settings.vad_signals = params.vad_signals
+                default_settings.high_vad_sensitivity = params.high_vad_sensitivity
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Resolve model config and validate (after all overrides)
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        self._config = MODEL_CONFIGS[resolved_model]
+
+        # Validate parameters against model capabilities
+        if mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{resolved_model}' does not support mode parameter.")
+        if default_settings.language is not None and not self._config.supports_language:
+            raise ValueError(
+                f"Model '{resolved_model}' does not support language parameter (auto-detects language)."
+            )
+
+        # Resolve mode default from model config
+        if mode is None:
+            mode = self._config.default_mode
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+
+        # Init-only connection config (not runtime-updatable)
+        self._mode = mode
+        self._keyterms = list(keyterms) if keyterms is not None else None
+
+        # Store connection parameters
+        self._input_audio_codec = input_audio_codec
+
+        # Initialize Sarvam SDK client
+        self._sdk_headers = sdk_headers()
+        # Pass Pipecat SDK headers directly at client construction time so they are
+        # merged by the Sarvam SDK's client wrapper and consistently applied to
+        # WebSocket handshake requests.
+        self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key, headers=self._sdk_headers)
+        self._websocket_context = None
+        self._socket_client = None
+        self._receive_task = None
+        # Warn only once per unrecognized language code, so a session stuck
+        # detecting one unmapped language doesn't spam a warning per turn.
+        self._unmapped_language_codes_warned: set[str] = set()
+
+        if default_settings.vad_signals:
+            self._register_event_handler("on_speech_started")
+            self._register_event_handler("on_speech_stopped")
+            self._register_event_handler("on_utterance_end")
+
+        logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert pipecat Language enum to Sarvam's language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            The Sarvam language code string.
+        """
+        return language_to_sarvam_language(language)
+
+    def _get_language_string(self) -> str | None:
+        """Resolve the current language setting to a Sarvam language code string."""
+        return _configured_language_code(self._settings, self._config)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Sarvam's VAD signals drive turns.
+
+        With ``vad_signals`` enabled Sarvam detects speech boundaries server-side
+        and this service proposes turns from them, so the user aggregator resolves
+        those rather than running local VAD/smart-turn. Without it the defaults are
+        left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._settings.vad_signals:
+            frame.user_turn_strategies = ExternalUserTurnStrategies()
+        return frame
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames.
+
+        Flushes on Pipecat's VAD turn end when Sarvam's built-in VAD signals
+        aren't driving the turn.
+        """
+        await super().process_frame(frame, direction)
+
+        # Only handle VAD frames when not using Sarvam's VAD signals
+        if not self._settings.vad_signals:
+            if isinstance(frame, VADUserStoppedSpeakingFrame):
+                if self._socket_client:
+                    await self._socket_client.flush()
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, validate, sync state, and reconnect.
+
+        Args:
+            delta: A :class:`STTSettings` (or ``SarvamSTTService.Settings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+
+        Raises:
+            ValueError: If a setting is not supported by the current model.
+        """
+        # Validate against model capabilities before applying
+        if is_given(delta.language) and delta.language is not None:
+            if not self._config.supports_language:
+                raise ValueError(
+                    f"Model '{self._settings.model}' does not support language parameter "
+                    "(auto-detects language)."
+                )
+
+        changed = await super()._update_settings(delta)
+
+        # These are all WebSocket connect-time parameters; reconnect to apply.
+        reconnect_fields = {
+            "language",
+            "positive_speech_threshold",
+            "negative_speech_threshold",
+            "min_speech_frames",
+            "first_turn_min_speech_frames",
+            "negative_frames_count",
+            "negative_frames_window",
+            "start_speech_volume_threshold",
+            "interrupt_min_speech_frames",
+            "pre_speech_pad_frames",
+            "num_initial_ignored_frames",
+        }
+        if changed.keys() & reconnect_fields:
+            await self._disconnect()
+            await self._connect()
+
+        unhandled = {k: v for k, v in changed.items() if k not in reconnect_fields}
+        if unhandled:
+            self._warn_unhandled_updated_settings(unhandled)
+
+        return changed
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Sarvam STT service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Sarvam STT service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Send audio data to Sarvam for transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (transcription results come via WebSocket callbacks).
+        """
+        if not self._socket_client:
+            yield None
+            return
+
+        try:
+            # Convert audio bytes to base64 for Sarvam API
+            audio_base64 = base64.b64encode(audio).decode("utf-8")
+
+            # Convert input_audio_codec to encoding format (prepend "audio/" if needed)
+            encoding = (
+                self._input_audio_codec
+                if self._input_audio_codec.startswith("audio/")
+                else f"audio/{self._input_audio_codec}"
+            )
+
+            # Build method arguments
+            method_kwargs = {
+                "audio": audio_base64,
+                "encoding": encoding,
+                "sample_rate": self.sample_rate,
+            }
+
+            await self._socket_client.transcribe(**method_kwargs)
+
+        except Exception as e:
+            yield ErrorFrame(error=f"Error sending audio to Sarvam: {e}", exception=e)
+
+        yield None
+
+    async def _connect(self):
+        """Connect to Sarvam WebSocket API using the SDK."""
+        logger.debug("Connecting to Sarvam")
+
+        try:
+            # Build common connection parameters
+            connect_kwargs = {
+                "model": self._settings.model,
+                "sample_rate": str(self.sample_rate),
+            }
+
+            # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
+            # the flush() call on user-stopped-speaking is honored by the server.
+            if not self._settings.vad_signals:
+                connect_kwargs["flush_signal"] = "true"
+
+            # Only send vad parameters when explicitly set (avoid overriding server defaults)
+            if self._settings.vad_signals is not None:
+                connect_kwargs["vad_signals"] = "true" if self._settings.vad_signals else "false"
+            if self._settings.high_vad_sensitivity is not None:
+                connect_kwargs["high_vad_sensitivity"] = (
+                    "true" if self._settings.high_vad_sensitivity else "false"
+                )
+
+            # Fine-grained VAD parameters (sent as strings per SDK spec)
+            _vad_params = {
+                "positive_speech_threshold": self._settings.positive_speech_threshold,
+                "negative_speech_threshold": self._settings.negative_speech_threshold,
+                "min_speech_frames": self._settings.min_speech_frames,
+                "first_turn_min_speech_frames": self._settings.first_turn_min_speech_frames,
+                "negative_frames_count": self._settings.negative_frames_count,
+                "negative_frames_window": self._settings.negative_frames_window,
+                "start_speech_volume_threshold": self._settings.start_speech_volume_threshold,
+                "interrupt_min_speech_frames": self._settings.interrupt_min_speech_frames,
+                "pre_speech_pad_frames": self._settings.pre_speech_pad_frames,
+                "num_initial_ignored_frames": self._settings.num_initial_ignored_frames,
+            }
+            for k, v in _vad_params.items():
+                if v is not None:
+                    connect_kwargs[k] = str(v)
+
+            # Add language_code for models that support it
+            language_string = self._get_language_string()
+            if language_string is not None:
+                connect_kwargs["language_code"] = language_string
+
+            # Add mode for models that support it
+            if self._config.supports_mode and self._mode is not None:
+                connect_kwargs["mode"] = self._mode
+
+            # Headers are supplied through request_options because this is a
+            # documented SDK parameter that survives SDK signature changes.
+            request_options: RequestOptions = {"additional_headers": self._sdk_headers}
+            if self._keyterms is not None:
+                request_options["additional_query_parameters"] = {
+                    "keyterms": json.dumps(self._keyterms)
+                }
+
+            try:
+                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
+                    **connect_kwargs,
+                    request_options=request_options,
+                )
+            except TypeError:
+                if self._keyterms is not None:
+                    raise
+                # Fallback for SDK builds that don't expose request_options.
+                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
+                    **connect_kwargs
+                )
+
+            # Enter the async context manager
+            self._socket_client = await self._websocket_context.__aenter__()
+
+            # Register event handler for incoming messages
+            def _message_handler(message):
+                """Wrapper to handle async response handler."""
+                # Use Pipecat's built-in task management
+                self.create_task(self._handle_message(message))
+
+            self._socket_client.on(EventType.MESSAGE, _message_handler)
+
+            # Start receive task using Pipecat's task management
+            self._receive_task = self.create_task(self._receive_task_handler())
+
+            self._create_keepalive_task()
+
+            logger.info("Connected to Sarvam successfully")
+
+        except ApiError as e:
+            self._socket_client = None
+            self._websocket_context = None
+            await self.push_error(error_msg=f"Sarvam API error: {e}", exception=e)
+        except Exception as e:
+            self._socket_client = None
+            self._websocket_context = None
+            await self.push_error(error_msg=f"Failed to connect to Sarvam: {e}", exception=e)
+
+    async def _disconnect(self):
+        """Disconnect from Sarvam WebSocket API using SDK."""
+        await self._cancel_keepalive_task()
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        # Clear references first to prevent run_stt from sending audio
+        # during the close handshake.
+        socket_client = self._socket_client
+        websocket_context = self._websocket_context
+        self._socket_client = None
+        self._websocket_context = None
+
+        if websocket_context and socket_client:
+            try:
+                await websocket_context.__aexit__(None, None, None)
+            except Exception as e:
+                await self.push_error(
+                    error_msg=f"Error closing WebSocket connection: {e}", exception=e
+                )
+            finally:
+                logger.debug("Disconnected from Sarvam WebSocket")
+
+    async def _receive_task_handler(self):
+        """Handle incoming messages from Sarvam WebSocket.
+
+        This task wraps the SDK's start_listening() method which processes
+        messages via the registered event handler callback.
+        """
+        if not self._socket_client:
+            return
+
+        try:
+            # Start listening for messages from the Sarvam SDK
+            # Messages will be handled via the _message_handler callback
+            await self._socket_client.start_listening()
+        except Exception as e:
+            await self.push_error(error_msg=f"Sarvam receive task error: {e}", exception=e)
+
+    async def _handle_message(self, message):
+        """Handle incoming WebSocket message from Sarvam SDK.
+
+        Processes transcription data and VAD events from the Sarvam service.
+
+        Args:
+            message: The parsed response object from Sarvam WebSocket.
+        """
+        logger.debug(f"Received response: {message}")
+
+        try:
+            if message.type == "events":
+                # VAD event
+                signal = message.data.signal_type
+                timestamp = message.data.occured_at
+                logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
+
+                if signal == "START_SPEECH":
+                    logger.debug("User started speaking")
+                    await self._call_event_handler("on_speech_started")
+                    await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+
+                elif signal == "END_SPEECH":
+                    logger.debug("User stopped speaking")
+                    await self._call_event_handler("on_speech_stopped")
+                    await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+            elif message.type == "data":
+                transcript = message.data.transcript
+                language_code = message.data.language_code
+                # Prefer language from message (auto-detected for translate models). Fallback to configured.
+                # Either can resolve to None -- an unrecognized code, or Sarvam's own
+                # "unknown"/auto-detect placeholder -- in which case the frame is left
+                # without a language rather than guessing one.
+                language = self._map_language_code_to_enum(
+                    language_code or self._get_language_string()
+                )
+
+                # Emit utterance end event
+                await self._call_event_handler("on_utterance_end")
+
+                if transcript and transcript.strip():
+                    # Record tracing for this transcription event
+                    await self._handle_transcription(transcript, True, language)
+                    # Report usage before the transcription frame so tracing
+                    # can attach it to the STT span the frame closes.
+                    await self.emit_stt_usage_metrics()
+                    await self.push_frame(
+                        TranscriptionFrame(
+                            transcript,
+                            self._user_id,
+                            time_now_iso8601(),
+                            language,
+                            result=(message.dict() if hasattr(message, "dict") else str(message)),
+                            # This service emits one transcript per utterance and
+                            # no interim frames, so every transcript it produces is
+                            # final. Without this, turn-stop strategies cannot take
+                            # their finalized fast path and wait out a timeout meant
+                            # for partial transcripts instead.
+                            finalized=True,
+                        )
+                    )
+        except Exception as e:
+            await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
+            await self.stop_all_metrics()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing.
+
+        This method is decorated with @traced_stt for observability.
+        """
+        pass
+
+    def _map_language_code_to_enum(self, language_code: str | None) -> Language | None:
+        """Map a Sarvam language code to a pipecat Language, or None if unresolved.
+
+        Returns None for Sarvam's own "unknown"/auto-detect placeholder and for
+        any code -- present or future -- this table doesn't have an entry for,
+        rather than guessing a specific language. A code that IS recognized but
+        maps to a language this table doesn't carry only logs a warning once,
+        so a long-running session doesn't spam it every turn.
+        """
+        return _language_code_to_language(language_code, self._unmapped_language_codes_warned, self)
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the Sarvam SDK websocket client is connected."""
+        return self._socket_client is not None
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio via the Sarvam SDK to keep the connection alive.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        encoding = (
+            self._input_audio_codec
+            if self._input_audio_codec.startswith("audio/")
+            else f"audio/{self._input_audio_codec}"
+        )
+        method_kwargs = {
+            "audio": audio_base64,
+            "encoding": encoding,
+            "sample_rate": self.sample_rate,
+        }
+        # We know client exists because _is_keepalive_ready(), called before
+        # _send_keepalive(), gates on it
+        assert self._socket_client is not None
+
+        await self._socket_client.transcribe(**method_kwargs)
+
+
+_REALTIME_MODEL = "saaras:v3-realtime"
+
+# Sarvam's realtime endpoint serves both generations over the same connection
+# parameters and event protocol, so only the model string differs. The default
+# follows Sarvam's own, which is still v3. The second generation is named
+# `saaras:v4` here, without the `-realtime` suffix its predecessor carries: that
+# is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+_SUPPORTED_REALTIME_MODELS = frozenset({"saaras:v3-realtime", "saaras:v4"})
+
+SUPPORTED_LANGUAGES = {
+    "auto",
+    "en-IN",
+    "hi-IN",
+    "bn-IN",
+    "kn-IN",
+    "ml-IN",
+    "mr-IN",
+    "or-IN",
+    "pa-IN",
+    "ta-IN",
+    "te-IN",
+    "gu-IN",
+    "as-IN",
+    "ur-IN",
+    "ne-IN",
+    "kok-IN",
+    "ks-IN",
+    "sd-IN",
+    "sa-IN",
+    "sat-IN",
+    "mni-IN",
+    "brx-IN",
+    "mai-IN",
+    "doi-IN",
+}
+# A plain set: the rate in force can come from the pipeline rather than the
+# caller, so it is checked once resolved rather than annotated.
+SUPPORTED_SAMPLE_RATES = {8000, 16000}
+
+# Sarvam's `stream_type` selects the *server* flush profile; it says nothing
+# about how often the client should send. Audio goes out on a fixed cadence so
+# transcript latency doesn't scale with the chosen profile.
+_CLIENT_CHUNK_MS = 50
+
+# Sarvam closes a connection with this code when it rejects a connection
+# parameter (model, language, VAD tuning) or the account isn't enabled for it.
+_REJECTED_SETTINGS_CLOSE_CODE = 4000
+
+# Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
+# `language_code`; the rest share their `Settings` names. Of these,
+# `language_code`, `stream_type`, `mode`, and `prompt` are boundary-gated: the
+# server defers them to the next utterance boundary.
+_RUNTIME_CONFIG_FIELDS = frozenset(
+    {
+        "language_code",
+        "stream_type",
+        "mode",
+        "prompt",
+        "threshold",
+        "silence_duration_ms",
+        "min_speech_duration_ms",
+    }
+)
+
+# Only meaningful while the server is doing the endpointing.
+_VAD_TUNING_FIELDS = (
+    "threshold",
+    "silence_duration_ms",
+    "min_speech_duration_ms",
+)
+_SHORT_LANGUAGE_DEFAULTS = {
+    language.split("-", maxsplit=1)[0]: language
+    for language in SUPPORTED_LANGUAGES
+    if language != "auto"
+}
+
+
+def language_to_sarvam_realtime_language(language: Language) -> str:
+    """Convert a Language enum to Sarvam realtime's language code."""
+    language_map = {
+        Language.AS: "as-IN",
+        Language.AS_IN: "as-IN",
+        Language.BN: "bn-IN",
+        Language.BN_IN: "bn-IN",
+        Language.BRX: "brx-IN",
+        Language.BRX_IN: "brx-IN",
+        Language.DOI: "doi-IN",
+        Language.DOI_IN: "doi-IN",
+        Language.EN: "en-IN",
+        Language.EN_IN: "en-IN",
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        Language.KOK: "kok-IN",
+        Language.KOK_IN: "kok-IN",
+        Language.KS: "ks-IN",
+        Language.KS_IN: "ks-IN",
+        Language.MAI: "mai-IN",
+        Language.MAI_IN: "mai-IN",
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        Language.MNI: "mni-IN",
+        Language.MNI_IN: "mni-IN",
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        Language.NE: "ne-IN",
+        Language.NE_IN: "ne-IN",
+        Language.OR: "or-IN",
+        Language.OR_IN: "or-IN",
+        Language.PA: "pa-IN",
+        Language.PA_IN: "pa-IN",
+        Language.SA: "sa-IN",
+        Language.SA_IN: "sa-IN",
+        Language.SAT: "sat-IN",
+        Language.SAT_IN: "sat-IN",
+        Language.SD: "sd-IN",
+        Language.SD_IN: "sd-IN",
+        Language.UR: "ur-IN",
+        Language.UR_IN: "ur-IN",
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+    }
+    return resolve_language(language, language_map, use_base_code=False)
+
+
+@dataclass
+class SarvamRealtimeSTTSettings(STTSettings):
+    """Settings for SarvamRealtimeSTTService.
+
+    Sarvam reads these from the connection query string but also accepts them
+    in a ``config.update``. The values it only reads at connection time are
+    constructor arguments on the service instead. ``language=None`` asks Sarvam
+    to detect the language of each utterance.
+
+    Parameters:
+        language_code: Sarvam realtime language code or ``auto``.
+
+            .. deprecated:: 1.13.0
+                Use ``language`` instead, with ``None`` for ``auto``. Will be
+                removed in 2.0.0.
+
+        stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
+        mode: Realtime STT task mode.
+        prompt: Optional decoding prompt.
+        threshold: Optional VAD sensitivity threshold.
+        silence_duration_ms: Optional silence duration for end-of-speech.
+        min_speech_duration_ms: Optional minimum speech duration.
+    """
+
+    language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stream_type: Literal["fast", "balanced", "simulated"] | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    mode: SarvamMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class SarvamRealtimeSTTService(WebsocketSTTService):
+    """Sarvam realtime Speech-to-Text service.
+
+    Streams raw audio bytes to Sarvam's realtime websocket endpoint and maps
+    provider VAD and transcript events into Pipecat frames.
+
+    Serves ``saaras:v3-realtime`` and ``saaras:v4``, selected with
+    ``settings=SarvamRealtimeSTTService.Settings(model=...)`` and defaulting to
+    ``saaras:v3-realtime``, Sarvam's own default.
+
+    With the default ``endpointing="vad"`` the server drives turn boundaries. With
+    ``endpointing="manual"`` the pipeline drives them instead, so the pipeline
+    needs a turn strategy that emits ``VADUserStartedSpeakingFrame`` and
+    ``VADUserStoppedSpeakingFrame``; without one, Sarvam never receives a boundary
+    and never emits a final transcript. The mode is a constructor argument rather
+    than a setting, since it decides which turn strategies the user aggregator
+    runs and those are announced once, at startup.
+
+    A VAD analyzer is required in either ``endpointing`` mode. Under ``vad`` it
+    times transcription latency: TTFB is measured from
+    ``VADUserStoppedSpeakingFrame``, which carries the stop delay needed to place
+    the real end of speech, where Sarvam's own ``vad.speech_end`` arrives only
+    after the server's silence window and would time a shorter interval than
+    every other STT service reports. Under ``manual`` those same frames also mark
+    the turn for Sarvam, reaching it as ``speech_start`` and ``speech_end``.
+
+    A dropped socket is reopened with backoff in the background unless
+    ``reconnect_on_error=False``; audio that arrives while it is down isn't
+    transcribed. An utterance lives in one connection, so one cut short by a
+    drop ends with the transcript received so far, and speech that continues on
+    the new connection is transcribed as a new utterance. Settings Sarvam
+    rejects are a permanent invalid-request error rather than retried. Once the
+    service stops trying it is no longer usable, so a ``ServiceSwitcher`` can
+    move on.
+    """
+
+    Settings = SarvamRealtimeSTTSettings
+    _settings: Settings
+
+    # How long to wait for the server's ``session.begin`` after the handshake
+    # before treating the connection as failed.
+    _CONNECTION_TIMEOUT = 10.0
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "wss://api.sarvam.ai/speech-to-text-realtime/ws",
+        endpointing: Literal["vad", "manual"] = "vad",
+        sample_rate: int | None = None,
+        return_timestamps: bool = False,
+        keyterms: list[str] | None = None,
+        prefix_padding_ms: int | None = None,
+        settings: Settings | None = None,
+        should_interrupt: bool = True,
+        ttfs_p99_latency: float | None = SARVAM_REALTIME_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize Sarvam realtime STT.
+
+        Args:
+            api_key: Sarvam API key.
+            base_url: Realtime STT websocket endpoint.
+            endpointing: Which side detects turn boundaries: ``vad`` for Sarvam's
+                own detection, or ``manual`` for the pipeline's. Decides the turn
+                strategies this service asks the user aggregator to run, so it is
+                fixed for the life of the service. Defaults to ``vad``.
+            sample_rate: Declared input audio sample rate, 8000 or 16000. ``None``
+                adopts the pipeline's input rate.
+            return_timestamps: Whether final transcripts should include segment
+                offsets. Defaults to False.
+            keyterms: Connection-time recognition hints for saaras:v4. At most 50
+                terms of 64 characters each; put each phrase in a separate item.
+            prefix_padding_ms: Optional VAD prefix padding, used only under
+                ``endpointing="vad"``.
+            settings: Runtime-updatable realtime settings.
+            should_interrupt: Determine whether the bot should be interrupted when
+                Sarvam detects user speech. Passed along to the user turn
+                strategies this service recommends, which own the interruption; a
+                user-supplied ``user_turn_strategies`` overrides the recommendation
+                and this setting with it. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+            **kwargs: Additional arguments passed to :class:`WebsocketSTTService`.
+        """
+        settings_fields = {setting.name for setting in fields(self.Settings)}
+        direct_settings = sorted(settings_fields.intersection(kwargs))
+        if direct_settings:
+            names = ", ".join(direct_settings)
+            raise TypeError(
+                f"{names} must be passed via "
+                "settings=SarvamRealtimeSTTService.Settings(...), not as constructor kwargs"
+            )
+        if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
+            allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
+            raise ValueError(f"Unsupported sample_rate '{sample_rate}'. Allowed values: {allowed}.")
+        default_settings = self.Settings(
+            model=_REALTIME_MODEL,
+            language=Language.EN_IN,
+            language_code=None,
+            stream_type="balanced",
+            mode="transcribe",
+            prompt=None,
+            threshold=None,
+            silence_duration_ms=None,
+            min_speech_duration_ms=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(_without_language_code(settings))
+
+        self._validate_settings(default_settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=default_settings,
+            ttfs_p99_latency=ttfs_p99_latency,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._base_url = base_url
+        self._return_timestamps = return_timestamps
+        self._keyterms = list(keyterms) if keyterms is not None else None
+        self._prefix_padding_ms = prefix_padding_ms
+        self._should_interrupt = should_interrupt
+        self._receive_task: asyncio.Task | None = None
+        self._connection_established_event = asyncio.Event()
+        self._audio_buffer = bytearray()
+        self._request_id: str | None = None
+        # The latest partial transcript with no final after it yet, pushed if
+        # its connection closes before the final arrives.
+        self._pending_partial: dict[str, Any] | None = None
+        self._provider_speech_active = False
+        self._speech_end_audio_position_s: float | None = None
+        self._audio_position_bytes = 0
+        self._endpointing = endpointing
+        # Whether the pipeline has opened a manual-endpointing turn it has not
+        # closed yet.
+        self._manual_turn_open = False
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing and usage metrics."""
+        return True
+
+    def service_metadata_frame(self) -> STTMetadataFrame:
+        """Request external turn strategies when Sarvam endpoints server-side.
+
+        With ``endpointing="vad"`` (the default) Sarvam's VAD decides turn
+        boundaries and this service proposes them via
+        ``ProposedUserStarted/StoppedSpeakingFrame``, so the user aggregator
+        resolves those rather than running local VAD/smart-turn. In
+        ``endpointing="manual"`` the pipeline supplies the boundaries, so the
+        defaults are left in place. Applied unless the user passed their own
+        ``user_turn_strategies``.
+        """
+        frame = super().service_metadata_frame()
+        if self._endpointing == "vad":
+            frame.user_turn_strategies = ExternalUserTurnStrategies(
+                enable_interruptions=self._should_interrupt,
+            )
+        return frame
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert a Language enum to Sarvam realtime's language code."""
+        return language_to_sarvam_realtime_language(language)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the service and connect the websocket.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        # The rate can come from the pipeline, so it is only settled once the
+        # service is set up. It holds for the session, so an unsupported one is
+        # a permanent failure that costs the service its usability, letting a
+        # `ServiceSwitcher` move on.
+        error = self._resolved_sample_rate_error()
+        if error:
+            await self.push_error(error, category=ErrorCategory.INVALID_REQUEST)
+            return
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close the websocket."""
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close the websocket."""
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and send manual endpointing boundaries when configured."""
+        await super().process_frame(frame, direction)
+        if self._endpointing != "manual":
+            return
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._manual_turn_open = True
+            await self._send_json({"event": "speech_start"})
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._manual_turn_open = False
+            # The tail of the turn must reach Sarvam before the boundary, or the
+            # final transcript is cut short. `speech_end` finalizes the utterance
+            # on its own; Sarvam's separate `flush` event force-finalizes
+            # buffered audio mid-utterance and has no part in a turn that ends
+            # on a boundary.
+            await self._flush_audio_buffer()
+            await self._send_json({"event": "speech_end"})
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Buffer and send raw audio bytes to Sarvam as base64-encoded JSON messages."""
+        if not audio:
+            yield None
+            return
+        if not self._is_websocket_open():
+            yield None
+            return
+
+        self._audio_buffer.extend(audio)
+        chunk_size = self._chunk_size_bytes()
+        while len(self._audio_buffer) >= chunk_size:
+            chunk = bytes(self._audio_buffer[:chunk_size])
+            del self._audio_buffer[:chunk_size]
+            try:
+                await self._send_audio_chunk(chunk)
+            except Exception as e:
+                await self.push_error(
+                    error_msg=f"Sarvam realtime STT send failed: {e}", exception=e
+                )
+                break
+
+        yield None
+
+    def _build_ws_url(self) -> str:
+        """Build the Sarvam realtime websocket URL."""
+        params = self._query_params()
+        return f"{self._base_url}?{urlencode(params)}"
+
+    async def _connect(self):
+        """Connect to Sarvam realtime and start receive task."""
+        await super()._connect()
+        await self._connect_websocket()
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+    async def _disconnect(self):
+        """Disconnect from Sarvam realtime."""
+        await super()._disconnect()
+        if self._websocket and self._websocket.state is State.OPEN:
+            await self._flush_audio_buffer()
+            try:
+                await self._send_json({"event": "end"})
+            except Exception as e:
+                logger.debug(f"{self} error sending Sarvam end event: {e}")
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Open the Sarvam realtime websocket.
+
+        The server confirms the session with ``session.begin``, which the
+        receive loop waits for (see ``_receive_messages``).
+        """
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            self._connection_established_event.clear()
+            url = self._build_ws_url()
+            headers = {"API-SUBSCRIPTION-KEY": self._api_key}
+            logger.debug(f"Connecting to Sarvam realtime STT WebSocket: {url}")
+            self._websocket = await self._websocket_connect(
+                url,
+                additional_headers=headers,
+                user_agent_header=sdk_headers()["User-Agent"],
+            )
+        except Exception as e:
+            self._websocket = None
+            # Left on the category the failure earns: `_try_reconnect` skips a
+            # service that has stopped being usable, so reporting a socket that
+            # would not open as permanent bars the retry that could open it.
+            await self.push_error(
+                error_msg=f"Unable to connect to Sarvam realtime STT: {e}", exception=e
+            )
+            await self._call_event_handler("on_connection_error", str(e))
+
+    async def _disconnect_websocket(self):
+        """Close the active websocket."""
+        try:
+            if self._websocket:
+                await self._websocket.close()
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Error closing Sarvam realtime STT websocket: {e}", exception=e
+            )
+        finally:
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
+
+    async def _receive_task_handler(self, report_error: ReportErrorCallback):
+        """Mark the service unusable once the receive loop is done.
+
+        The loop exits for good only when reconnection is off or has given up,
+        so the service has no transcripts left to give.
+
+        Cancellation is left alone: that only happens during an intentional
+        disconnect, where teardown is already under way.
+        """
+        await super()._receive_task_handler(report_error)
+        if not self._disconnecting:
+            await self.set_usable(False)
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Carry an open manual turn across the socket swap.
+
+        Under ``manual`` the pipeline's turn is still open, and Sarvam ignores
+        a ``speech_end`` without a matching ``speech_start``, so the new session
+        is told the turn has started. Audio positions count from the start of
+        the new session.
+        """
+        reconnected = await super()._reconnect_websocket(attempt_number)
+        if reconnected:
+            self._audio_position_bytes = 0
+            if self._manual_turn_open:
+                await self._send_json({"event": "speech_start"})
+        return reconnected
+
+    async def _receive_messages(self):
+        """Receive Sarvam realtime server events.
+
+        Waits for the server to confirm the session with ``session.begin``,
+        then processes VAD, transcript, and error events.
+
+        Raises:
+            ConnectionError: If ``session.begin`` doesn't arrive within
+                ``_CONNECTION_TIMEOUT``.
+            ConnectionClosedError: If the connection closes with an error. A
+                close rejecting the connection's settings is also reported as
+                a permanent invalid-request error, so it isn't retried.
+        """
+        if not self._websocket:
+            raise Exception("Websocket not connected")
+        messages = aiter(self._websocket)
+        try:
+            if not await self._receive_until_confirmed(
+                messages,
+                self._connection_established_event,
+                self._process_message,
+                self._CONNECTION_TIMEOUT,
+            ):
+                # Closed before confirming; the receive loop treats it as a drop.
+                return
+
+            await self._call_event_handler("on_connected")
+
+            async for message in messages:
+                await self._process_message(message)
+        except ConnectionClosedError as e:
+            if e.rcvd is not None and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE:
+                await self.push_error(
+                    error_msg=f"Sarvam realtime STT rejected the connection: {e.rcvd.reason}",
+                    exception=e,
+                    category=ErrorCategory.INVALID_REQUEST,
+                )
+            raise
+        finally:
+            # An utterance lives in one connection, so it ends when the
+            # connection does, unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_utterance_cut_short()
+
+    async def _process_message(self, message: str | bytes):
+        """Decode and handle one message from the WebSocket."""
+        if not isinstance(message, str):
+            logger.trace(f"{self} ignored non-text Sarvam server message")
+            return
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            logger.warning(f"{self} received non-JSON Sarvam message: {message}")
+            return
+        await self._handle_message(data)
+
+    async def _end_utterance_cut_short(self):
+        """End an utterance whose connection closed before its final transcript.
+
+        The new session never sends the old one's ``vad.speech_end`` or
+        ``transcript.final``, so the utterance is closed here, and the latest
+        partial transcript is pushed as its transcription, unfinalized since
+        the server never committed it. Without this, downstream turn
+        aggregation would wait on a boundary that is never coming, and what
+        the user said would be lost.
+        """
+        await self._complete_active_utterance()
+        partial, self._pending_partial = self._pending_partial, None
+        if not partial:
+            return
+        logger.debug(f"{self}: connection closed before the final transcript, using the partial")
+        await self.emit_stt_usage_metrics()
+        text = (partial.get("text") or "").strip()
+        language = self._language_for_frame(partial.get("language"))
+        result = self._result_payload(partial)
+        result["speech_end_audio_position_s"] = self._speech_end_audio_position_s
+        await self.push_frame(
+            TranscriptionFrame(text, self._user_id, time_now_iso8601(), language, result=result)
+        )
+        await self._trace_transcription(text, True, language)
+
+    async def _handle_message(self, message: dict[str, Any]):
+        """Handle a parsed Sarvam realtime server event."""
+        event = message.get("event")
+        if event == "session.begin":
+            self._request_id = message.get("request_id")
+            logger.info(f"{self} Sarvam realtime session.begin request_id={self._request_id}")
+            self._connection_established_event.set()
+        # Only the endpointer in charge gets to set turn boundaries. Under
+        # manual endpointing the pipeline owns them, so server VAD telemetry
+        # would compete with the boundaries it is already producing.
+        elif event == "vad.speech_start" and self._endpointing == "vad":
+            await self._handle_speech_start(message)
+        elif event == "vad.speech_end" and self._endpointing == "vad":
+            await self._handle_speech_end(message)
+        elif event == "transcript.partial":
+            await self._handle_partial_transcript(message)
+        elif event == "transcript.final":
+            await self._handle_final_transcript(message)
+        elif event == "session.end":
+            await self._handle_session_end(message)
+        elif event == "config.updated":
+            logger.trace(f"{self} Sarvam realtime acknowledgement: {message}")
+        elif event == "error":
+            await self._handle_error(message)
+        elif event == "pong":
+            # Answers our keepalive ping; the reply itself is the liveness proof.
+            logger.trace(f"{self} Sarvam realtime pong")
+        else:
+            logger.trace(f"{self} unhandled Sarvam realtime event: {message}")
+
+    async def update_config(self, **fields: Any):
+        """Send a live Sarvam ``config.update`` message without reconnecting.
+
+        Args:
+            fields: Runtime-updatable Sarvam config values. Connection-only
+                values are rejected; they are fixed for the life of the stream.
+
+        Raises:
+            ValueError: If a connection-only or invalid value is supplied.
+        """
+        if not fields:
+            return
+        self._validate_config_update(fields)
+        await self._send_config_update(fields)
+
+    async def _send_config_update(self, fields: dict[str, Any]):
+        """Send an already-validated ``config.update`` and record what was sent."""
+        if not await self._send_json({"event": "config.update", **fields}):
+            return
+        # The store has to follow what the server was told, or a later delta
+        # diffs against a stale value and skips an update the server needs.
+        stored = dict(fields)
+        if "language_code" in stored:
+            stored["language"] = _language_from_code(stored.pop("language_code"))
+        self._settings.apply_update(self.Settings(**stored))
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply runtime settings and send supported fields via ``config.update``."""
+        if isinstance(delta, self.Settings):
+            delta = _without_language_code(delta)
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+
+        unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS - {"language"}
+        if unsupported:
+            self._warn_unhandled_updated_settings({key: changed[key] for key in unsupported})
+
+        payload = {
+            name: getattr(self._settings, name) for name in _RUNTIME_CONFIG_FIELDS & changed.keys()
+        }
+        if "language" in changed:
+            payload["language_code"] = self._language_code()
+        if payload:
+            await self._send_json({"event": "config.update", **payload})
+        return changed
+
+    def _language_code(self) -> str:
+        """The ``language_code`` Sarvam is sent for the configured language."""
+        language = self._settings.language
+        return str(language) if is_given(language) and language else "auto"
+
+    async def _handle_speech_start(self, message: dict[str, Any]):
+        if self._provider_speech_active:
+            return
+        self._provider_speech_active = True
+        self._speech_end_audio_position_s = None
+        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+
+    async def _handle_speech_end(self, message: dict[str, Any]):
+        await self._complete_active_utterance()
+
+    async def _complete_active_utterance(self):
+        """End the in-flight utterance.
+
+        Runs on ``vad.speech_end``, and on a session or connection ending
+        mid-utterance, where the server will never send that boundary.
+        """
+        if not self._provider_speech_active:
+            return
+        self._provider_speech_active = False
+        self._speech_end_audio_position_s = self._duration_for_bytes(self._audio_position_bytes)
+        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+    async def _handle_partial_transcript(self, message: dict[str, Any]):
+        text = (message.get("text") or "").strip()
+        if not text:
+            return
+        self._pending_partial = message
+        result = self._result_payload(message)
+        language = self._language_for_frame(message.get("language"))
+        await self.push_frame(
+            InterimTranscriptionFrame(
+                text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=result,
+            )
+        )
+
+    async def _handle_final_transcript(self, message: dict[str, Any]):
+        # Report usage before the transcription frame so tracing can attach it
+        # to the STT span the frame closes. A blank final still consumed audio.
+        self._pending_partial = None
+        await self.emit_stt_usage_metrics()
+        text = (message.get("text") or "").strip()
+        if text:
+            language = self._language_for_frame(message.get("language"))
+            result = self._result_payload(message)
+            result["speech_end_audio_position_s"] = self._speech_end_audio_position_s
+            await self.push_frame(
+                TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    language,
+                    result=result,
+                    finalized=True,
+                )
+            )
+            await self._trace_transcription(text, True, language)
+
+    async def _handle_session_end(self, message: dict[str, Any]):
+        if message.get("request_id"):
+            self._request_id = message.get("request_id")
+        await self._complete_active_utterance()
+
+    async def _handle_error(self, message: dict[str, Any]):
+        await self.push_error(
+            error_msg=f"Sarvam realtime STT error: {json.dumps(message, ensure_ascii=False)}",
+        )
+
+    async def _send_audio_chunk(self, chunk: bytes):
+        if not self._websocket:
+            raise RuntimeError("WebSocket not connected")
+        sent = await self._send_json(
+            {"event": "audio_input", "audio": base64.b64encode(chunk).decode("utf-8")}
+        )
+        if not sent:
+            return
+        self._audio_position_bytes += len(chunk)
+
+    async def _flush_audio_buffer(self):
+        if not self._audio_buffer:
+            return
+        chunk = bytes(self._audio_buffer)
+        self._audio_buffer.clear()
+        if not self._is_websocket_open():
+            return
+        try:
+            await self._send_audio_chunk(chunk)
+        except Exception as e:
+            # Late audio on a socket the server already dropped must not break
+            # the turn boundary or teardown.
+            await self.push_error(error_msg=f"Sarvam realtime STT flush failed: {e}", exception=e)
+
+    async def _send_keepalive(self, silence: bytes):
+        """Hold the connection open with Sarvam's ping event.
+
+        Args:
+            silence: Silent PCM audio bytes, unused. The socket only accepts
+                JSON events, and Sarvam answers a ping with a pong rather than
+                reading padding audio.
+        """
+        await self._send_json({"event": "ping"})
+
+    async def _send_json(self, payload: dict[str, Any]) -> bool:
+        """Send a JSON event, reporting whether it reached the socket."""
+        if not self._is_websocket_open():
+            return False
+        assert self._websocket is not None
+        await self._websocket.send(json.dumps(payload))
+        return True
+
+    def _query_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "language_code": self._language_code(),
+            "stream_type": self._settings.stream_type,
+            "endpointing": self._endpointing,
+            "encoding": "linear16",
+            "sample_rate": self.sample_rate,
+            "model": self._settings.model,
+            "mode": self._settings.mode,
+            "return_timestamps": str(self._return_timestamps).lower(),
+        }
+        if self._keyterms is not None:
+            params["keyterms"] = json.dumps(self._keyterms)
+        optional: dict[str, Any] = {"prompt": self._settings.prompt}
+        if self._endpointing == "vad":
+            optional["prefix_padding_ms"] = self._prefix_padding_ms
+            optional.update(
+                {name: getattr(self._settings, name) for name in _VAD_TUNING_FIELDS},
+            )
+        params.update(
+            {key: value for key, value in optional.items() if is_given(value) and value is not None}
+        )
+        return params
+
+    def _bytes_per_second(self) -> int:
+        return self.sample_rate * 2
+
+    def _chunk_size_bytes(self) -> int:
+        return int(self._bytes_per_second() * (_CLIENT_CHUNK_MS / 1000))
+
+    def _duration_for_bytes(self, byte_count: int) -> float:
+        bytes_per_second = self._bytes_per_second()
+        if bytes_per_second <= 0:
+            return 0.0
+        return byte_count / bytes_per_second
+
+    def _result_payload(self, message: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(message)
+        if self._request_id is not None:
+            payload.setdefault("request_id", self._request_id)
+        confidence = payload.get("confidence")
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            # `language_confidence` is a LID score and never a recognition score.
+            payload["confidence"] = 1.0
+        return payload
+
+    def _language_for_frame(self, raw_language: str | None = None) -> Language | None:
+        configured_language_code = self._language_code()
+        language_code = self._normalize_language_code(raw_language or configured_language_code)
+        if language_code == "auto":
+            return None
+        try:
+            return Language(language_code)
+        except ValueError:
+            return None
+
+    def _normalize_language_code(self, language_code: str | None) -> str:
+        if not language_code:
+            return self._language_code()
+        if "-" not in language_code and language_code != "auto":
+            configured = self._language_code()
+            if configured != "auto" and configured.startswith(f"{language_code}-"):
+                return configured
+            return _SHORT_LANGUAGE_DEFAULTS.get(language_code, language_code)
+        return language_code
+
+    def _is_websocket_open(self) -> bool:
+        return self._websocket is not None and self._websocket.state is State.OPEN
+
+    def _resolved_sample_rate_error(self) -> str | None:
+        """Describe why the rate actually in use is unusable, if it is."""
+        if self.sample_rate in SUPPORTED_SAMPLE_RATES:
+            return None
+        allowed = ", ".join(str(rate) for rate in sorted(SUPPORTED_SAMPLE_RATES))
+        return f"Unsupported sample_rate '{self.sample_rate}'. Allowed values: {allowed}."
+
+    def _validate_config_update(self, update: dict[str, Any]):
+        """Reject a ``config.update`` field Sarvam has no setting for."""
+        unknown = sorted(set(update) - _RUNTIME_CONFIG_FIELDS)
+        if unknown:
+            names = ", ".join(unknown)
+            raise ValueError(f"Unknown config.update field(s) {names}.")
+
+    @staticmethod
+    def _validate_settings(settings: Settings):
+        """Check the settings this integration itself depends on.
+
+        Sarvam's own vocabulary — languages, modes, stream types, VAD tuning
+        ranges — is left to the server, which rejects a bad value on the wire
+        and reaches the app as an error frame. Repeating those lists here would
+        block values Sarvam adds later.
+        """
+        model = assert_given(settings.model)
+        if model not in _SUPPORTED_REALTIME_MODELS:
+            allowed = ", ".join(sorted(_SUPPORTED_REALTIME_MODELS))
+            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+
+    @traced_stt
+    async def _trace_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Record transcription event for tracing."""
+        pass
+
+
+def _language_from_code(language_code: str) -> str | None:
+    """Convert a Sarvam ``language_code`` to a ``language`` setting value."""
+    return None if language_code == "auto" else language_code
+
+
+def _without_language_code(settings: SarvamRealtimeSTTSettings) -> SarvamRealtimeSTTSettings:
+    """Fold the deprecated ``language_code`` setting into ``language``."""
+    if not is_given(settings.language_code) or settings.language_code is None:
+        return settings
+    warn_deprecated(
+        "`SarvamRealtimeSTTService.Settings.language_code` is deprecated since 1.13.0 and "
+        "will be removed in 2.0.0. Use `language` instead.",
+        stacklevel=3,
+    )
+    folded = settings.copy()
+    folded.language = _language_from_code(settings.language_code)
+    folded.language_code = NOT_GIVEN
+    return folded
+
+
+# Longest audio, in seconds, Sarvam's synchronous REST endpoint accepts in one
+# request; longer audio is rejected.
+_HTTP_MAX_REQUEST_SECS = 30
+
+
+def _split_wav(audio: bytes, max_secs: float) -> list[bytes]:
+    """Split a WAV file into WAV files of at most ``max_secs`` each.
+
+    Audio that already fits is returned whole and unchanged, as is audio that
+    isn't WAV (Sarvam's REST endpoint also accepts other formats).
+
+    Args:
+        audio: The audio file to split.
+        max_secs: The longest duration of each returned file, in seconds.
+    """
+    try:
+        with wave.open(io.BytesIO(audio)) as wav:
+            params = wav.getparams()
+            frames = wav.readframes(params.nframes)
+    except (wave.Error, EOFError):
+        return [audio]
+
+    max_frames = int(params.framerate * max_secs)
+    if params.nframes <= max_frames:
+        return [audio]
+
+    chunk_bytes = max_frames * params.sampwidth * params.nchannels
+    chunks = []
+    for start in range(0, len(frames), chunk_bytes):
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as chunk:
+            chunk.setparams(params)
+            chunk.writeframes(frames[start : start + chunk_bytes])
+        chunks.append(buffer.getvalue())
+    return chunks
+
+
+@dataclass
+class SarvamHttpSTTSettings(STTSettings):
+    """Settings for SarvamHttpSTTService."""
+
+    pass
+
+
+class SarvamHttpSTTService(SegmentedSTTService):
+    """Sarvam speech-to-text service using the synchronous REST API.
+
+    The HTTP sibling of the WebSocket :class:`SarvamSTTService`: each
+    VAD-detected speech segment is sent to Sarvam's REST speech-to-text
+    endpoint and the transcription is yielded inline from ``run_stt()``, so
+    it suits pipelines that prefer per-segment HTTP requests over a long-lived
+    socket, and callers that use ``run_stt()`` directly.
+
+    The REST endpoint accepts at most 30 seconds of audio per request, so a
+    longer segment is sent as consecutive 30-second pieces whose transcripts
+    are joined into one ``TranscriptionFrame``. A word spoken across a piece
+    boundary may be transcribed less accurately.
+
+    Requires VAD to be enabled in the pipeline.
+    """
+
+    Settings = SarvamHttpSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        mode: SarvamMode | None = None,
+        keyterms: list[str] | None = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SARVAM_HTTP_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the Sarvam HTTP STT service.
+
+        Args:
+            api_key: Sarvam API key for authentication.
+            mode: Mode of operation. Options: transcribe, translate, verbatim,
+                translit, codemix. Only applicable to models that support it.
+                Defaults to the model's default mode.
+            keyterms: Recognition hints for saaras:v4, sent with every request.
+                At most 50 terms of 64 characters each; put each phrase in a
+                separate item.
+            sample_rate: Audio sample rate. If None, uses the pipeline's rate.
+                Sarvam's REST API performs best with 16 kHz audio.
+            settings: Runtime-updatable settings. Defaults to the
+                ``saaras:v4`` model with automatic language detection.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
+        default_settings = self.Settings(
+            model="saaras:v4",
+            language=None,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        self._config = MODEL_CONFIGS[resolved_model]
+
+        if mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{resolved_model}' does not support mode parameter.")
+        if mode is None:
+            mode = self._config.default_mode
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._mode = mode
+        self._keyterms = list(keyterms) if keyterms is not None else None
+        # Warn only once per unrecognized language code, so a session stuck
+        # detecting one unmapped language doesn't spam a warning per turn.
+        self._unmapped_language_codes_warned: set[str] = set()
+
+        self._sdk_headers = sdk_headers()
+        self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key, headers=self._sdk_headers)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Sarvam HTTP service supports metrics generation.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert pipecat Language enum to Sarvam's language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            The Sarvam language code string.
+        """
+        return language_to_sarvam_language(language)
+
+    def _get_language_string(self) -> str | None:
+        """Resolve the current language setting to a Sarvam language code string."""
+        return _configured_language_code(self._settings, self._config)
+
+    def _map_language_code_to_enum(self, language_code: str | None) -> Language | None:
+        """Map a Sarvam language code to a pipecat Language, or None if unresolved."""
+        return _language_code_to_language(language_code, self._unmapped_language_codes_warned, self)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta; model and language take effect on the next request.
+
+        Args:
+            delta: A :class:`STTSettings` (or ``SarvamHttpSTTService.Settings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+
+        Raises:
+            ValueError: If the delta names a model the REST API does not offer.
+        """
+        # Validate before applying so a rejected delta leaves the store intact.
+        if is_given(delta.model) and delta.model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{delta.model}'. Allowed values: {allowed}.")
+
+        changed = await super()._update_settings(delta)
+
+        if "model" in changed:
+            # The delta was validated above, so the stored model is a known key.
+            self._config = MODEL_CONFIGS[cast(str, self._settings.model)]
+
+        return changed
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
+    async def _transcribe(self, audio: bytes) -> Any:
+        """Send one request, of at most 30 seconds of audio, to Sarvam's REST API."""
+        request_kwargs: dict[str, Any] = {
+            "file": ("segment.wav", audio, "audio/wav"),
+            "model": self._settings.model,
+        }
+
+        language_string = self._get_language_string()
+        if language_string is not None:
+            request_kwargs["language_code"] = language_string
+
+        if self._config.supports_mode and self._mode is not None:
+            request_kwargs["mode"] = self._mode
+
+        if self._keyterms is not None:
+            # transcribe() has no keyterms parameter; the REST API takes it as
+            # a form field holding a JSON array.
+            request_options: RequestOptions = {
+                "additional_body_parameters": {"keyterms": json.dumps(self._keyterms)}
+            }
+            request_kwargs["request_options"] = request_options
+
+        return await self._sarvam_client.speech_to_text.transcribe(**request_kwargs)
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Transcribe an audio segment using Sarvam's REST API.
+
+        A segment longer than the REST endpoint's 30-second limit is sent as
+        consecutive pieces, and their transcripts are joined.
+
+        Args:
+            audio: Audio segment in WAV format (already wrapped by the
+                SegmentedSTTService base class).
+
+        Yields:
+            Frame: TranscriptionFrame containing the transcribed text, or
+            ErrorFrame on failure. Empty transcriptions are not yielded.
+        """
+        try:
+            await self.start_processing_metrics()
+
+            responses = [
+                await self._transcribe(chunk) for chunk in _split_wav(audio, _HTTP_MAX_REQUEST_SECS)
+            ]
+
+            await self.stop_processing_metrics()
+
+            transcript = " ".join(
+                r.transcript.strip() for r in responses if r.transcript and r.transcript.strip()
+            )
+            if not transcript:
+                return
+
+            # Prefer the language Sarvam detected; fall back to the configured one.
+            # Either can resolve to None -- an unrecognized code, or Sarvam's own
+            # "unknown"/auto-detect placeholder -- in which case the frame is left
+            # without a language rather than guessing one.
+            detected = next((r.language_code for r in responses if r.language_code), None)
+            language = self._map_language_code_to_enum(detected or self._get_language_string())
+
+            await self._handle_transcription(transcript, True, language)
+            logger.debug(f"Transcription: [{transcript}]")
+            yield TranscriptionFrame(
+                transcript,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=(
+                    responses[0].dict() if len(responses) == 1 else [r.dict() for r in responses]
+                ),
+            )
+
+        except Exception as e:
+            yield ErrorFrame(error=f"Sarvam HTTP STT error: {e}", exception=e)

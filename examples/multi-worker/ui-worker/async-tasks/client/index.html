@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Async tasks — UIAgent demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Research lab</h1>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <main>
+      <p class="hint">
+        Try: "research the Mariana Trench" — the agent fans out three
+        worker researchers (Wikipedia, news, scholarly papers) in
+        parallel. Each streams progress updates while it works. You
+        can cancel any group mid-flight.
+      </p>
+
+      <section aria-label="In-flight tasks">
+        <h2>In flight</h2>
+        <div id="tasks-empty" class="empty-state">
+          No tasks yet. Ask the assistant to research something.
+        </div>
+        <div id="tasks-list"></div>
+      </section>
+
+      <section aria-label="Completed results">
+        <h2>Results</h2>
+        <div id="results-empty" class="empty-state">
+          Completed research will appear here.
+        </div>
+        <div id="results-list"></div>
+      </section>
+    </main>
+
+    <div id="status" aria-live="polite"></div>
+    <audio id="bot-audio" autoplay data-a11y-exclude></audio>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

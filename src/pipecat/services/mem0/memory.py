@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,27 +11,29 @@ and retrieve conversational memories, enhancing LLM context with relevant
 historical information.
 """
 
-from typing import Any, Dict, List, Optional
+import asyncio
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import ErrorFrame, Frame, LLMContextFrame, LLMMessagesFrame
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
+from pipecat.frames.frames import Frame, LLMContextFrame
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+    LLMStandardMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.deprecation import warn_deprecated
 
 try:
     from mem0 import Memory, MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Mem0, you need to `pip install mem0ai`. Also, set the environment variable MEM0_API_KEY."
+        "In order to use Mem0, you need to `uv add mem0ai`. Also, set the environment variable MEM0_API_KEY."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class Mem0MemoryService(FrameProcessor):
@@ -49,14 +51,22 @@ class Mem0MemoryService(FrameProcessor):
             search_limit: Maximum number of memories to retrieve per query.
             search_threshold: Minimum similarity threshold for memory retrieval.
             api_version: API version to use for Mem0 client operations.
+
+                .. deprecated:: 1.4.0
+                    No replacement. Mem0 2.0.0 removed the ``api_version`` /
+                    ``output_format`` parameters from the client. Will be
+                    removed in 2.0.0.
+
             system_prompt: Prefix text for memory context messages.
-            add_as_system_message: Whether to add memories as system messages.
+            add_as_system_message: Whether to add memories as instruction
+                messages ("developer" role) rather than user messages.
+                Providers without a "developer" role receive them as "user".
             position: Position to insert memory messages in context.
         """
 
         search_limit: int = Field(default=10, ge=1)
         search_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
-        api_version: str = Field(default="v2")
+        api_version: str | None = Field(default=None)
         system_prompt: str = Field(default="Based on previous conversations, I recall: \n\n")
         add_as_system_message: bool = Field(default=True)
         position: int = Field(default=1)
@@ -64,13 +74,13 @@ class Mem0MemoryService(FrameProcessor):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        local_config: Optional[Dict[str, Any]] = None,
-        user_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        host: Optional[str] = None,
+        api_key: str | None = None,
+        local_config: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        params: InputParams | None = None,
+        host: str | None = None,
     ):
         """Initialize the Mem0 memory service.
 
@@ -105,15 +115,70 @@ class Mem0MemoryService(FrameProcessor):
         self.run_id = run_id
         self.search_limit = params.search_limit
         self.search_threshold = params.search_threshold
-        self.api_version = params.api_version
+        if params.api_version is not None:
+            warn_deprecated(
+                "`Mem0MemoryService.InputParams.api_version` is deprecated since 1.4.0 and "
+                "will be removed in 2.0.0. No replacement. It has no effect: Mem0 2.0.0 "
+                "removed the api_version/output_format parameters.",
+                stacklevel=2,
+            )
         self.system_prompt = params.system_prompt
         self.add_as_system_message = params.add_as_system_message
         self.position = params.position
         self.last_query = None
         logger.info(f"Initialized Mem0MemoryService with {user_id=}, {agent_id=}, {run_id=}")
 
-    def _store_messages(self, messages: List[Dict[str, Any]]):
+    async def get_memories(self) -> list[dict[str, Any]]:
+        """Retrieve all stored memories for the configured user/agent/run IDs.
+
+        This is a convenience method for accessing memories outside the pipeline,
+        e.g. to build a personalized greeting at connection time. It wraps the
+        blocking Mem0 ``get_all()`` call in a background thread.
+
+        Returns:
+            List of memory dictionaries. Each dict contains at least a
+            ``"memory"`` key with the memory text. Returns an empty list on
+            error.
+        """
+        try:
+            if isinstance(self.memory_client, Memory):
+                # Mem0 2.0.0 requires entity IDs inside ``filters`` (as flat
+                # top-level keys for the local client) rather than as kwargs.
+                filters = {
+                    name: value
+                    for name, value in (
+                        ("user_id", self.user_id),
+                        ("agent_id", self.agent_id),
+                        ("run_id", self.run_id),
+                    )
+                    if value is not None
+                }
+                memories = await asyncio.to_thread(
+                    lambda: self.memory_client.get_all(filters=filters)
+                )
+            else:
+                id_pairs = [
+                    ("user_id", self.user_id),
+                    ("agent_id", self.agent_id),
+                    ("run_id", self.run_id),
+                ]
+                clauses = [{name: value} for name, value in id_pairs if value is not None]
+                filters = {"OR": clauses} if clauses else {}
+                memories = await asyncio.to_thread(
+                    lambda: self.memory_client.get_all(filters=filters)
+                )
+
+            results = memories.get("results", []) if isinstance(memories, dict) else memories
+            return results
+        except Exception as e:
+            logger.error(f"Error retrieving memories from Mem0: {e}")
+            return []
+
+    async def _store_messages(self, messages: list[LLMStandardMessage]):
         """Store messages in Mem0.
+
+        Runs the blocking Mem0 API call in a background thread to avoid
+        blocking the event loop.
 
         Args:
             messages: List of message dictionaries to store in memory.
@@ -121,24 +186,22 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
             params = {
-                "async_mode": True,
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
-                "output_format": "v1.1",
             }
             for id in ["user_id", "agent_id", "run_id"]:
                 if getattr(self, id):
                     params[id] = getattr(self, id)
 
-            if isinstance(self.memory_client, Memory):
-                del params["output_format"]
-            # Note: You can run this in background to avoid blocking the conversation
-            self.memory_client.add(**params)
+            await asyncio.to_thread(lambda: self.memory_client.add(**params))
         except Exception as e:
             logger.error(f"Error storing messages in Mem0: {e}")
 
-    def _retrieve_memories(self, query: str) -> List[Dict[str, Any]]:
+    async def _retrieve_memories(self, query: str) -> list[dict[str, Any]]:
         """Retrieve relevant memories from Mem0.
+
+        Runs the blocking Mem0 API call in a background thread to avoid
+        blocking the event loop.
 
         Args:
             query: The query to search for relevant memories.
@@ -149,15 +212,26 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Retrieving memories for query: {query}")
             if isinstance(self.memory_client, Memory):
-                params = {
-                    "query": query,
-                    "user_id": self.user_id,
-                    "agent_id": self.agent_id,
-                    "run_id": self.run_id,
-                    "limit": self.search_limit,
+                # Mem0 2.0.0 requires entity IDs inside ``filters`` (as flat
+                # top-level keys for the local client) and uses ``top_k``
+                # instead of ``limit``.
+                filters = {
+                    name: value
+                    for name, value in (
+                        ("user_id", self.user_id),
+                        ("agent_id", self.agent_id),
+                        ("run_id", self.run_id),
+                    )
+                    if value is not None
                 }
-                params = {k: v for k, v in params.items() if v is not None}
-                results = self.memory_client.search(**params)
+                results = await asyncio.to_thread(
+                    lambda: self.memory_client.search(
+                        query,
+                        filters=filters,
+                        top_k=self.search_limit,
+                        threshold=self.search_threshold,
+                    )
+                )
             else:
                 id_pairs = [
                     ("user_id", self.user_id),
@@ -166,22 +240,26 @@ class Mem0MemoryService(FrameProcessor):
                 ]
                 clauses = [{name: value} for name, value in id_pairs if value is not None]
                 filters = {"OR": clauses} if clauses else {}
-                results = self.memory_client.search(
-                    query=query,
-                    filters=filters,
-                    version=self.api_version,
-                    top_k=self.search_limit,
-                    threshold=self.search_threshold,
-                    output_format="v1.1",
+                results = await asyncio.to_thread(
+                    lambda: self.memory_client.search(
+                        query=query,
+                        filters=filters,
+                        top_k=self.search_limit,
+                        threshold=self.search_threshold,
+                    )
                 )
 
+            # Mem0 2.x returns {"results": [...]} from search(); older/cloud
+            # versions may return a bare list. Normalize to a list so callers
+            # get a consistent shape (matches get_all() handling above).
+            results = results.get("results", []) if isinstance(results, dict) else results
             logger.debug(f"Retrieved {len(results)} memories from Mem0")
             return results
         except Exception as e:
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    def _enhance_context_with_memories(self, context: LLMContext | OpenAILLMContext, query: str):
+    async def _enhance_context_with_memories(self, context: LLMContext, query: str):
         """Enhance the LLM context with relevant memories.
 
         Args:
@@ -194,21 +272,27 @@ class Mem0MemoryService(FrameProcessor):
 
         self.last_query = query
 
-        memories = self._retrieve_memories(query)
+        memories = await self._retrieve_memories(query)
         if not memories:
             return
 
         # Format memories as a message
         memory_text = self.system_prompt
-        for i, memory in enumerate(memories["results"], 1):
+        for i, memory in enumerate(memories, 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
-        # Add memories as a system message or user message based on configuration
-        if self.add_as_system_message:
-            context.add_message({"role": "system", "content": memory_text})
-        else:
-            # Add as a user message that provides context
-            context.add_message({"role": "user", "content": memory_text})
+        # Add memories as a developer message or user message based on configuration
+        memory_message: LLMStandardMessage = (
+            {"role": "developer", "content": memory_text}
+            if self.add_as_system_message
+            else {"role": "user", "content": memory_text}
+        )
+
+        messages = context.get_messages()
+        position = max(0, min(self.position, len(messages)))
+        messages.insert(position, memory_message)
+        context.set_messages(messages)
+
         logger.debug(f"Enhanced context with {len(memories)} memories")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -220,42 +304,41 @@ class Mem0MemoryService(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-        messages = None
-
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             context = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            messages = frame.messages
-            context = LLMContext(messages)
-
-        if context:
             try:
                 # Get the latest user message to use as a query for memory retrieval
                 context_messages = context.get_messages()
                 latest_user_message = None
 
                 for message in reversed(context_messages):
-                    if message.get("role") == "user" and isinstance(message.get("content"), str):
-                        latest_user_message = message.get("content")
+                    if isinstance(message, LLMSpecificMessage):
+                        continue
+                    content = message.get("content")
+                    if message.get("role") == "user" and isinstance(content, str):
+                        latest_user_message = content
                         break
 
                 if latest_user_message:
+                    # Filter to only user/assistant messages — Mem0 API
+                    # doesn't accept other roles (system, developer, etc.)
+                    messages_to_store = [
+                        m
+                        for m in context_messages
+                        if not isinstance(m, LLMSpecificMessage)
+                        and m.get("role") in ("user", "assistant")
+                    ]
                     # Enhance context with memories before passing it downstream
-                    self._enhance_context_with_memories(context, latest_user_message)
-                    # Store the conversation in Mem0. Only call this when user message is detected
-                    self._store_messages(context_messages)
+                    await self._enhance_context_with_memories(context, latest_user_message)
+                    # Store the conversation in Mem0 as a background task
+                    self.create_task(self._store_messages(messages_to_store), name="mem0_store")
 
-                # If we received an LLMMessagesFrame, create a new one with the enhanced messages
-                if messages is not None:
-                    await self.push_frame(LLMMessagesFrame(context.get_messages()))
-                else:
-                    # Otherwise, pass the enhanced context frame downstream
-                    await self.push_frame(frame)
+                # Pass the enhanced context frame downstream
+                await self.push_frame(frame)
             except Exception as e:
-                logger.error(f"Error processing with Mem0: {str(e)}")
-                await self.push_frame(ErrorFrame(f"Error processing with Mem0: {str(e)}"))
+                await self.push_error(
+                    error_msg=f"Error processing with Mem0: {str(e)}", exception=e
+                )
                 await self.push_frame(frame)  # Still pass the original frame through
         else:
-            # For non-context frames, just pass them through
             await self.push_frame(frame, direction)

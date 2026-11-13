@@ -1,0 +1,752 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Tests for the ElevenLabs Text-to-Dialogue TTS service."""
+
+import base64
+import json
+import unittest
+from urllib.parse import parse_qs, urlparse
+
+import pytest
+from loguru import logger
+from websockets.protocol import State
+
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
+from pipecat.expressive.formatter import ExpressionFormatter
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TextType,
+    TTSTextFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
+from pipecat.services.elevenlabs.dialogue.tts import (
+    _KEEPALIVE_CONTEXT_ID,
+    ElevenLabsDialogueTTSService,
+    _DialogueContext,
+    _normalize_ttd_alignment,
+)
+from pipecat.services.elevenlabs.tts import calculate_word_times
+from pipecat.services.tts_service import TextAggregationMode
+from pipecat.tests.utils import run_test
+from tests.test_tts_frame_ordering import _MockWordTimestampHttpTTSService
+
+_WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
+
+
+class _FakeWebSocket:
+    """Minimal stand-in for the ElevenLabs websocket that records sends."""
+
+    def __init__(self):
+        self.state = State.OPEN
+        self.sent: list[dict] = []
+
+    async def send(self, data: str):
+        self.sent.append(json.loads(data))
+
+
+def _make_dialogue_service(**settings_kwargs) -> ElevenLabsDialogueTTSService:
+    settings = ElevenLabsDialogueTTSService.Settings(voice="test-voice", **settings_kwargs)
+    return ElevenLabsDialogueTTSService(api_key="test-key", settings=settings)
+
+
+#: One 24kHz PCM frame of silence, base64-encoded, as the server sends audio.
+_SILENCE_B64 = base64.b64encode(b"\x00" * 480).decode()
+
+
+async def _open_dialogue_context(service, ws, context_id="ctx-1"):
+    """Put the service in the state run_tts leaves behind for an open context."""
+    service._websocket = ws
+    service._contexts[context_id] = _DialogueContext()
+    await service._audio_context_manager.create(context_id)
+
+
+@pytest.mark.asyncio
+async def test_dialogue_text_is_sent_as_inputs():
+    """Text goes out as an inputs array tagged with the configured voice."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service._send_text("Hello there.", "ctx-1")
+
+    assert ws.sent == [
+        {
+            "context_id": "ctx-1",
+            "inputs": [{"text": "Hello there.", "voice_id": "test-voice", "new_turn": True}],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_new_turn_only_on_first_input():
+    """new_turn resets prosody once per context, not on every input."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service._send_text("First sentence.", "ctx-1")
+    await service._send_text("Second sentence.", "ctx-1")
+
+    assert [m["inputs"][0]["new_turn"] for m in ws.sent] == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_text_for_unregistered_context_is_dropped():
+    """Messages naming an unregistered context would close the socket with 1008."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._send_text("Hello there.", "ctx-unknown")
+    await service.flush_audio("ctx-unknown")
+
+    assert ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_dialogue_interruption_closes_context_without_reconnect():
+    """Interruptions cancel via close_context on the open socket."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    disconnects = []
+    service._disconnect = lambda: disconnects.append(True)
+
+    await service._close_context("ctx-1")
+
+    assert ws.sent == [{"context_id": "ctx-1", "close_context": True}]
+    assert disconnects == []
+    assert service._contexts["ctx-1"].registered is False
+
+
+@pytest.mark.asyncio
+async def test_dialogue_close_context_is_idempotent():
+    """A context already closed by the server isn't closed twice."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service._close_context("ctx-1")
+    await service._close_context("ctx-1")
+
+    assert len(ws.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_dialogue_context_init_is_idempotent():
+    """Re-registering a context the server already has closes the socket."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._send_context_init("ctx-1")
+    await service._send_context_init("ctx-1")
+
+    assert ws.sent == [{"context_id": "ctx-1", "voices": ["test-voice"]}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_quiet_context_is_not_registered_again():
+    """The reported 1008: run_tts reopens the audio context, the server's stays."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+    await service._send_text("First sentence.", "ctx-1")
+
+    # What the base class does when an audio context reaches its idle timeout.
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_completed("ctx-1")
+    ws.sent.clear()
+
+    async for _ in service.run_tts("The rest of the turn.", "ctx-1"):
+        pass
+
+    assert ws.sent == [
+        {
+            "context_id": "ctx-1",
+            "inputs": [
+                {"text": "The rest of the turn.", "voice_id": "test-voice", "new_turn": False}
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_new_connection_forgets_old_contexts():
+    """A context belongs to the connection that registered it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    fresh = _FakeWebSocket()
+    service._websocket = fresh
+    await service._on_websocket_connected()
+
+    assert "ctx-1" not in service._contexts
+    assert fresh.sent == [{"context_id": _KEEPALIVE_CONTEXT_ID, "voices": ["test-voice"]}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_keepalive_context_is_registered_on_connect():
+    """The connection idles out in 20s without a context to keep alive."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._register_keepalive_context()
+
+    keepalive_id = _KEEPALIVE_CONTEXT_ID
+    assert ws.sent == [{"context_id": keepalive_id, "voices": ["test-voice"]}]
+    assert keepalive_id in service._contexts
+
+
+@pytest.mark.asyncio
+async def test_dialogue_keepalive_targets_its_own_context():
+    """A keep_alive without a registered context_id is rejected with 1008."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    await service._register_keepalive_context()
+    ws.sent.clear()
+
+    await service._send_keepalive()
+
+    assert ws.sent == [{"context_id": _KEEPALIVE_CONTEXT_ID, "keep_alive": True}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_keepalive_silent_before_registration():
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    await service._send_keepalive()
+
+    assert ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_dialogue_keepalive_context_messages_are_ignored():
+    """Nothing about the keepalive context should reach the audio pipeline."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    appended = []
+    service.append_to_audio_context = lambda ctx, frame: appended.append((ctx, frame))
+
+    await service._handle_message({"context_id": _KEEPALIVE_CONTEXT_ID, "is_final": True})
+
+    assert appended == []
+
+
+@pytest.mark.asyncio
+async def test_dialogue_flush_targets_registered_contexts_only():
+    """The server rejects any message naming a context it has closed."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service.flush_audio("ctx-1")
+    assert ws.sent == [{"context_id": "ctx-1", "flush": True}]
+
+    service._contexts["ctx-1"].registered = False
+    await service.flush_audio("ctx-1")
+
+    assert ws.sent.count({"context_id": "ctx-1", "flush": True}) == 1
+
+
+@pytest.mark.asyncio
+async def test_dialogue_turn_end_closes_the_context():
+    """Ending a turn sends the close, which is what generates the turn's tail."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service._send_text("Sure.", "ctx-1")
+
+    service._turn_context_id = "ctx-1"
+    await service.on_turn_context_completed()
+
+    assert ws.sent[-1] == {"context_id": "ctx-1", "close_context": True}
+
+
+@pytest.mark.asyncio
+async def test_dialogue_turn_end_closes_a_context_that_went_quiet():
+    """A context still generating outlives the audio context that waits on it."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    service._turn_context_id = "ctx-1"
+
+    # What the base class does when an audio context reaches its idle timeout.
+    service._audio_context_manager.remove("ctx-1")
+    await service.on_audio_context_completed("ctx-1")
+
+    await service.on_turn_context_completed()
+
+    assert ws.sent == [{"context_id": "ctx-1", "close_context": True}]
+
+
+@pytest.mark.asyncio
+async def test_dialogue_turn_final_does_not_end_the_audio_context():
+    """Turn finals arrive per generation batch; only is_final ends a context."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    appended = []
+    service.append_to_audio_context = lambda ctx, frame: appended.append(frame)
+
+    await service._handle_message({"context_id": "ctx-1", "is_final_audio_for_turn": True})
+
+    assert appended == []
+
+
+@pytest.mark.asyncio
+async def test_dialogue_interruption_closes_without_waiting_for_audio():
+    """Before generation starts, an immediate close is what cancels the text."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    await service._close_context("ctx-1")
+
+    assert ws.sent == [{"context_id": "ctx-1", "close_context": True}]
+
+
+def test_dialogue_stability_is_passed_through():
+    """The API validates the range itself; it accepts any value in it."""
+    for given in (0.0, 0.25, 0.3, 0.5, 0.7, 1.0):
+        service = _make_dialogue_service(stability=given)
+        assert service._voice_settings == {"stability": given}
+
+
+def test_dialogue_voice_settings_carries_stability_only():
+    """Text-to-Dialogue ignores the other voice settings entirely."""
+    service = _make_dialogue_service(stability=0.3)
+    assert set(service._voice_settings) == {"stability"}
+
+
+def test_dialogue_voice_settings_omitted_when_stability_unset():
+    service = _make_dialogue_service()
+    assert service._voice_settings is None
+
+
+def test_dialogue_clone_strength_is_sent_for_v4_models():
+    """The v4 websocket voice settings read clone_strength; it shapes v4 PVCs."""
+    service = _make_dialogue_service(stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3, "clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_alone_is_enough():
+    service = _make_dialogue_service(clone_strength=0.2)
+    assert service._voice_settings == {"clone_strength": 0.2}
+
+
+def test_dialogue_clone_strength_is_dropped_for_v3_models():
+    """Only eleven_v4 models read clone_strength; v3 reads stability alone."""
+    service = _make_dialogue_service(model="eleven_v3", stability=0.3, clone_strength=0.2)
+    assert service._voice_settings == {"stability": 0.3}
+
+
+def test_dialogue_clone_strength_change_does_not_require_reconnect():
+    """clone_strength rides in the per-context registration, not the URL."""
+    assert "clone_strength" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
+    assert "clone_strength" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
+def test_dialogue_voice_change_does_not_require_reconnect():
+    """Voices are registered per context, so a voice change just needs a new one."""
+    assert "voice" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
+    assert "voice" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
+@pytest.mark.parametrize("mode", [None, "auto", "on", "off"])
+def test_dialogue_text_normalization_is_sent_only_when_set(mode):
+    service = _make_dialogue_service(apply_text_normalization=mode)
+    query = parse_qs(urlparse(service._build_websocket_url()).query)
+    assert query.get("apply_text_normalization") == ([mode] if mode else None)
+
+
+def test_dialogue_text_normalization_change_requires_reconnect():
+    """apply_text_normalization is a query parameter of the websocket URL."""
+    assert "apply_text_normalization" in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
+
+
+def test_dialogue_alignment_is_normalized_for_word_times():
+    """Text-to-Dialogue sends snake_case alignment; shared helpers expect camelCase."""
+    normalized = _normalize_ttd_alignment(
+        {
+            "chars": ["H", "i", " ", "t", "h", "e", "r", "e"],
+            "char_start_times_ms": [0, 50, 100, 120, 170, 220, 270, 320],
+            "char_durations_ms": [50, 50, 20, 50, 50, 50, 50, 50],
+        }
+    )
+
+    assert set(normalized) == set(_WS_ALIGNMENT_KEYS)
+
+    word_times, partial, _ = calculate_word_times(normalized, 0.0, "", 0.0)
+    assert [word for word, _ in word_times] == ["Hi"]
+    assert partial == "there"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_wordless_alignment_still_advances_the_clock():
+    """Trailing punctuation arrives on its own; its span must not be dropped."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    service.add_word_timestamps = _noop
+
+    # "Hi there" -- completes "Hi", carries "there".
+    await service._handle_message(
+        {
+            "context_id": "ctx-1",
+            "alignment": {
+                "chars": ["H", "i", " ", "t", "h", "e", "r", "e"],
+                "char_start_times_ms": [0, 120, 240, 293, 347, 400, 453, 507],
+                "char_durations_ms": [120, 120, 53, 54, 53, 53, 54, 53],
+            },
+        }
+    )
+    after_first = service._word_clocks["ctx-1"].cumulative_time
+    assert after_first == pytest.approx(0.560)
+
+    # "!" alone: completes no word, but occupies 320ms of audio.
+    await service._handle_message(
+        {
+            "context_id": "ctx-1",
+            "alignment": {
+                "chars": ["!"],
+                "char_start_times_ms": [0],
+                "char_durations_ms": [320],
+            },
+        }
+    )
+
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(after_first + 0.320), (
+        "word-less alignment chunk dropped from the clock; later word timestamps would run early"
+    )
+
+
+def test_dialogue_appends_trailing_space_to_inputs():
+    """Consecutive inputs are concatenated verbatim by the server."""
+    service = _make_dialogue_service()
+
+    assert service._append_trailing_space is True
+    assert service._prepare_text_for_tts("Hi there!") == "Hi there! "
+    assert service._prepare_text_for_tts("Hi there! ") == "Hi there! "
+
+
+def test_dialogue_always_aggregates_sentences():
+    """Each flush generates independently, so tokens would synthesize out of context."""
+    service = _make_dialogue_service()
+
+    assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
+    assert service._is_streaming_tokens is False
+
+
+def test_dialogue_token_aggregation_is_refused():
+    """Sentence aggregation holds even when the caller asks for tokens."""
+    settings = ElevenLabsDialogueTTSService.Settings(voice="test-voice")
+    service = ElevenLabsDialogueTTSService(
+        api_key="test-key",
+        settings=settings,
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+
+    assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
+    assert service._is_streaming_tokens is False
+
+
+def test_dialogue_defaults_to_eleven_v4_turbo():
+    service = _make_dialogue_service()
+
+    assert service._settings.model == "eleven_v4_turbo"
+
+
+def test_dialogue_non_dialogue_model_warns_without_raising():
+    """The wrong-model warning names the service, so it needs a constructed one."""
+    service = _make_dialogue_service(model="eleven_flash_v2_5")
+
+    assert service._settings.model == "eleven_flash_v2_5"
+
+
+def test_dialogue_appends_trailing_space_under_sentence_aggregation():
+    """Sentence aggregation is what makes the trailing space safe to append."""
+    service = _make_dialogue_service()
+
+    assert service._append_trailing_space is True
+    assert service._prepare_text_for_tts("Hi there!") == "Hi there! "
+
+
+@pytest.mark.asyncio
+async def test_dialogue_drained_alignment_does_not_disturb_the_next_turn():
+    """An interrupted context keeps streaming; its alignment belongs to nobody."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    service.add_word_timestamps = _noop
+
+    # The next turn is under way.
+    service._audio_context_manager.remove("ctx-1")
+    await service._audio_context_manager.create("ctx-2")
+
+    # Late alignment from the interrupted context arrives.
+    await service._handle_message(
+        {
+            "context_id": "ctx-1",
+            "alignment": {
+                "chars": ["s", "t", "a", "l", "e"],
+                "char_start_times_ms": [0, 100, 200, 300, 400],
+                "char_durations_ms": [100, 100, 100, 100, 100],
+            },
+        }
+    )
+
+    assert "ctx-1" not in service._word_clocks, "drained context's alignment was processed"
+    assert "ctx-2" not in service._word_clocks, "drained context disturbed the next turn's clock"
+
+
+def _ttd_message(context_id: str, text: str) -> dict:
+    """A Text-to-Dialogue alignment message for text, one character every 10ms."""
+    alignment = _alignment(text)
+    return {
+        "context_id": context_id,
+        "alignment": {
+            "chars": alignment["chars"],
+            "char_start_times_ms": alignment["charStartTimesMs"],
+            "char_durations_ms": alignment["charDurationsMs"],
+        },
+    }
+
+
+def test_dialogue_pause_frame_processing_is_configurable():
+    """Holding frames per turn is the default; turning it off lets contexts overlap."""
+    assert _make_dialogue_service()._pause_frame_processing is True
+    service = ElevenLabsDialogueTTSService(api_key="test-key", pause_frame_processing=False)
+    assert service._pause_frame_processing is False
+
+
+@pytest.mark.asyncio
+async def test_dialogue_interleaved_contexts_align_words_independently():
+    """The server generates concurrent contexts together and interleaves their
+    alignment on one socket; a word split across one context's chunks must not
+    pick up another context's characters or clock."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word, start) for word, start in word_times)
+
+    service.add_word_timestamps = _record
+
+    for context_id, chunk in (
+        ("ctx-1", "Hello wor"),
+        ("ctx-2", "Good mor"),
+        ("ctx-1", "ld again "),
+        ("ctx-2", "ning all "),
+    ):
+        await service._handle_message(_ttd_message(context_id, chunk))
+
+    assert [(c, w) for c, w, _ in reported if c == "ctx-1"] == [
+        ("ctx-1", "Hello"),
+        ("ctx-1", "world"),
+        ("ctx-1", "again"),
+    ]
+    assert [(c, w) for c, w, _ in reported if c == "ctx-2"] == [
+        ("ctx-2", "Good"),
+        ("ctx-2", "morning"),
+        ("ctx-2", "all"),
+    ]
+    # Each context's times run on its own clock: "again" starts after ctx-1's
+    # first chunk (90ms) plus "ld " (30ms), whatever ctx-2 sent in between.
+    starts = {(c, w): t for c, w, t in reported}
+    assert starts[("ctx-1", "world")] == pytest.approx(0.06)
+    assert starts[("ctx-1", "again")] == pytest.approx(0.09 + 0.03)
+    assert starts[("ctx-2", "morning")] == pytest.approx(0.05)
+    assert starts[("ctx-2", "all")] == pytest.approx(0.08 + 0.05)
+
+
+@pytest.mark.asyncio
+async def test_dialogue_context_completion_resets_only_its_own_clock():
+    """A context finishing while another is mid-word must not wipe that word."""
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws, "ctx-1")
+    await _open_dialogue_context(service, ws, "ctx-2")
+    reported = []
+
+    async def _record(word_times, context_id, *args, **kwargs):
+        reported.extend((context_id, word) for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+
+    await service._handle_message(_ttd_message("ctx-1", "Done "))
+    await service._handle_message(_ttd_message("ctx-2", "Kail"))
+    service._reset_alignment_state("ctx-1")  # ctx-1's audio context completes
+    await service._handle_message(_ttd_message("ctx-2", "ash "))
+
+    assert "ctx-1" not in service._word_clocks
+    assert ("ctx-2", "Kailash") in reported
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+def _alignment(text: str, start_ms: int = 0) -> dict:
+    """Alignment for text, one character every 10ms."""
+    return {
+        "chars": list(text),
+        "charStartTimesMs": [start_ms + 10 * i for i in range(len(text))],
+        "charDurationsMs": [10] * len(text),
+    }
+
+
+def test_an_audio_tag_is_one_word():
+    word_times, partial, _ = calculate_word_times(
+        _alignment("10\u00a0000, [short pause] two"), 0.0, audio_tags=True
+    )
+
+    assert [word for word, _ in word_times] == ["10\u00a0000,", "[short pause]"]
+    assert partial == "two"
+
+
+def test_an_audio_tag_split_across_chunks_is_one_word():
+    first, partial, start = calculate_word_times(_alignment("[clear th"), 0.0, audio_tags=True)
+    second, partial, _ = calculate_word_times(
+        _alignment("roat] It's"), 0.0, partial, start, audio_tags=True
+    )
+
+    assert first == []
+    assert [word for word, _ in second] == ["[clear throat]"]
+    assert partial == "It's"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_word_timestamps_report_audio_tags_as_words():
+    service = _make_dialogue_service()
+    ws = _FakeWebSocket()
+    await _open_dialogue_context(service, ws)
+    reported = []
+
+    async def _record(word_times, *args, **kwargs):
+        reported.extend(word for word, _ in word_times)
+
+    service.add_word_timestamps = _record
+    service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
+
+    for chunk in ("[exci", "ted] Good news [clear th", "roat] it's ", "back."):
+        alignment = _alignment(chunk)
+        await service._handle_message(
+            {
+                "context_id": "ctx-1",
+                "alignment": {
+                    "chars": alignment["chars"],
+                    "char_start_times_ms": alignment["charStartTimesMs"],
+                    "char_durations_ms": alignment["charDurationsMs"],
+                },
+            }
+        )
+
+    assert reported == ["[excited]", "Good", "news", "[clear throat]", "it's"]
+    assert service._word_clocks["ctx-1"].cumulative_time == pytest.approx(0.05 + 0.24 + 0.11 + 0.05)
+
+
+class TestAudioTagExpressionAdapter:
+    def test_capabilities(self):
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert capabilities.allows_free_text_sounds
+        assert capabilities.allows_free_text_delivery
+        assert capabilities.emphasis
+        assert capabilities.pause_range_ms == (100, 3000)
+
+    def test_delivery_names_are_single_words(self):
+        # A delivery tag separates its names by spaces.
+        capabilities = ElevenLabsAudioTagExpressionAdapter().capabilities()
+        assert all(len(term.name.split()) == 1 for term in capabilities.delivery)
+
+    def test_tags_formatted_where_delivery_changes(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", ["excited"], None) == "[excited] Hi."
+        assert adapter.format_text("Hi.", ["excited"], ["excited"]) == "Hi."
+        assert adapter.format_text("Hi.", ["sad", "whispers"], None) == "[sad] [whispers] Hi."
+
+    def test_slow_and_fast_are_written_as_pace_tags(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert {"slow", "fast"} <= {term.name for term in adapter.capabilities().delivery}
+        assert adapter.format_text("Hi.", ["calm", "slow"], None) == "[calm] [slowly] Hi."
+        assert adapter.format_text("Hi.", ["fast"], ["calm"]) == "[quickly] Hi."
+
+    def test_return_to_baseline_formats_nothing(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("Hi.", [], ["excited"]) == "Hi."
+
+    def test_emphasis_is_capitalized(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_text("back up", ["emphasis"], None) == "BACK UP"
+        assert adapter.format_text("back up", ["excited", "emphasis"], ["excited"]) == "BACK UP"
+
+    def test_sounds(self):
+        assert ElevenLabsAudioTagExpressionAdapter().format_sound("laughs") == " [laughs] "
+
+    def test_pauses_are_short_or_long(self):
+        adapter = ElevenLabsAudioTagExpressionAdapter()
+        assert adapter.format_pause(500) == " [short pause] "
+        assert adapter.format_pause(1500) == " [long pause] "
+
+
+class _AlignedTTSService(_MockWordTimestampHttpTTSService):
+    """Reports the words of what it's sent as ElevenLabs aligns them, audio tags whole."""
+
+    expression_adapter_class = ElevenLabsAudioTagExpressionAdapter
+
+    async def run_tts(self, text: str, context_id: str):
+        word_times, partial, start = calculate_word_times(_alignment(text), 0.0, audio_tags=True)
+        self._word_times = word_times + ([(partial, start)] if partial else [])
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tag", ["[[inhales deeply]]", "[[clears throat]]", "[[pause 400]]"])
+async def test_every_word_around_a_tag_of_several_words_is_reported(tag):
+    warnings: list[str] = []
+    handler_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        down, _ = await run_test(
+            _AlignedTTSService(),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(f"Here's a story. {tag} Every night, a lighthouse blinked."),
+                LLMFullResponseEndFrame(),
+            ],
+            pipeline_params=PipelineParams(enable_expressive_conversation=True),
+        )
+    finally:
+        logger.remove(handler_id)
+
+    words = [f.text for f in down if isinstance(f, TTSTextFrame) and f.text_type == TextType.WORD]
+    assert words == ["Here's", "a", "story.", "Every", "night,", "a", "lighthouse", "blinked."]
+    assert not [w for w in warnings if "Dropping word" in w]
