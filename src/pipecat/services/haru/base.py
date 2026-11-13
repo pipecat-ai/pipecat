@@ -73,8 +73,7 @@ class HaruLLMSettings(LLMSettings):
     an option at the model's own default.
 
     Parameters:
-        guidance_scale: Audio guidance, from 1 to 2. Higher follows the voice
-            reference more closely.
+        guidance_scale: Guidance scale of the audio sampling, from 1 to 2.
         eop_bias: Added to the logit of the model's "start speaking" token.
             Above 0 the model starts speaking sooner.
         speak_first: Whether the model opens the conversation.
