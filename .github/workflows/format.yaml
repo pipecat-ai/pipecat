@@ -64,3 +64,6 @@ jobs:
         run: |
           uv run scripts/cli/update_registry.py
           git diff --exit-code src/pipecat/cli/registry/_imports.py src/pipecat/cli/registry/_configs.py
+
+      - name: Changelog fragment names
+        run: uv run python scripts/check-changelog-fragments.py

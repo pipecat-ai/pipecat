@@ -85,35 +85,9 @@ jobs:
             exit 1
           fi
 
-          # Validate fragment types
-          VALID_TYPES="added changed deprecated removed fixed performance security other"
-          INVALID_FRAGMENTS=""
-
-          for file in changelog/*.md; do
-            # Skip template
-            if [[ "$file" == "changelog/_template.md.j2" ]]; then
-              continue
-            fi
-            
-            # Extract type from filename (e.g., 1234.added.md -> added)
-            filename=$(basename "$file")
-            # Handle both 1234.added.md and 1234.added.2.md patterns
-            type=$(echo "$filename" | sed -E 's/^[0-9]+\.([a-z]+)(\.[0-9]+)?\.md$/\1/')
-            
-            # Check if type is valid
-            if ! echo "$VALID_TYPES" | grep -wq "$type"; then
-              INVALID_FRAGMENTS="$INVALID_FRAGMENTS\n  - $filename (type: '$type')"
-            fi
-          done
-
-          if [ -n "$INVALID_FRAGMENTS" ]; then
-            echo "❌ Error: Invalid changelog fragment types found:"
-            echo -e "$INVALID_FRAGMENTS"
-            echo ""
-            echo "Valid types are: $VALID_TYPES"
-            echo "Example: 1234.added.md, 5678.fixed.md"
-            exit 1
-          fi
+          # Also runs on every PR in format.yaml, so a misnamed fragment should
+          # never get this far.
+          uv run python scripts/check-changelog-fragments.py
 
           echo "✓ Found $FRAGMENT_COUNT changelog fragment(s)"
           echo "has_fragments=true" >> $GITHUB_OUTPUT
