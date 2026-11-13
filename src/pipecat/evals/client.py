@@ -862,6 +862,9 @@ class EvalClient:
         """End the handshake with a refusal, unless it is already over."""
         if not self._handshake_over.is_set():
             self._refusal = EvalBotUnavailableError(kind, reason)
+            # A bot can greet as the run is torn down; the persona mustn't answer it.
+            if self._persona is not None:
+                self._persona.hang_up()
             self._handshake_over.set()
 
     def _connection_flags(self) -> EvalConnectionFlags:
