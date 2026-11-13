@@ -758,6 +758,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         :meth:`_handle_context`). Before the session's conversation is set up,
         nothing is sent: the setup sends the context, which the aggregator
         records the messages in.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if not self._api_session_ready or self._llm_needs_conversation_setup:
             return
@@ -767,7 +770,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 continue
             role = message.get("role") if isinstance(message, dict) else None
             await self._send_message_item(
-                text, role="assistant" if role == "assistant" else "system"
+                text, role=role if role in ("user", "assistant") else "system"
             )
         self._results_awaiting_response = True
 

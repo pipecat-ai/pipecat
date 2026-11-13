@@ -3386,6 +3386,32 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         for msg in assistant_msg_stopped:
             self.assertFalse(msg.interrupted)
 
+    async def test_an_appended_message_goes_on_to_the_service(self):
+        context, pair = self._build_pair(realtime_service_mode=True)
+        message = {"role": "user", "content": "What's the capital of France?"}
+
+        down_frames, _ = await run_test(
+            Pipeline([pair.user()]),
+            frames_to_send=[LLMMessagesAppendFrame(messages=[message], run_llm=True)],
+        )
+
+        appends = [f for f in down_frames if isinstance(f, LLMMessagesAppendFrame)]
+        self.assertEqual([f.messages for f in appends], [[message]])
+        self.assertFalse(any(isinstance(f, LLMContextFrame) for f in down_frames))
+        self.assertEqual(context.get_messages(), [])
+
+    async def test_an_appended_message_is_added_once_and_the_assistant_asks_to_run(self):
+        context, pair = self._build_pair(realtime_service_mode=True)
+        message = {"role": "user", "content": "What's the capital of France?"}
+
+        _, up_frames = await run_test(
+            Pipeline([pair.user(), pair.assistant()]),
+            frames_to_send=[LLMMessagesAppendFrame(messages=[message], run_llm=True)],
+        )
+
+        self.assertEqual(context.get_messages(), [message])
+        self.assertTrue(any(isinstance(f, LLMContextFrame) for f in up_frames))
+
     async def test_interruption_writes_assistant_immediately(self):
         _, pair = self._build_pair(realtime_service_mode=True)
         user, assistant = pair

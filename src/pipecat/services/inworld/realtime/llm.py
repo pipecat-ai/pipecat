@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -613,8 +612,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
@@ -756,10 +753,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     await self.start_processing_metrics()
                     await self.start_ttfb_metrics()
                     await self.send_client_event(events.ResponseCreateEvent())
-
-    async def _handle_messages_append(self, frame):
-        """Handle appending messages to the context (not yet supported)."""
-        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Inworld Realtime")
 
     #
     # WebSocket communication

@@ -675,7 +675,16 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         Interactive text when the append asks to run, which the model answers
         as it would the user speaking; plain text otherwise, which it takes in
         without answering.
+
+        If the session isn't set up yet, the messages aren't sent. The
+        assistant aggregator adds them to the context, and the session is set
+        up from that context, so the model gets them then.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
+        if not self._audio_input_started:
+            return
         for message in frame.messages:
             text = standard_message_text(message)
             if text:

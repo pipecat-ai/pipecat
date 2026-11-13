@@ -236,6 +236,12 @@ class TestOpenAIRealtimeIntermediateResults(
     def _build_service(self):
         return OpenAIRealtimeLLMService(api_key="test")
 
+    async def test_an_appended_user_message_goes_in_as_a_user_item(self):
+        await self.service._handle_messages_append(_append("Hello?", role="user"))
+
+        (item,) = self._items()
+        self.assertEqual(item.role, "user")
+
 
 class TestGrokRealtimeIntermediateResults(
     OpenAIProtocolIntermediateResultsTests, unittest.IsolatedAsyncioTestCase
@@ -364,12 +370,10 @@ class TestGeminiLiveIntermediateResults(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(self.service._session.send_client_content.call_args_list), 1)
 
-    async def test_without_a_context_an_append_starts_a_conversation(self):
+    async def test_nothing_is_appended_before_the_first_context(self):
         await self.service._handle_messages_append(_append())
 
-        self.assertTrue(
-            self.service._session.send_client_content.await_args.kwargs["turn_complete"]
-        )
+        self.service._session.send_client_content.assert_not_awaited()
 
     async def test_a_model_without_non_blocking_tools_takes_no_intermediate_results(self):
         self.service._settings.model = "models/gemini-3.1-flash-live-preview"
@@ -421,6 +425,8 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertIn("call_1", self.service._completed_tool_calls)
 
     async def test_an_appended_message_goes_in_as_text_interactive_as_asked(self):
+        self.service._audio_input_started = True
+
         await self.service._handle_messages_append(_append())
         await self.service._handle_messages_append(
             _append("Backend (working): read_file()", run_llm=False)
@@ -429,6 +435,11 @@ class TestNovaSonicIntermediateResults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self._texts(), [("Backend: On it.", True), ("Backend (working): read_file()", False)]
         )
+
+    async def test_nothing_is_appended_before_the_session_is_set_up(self):
+        await self.service._handle_messages_append(_append())
+
+        self.assertEqual(self._texts(), [])
 
 
 class TestUltravoxIntermediateResults(unittest.IsolatedAsyncioTestCase):
