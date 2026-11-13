@@ -23,6 +23,7 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     ErrorFrame,
+    InterruptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
@@ -459,6 +460,57 @@ async def test_xai_websocket_word_timestamps_from_audioless_delta():
     joined = "".join(frame.text for frame in down_frames if isinstance(frame, TTSTextFrame))
     assert "Hi" in joined
     assert "there" in joined
+
+
+@pytest.mark.asyncio
+async def test_xai_websocket_drops_cleared_utterance_tail():
+    """Audio xAI still sends for a cleared utterance must not play as the next reply."""
+    tail_bytes = b"\x0a\x0b" * 512
+    reply_bytes = b"\x01\x02" * 512
+
+    def delta(audio: bytes) -> str:
+        return json.dumps({"type": "audio.delta", "delta": base64.b64encode(audio).decode("ascii")})
+
+    async def handler(ws):
+        cleared = False
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                if msg["type"] == "text.clear":
+                    cleared = True
+                elif msg["type"] == "text.delta" and cleared:
+                    # xAI finishes the cleared utterance before acknowledging the clear,
+                    # by which time the next reply's context is already active.
+                    await ws.send(delta(tail_bytes))
+                    await ws.send(json.dumps({"type": "audio.done"}))
+                    await ws.send(json.dumps({"type": "audio.clear"}))
+                elif msg["type"] == "text.done":
+                    await ws.send(delta(tail_bytes if not cleared else reply_bytes))
+                    if cleared:
+                        await ws.send(json.dumps({"type": "audio.done"}))
+        except websockets.ConnectionClosed:
+            pass
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        tts_service = XAITTSService(
+            api_key="test-key", base_url=f"ws://{host}:{port}/v1/tts", sample_rate=24000
+        )
+        down_frames, _ = await run_test(
+            tts_service,
+            frames_to_send=[
+                TTSSpeakFrame(text="This reply gets cut off."),
+                _SleepAfterSpeak(0.2),
+                InterruptionFrame(),
+                _SleepAfterSpeak(0.1),
+                TTSSpeakFrame(text="Okay."),
+                _SleepAfterSpeak(0.3),
+            ],
+        )
+
+    start = next(i for i, f in enumerate(down_frames) if isinstance(f, InterruptionFrame))
+    audio = b"".join(f.audio for f in down_frames[start:] if isinstance(f, TTSAudioRawFrame))
+    assert audio == reply_bytes
 
 
 # Small helper imported lazily to avoid circular import in fixture-lite tests.
