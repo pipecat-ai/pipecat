@@ -35,6 +35,7 @@ import importlib
 import inspect
 import pkgutil
 from dataclasses import fields
+from unittest.mock import Mock
 
 import pytest
 
@@ -164,12 +165,17 @@ def test_delta_defaults_are_not_given(settings_cls):
 
 
 @pytest.mark.parametrize("service_cls", ALL_SERVICE_CLASSES, ids=lambda c: c.__qualname__)
-def test_service_settings_complete(service_cls):
+def test_service_settings_complete(service_cls, monkeypatch):
     """After construction, _settings must have no NOT_GIVEN values.
 
     This is what validate_complete() checks in start().  Catching it
     here means we don't need a running pipeline to find missing defaults.
     """
+    if service_cls.__module__ == "pipecat.services.pocket_tts.tts":
+        # Settings validation needs the real service constructor but no model weights.
+        module = importlib.import_module(service_cls.__module__)
+        monkeypatch.setattr(module.TTSModel, "load_model", Mock(return_value=Mock()))
+
     try:
         svc = _try_instantiate(service_cls)
     except Exception:
