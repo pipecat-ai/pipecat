@@ -1324,7 +1324,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._realtime_handoff_flush_task = None
 
     async def _realtime_handle_messages_append(self, frame: LLMMessagesAppendFrame):
-        """Pass appended messages on to the realtime service and the assistant aggregator.
+        """Pass appended messages on, so the realtime service can take them in straight away.
 
         In a cascade pipeline, the user aggregator handles an appended message:
         it adds it to the context and triggers an LLM run. In a realtime
