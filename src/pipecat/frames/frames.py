@@ -1882,11 +1882,17 @@ class FunctionCallCancelFrame(SystemFrame):
             cancelled by its own timeout sets this: an interruption must not
             trigger inference, and a cancellation the LLM asked for already
             runs inference through the result of the tool that requested it.
+        result: What the handler reported while it was being cancelled, or None
+            if it reported nothing. A handler that catches its
+            ``asyncio.CancelledError`` can report how far it got (for example,
+            that its request had already been sent), and the call is settled
+            with that in place of a notice that its outcome is unknown.
     """
 
     function_name: str
     tool_call_id: str
     run_llm: bool = False
+    result: Any = None
 
 
 @dataclass

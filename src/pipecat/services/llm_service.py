@@ -187,7 +187,12 @@ class FunctionCallParams:
         result_callback: Callback to deliver the result of the function call.
             For async function calls (``cancel_on_interruption=False``), call
             it with ``properties=FunctionCallResultProperties(is_final=False)``
-            to push intermediate updates before the final result.
+            to push intermediate updates before the final result. A handler
+            that is cancelled (by an interruption, a timeout, or the LLM) can
+            catch its ``asyncio.CancelledError`` and call it before re-raising
+            to report how far it got, such as whether its request had already
+            been sent; the report settles the cancelled call in place of a
+            notice that its outcome is unknown.
         app_resources: The application-defined resources passed to
             ``PipelineWorker(..., app_resources=...)``. Same object — passed by
             reference, not a copy. Use it to share DB handles, clients, state,
@@ -285,6 +290,11 @@ class FunctionCallRunnerItem:
             final result, a timeout, or a cancellation. Results reported after
             that are rejected, since the rest of the pipeline has stopped
             tracking the call.
+        cancelling: Whether the call has been settled as cancelled but the
+            cancellation hasn't been broadcast yet. A final result the handler
+            reports in that window is kept in ``cancelled_result``.
+        cancelled_result: What the handler reported while being cancelled,
+            carried by the ``FunctionCallCancelFrame`` that settles the call.
     """
 
     registry_item: FunctionCallRegistryItem
@@ -295,6 +305,8 @@ class FunctionCallRunnerItem:
     run_llm: bool | None = None
     group_id: str | None = None
     settled: bool = False
+    cancelling: bool = False
+    cancelled_result: Any = None
 
 
 # `default=BaseLLMAdapter` (PEP 696) so that unparameterized subclasses
@@ -2040,6 +2052,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 )
                 return
 
+            # A handler being cancelled can still say how far it got: its
+            # report settles the call in place of a notice that the outcome is
+            # unknown.
+            if runner_item.cancelling and is_final:
+                runner_item.cancelled_result = result
+                return
+
             # A handler can outlive its call and still hold this callback, so
             # late results are rejected here rather than broadcast for the
             # aggregator to drop.
@@ -2083,8 +2102,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f" or set a global default via `function_call_timeout_secs` on the LLM constructor."
             )
             # Settle the call before cancelling, so a result racing in while the
-            # handler unwinds is rejected instead of broadcast.
+            # handler unwinds settles it as cancelled instead of being broadcast.
             runner_item.settled = True
+            runner_item.cancelling = True
             # Cancelling goes through a detached task because it awaits the
             # function call task this handler runs inside of.
             self.create_task(self._timeout_function_call(runner_item))
@@ -2368,8 +2388,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
             # Settle before cancelling: a handler that catches its
             # CancelledError and reports a result while unwinding must not be
-            # able to reopen a call the pipeline has stopped tracking.
+            # able to reopen a call the pipeline has stopped tracking. Its
+            # report is carried by the cancellation instead.
             runner_item.settled = True
+            runner_item.cancelling = True
 
             if task:
                 # We remove the callback because we are going to cancel the
@@ -2406,11 +2428,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         Returns:
             The cancelled call, described for ``on_function_calls_cancelled``.
         """
+        # Anything the handler reports from here on is too late to settle the
+        # call, and is rejected like any other late result.
+        runner_item.cancelling = False
         await self.broadcast_frame(
             FunctionCallCancelFrame,
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             run_llm=run_llm,
+            result=runner_item.cancelled_result,
         )
         return FunctionCallFromLLM(
             function_name=runner_item.function_name,
@@ -2425,8 +2451,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         The handler usually still owns the call and is cancelled outright. If it
         happened to finish while the timeout was being processed its task is
         already gone and there is nothing left to cancel, but the deadline has
-        settled the call, so its result is rejected — the pipeline is told the
-        call is over regardless, or it waits on a result that can never arrive.
+        settled the call, so its result is carried by the cancellation rather
+        than broadcast — the pipeline is told the call is over regardless, or it
+        waits on a result that can never arrive.
 
         A deadline is the one cancellation nothing else follows up on, so it
         asks for inference: without it the LLM never learns the call is over and

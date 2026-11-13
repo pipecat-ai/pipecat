@@ -1534,5 +1534,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """Settle a cancelled call, so the API isn't left waiting on it."""
         if frame.tool_call_id not in self._open_function_calls:
             return
-        await self._send_tool_result(frame.tool_call_id, "CANCELLED")
+        await self._send_tool_result(
+            frame.tool_call_id, async_tool_messages.cancelled_call_result(frame.result)
+        )
         self._completed_tool_calls.add(frame.tool_call_id)

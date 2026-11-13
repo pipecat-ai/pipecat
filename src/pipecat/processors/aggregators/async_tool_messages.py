@@ -102,6 +102,17 @@ _CANCELLED_DESCRIPTION = (
     "not complete rather than leaving it unanswered."
 )
 
+# Result given to the LLM for a synchronous call cancelled before it returned, by an
+# interruption or a timeout. Cancelling the handler doesn't undo what it had already
+# sent, so the call's outcome is unknown: the model must not tell the user the action
+# didn't happen, nor retry an action that may have gone through.
+CANCELLED_CALL_RESULT = (
+    "CANCELLED: this tool call was stopped before it returned a result, so its "
+    "outcome is unknown and its action may already have taken effect. Do not tell "
+    "the user it did or did not happen; if it matters, say you can't confirm "
+    "whether it went through. Do not call it again unless the user asks you to."
+)
+
 # Standing guidance composed into the system instruction whenever an async tool is
 # registered. The per-result message says the same thing, but it arrives buried in a
 # context whose most recent turn may be the user asking for something else; a model
@@ -302,6 +313,22 @@ def build_cancelled_message(tool_call_id: str) -> LLMStandardMessage:
             result=_CANCELLED_RESULT,
         )
     )
+
+
+def cancelled_call_result(reported: Any = None) -> str:
+    """Build the result that settles a synchronous call cancelled before it returned.
+
+    Args:
+        reported: What the handler reported while it was being cancelled (see
+            ``FunctionCallCancelFrame.result``), or None if it reported nothing.
+
+    Returns:
+        The reported result, JSON-encoded, or :data:`CANCELLED_CALL_RESULT` when
+        the handler reported nothing and the call's outcome is unknown.
+    """
+    if reported is None:
+        return CANCELLED_CALL_RESULT
+    return json.dumps(reported, ensure_ascii=False)
 
 
 # --- Parsing -----------------------------------------------------------------

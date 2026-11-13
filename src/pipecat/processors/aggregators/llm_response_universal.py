@@ -2417,9 +2417,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Update context with the function call cancellation. An async call is
         # settled with a developer message, the same channel its results use,
         # whether or not the conversation moved on, since the notice says the
-        # call did not complete and asks for the user to be told.
+        # call did not complete and asks for the user to be told. A handler
+        # that reported how far it got while being cancelled is settled with
+        # that report instead of the notice.
         if function_call.cancel_on_interruption:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
+            self._update_function_call_result(
+                frame.function_name,
+                frame.tool_call_id,
+                async_tool_messages.cancelled_call_result(frame.result),
+            )
+        elif frame.result is not None:
+            self._context.add_message(
+                async_tool_messages.build_final_result_message(
+                    frame.tool_call_id, json.dumps(frame.result, ensure_ascii=False)
+                )
+            )
         else:
             self._context.add_message(
                 async_tool_messages.build_cancelled_message(frame.tool_call_id)

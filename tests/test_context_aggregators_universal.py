@@ -1758,7 +1758,28 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=[],
         )
-        assert context.messages[-1]["content"] == "CANCELLED"
+        # Cancelling the handler doesn't undo what it already sent, so the LLM
+        # is told the outcome is unknown rather than that nothing happened.
+        assert context.messages[-1]["content"] == async_tool_messages.CANCELLED_CALL_RESULT
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_function_call_cancel_settles_with_what_the_handler_reported(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="issue_refund",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(
+                function_name="issue_refund", tool_call_id="1", result={"status": "submitted"}
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        assert json.loads(context.messages[-1]["content"]) == {"status": "submitted"}
         assert not aggregator.has_function_calls_in_progress
 
     async def test_fast_async_function_call_settles_in_place(self):
@@ -2051,6 +2072,28 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         assert payload.kind == "final"
         assert payload.tool_call_id == "1"
         assert payload.result.startswith("CANCELLED")
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_async_function_call_cancel_settles_with_what_the_handler_reported(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="issue_refund",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(
+                function_name="issue_refund", tool_call_id="1", result={"status": "submitted"}
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send, expected_down_frames=[])
+        payload = async_tool_messages.parse_message(context.messages[-1])
+        assert payload is not None
+        assert payload.kind == "final"
+        assert json.loads(payload.result) == {"status": "submitted"}
         assert not aggregator.has_function_calls_in_progress
 
     async def test_run_survives_a_later_result_that_does_not_ask_to_run(self):
