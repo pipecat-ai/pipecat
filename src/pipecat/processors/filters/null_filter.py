@@ -11,7 +11,7 @@ system and end frames, useful for testing or temporarily stopping
 frame flow in a pipeline.
 """
 
-from pipecat.frames.frames import EndFrame, Frame, SystemFrame
+from pipecat.frames.frames import EndFrame, Frame, StopFrame, SystemFrame, WorkerFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -19,8 +19,9 @@ class NullFilter(FrameProcessor):
     """A filter that blocks all frames except system and end frames.
 
     This processor acts as a null filter, preventing frames from passing
-    through the pipeline while still allowing essential system and end
-    frames to maintain proper pipeline operation.
+    through the pipeline while still allowing system frames and the frames
+    that end or stop the pipeline (``EndFrame``, ``StopFrame`` and worker
+    frames such as ``EndWorkerFrame``) to maintain proper pipeline operation.
     """
 
     def __init__(self, **kwargs):
@@ -44,5 +45,5 @@ class NullFilter(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (SystemFrame, EndFrame)):
+        if isinstance(frame, (SystemFrame, EndFrame, StopFrame, WorkerFrame)):
             await self.push_frame(frame, direction)
