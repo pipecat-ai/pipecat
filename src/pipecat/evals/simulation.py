@@ -106,6 +106,7 @@ Fields:
     anecdote and three are a check.
 """
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -470,8 +471,8 @@ def _positive_int(data: dict, key: str, default: int, path: Path) -> int:
 
 def _positive_number(data: dict, key: str, default: float, path: Path) -> float:
     value = data.get(key, default)
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
-        raise ValueError(f"{path}: '{key}:' must be a positive number")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 < value < math.inf:
+        raise ValueError(f"{path}: '{key}:' must be a finite positive number")
     return float(value)
 
 
