@@ -594,6 +594,31 @@ class AggregatedTextProgressFrame(DataFrame):
         self.text_type = value
 
 
+@dataclass(frozen=True)
+class TranscriptionSpeaker:
+    """A speaker an STT service's diarization told apart in a transcription stream.
+
+    Labels are opaque and provider-specific. Numbers count speakers in the order
+    they first appeared in the STT service's session, so they read the same
+    whatever labels the provider uses. Both only hold within that session: a
+    provider that restarts its labels (e.g. after a reconnect) may give a known
+    label, and so its number, to a different person, and services that diarize
+    each speech segment separately don't keep labels across segments.
+
+    Parameters:
+        label: The provider's label for the speaker (e.g. ``"A"``, ``"S1"``,
+            ``"2"``).
+        number: The speaker's place in the order speakers first appeared,
+            starting at ``1``.
+    """
+
+    label: str
+    number: int
+
+    def __str__(self):
+        return f"{self.number} ({self.label})"
+
+
 @dataclass
 class TranscriptionFrame(TextFrame):
     """Text frame containing speech transcription data.
@@ -602,12 +627,19 @@ class TranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
         perception: How the user said these words, as a perception producer
             read them, or None. Set by an STT service that perceives, or by a
             processor after it. Part of expressive conversation (alpha).
@@ -618,10 +650,11 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
     result: Any | None = None
     finalized: bool = False
+    speaker: TranscriptionSpeaker | None = None
     perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -633,10 +666,17 @@ class InterimTranscriptionFrame(TextFrame):
     contains the result from the STT service if available.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the interim transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
         perception: A provisional reading of how the user said these words, or
             None. Part of expressive conversation (alpha).
     """
@@ -645,10 +685,11 @@ class InterimTranscriptionFrame(TextFrame):
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker: TranscriptionSpeaker | None = None
     perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -663,10 +704,17 @@ class EagerTranscriptionFrame(TextFrame):
     :class:`~pipecat.turns.user_stop.EagerUserTurnStopStrategy`.
 
     Parameters:
-        user_id: Identifier for the user who spoke.
+        user_id: Identifier of the participant whose audio was transcribed, as
+            reported by the input transport (e.g. a Daily or LiveKit participant
+            id). Empty when the transport does not identify participants.
         timestamp: When the eager end of turn occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        speaker: The speaker the STT service's diarization assigned to this
+            text, or ``None`` when diarization is off or the service gave no
+            label. Speakers only distinguish people within one transcription
+            stream and are not participant identities: several speakers can
+            share one ``user_id`` when they share an audio stream.
         perception: How the user said the turn, as a perception producer read
             it at the predicted end of turn, or None. A speculative inference
             answers the turn with it. Part of expressive conversation (alpha).
@@ -676,10 +724,11 @@ class EagerTranscriptionFrame(TextFrame):
     timestamp: str
     language: Language | None = None
     result: Any | None = None
+    speaker: TranscriptionSpeaker | None = None
     perception: list[PerceptionSignal] | None = field(default=None, kw_only=True)
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -1512,6 +1561,22 @@ class UserMuteStoppedFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class PerceptionFrame(SystemFrame):
+    """A reading of how the user spoke, broadcast as soon as a producer has one.
+
+    A perception producer broadcasts every reading it makes, whether or not a
+    transcription is there to carry it yet, so processors and clients can act
+    on it right away. The LLM is given the reading a transcription carries in
+    its ``perception``. Part of expressive conversation (alpha).
+
+    Parameters:
+        perception: The reading.
+    """
+
+    perception: list[PerceptionSignal]
 
 
 @dataclass

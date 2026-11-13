@@ -83,6 +83,35 @@ class TestRTVIObserverReportLevel(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_full_level_reports_a_falsy_result_as_returned(self):
+        for result in [{}, [], 0, False, ""]:
+            with self.subTest(result=result):
+                observer = RTVIObserver(
+                    params=RTVIObserverParams(
+                        function_call_report_level={"*": RTVIFunctionCallReportLevel.FULL}
+                    )
+                )
+                sent = []
+                observer.send_rtvi_message = AsyncMock(side_effect=sent.append)
+
+                await run_test(
+                    IdentityFilter(),
+                    frames_to_send=[
+                        FunctionCallResultFrame(
+                            function_name="search",
+                            tool_call_id="call_1",
+                            arguments={},
+                            result=result,
+                        ),
+                    ],
+                    observers=[observer],
+                )
+
+                self.assertEqual(len(sent), 1)
+                self.assertEqual(sent[0].type, "llm-function-call-stopped")
+                self.assertEqual(sent[0].data.result, result)
+                self.assertIs(type(sent[0].data.result), type(result))
+
 
 if __name__ == "__main__":
     unittest.main()

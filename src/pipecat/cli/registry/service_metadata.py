@@ -447,6 +447,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="rime_stt",
+            label="Rime",
+            package="pipecat-ai[rime]",
+            class_name=["RimeSTTService"],
+            env_prefix="RIME",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="sarvam_stt",
             label="Sarvam",
             package="pipecat-ai[sarvam]",
@@ -596,6 +604,24 @@ class ServiceRegistry:
             class_name=["GoogleLLMService"],
             env_prefix="GOOGLE",
             include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="google_interactions_llm",
+            label="Google Gemini Interactions",
+            package="pipecat-ai[google]",
+            class_name=["GoogleInteractionsLLMService"],
+            env_prefix="GOOGLE",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="google_interactions_vertex_llm",
+            label="Google Vertex AI Interactions",
+            package="pipecat-ai[google]",
+            class_name=["GoogleInteractionsVertexLLMService"],
+            env_prefix="GOOGLE",
+            include_params=["credentials", "location", "project_id"],
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
@@ -923,13 +949,14 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
-            value="hume_tts",
-            label="Hume TTS",
-            package="pipecat-ai[hume]",
-            class_name=["HumeTTSService"],
-            env_prefix="HUME",
+            value="heygen_tts",
+            label="HeyGen TTS",
+            package="pipecat-ai",
+            class_name=["HeyGenTTSService"],
+            env_prefix="HEYGEN",
             include_params=["api_key"],
             settings_params=["voice"],
+            param_defaults={"voice": "83548de556df48ba8c09c42a57c51d85"},
         ),
         ServiceDefinition(
             value="inworld_tts",
@@ -1173,6 +1200,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="zoom_ai_realtime",
+            label="Zoom AI Voice Agent",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIRealtimeLLMService"],
+            env_prefix="ZOOM_AI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="ultravox",
             label="Ultravox",
             package="pipecat-ai[ultravox]",
@@ -1294,6 +1330,14 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "zoom_ai_realtime": (
+        "llm = ZoomAIRealtimeLLMService(\n"
+        '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "    settings=ZoomAIRealtimeLLMService.Settings(\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
         ")"

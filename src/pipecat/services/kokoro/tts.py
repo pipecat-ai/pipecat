@@ -15,7 +15,6 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -215,8 +214,6 @@ class KokoroTTSService(TTSService):
         if voice not in self._kokoro.voices:
             raise ValueError(f"Kokoro TTS voice '{voice}' is not in the voices file")
 
-        self._resampler = create_stream_resampler()
-
     def can_generate_metrics(self) -> bool:
         """Indicate that this service supports TTFB and usage metrics."""
         return True
@@ -255,13 +252,10 @@ class KokoroTTSService(TTSService):
                 await self.stop_ttfb_metrics()
 
                 audio_int16 = (samples * 32767).astype(np.int16).tobytes()
-                audio_data = await self._resampler.resample(
-                    audio_int16, sample_rate, self.sample_rate
-                )
 
                 yield TTSAudioRawFrame(
-                    audio=audio_data,
-                    sample_rate=self.sample_rate,
+                    audio=audio_int16,
+                    sample_rate=sample_rate,
                     num_channels=1,
                     context_id=context_id,
                 )

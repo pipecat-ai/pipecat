@@ -1,0 +1,1 @@
+- Fixed MoQ bot audio playing progressively later each turn and eventually cutting out. The published presentation timeline now tracks wall-clock across the silences between turns; previously it advanced only by audio duration, so playback fell behind by the sum of every gap and the browser player started dropping audio once the backlog passed its buffer ceiling (~30s).

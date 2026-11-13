@@ -9,6 +9,7 @@
 import base64
 import json
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from loguru import logger
@@ -367,6 +368,18 @@ def test_dialogue_voice_change_does_not_require_reconnect():
     """Voices are registered per context, so a voice change just needs a new one."""
     assert "voice" not in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
     assert "voice" in ElevenLabsDialogueTTSService.Settings.VOICE_SETTINGS_FIELDS
+
+
+@pytest.mark.parametrize("mode", [None, "auto", "on", "off"])
+def test_dialogue_text_normalization_is_sent_only_when_set(mode):
+    service = _make_dialogue_service(apply_text_normalization=mode)
+    query = parse_qs(urlparse(service._build_websocket_url()).query)
+    assert query.get("apply_text_normalization") == ([mode] if mode else None)
+
+
+def test_dialogue_text_normalization_change_requires_reconnect():
+    """apply_text_normalization is a query parameter of the websocket URL."""
+    assert "apply_text_normalization" in ElevenLabsDialogueTTSService.Settings.URL_FIELDS
 
 
 def test_dialogue_alignment_is_normalized_for_word_times():

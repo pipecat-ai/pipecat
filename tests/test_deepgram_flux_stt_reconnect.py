@@ -109,10 +109,12 @@ def _audio_frames(seconds: float) -> list:
     return frames
 
 
-async def _run(server: _FakeFlux, seconds: float, configure=None):
+async def _run(server: _FakeFlux, seconds: float, configure=None, **service_kwargs):
     async with serve(server.handle, "127.0.0.1", 0, process_request=server.process_request) as s:
         service = DeepgramFluxSTTService(
-            api_key="test-key", url=f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}"
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{s.sockets[0].getsockname()[1]}",
+            **service_kwargs,
         )
         if configure:
             configure(service)
@@ -186,13 +188,11 @@ async def test_speech_continuing_after_a_drop_becomes_a_new_turn():
 
 @pytest.mark.asyncio
 async def test_a_turn_ends_when_reconnecting_gives_up():
-    def fast_backoff(service):
-        service._reconnect_backoff_min_wait = 0.01
-        service._reconnect_backoff_max_wait = 0.01
-
     server = _FakeFlux(drop_first_after=10, drop_mid_turn=True, reject_after=1)
 
-    service, down = await _run(server, seconds=1.0, configure=fast_backoff)
+    service, down = await _run(
+        server, seconds=1.0, reconnect_backoff_min_wait=0.01, reconnect_backoff_max_wait=0.01
+    )
 
     transcripts, stops = _turn_ends(down)
     assert transcripts == [("hello there", False)]
@@ -233,14 +233,13 @@ async def test_audio_keeps_flowing_while_the_provider_is_down():
     # The connection drops and every reconnect is rejected. Reconnecting
     # happens in the background, so frames pass through the service on time
     # while each attempt fails and backs off.
-    def long_backoff(service):
-        service._reconnect_backoff_min_wait = 30
-        service._reconnect_backoff_max_wait = 30
-
     server = _FakeFlux(drop_first_after=5, reject_after=1)
 
     start = time.monotonic()
-    _, down = await asyncio.wait_for(_run(server, seconds=0.5, configure=long_backoff), 10)
+    _, down = await asyncio.wait_for(
+        _run(server, seconds=0.5, reconnect_backoff_min_wait=30, reconnect_backoff_max_wait=30),
+        10,
+    )
 
     assert time.monotonic() - start < 3
     assert sum(isinstance(f, InputAudioRawFrame) for f in down) == 25

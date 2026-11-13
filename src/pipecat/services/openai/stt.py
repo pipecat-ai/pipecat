@@ -24,7 +24,6 @@ from loguru import logger
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.protocol import State
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -52,6 +51,10 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 
+def _is_diarization_model(model: str) -> bool:
+    return "diarize" in model
+
+
 @dataclass
 class OpenAISTTSettings(BaseWhisperSTTService.Settings):
     """Settings for the OpenAI STT service.
@@ -59,9 +62,14 @@ class OpenAISTTSettings(BaseWhisperSTTService.Settings):
     Parameters:
         keywords: Words or phrases that guide transcription of the input audio, such
             as product names or acronyms. Supported by ``"gpt-transcribe"``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified.
     """
 
     keywords: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAISTTService(BaseWhisperSTTService):
@@ -73,6 +81,10 @@ class OpenAISTTService(BaseWhisperSTTService):
     With ``include_prob_metrics=True``, GPT transcription models report per-token
     logprobs and Whisper models report per-segment logprobs. Diarization models
     support neither, so they report no probabilities.
+
+    Diarization models (e.g. ``"gpt-4o-transcribe-diarize"``) label each speaker:
+    every contiguous speaker run of a segment is emitted as its own frame with
+    OpenAI's speaker label (e.g. ``"A"``) as ``speaker.label``.
     """
 
     Settings = OpenAISTTSettings
@@ -134,6 +146,7 @@ class OpenAISTTService(BaseWhisperSTTService):
             prompt=None,
             temperature=None,
             keywords=None,
+            speaker_format=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -178,13 +191,19 @@ class OpenAISTTService(BaseWhisperSTTService):
             "language": self._settings.language,
         }
 
+        if _is_diarization_model(model):
+            # Speakers come back only in "diarized_json", and diarization models
+            # require a chunking strategy for audio longer than 30 seconds.
+            kwargs["response_format"] = "diarized_json"
+            kwargs["chunking_strategy"] = "auto"
+
         if self._include_prob_metrics:
             # GPT transcription models return logprobs alongside a "json" response;
             # Whisper models carry per-segment logprobs in "verbose_json" instead.
             # Diarization models support neither and reject the logprobs request.
             if model.startswith("whisper"):
                 kwargs["response_format"] = "verbose_json"
-            elif "diarize" in model:
+            elif _is_diarization_model(model):
                 if self._prob_metrics_warned_model != model:
                     self._prob_metrics_warned_model = model
                     logger.warning(
@@ -205,6 +224,16 @@ class OpenAISTTService(BaseWhisperSTTService):
             kwargs["keywords"] = self._settings.keywords
 
         return await self._client.audio.transcriptions.create(**kwargs)
+
+    def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
+        """Return a diarized response's ``(segment text, speaker)`` pairs."""
+        # A diarized response's segments carry a speaker; Whisper's verbose
+        # segments don't. Read it by attribute so older openai releases, which
+        # lack the diarized response type, still work.
+        segments = getattr(response, "segments", None)
+        if not segments or getattr(segments[0], "speaker", None) is None:
+            return None
+        return [(segment.text.strip(), getattr(segment, "speaker", None)) for segment in segments]
 
 
 @dataclass
@@ -396,7 +425,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._session_ready = False
-        self._resampler = create_stream_resampler()
 
         # Server-side VAD is disabled by default (turn_detection=False).
         # Set to None or a dict to enable server-side VAD.
@@ -435,6 +463,15 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             True, as this service supports metrics generation.
         """
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 24 kHz the Realtime API takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return OPENAI_SAMPLE_RATE
 
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Request external turn strategies when server-side VAD drives turns.
@@ -669,12 +706,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _send_audio(self, audio: bytes):
         """Send audio data via ``input_audio_buffer.append``.
 
-        Resamples from the pipeline sample rate to 24 kHz if needed.
-
         Args:
-            audio: Raw audio bytes at the pipeline sample rate.
+            audio: Raw audio bytes at 24 kHz.
         """
-        audio = await self._resampler.resample(audio, self.sample_rate, OPENAI_SAMPLE_RATE)
         if not audio:
             return
         payload = base64.b64encode(audio).decode("utf-8")

@@ -36,6 +36,7 @@ FAILURE_KINDS = (
     "connect_failed",  # never connected to the bot's eval transport
     "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready
+    "audio_unsupported",  # bot-ready said the transport is off for audio the run uses
     "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
@@ -241,8 +242,9 @@ class EvalSimulationMetricScore:
         failure_kind: How the metric failed, for grouping across runs: ``judge_no``
             when the judge rejected a turn, ``judge_no_verdict`` when it only
             left turns unanswered, ``out_of_range`` for a measure outside its
-            bounds, ``function_calls`` for a call list that did not match;
-            ``None`` when it passed.
+            bounds, ``function_calls`` for a call list that did not match,
+            ``error`` when a required measurement was unavailable; ``None``
+            when it passed.
         criterion: The criterion each bot turn was judged on, as the
             simulation worded it; ``None`` for a measured metric.
     """

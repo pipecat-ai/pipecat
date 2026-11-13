@@ -976,6 +976,35 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(params.enable_user_speaking_frames)
         await strategy.cleanup()
 
+    async def test_a_finalized_transcript_after_the_stop_signal_ends_the_turn_at_once(self):
+        """A finalized transcript is the last of the turn's text, so nothing is left to wait for."""
+        strategy = ExternalUserTurnStopStrategy(timeout=10.0)
+        decisions = await self._open_turn(strategy)
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(decisions, [])
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now", finalized=True)
+        )
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
+    async def test_a_finalized_transcript_while_the_user_speaks_waits_for_the_stop_signal(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=10.0)
+        decisions = await self._open_turn(strategy)
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now", finalized=True)
+        )
+        self.assertEqual(decisions, [])
+
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
     async def _open_turn(self, strategy) -> list:
         decisions = []
 

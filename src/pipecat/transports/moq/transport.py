@@ -16,9 +16,11 @@ making MoQ a full bidirectional RTVI transport.
 """
 
 import asyncio
+import inspect
 import re
 import secrets
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum
@@ -303,6 +305,10 @@ _PEER_DATA_GRACE_S = 5.0
 # and well below any real turn gap.
 _EPOCH_REANCHOR_MIN_GAP_S = 0.25
 
+# Silence published on interruption to carry the epoch discontinuity
+# to the player (see ``cut_audio``). One Opus frame's worth.
+_AUDIO_CUT_SILENCE_S = 0.02
+
 # Pin the Opus wire rate to its highest supported internal rate (Opus
 # supports {8, 12, 16, 24, 48} kHz). Chrome's WebCodecs Opus decoder
 # always emits AudioData at 48kHz regardless of the
@@ -477,12 +483,12 @@ class MOQParams(TransportParams):
             real-time with future-dated timestamps so the browser player
             (``@moq/watch``) can buffer and play at the encoded pace; this
             paces ``publish_audio`` so the in-flight buffer never grows
-            past this many milliseconds. Keep it a little under the
-            player's buffer ceiling (``MoqTransportOptions.audioBufferMaxMs``,
-            30s) so the producer self-limits below the player's drop
-            ceiling and the player never has to drop. On interruption the
-            pacing clock is re-anchored (see :meth:`reset_audio_pacing`) so
-            the next utterance isn't delayed by the previous buffer.
+            past this many milliseconds. The player consumes whatever is
+            in flight at 1x, so this also bounds how long a cancelled
+            utterance keeps playing after an interruption (see
+            :meth:`cut_audio`); keep it small for barge-in, larger for
+            network-stall smoothing, and always under the player's drop
+            ceiling (``MoqTransportOptions.audioBufferMaxMs``, 30s).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -511,7 +517,7 @@ class MOQParams(TransportParams):
     audio_in_sample_rate: int = 16000
     audio_in_max_latency_ms: int = 500
     audio_out_frame_ms: int = 20
-    audio_out_max_buffer_ms: int = 25000
+    audio_out_max_buffer_ms: int = 2000
 
     @model_validator(mode="before")
     @classmethod
@@ -665,6 +671,14 @@ class MOQTransportClient:
         # playback. Not reset on interruption — the player re-anchors on
         # its own (reset() on user-started-speaking).
         self._publish_pts_us: int = 0
+        # Wall clock at pts 0, for re-anchoring the timeline across idle gaps.
+        self._publish_pts_epoch: float | None = None
+        # Uninterruptible audio already handed to moq, as (pacing-clock end,
+        # PCM) per chunk. An interruption cut re-publishes the unplayed
+        # remainder so protected audio survives the discontinuity (see
+        # :meth:`cut_audio`). Entries whose end has passed are pruned on
+        # each write.
+        self._publish_protected: deque[tuple[float, bytes]] = deque()
 
         # Track consumers we created so disconnect() can cancel them.
         # Each entry has a sync .cancel() method that terminates any
@@ -849,10 +863,9 @@ class MOQTransportClient:
     def reset_audio_pacing(self):
         """Re-anchor the publish_audio pacing clock to wall-clock now.
 
-        Called from :class:`MOQOutputTransport.process_frame` on
-        InterruptionFrame so the next utterance plays immediately
-        instead of waiting for the (now-cancelled) previous one to
-        finish in pacing time.
+        Called on InterruptionFrame (via :meth:`cut_audio`) so the next
+        utterance plays immediately instead of waiting for the
+        (now-cancelled) previous one to finish in pacing time.
 
         Part of the publish_audio pacing workaround; goes away once
         moq-rs exposes a flush primitive on ``AudioProducer``. See
@@ -860,7 +873,68 @@ class MOQTransportClient:
         """
         self._publish_audio_clock = None
 
-    async def publish_audio(self, audio: bytes):
+    async def cut_audio(self):
+        """Stop the cancelled utterance on the player within a round trip.
+
+        Called from :class:`MOQOutputTransport.process_frame` on
+        InterruptionFrame. The browser flushes only its shallow playback
+        ring on interruption; the cancelled utterance's write-ahead sits
+        in its network buffer and keeps playing until an epoch
+        discontinuity truncates it. ``reset_epoch`` reaches the wire
+        with the next write, so after re-anchoring the pacing clock this
+        publishes a short silence to carry the discontinuity immediately.
+
+        The discontinuity drops *everything* the player has buffered, so
+        the unplayed remainder of any uninterruptible audio already
+        handed to moq is re-published right after the silence; the
+        protected audio keeps playing while cancelled speech is cut
+        (matching base_output, which preserves uninterruptible frames
+        still in its queue).
+
+        Runs concurrently with the output transport's audio task, which
+        may be inside :meth:`publish_audio` with the next chunk. The
+        drain, silence and replay therefore commit synchronously — no
+        await from drain to last replayed write — so a concurrent chunk
+        can only land after the whole cut, never inside it. The replayed
+        remainder was already paced once, so skipping the pacing sleep
+        overshoots the write-ahead cap by at most the cut silence.
+        """
+        had_audio = self._publish_audio_clock is not None
+        protected = self._take_protected_remainder()
+        self.reset_audio_pacing()
+        if not had_audio or self._audio_out is None or not self._audio_out_sample_rate:
+            return
+        now = time.monotonic()
+        samples = int(self._audio_out_sample_rate * _AUDIO_CUT_SILENCE_S)
+        self._commit_audio(b"\x00\x00" * samples, now, interruptible=True)
+        for chunk in protected:
+            self._commit_audio(chunk, now, interruptible=False)
+
+    def _take_protected_remainder(self) -> list[bytes]:
+        """Drain the protected ledger, returning the unplayed audio.
+
+        A chunk's entry carries the pacing-clock time its playback ends;
+        the part of it past ``now`` hasn't played yet. The first live
+        chunk may be mid-playback, so it is trimmed to its unplayed tail.
+        """
+        rate = self._audio_out_sample_rate
+        entries = self._publish_protected
+        self._publish_protected = deque()
+        if not rate:
+            return []
+        now = time.monotonic()
+        remainder = []
+        for end, audio in entries:
+            if end <= now:
+                continue
+            start = end - len(audio) / (rate * 2)
+            if start < now:
+                audio = audio[int((now - start) * rate) * 2 :]
+            if audio:
+                remainder.append(audio)
+        return remainder
+
+    async def publish_audio(self, audio: bytes, interruptible: bool = True):
         """Push a PCM chunk to the bot's audio track with real PTS, paced to a cap.
 
         The library does the Opus encode + resample inside the FFI, so we
@@ -872,13 +946,17 @@ class MOQTransportClient:
         is fire-and-forget, so to bound how far ahead the bot runs we pace
         the writes against a virtual clock: each call advances the clock by
         the chunk's audio duration, and we sleep until wall-clock is within
-        ``audio_out_max_buffer_ms`` (25s) of it. That keeps the in-flight
-        buffer a little under the player's drop ceiling
-        (``MoqTransportOptions.audioBufferMaxMs``, 30s), so the producer
-        self-limits below the consumer's cap. Interruptions are flushed on
-        the browser side (``reset()`` on ``user-started-speaking``); the
-        pacing clock is re-anchored here (see :meth:`reset_audio_pacing`)
-        so the next utterance isn't delayed by the previous buffer.
+        ``audio_out_max_buffer_ms`` of it. The in-flight buffer is what a
+        cancelled utterance keeps playing out of after an interruption
+        (see :meth:`cut_audio`), so the cap bounds barge-in overhang; it
+        must also stay under the player's drop ceiling
+        (``MoqTransportOptions.audioBufferMaxMs``, 30s).
+
+        Args:
+            audio: S16 mono PCM at the track's sample rate.
+            interruptible: Whether an interruption may cut this chunk.
+                ``False`` records it in the protected ledger so
+                :meth:`cut_audio` re-publishes its unplayed remainder.
         """
         if self._audio_out is None or not self._audio_out_sample_rate:
             return
@@ -896,6 +974,20 @@ class MOQTransportClient:
                 if self._publish_audio_clock is None:
                     now = time.monotonic()
 
+        self._commit_audio(audio, now, interruptible=interruptible)
+
+    def _commit_audio(self, audio: bytes, now: float, *, interruptible: bool):
+        """Write a chunk to the audio track, advancing clock, pts and ledger.
+
+        Synchronous on purpose: :meth:`cut_audio` commits its silence and
+        replay through here so the cut can't interleave with a concurrent
+        :meth:`publish_audio` (which awaits only in its pacing sleep,
+        before committing).
+        """
+        audio_out = self._audio_out
+        rate = self._audio_out_sample_rate
+        if audio_out is None or not rate:
+            return
         if self._publish_audio_clock is None or self._publish_audio_clock < now:
             # Writes resumed after idle (turn gap, interruption re-anchor).
             # Re-anchor encoder timeline: an un-anchored gap is measured as
@@ -904,20 +996,44 @@ class MOQTransportClient:
             # compounding per turn).
             gap = None if self._publish_audio_clock is None else now - self._publish_audio_clock
             if gap is None or gap > _EPOCH_REANCHOR_MIN_GAP_S:
-                self._audio_out.reset_epoch()
+                audio_out.reset_epoch()
+                # Carry the idle gap into the presentation timeline. The
+                # player anchors pts to wall clock on the first frame and
+                # holds that anchor while it buffers, so a timeline that
+                # advances only by audio duration is short by every silence
+                # between turns: each utterance plays late by the sum of the
+                # gaps before it, and once the backlog passes the player's
+                # `maxAge` the oldest groups are dropped. Never moves back,
+                # so an interruption's cancelled lookahead keeps its place.
+                if self._publish_pts_epoch is None:
+                    self._publish_pts_epoch = now
+                else:
+                    self._publish_pts_us = max(
+                        self._publish_pts_us,
+                        int((now - self._publish_pts_epoch) * 1_000_000),
+                    )
                 logger.debug(
                     f"MOQ: audio epoch re-anchored after "
-                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'}"
+                    f"{'a fresh clock' if gap is None else f'a {gap:.3f}s gap'} "
+                    f"(pts={self._publish_pts_us / 1e6:.3f}s)"
                 )
             self._publish_audio_clock = now
 
         # Advance the virtual clock and the presentation timestamp by the
         # duration of this chunk. S16 = 2 bytes/sample, mono.
-        duration_s = len(audio) / (self._audio_out_sample_rate * 2)
+        duration_s = len(audio) / (rate * 2)
         self._publish_audio_clock += duration_s
 
-        self._audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
+        audio_out.write(moq.AudioFrame(timestamp_us=self._publish_pts_us, data=audio))
         self._publish_pts_us += int(duration_s * 1_000_000)
+
+        # Keep the protected ledger current: drop chunks that have played
+        # out, record this one if a cut must preserve it.
+        played_out = time.monotonic()
+        while self._publish_protected and self._publish_protected[0][0] <= played_out:
+            self._publish_protected.popleft()
+        if not interruptible:
+            self._publish_protected.append((self._publish_audio_clock, audio))
 
     async def wait_for_audio_drain(self, jitter_buffer_margin_s: float = 0.3) -> None:
         """Block until the pacing clock catches up to wall-clock, then a bit more.
@@ -1999,7 +2115,7 @@ class MOQOutputTransport(BaseOutputTransport):
         this the bot's final TTS utterance gets clipped: base_output's
         stop() unblocks as soon as every audio frame has been *written*
         to moq's pacing queue, but moq buffers up to
-        ``audio_out_max_buffer_ms`` (25s) of paced audio that still has
+        ``audio_out_max_buffer_ms`` of paced audio that still has
         to reach the browser and drain the client jitter buffer before
         it actually plays.
 
@@ -2028,19 +2144,21 @@ class MOQOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Reset the publish_audio pacing clock on interruption.
+        """Cut the cancelled utterance on interruption.
 
-        The pacing in ``write_audio_frame`` keeps moq's in-flight buffer
-        bounded so InterruptionFrame can actually stop playback in the
-        browser — but the pacing clock needs to be re-anchored to ``now``
-        so the next utterance plays immediately instead of catching up.
+        ``cut_audio`` re-anchors the publish_audio pacing clock so the
+        next utterance plays immediately, and publishes an epoch
+        discontinuity so the player drops the cancelled utterance's
+        buffered write-ahead instead of playing it out. Uninterruptible
+        audio already handed to moq is re-published after the cut, so a
+        protected announcement keeps playing through the interruption.
 
         Args:
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
         if isinstance(frame, InterruptionFrame):
-            self._client.reset_audio_pacing()
+            await self._client.cut_audio()
         await super().process_frame(frame, direction)
 
     async def send_message(
@@ -2066,11 +2184,61 @@ class MOQOutputTransport(BaseOutputTransport):
             True if the audio frame was written successfully, False otherwise.
         """
         try:
-            await self._client.publish_audio(frame.audio)
+            await self._client.publish_audio(frame.audio, interruptible=frame.interruptible)
             return True
         except Exception as e:
             logger.error(f"Error writing audio frame: {e}")
             return False
+
+
+def _wrap_legacy_client_handler(handler):
+    """Wrap a ``(transport)``-only client-event handler to accept the client arg."""
+    if inspect.iscoroutinefunction(handler):
+
+        async def adapted_async(transport, client):
+            await handler(transport)
+
+        return adapted_async
+
+    def adapted(transport, client):
+        handler(transport)
+
+    return adapted
+
+
+def _adapt_legacy_client_handler(event_name: str, handler):
+    """Wrap a ``(transport)``-only client-event handler to accept the client arg.
+
+    A handler already taking ``(transport, client)`` is returned unchanged.
+    A handler whose signature can't be inspected keeps the legacy
+    one-argument call; wrap such a callable in an explicit
+    ``(transport, client)`` function to receive the client.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        warn_deprecated(
+            f"`{event_name}(transport)` is deprecated since 1.8.0 and will be removed in "
+            f"2.0.0. Use `{event_name}(transport, client)` instead.",
+            stacklevel=4,
+        )
+        return _wrap_legacy_client_handler(handler)
+    params = list(sig.parameters.values())
+    if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+        return handler
+    positional = [
+        p
+        for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(positional) != 1:
+        return handler
+    warn_deprecated(
+        f"`{event_name}(transport)` is deprecated since 1.8.0 and will be removed in "
+        f"2.0.0. Use `{event_name}(transport, client)` instead.",
+        stacklevel=4,
+    )
+    return _wrap_legacy_client_handler(handler)
 
 
 class MOQTransport(BaseTransport):
@@ -2098,9 +2266,11 @@ class MOQTransport(BaseTransport):
       first and every redialed one (or the serve bind is up)
     - ``on_disconnected`` — the session ended. Client mode redials after
       it, so end the call from ``on_client_disconnected`` instead
-    - ``on_client_connected`` — peer broadcast announced (client joined)
+    - ``on_client_connected`` — peer broadcast announced (client joined);
+      receives the client as ``{"id": peer_id}``
     - ``on_client_disconnected`` — the peer is gone: it said goodbye, or
-      it stayed missing for ``connection_timeout``
+      it stayed missing for ``connection_timeout``; receives the client
+      as ``{"id": peer_id}``
     - ``on_track_subscribed`` — remote track subscription succeeded
     - ``on_error`` — error in the underlying transport; receives the
       message and the exception
@@ -2159,6 +2329,11 @@ class MOQTransport(BaseTransport):
         self._input: MOQInputTransport | None = None
         self._output: MOQOutputTransport | None = None
 
+        # Client-event registrations in order, one (event_name, original,
+        # adapted) entry per add_event_handler() call, so removal by the
+        # original callback matches BaseObject's first-equal semantics.
+        self._client_handler_registrations: list[tuple] = []
+
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_client_connected")
@@ -2195,6 +2370,46 @@ class MOQTransport(BaseTransport):
         """
         await self._client.disconnect()
 
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        ``on_client_connected`` and ``on_client_disconnected`` handlers
+        take ``(transport, client)``, matching the other transports; a
+        legacy handler written as ``(transport)`` alone is adapted, with
+        a deprecation warning. A handler whose signature can't be
+        inspected (e.g. a builtin like ``deque.append``) is called with
+        the legacy ``(transport)`` argument alone; wrap such a callable
+        in an explicit ``(transport, client)`` function to receive the
+        client.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        if event_name in ("on_client_connected", "on_client_disconnected"):
+            adapted = _adapt_legacy_client_handler(event_name, handler)
+            self._client_handler_registrations.append((event_name, handler, adapted))
+            handler = adapted
+        super().add_event_handler(event_name, handler)
+
+    def remove_event_handler(self, event_name: str, handler):
+        """Remove a previously added event handler.
+
+        A client-event handler is removed by the callback originally
+        passed to :meth:`add_event_handler`; the first matching
+        registration is removed, as :class:`BaseObject` does.
+
+        Args:
+            event_name: The name of the event the handler was added for.
+            handler: The handler to remove.
+        """
+        for i, (event, original, adapted) in enumerate(self._client_handler_registrations):
+            if event == event_name and (original is handler or original == handler):
+                del self._client_handler_registrations[i]
+                super().remove_event_handler(event_name, adapted)
+                return
+        super().remove_event_handler(event_name, handler)
+
     # ------------------------------------------------------------------
     # MOQTransportClient callbacks.
     # ------------------------------------------------------------------
@@ -2209,11 +2424,11 @@ class MOQTransport(BaseTransport):
 
     async def _on_client_connected(self):
         """Handle the peer's broadcast being announced."""
-        await self._call_event_handler("on_client_connected")
+        await self._call_event_handler("on_client_connected", {"id": self._params.peer_id})
 
     async def _on_client_disconnected(self):
         """Handle the peer's broadcast going away."""
-        await self._call_event_handler("on_client_disconnected")
+        await self._call_event_handler("on_client_disconnected", {"id": self._params.peer_id})
 
     async def _on_track_subscribed(self, track: MOQTrack):
         """Handle a remote track subscription succeeding.

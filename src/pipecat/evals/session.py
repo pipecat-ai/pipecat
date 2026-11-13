@@ -26,7 +26,7 @@ import time
 import traceback
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
@@ -84,6 +84,13 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
+        audio_support_check: Whether an audio run checks that the bot's
+            transport carries the audio it uses, as the bot reports in
+            ``bot-ready``. With ``when_advertised``, a bot that reports a
+            direction the run uses as off is refused before the conversation
+            (failure kind ``audio_unsupported``); a bot that reports nothing,
+            such as one on Pipecat before 1.13, runs unchecked. Defaults to
+            ``off``.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -106,6 +113,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    audio_support_check: Literal["off", "when_advertised"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

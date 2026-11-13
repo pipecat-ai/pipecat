@@ -8,15 +8,17 @@
 
 A classifier is not a pipeline component: build one, ask it, and clean it up.
 By default the questions go to Jev; with ``--clef`` they go to Cloudflare's
-Clef, with ``--openai`` to OpenAI's Decisions API, and with ``--llm`` to an
-OpenAI model through ``LLMClassifier``.
+Clef, with ``--openai`` to OpenAI's Decisions API, with ``--google`` to
+Google's Decisions API, and with ``--llm`` to an OpenAI model through
+``LLMClassifier``.
 
 Usage::
 
     TYPESAFE_API_KEY=... python features-classifiers.py
     CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers.py --clef
     OPENAI_API_KEY=... python features-classifiers.py --openai
-    OPENAI_API_KEY=... python features-classifiers.py --llm gpt-4o-mini
+    GOOGLE_API_KEY=... python features-classifiers.py --google
+    OPENAI_API_KEY=... python features-classifiers.py --llm gpt-6-luna
 """
 
 import argparse
@@ -35,6 +37,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoResult,
 )
 from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
+from pipecat.classifiers.google.decisions.classifier import GoogleDecisionsClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
@@ -134,6 +137,13 @@ if __name__ == "__main__":
         const="gpt-6-luna",
         help="use OpenAI's Decisions API instead of Jev",
     )
+    parser.add_argument(
+        "--google",
+        metavar="MODEL",
+        nargs="?",
+        const="gemini-decision-1",
+        help="use Google's Decisions API instead of Jev",
+    )
     parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI model instead of Jev")
     args = parser.parse_args()
 
@@ -147,6 +157,11 @@ if __name__ == "__main__":
     elif args.openai:
         classifier = OpenAIDecisionsClassifier(
             api_key=os.environ["OPENAI_API_KEY"], model=args.openai
+        )
+        asyncio.run(main(classifier))
+    elif args.google:
+        classifier = GoogleDecisionsClassifier(
+            api_key=os.environ["GOOGLE_API_KEY"], model=args.google
         )
         asyncio.run(main(classifier))
     elif args.llm:

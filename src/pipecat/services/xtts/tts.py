@@ -22,7 +22,6 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -178,8 +177,6 @@ class XTTSService(TTSService):
         self._studio_speakers: dict[str, Any] | None = None
         self._aiohttp_session = aiohttp_session
 
-        self._resampler = create_stream_resampler()
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -259,40 +256,8 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            CHUNK_SIZE = self.chunk_size
-
-            buffer = bytearray()
-            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+            async for chunk in r.content.iter_chunked(self.chunk_size):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    # Append new chunk to the buffer.
-                    buffer.extend(chunk)
-
-                    # Check if buffer has enough data for processing.
-                    while (
-                        len(buffer) >= 48000
-                    ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                        # Process the buffer up to a safe size for resampling.
-                        process_data = buffer[:48000]
-                        # Remove processed data from buffer.
-                        buffer = buffer[48000:]
-
-                        # XTTS uses 24000 so we need to resample to our desired rate.
-                        resampled_audio = await self._resampler.resample(
-                            bytes(process_data), 24000, self.sample_rate
-                        )
-                        # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(
-                            resampled_audio, self.sample_rate, 1, context_id=context_id
-                        )
-                        yield frame
-
-            # Process any remaining data in the buffer.
-            if len(buffer) > 0:
-                resampled_audio = await self._resampler.resample(
-                    bytes(buffer), 24000, self.sample_rate
-                )
-                frame = TTSAudioRawFrame(
-                    resampled_audio, self.sample_rate, 1, context_id=context_id
-                )
-                yield frame
+                    # XTTS streams 24 kHz audio.
+                    yield TTSAudioRawFrame(chunk, 24000, 1, context_id=context_id)

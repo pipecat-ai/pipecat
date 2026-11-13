@@ -6,7 +6,7 @@
 
 import asyncio
 import unittest
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.services.llm_service import FunctionCallParams
@@ -123,6 +123,25 @@ class TestDirectFunction(unittest.TestCase):
                         "age": {"type": "integer"},
                     },
                 },
+            },
+        )
+
+    def test_any_params_accept_any_value(self):
+        async def my_function_any_params(
+            params: FunctionCallParams,
+            value: Any,
+            tags: list[Any],
+            metadata: dict[str, Any],
+        ):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function_any_params)
+        self.assertEqual(
+            func.properties,
+            {
+                "value": {},
+                "tags": {"type": "array", "items": {}},
+                "metadata": {"type": "object", "additionalProperties": {}},
             },
         )
 

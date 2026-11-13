@@ -141,7 +141,7 @@ jobs:
           path: _reports
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "latest"
           enable-cache: false
@@ -189,8 +189,9 @@ jobs:
           done
 
       - name: Run provider research
+        id: research
         timeout-minutes: 55
-        uses: anthropics/claude-code-action@aa8a7738e48bf30a40ee499ce818bef081c5ab5e # v1.0.257
+        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Researcher launches must block until the researcher returns
@@ -220,12 +221,24 @@ jobs:
             Before finishing — including when something stops you early —
             write your Step 6 summary (or whatever explanation you have) to
             `$GITHUB_WORKSPACE/.pw-scratch/summary.md`: the workflow uploads
-            it, and it is the only record of your reasoning that survives the
+            it, and it is the only record of the run that survives the
             runner.
           claude_args: |
             --model claude-opus-5
             --max-turns 120
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
+
+      - name: Show why the research session stopped
+        # The action hides the session's output, since this repo's logs are
+        # public. The final result line says why a failed session ended (an
+        # API error, or the model's last words), so it alone is printed,
+        # capped at 500 characters.
+        if: failure() && steps.research.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.research.outputs.execution_file }}
+        run: |
+          jq -r 'last(.[] | select(.type == "result")) | .result // .subtype' "$EXECUTION_FILE" | head -c 500
+          echo
 
       - name: Verify the group was researched
         # A run that exits cleanly without doing the work should fail loudly,
@@ -270,6 +283,9 @@ jobs:
           name: provider-watch-${{ github.run_id }}-${{ matrix.group.name }}
           if-no-files-found: ignore
           retention-days: 14
+          # .pw-scratch is a hidden directory, which upload-artifact skips
+          # unless told otherwise.
+          include-hidden-files: true
           path: |
             _reports/reports
             _reports/digests
@@ -312,7 +328,7 @@ jobs:
           path: _reports
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "latest"
           enable-cache: false
@@ -338,7 +354,7 @@ jobs:
 
       - name: Author the digest
         timeout-minutes: 20
-        uses: anthropics/claude-code-action@aa8a7738e48bf30a40ee499ce818bef081c5ab5e # v1.0.257
+        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}

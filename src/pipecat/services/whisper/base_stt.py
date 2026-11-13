@@ -12,6 +12,7 @@ interface, including language mapping, metrics generation, and error handling.
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Any
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -296,15 +297,31 @@ class BaseWhisperSTTService(SegmentedSTTService):
             if text or self._push_empty_transcripts:
                 await self._handle_transcription(text, True, self._settings.language)
                 logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(
-                    text,
-                    self._user_id,
-                    time_now_iso8601(),
-                    result=response,
-                )
+                timestamp = time_now_iso8601()
+                runs = self._diarized_runs(text, self._speaker_words(response))
+                for speaker, run_text in runs:
+                    yield TranscriptionFrame(
+                        run_text,
+                        self._user_id,
+                        timestamp,
+                        result=response,
+                        speaker=speaker,
+                    )
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
+
+    def _speaker_words(self, response: Transcription) -> list[tuple[str, Any]] | None:
+        """Return a diarized response's ``(text, speaker)`` pairs in transcript order.
+
+        Args:
+            response: The transcription returned by :meth:`_transcribe`.
+
+        Returns:
+            The pairs to split the transcript by speaker, or ``None`` when the
+            response carries no speakers.
+        """
+        return None
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe audio data to text.

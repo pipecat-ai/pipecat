@@ -6,10 +6,12 @@
 
 """The instruction that teaches an LLM to take part in expressive conversation.
 
-Part of expressive conversation (alpha). The instruction has three parts: how
-to read what was perceived of how the user spoke, built from a perception
-producer's :class:`~pipecat.expressive.perception.PerceptionCapabilities`; the
-tags the active TTS service can perform, by their universal names, built from its
+Part of expressive conversation (alpha). The readings and tags it teaches are
+written in RCS, the Real-time Context Standard. The instruction has three
+parts: how to read what was perceived of how the user spoke, built from a
+perception producer's
+:class:`~pipecat.expressive.perception.PerceptionCapabilities`; the tags the
+active TTS service can perform, by their universal names, built from its
 :class:`~pipecat.expressive.expression.ExpressionCapabilities`; and the
 developer's guidance on how to answer, from an
 :class:`~pipecat.expressive.policy.ExpressionPolicy`.
@@ -27,13 +29,12 @@ from pipecat.expressive.expression import (
     ExpressionCapabilities,
     ExpressionTerm,
 )
-from pipecat.expressive.perception import (
-    PerceptionCapabilities,
-    PerceptionSignal,
-    PerceptionTerm,
-    format_perception,
-)
+from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
+
+_RCS_OPENING = (
+    "This conversation uses RCS, the Real-time Context Standard, for context beyond plain text."
+)
 
 
 def expression_instructions(
@@ -66,7 +67,32 @@ def expression_instructions(
     ]
     if guidance:
         parts.append("\n".join(guidance))
-    return "\n\n".join(parts)
+    return "\n\n".join([_RCS_OPENING, *parts])
+
+
+def perception_turn_completion_instructions(complete: str, short: str, long: str) -> str:
+    """Tell an LLM that decides when the user's turn is complete that a reading doesn't decide it.
+
+    It goes after the turn completion instructions. Without it, a reading can
+    change the marker: a hesitant user's cut-off words get the long wait, and
+    words that haven't answered the LLM get an answer.
+
+    Args:
+        complete: The marker for a complete turn.
+        short: The marker for a turn cut off mid-sentence.
+        long: The marker for a user who needs time to think.
+
+    Returns:
+        The instruction.
+    """
+    return (
+        "When you choose the turn completion marker, decide it from the user's words alone. "
+        "The RCS reading in parentheses at the start of their message says how they sounded, "
+        f"not whether they finished: a user who sounds hesitant or unsure still gets {short} "
+        "when their words are cut off. A reading never changes the marker the words would get "
+        f"on their own: it doesn't make a hesitant user's cut-off words {long}, and it doesn't "
+        f"make words that haven't answered you {complete}."
+    )
 
 
 def expression_policy_warning(
@@ -100,17 +126,18 @@ def expression_policy_warning(
 def _perception_section(perception: PerceptionCapabilities | None) -> str | None:
     if not perception or not perception.signals:
         return None
-    such_as = ""
-    example = next((term for term in perception.signals if len(term.labels) >= 2), None)
-    if example:
-        labels = [(example.labels[0], 0.86), (example.labels[1], 0.10)]
-        such_as = f" such as {format_perception([PerceptionSignal(example.name, labels)])},"
     signals = "\n".join(_signal_line(term) for term in perception.signals)
+    # No example reading: an LLM shown one, even with placeholders, learns to
+    # write readings of its own.
     return (
-        f"A user message may start with how the user sounded, in parentheses,{such_as} each "
-        "signal with its likeliest labels and how sure the reading is, from 0 to 1, or with a "
-        "measure. The reading can be wrong, so weigh it against their words. A reading below "
-        f"0.5 is a guess: don't act on it. Never write it yourself. The signals are:\n{signals}"
+        "RCS readings (the user's input, never your output):\n"
+        "A user message may start with an RCS reading of how the user sounded, in parentheses, "
+        "each signal in square brackets with its likeliest labels and how sure the reading is, "
+        "from 0 to 1, or with a measure. Readings appear ONLY in the user's messages, added by a "
+        "separate system, never by you: a reading is part of the user's input and never part of "
+        "your output. It is context about their words, not words they said. It can be wrong, so "
+        "weigh it against their words. A reading below 0.5 is a guess: don't act on it. The "
+        f"signals are:\n{signals}"
     )
 
 
@@ -165,7 +192,10 @@ def _tags_section(
         tags.append("- [[pause 500]] pauses for about that many milliseconds.")
     if not tags:
         return None
-    return "You can direct how your words are spoken with tags:\n" + "\n".join(tags)
+    return (
+        "RCS tags (output only):\nYou can direct how your words are spoken with tags:\n"
+        + "\n".join(tags)
+    )
 
 
 def _left_out(capabilities: ExpressionCapabilities, policy: ExpressionPolicy) -> list[str]:

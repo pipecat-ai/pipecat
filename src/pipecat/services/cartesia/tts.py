@@ -249,12 +249,27 @@ class CartesiaTTSSettings(TTSSettings):
             accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
+        normalization: How Cartesia reads numbers, dates and phone numbers in the
+            transcript. ``"auto"`` (Cartesia's default) follows the request's language,
+            and a language or locale code such as ``"en-GB"`` reads them in that
+            convention whatever language is spoken. ``"off"`` skips normalization and
+            is only for text that is already spelled out: digits and symbols left in
+            the text come out garbled or not at all. Word timestamps, and so the LLM
+            context, carry the original text in every mode.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -375,6 +390,7 @@ class CartesiaTTSService(WebsocketTTSService):
             accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -613,6 +629,9 @@ class CartesiaTTSService(WebsocketTTSService):
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+        if assert_given(self._settings.normalization):
+            msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
 
@@ -929,6 +948,7 @@ class CartesiaHttpTTSService(TTSService):
             accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1076,6 +1096,9 @@ class CartesiaHttpTTSService(TTSService):
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+            if assert_given(self._settings.normalization):
+                payload["normalization"] = self._settings.normalization
 
             headers = {
                 "Cartesia-Version": self._cartesia_version,

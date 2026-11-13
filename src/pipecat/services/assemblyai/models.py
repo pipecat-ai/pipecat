@@ -10,7 +10,7 @@ This module defines Pydantic models for handling AssemblyAI's real-time
 transcription WebSocket messages and connection configuration.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,6 +27,8 @@ class Word(BaseModel):
         text: The transcribed word text.
         confidence: Confidence score for the word (0.0 to 1.0).
         word_is_final: Whether this word is finalized and won't change.
+        speaker: Speaker label for the word (e.g., "A"), or "PENDING" while it is not
+            yet assigned. Only present on final words when speaker_labels is enabled.
     """
 
     start: int
@@ -34,6 +36,7 @@ class Word(BaseModel):
     text: str
     confidence: float
     word_is_final: bool = Field(..., alias="word_is_final")
+    speaker: str | None = None
 
 
 class BaseMessage(BaseModel):
@@ -75,8 +78,9 @@ class TurnMessage(BaseMessage):
             complete utterances or when end_of_turn is True.
         language_confidence: Confidence score (0-1) for language detection. Only present
             with complete utterances or when end_of_turn is True.
-        speaker: Speaker label (e.g., "A", "B"). Only present when speaker_labels is
-            enabled and end_of_turn is True. Maps to 'speaker_label' in JSON response.
+        speaker: Speaker label (e.g., "A", "B"), or "PENDING" while the speaker is
+            not yet assigned. Only present when speaker_labels is enabled and
+            end_of_turn is True. Maps to 'speaker_label' in JSON response.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -119,8 +123,26 @@ class TerminationMessage(BaseMessage):
     session_duration_seconds: float
 
 
+class SpeakerRevisionMessage(BaseMessage):
+    """Message correcting the speaker labels of turns already sent.
+
+    Sent with speaker diarization enabled, at the end of the session and, when
+    configured, periodically during it.
+
+    Parameters:
+        type: Always "SpeakerRevision" for this message type.
+        revisions: The revised turns, each with its ``turn_order``, new
+            ``speaker_label`` and words.
+    """
+
+    type: Literal["SpeakerRevision"] = "SpeakerRevision"
+    revisions: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # Union type for all possible message types
-AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage
+AnyMessage = (
+    BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage | SpeakerRevisionMessage
+)
 
 
 @deprecated(
@@ -141,8 +163,8 @@ class AssemblyAIConnectionParams(BaseModel):
         min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
-        prompt: Optional text prompt to guide the transcription. Only used with a Universal-3 Pro model ("universal-3-5-pro" or "universal-3-6-pro").
-        speech_model: Select between English, multilingual, and Universal-3 Pro ("universal-3-5-pro", "universal-3-6-pro") models. Defaults to "universal-3-6-pro".
+        prompt: Optional text prompt to guide the transcription. Only used with a Universal-3 Pro model ("universal-3-5-pro", "universal-3-6-pro", or "assemblyai-stt-3-7-realtime-agent").
+        speech_model: Select between English, multilingual, and Universal-3 Pro ("universal-3-5-pro", "universal-3-6-pro", "assemblyai-stt-3-7-realtime-agent") models. Defaults to "universal-3-6-pro".
         language_detection: Enable automatic language detection. Only applicable to
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
@@ -177,6 +199,7 @@ class AssemblyAIConnectionParams(BaseModel):
         "u3-rt-pro-beta-1",
         "universal-3-5-pro",
         "universal-3-6-pro",
+        "assemblyai-stt-3-7-realtime-agent",
     ] = "universal-3-6-pro"
     language_detection: bool | None = None
     format_turns: bool = True

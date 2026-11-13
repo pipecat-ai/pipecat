@@ -8,7 +8,13 @@
 
 import pytest
 
-from pipecat.expressive.perception import PerceptionSignal, format_perception
+from pipecat.expressive.perception import (
+    PerceptionCapabilities,
+    PerceptionSignal,
+    PerceptionTerm,
+    format_perception,
+    merge_perception,
+)
 from pipecat.frames.frames import (
     EagerTranscriptionFrame,
     Frame,
@@ -88,6 +94,53 @@ def test_a_reading_formats_labels_with_confidences_and_values():
     )
 
 
+def test_merging_keeps_every_label_with_its_highest_confidence_likeliest_first():
+    earlier = [PerceptionSignal("tone", labels=[("neutral", 0.80), ("frustrated", 0.11)])]
+    later = [PerceptionSignal("tone", labels=[("frustrated", 0.36), ("happy", 0.30)])]
+
+    assert merge_perception(earlier, later) == [
+        PerceptionSignal("tone", labels=[("neutral", 0.80), ("frustrated", 0.36), ("happy", 0.30)])
+    ]
+
+
+def test_merging_keeps_the_higher_value_whichever_comes_first():
+    unsure = [PerceptionSignal("hesitation", value=0.6)]
+    sure = [PerceptionSignal("hesitation", value=0.2)]
+
+    assert merge_perception(sure, unsure) == unsure
+    assert merge_perception(unsure, sure) == unsure
+
+
+def test_merging_keeps_the_signals_only_one_reading_has_in_the_order_first_read():
+    earlier = [*FRUSTRATED, PerceptionSignal("hesitation", value=0.3)]
+    later = [PerceptionSignal("sarcasm", value=0.9), *NEUTRAL]
+
+    merged = merge_perception(earlier, later)
+
+    assert [signal.name for signal in merged] == ["tone", "hesitation", "sarcasm"]
+    assert merge_perception(None, later) == later
+
+
+def test_merging_signals_keeps_every_label_and_the_first_description_in_order():
+    earlier = PerceptionCapabilities(
+        [PerceptionTerm("emotion", labels=["calm", "angry"]), PerceptionTerm("speech_rate")]
+    )
+    later = PerceptionCapabilities(
+        [
+            PerceptionTerm("emotion", "How the user felt.", labels=["angry", "sad"]),
+            PerceptionTerm("sarcasm", "The chance it's sarcastic."),
+        ]
+    )
+
+    assert earlier.merge(later) == PerceptionCapabilities(
+        [
+            PerceptionTerm("emotion", "How the user felt.", labels=["calm", "angry", "sad"]),
+            PerceptionTerm("speech_rate"),
+            PerceptionTerm("sarcasm", "The chance it's sarcastic."),
+        ]
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_reading_is_written_at_the_head_of_the_user_message():
     messages, down = await _user_messages(_turn("Can you tell me where my order is?", FRUSTRATED))
@@ -122,7 +175,7 @@ async def test_a_provisional_reading_is_not_written():
 
 
 @pytest.mark.asyncio
-async def test_the_turns_latest_final_reading_is_written():
+async def test_the_turns_final_readings_are_merged():
     messages, _ = await _user_messages(
         _turn(
             "where my order is?",
@@ -135,7 +188,9 @@ async def test_the_turns_latest_final_reading_is_written():
         )
     )
 
-    assert messages == ["([tone frustrated=0.86, neutral=0.10]) Can you tell me where my order is?"]
+    assert messages == [
+        "([tone frustrated=0.86, neutral=0.81, positive=0.12]) Can you tell me where my order is?"
+    ]
 
 
 async def _early_turn(
@@ -216,6 +271,23 @@ async def test_the_turn_stops_with_its_final_reading():
     )
 
     assert [m.perception for m in stopped] == [FRUSTRATED, None]
+
+
+@pytest.mark.asyncio
+async def test_the_turn_stops_with_its_final_readings_merged():
+    stopped = await _stopped(
+        _turn(
+            "where my order is?",
+            FRUSTRATED,
+            before=[
+                TranscriptionFrame(
+                    text="Can you tell me", user_id="", timestamp="now", perception=NEUTRAL
+                )
+            ],
+        )
+    )
+
+    assert stopped[0].perception == merge_perception(NEUTRAL, FRUSTRATED)
 
 
 @pytest.mark.asyncio

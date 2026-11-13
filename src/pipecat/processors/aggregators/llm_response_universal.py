@@ -24,7 +24,11 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.expressive.formatter import strip_expression_tags
-from pipecat.expressive.perception import PerceptionSignal, format_perception
+from pipecat.expressive.perception import (
+    PerceptionSignal,
+    format_perception,
+    merge_perception,
+)
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AssistantImageRawFrame,
@@ -318,8 +322,8 @@ class UserTurnStoppedMessage:
             instead.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
-        perception: The turn's final reading of how the user spoke, with
-            expressive conversation on and a perception producer in the
+        perception: The turn's final readings of how the user spoke, merged,
+            with expressive conversation on and a perception producer in the
             pipeline, or None. Part of expressive conversation (alpha).
 
     """
@@ -804,8 +808,8 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
-        # With expressive conversation on, the latest final reading of how the
-        # user spoke: for the user message, written at its head, and for the
+        # With expressive conversation on, the final readings of how the user
+        # spoke, merged: for the user message, written at its head, and for the
         # turn, reported when it stops. A turn can write several messages.
         self._expressive = False
         self._perception: list[PerceptionSignal] | None = None
@@ -1403,8 +1407,8 @@ class LLMUserAggregator(LLMContextAggregator):
     def _handle_perception(self, signals: list[PerceptionSignal] | None):
         if not self._expressive or not signals:
             return
-        self._perception = signals
-        self._turn_perception = signals
+        self._perception = merge_perception(self._perception, signals)
+        self._turn_perception = merge_perception(self._turn_perception, signals)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -1435,15 +1439,20 @@ class LLMUserAggregator(LLMContextAggregator):
 
         Queues the frame so it flows through `process_frame` and is handled
         internally (e.g. by the `UserTurnController`). The upstream frame is
-        pushed directly.
+        pushed directly. The two frames are marked as broadcast siblings, as
+        `broadcast_frame` marks them, so observers report the moment once.
 
         Args:
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
 
         """
-        await self.queue_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        downstream_frame = frame_cls(**kwargs)
+        upstream_frame = frame_cls(**kwargs)
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+        await self.queue_frame(downstream_frame)
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
@@ -1574,19 +1583,26 @@ class LLMUserAggregator(LLMContextAggregator):
         inference, it passes the LLM before the response is held, while the
         turn written once it ends waits for the inference to finish.
 
+        The speculated turn is whatever of the turn the context doesn't hold
+        yet: transcripts committed earlier in the turn but not written, then the
+        predicted text. Transcripts an earlier inference in the turn wrote are
+        already in the context.
+
         Args:
             speculation: The speculation to run, from the stop strategy that
                 started it.
         """
-        perception = speculation.perception if self._expressive else None
-        content = (
-            f"{format_perception(perception)} {speculation.text}"
-            if perception
-            else speculation.text
+        text = concatenate_aggregated_text(
+            [
+                *self._aggregation,
+                TextPartForConcatenation(speculation.text, includes_inter_part_spaces=False),
+            ]
         )
+        perception = speculation.perception if self._expressive else None
+        content = f"{format_perception(perception)} {text}" if perception else text
         await self.broadcast_frame(
             LLMContextUserTurnFrame,
-            text=speculation.text,
+            text=text,
             timestamp=self._user_turn_start_timestamp,
             perception=perception,
             speculation=True,
@@ -1834,8 +1850,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
-        # Markers seen on LLMMarkerFrames, so a service configured with markers
-        # other than the defaults still gets them stripped from transcripts.
+        # Markers seen on LLMMarkerFrames: the only text stripped from
+        # transcripts, whatever marker set the service is configured with.
         self._seen_turn_markers: set[str] = set()
         self._context_updated_tasks: set[asyncio.Task] = set()
 
@@ -2270,8 +2286,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # If an image frame has been added to the context, let's run inference.
             run_llm = await self._maybe_append_image_to_context(image_frame)
 
-        # Run inference if the function call result requires it.
-        if frame.result:
+        # Run inference if the function call result requires it. A falsy result
+        # such as {} or 0 is still a result; only None completes the call
+        # without running the LLM (e.g. a tool that already spoke its answer).
+        if frame.result is not None:
             if properties and properties.run_llm is not None:
                 # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
@@ -2352,7 +2370,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Injects an intermediate developer message into the context without
         removing the call from the in-progress map.
         """
-        if not frame.result:
+        if frame.result is None:
             logger.warning(f"{self} result_callback called with is_final=False but no result!")
             return
 
@@ -2372,7 +2390,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         deferred = self._is_deferred(in_progress_frame)
         del self._function_calls_in_progress[frame.tool_call_id]
 
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
 
         if deferred:
             # The conversation moved on while the call ran, so the LLM is told
@@ -2764,22 +2786,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Strip turn completion markers from assistant transcript.
 
         Turn completion markers are used internally for turn completion
-        detection and shouldn't appear in the final transcript. Both the
-        default markers and any seen on this turn's marker frames are removed,
-        so a custom marker set is stripped too.
+        detection and shouldn't appear in the final transcript. Every marker
+        seen so far on a marker frame is removed, wherever it appears in the
+        text.
         """
-        from pipecat.turns.user_turn_completion_mixin import (
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-        )
-
         marker_found = False
-        for marker in {
-            USER_TURN_COMPLETE_MARKER,
-            USER_TURN_INCOMPLETE_SHORT_MARKER,
-            USER_TURN_INCOMPLETE_LONG_MARKER,
-        } | self._seen_turn_markers:
+        for marker in self._seen_turn_markers:
             if marker in text:
                 text = text.replace(marker, "")
                 marker_found = True

@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
 from tests.openai_http_helpers import http
 
@@ -576,3 +577,96 @@ async def test_openai_llm_unexpected_failure_leaves_the_service_usable():
         await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
 
         assert service.is_usable
+
+
+def _bad_request_with_code(code: str | None):
+    """Build a real OpenAI ``BadRequestError`` carrying the given error ``code``."""
+    from openai import BadRequestError
+
+    response = http.Response(
+        400, request=http.Request("POST", "https://api.openai.com/v1/chat/completions")
+    )
+    return BadRequestError(
+        "simulated api error",
+        response=response,
+        body={"code": code, "message": "simulated api error"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code, expect_usable",
+    [
+        ("content_filter", True),
+        ("context_length_exceeded", False),
+        (None, False),
+    ],
+)
+async def test_openai_llm_usability_after_bad_request(code, expect_usable):
+    """Test that only a content-filter rejection leaves the service usable.
+
+    A content filter rejects one request's content with an HTTP 400, and the next
+    request can succeed, so it must not cost the service its usability. Any other
+    400 still classifies as permanent. Goes through the real ``push_error_frame``
+    path, which classifies the error and flips ``is_usable``.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        errors = []
+
+        @service.event_handler("on_error")
+        async def on_error(processor, error):
+            # pipecat marks the service unusable before on_error handlers run.
+            errors.append((error.category, processor.is_usable))
+
+        service.push_frame = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_bad_request_with_code(code))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert len(errors) == 1
+        category, usable_at_handler_time = errors[0]
+        assert usable_at_handler_time is expect_usable
+        assert service.is_usable is expect_usable
+        assert category.is_permanent is not expect_usable
+        assert (category == ErrorCategory.CONTENT_FILTERED) is (code == "content_filter")
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_content_filter_on_file_keeps_its_category():
+    """Test that a content-filter rejection reports CONTENT_FILTERED despite file cleanup.
+
+    The pending file is still removed, since it may be what the filter rejected.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
+        service._client = AsyncMock()
+
+        errors = []
+
+        @service.event_handler("on_error")
+        async def on_error(processor, error):
+            errors.append(error.category)
+
+        service.push_frame = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_bad_request_with_code("content_filter"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "hello"})
+        await context.add_file_frame_message(
+            type="bytes", format="application/pdf", file="data:application/pdf;base64,ZmFrZSBwZGY="
+        )
+        await service.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
+
+        assert errors == [ErrorCategory.CONTENT_FILTERED]
+        assert service.is_usable
+        messages = context.get_messages()
+        assert len(messages) == 1
+        assert messages[0]["content"] == "hello"

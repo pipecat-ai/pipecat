@@ -88,6 +88,20 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
+    async def test_blank_wake_phrases_do_not_start_a_turn(self):
+        for phrase in ("", " \t", "!!!"):
+            with self.subTest(phrase=phrase):
+                strategy = self._create_strategy(phrases=[phrase])
+                await self._setup_strategy(strategy)
+                self.addAsyncCleanup(strategy.cleanup)
+
+                result = await strategy.process_frame(
+                    TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
+                )
+
+                self.assertEqual(result, ProcessFrameResult.STOP)
+                self.assertEqual(strategy.state, _WakeState.IDLE)
+
     async def test_non_matching_text_resets_aggregation(self):
         """Non-matching transcription triggers aggregation reset to prevent LLM context pollution."""
         strategy = self._create_strategy()
@@ -181,6 +195,26 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
+    async def test_phrase_with_punctuation_matches(self):
+        """A phrase written with punctuation matches the transcript with or without it."""
+        for phrase, text in [
+            ("let's talk", "Let's talk."),
+            ("hey wall-e", "Hey Wall-E"),
+            ("hey, pipecat", "Hey, Pipecat!"),
+            ("hey, pipecat", "hey pipecat"),
+        ]:
+            with self.subTest(phrase=phrase, text=text):
+                strategy = self._create_strategy(phrases=[phrase])
+                await self._setup_strategy(strategy)
+
+                result = await strategy.process_frame(
+                    TranscriptionFrame(text=text, user_id="user1", timestamp="")
+                )
+                self.assertEqual(result, ProcessFrameResult.STOP)
+                self.assertEqual(strategy.state, _WakeState.AWAKE)
+
+                await strategy.cleanup()
+
     async def test_turn_start_preserves_inactive_state(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
@@ -239,7 +273,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.cleanup()
 
     async def test_wake_phrase_detected_event(self):
-        strategy = self._create_strategy()
+        strategy = self._create_strategy(phrases=["!!!", "Hey, Pipecat!"])
         await self._setup_strategy(strategy)
 
         detected_phrase = None
@@ -255,7 +289,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Event fires in a background task, give it a moment.
         await asyncio.sleep(0.05)
-        self.assertEqual(detected_phrase, "hey pipecat")
+        self.assertEqual(detected_phrase, "Hey, Pipecat!")
 
         await strategy.cleanup()
 

@@ -26,12 +26,15 @@ from loguru import logger
 from pipecat.evals.results import EvalScriptResult, EvalSimulationResult
 from pipecat.evals.scenario import EvalScenarioFile
 from pipecat.evals.session import EvalSession, EvalSessionParams
+from pipecat.evals.simulation import EvalRubric
 from pipecat.evals.suite import capture_pipeline_logs
 
 
 async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
     """Build and run the session for the scenario named in ``config``, whichever kind it is."""
     loaded = EvalScenarioFile.load(Path(config["scenario_path"]))[config["scenario_name"]]
+    if isinstance(loaded, EvalRubric):
+        raise ValueError(f"{loaded.name} is a rubric, which has nothing to run")
     params = EvalSessionParams.model_validate(config["params"])
     session = EvalSession.from_scenario(loaded, config["bot_url"], params=params)
     return await session.run()
@@ -39,7 +42,7 @@ async def _run(config: dict) -> EvalScriptResult | EvalSimulationResult:
 
 def main() -> int:
     """Run one scenario from a config file and write its result as JSON."""
-    config = json.loads(Path(sys.argv[1]).read_text())
+    config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     # No console sink: the worker's stdout/stderr is captured to a log file by the
     # suite, and the result comes back through the result file, not stdout.
     logger.remove()
@@ -54,7 +57,7 @@ def main() -> int:
     ):
         result = asyncio.run(_run(config))
 
-    Path(config["result_path"]).write_text(json.dumps(dataclasses.asdict(result)))
+    Path(config["result_path"]).write_text(json.dumps(dataclasses.asdict(result)), encoding="utf-8")
     return 0
 
 

@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
     PerceptionMetadataFrame,
     TextType,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -641,7 +642,7 @@ class RTVIObserver(BaseObserver):
                     tool_call_id=tool_call_id,
                     cancelled=cancelled,
                     function_name=function_name if named else None,
-                    result=(result if result else None) if full and not cancelled else None,
+                    result=result if full and not cancelled else None,
                 )
             )
         await self.send_rtvi_message(message)
@@ -916,9 +917,11 @@ class RTVIObserver(BaseObserver):
                 if is_progress_aware:
                     result = await transform(text, text_type, accumulated, remaining)
                     if isinstance(result, BotOutputTransformResult):
-                        accumulated = result.accumulated_text or accumulated
-                        remaining = result.remaining_text or remaining
-                        text = result.text or text
+                        if result.accumulated_text is not None:
+                            accumulated = result.accumulated_text
+                        if result.remaining_text is not None:
+                            remaining = result.remaining_text
+                        text = result.text
                 else:
                     # The deprecated 2-parameter signature returns the text itself.
                     accumulated = cast(str, await transform(accumulated, text_type))
@@ -926,7 +929,10 @@ class RTVIObserver(BaseObserver):
                     text = cast(str, await transform(text, text_type))
 
         if self._params.bot_output_enabled:
-            spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
+            # Whether speech is done comes from the frame: a transform may empty the text.
+            spoken_status: RTVI.SpokenStatus = (
+                "completed" if frame.remaining_text == "" else "in-progress"
+            )
             message = RTVI.BotOutputMessage(
                 data=RTVI.BotOutputMessageData(
                     text=text,
@@ -1119,6 +1125,7 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=frame.user_id,
                 perception=frame.perception,
+                speaker=frame.speaker,
             )
         if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
@@ -1128,6 +1135,7 @@ class RTVIObserver(BaseObserver):
                         user_id=frame.user_id,
                         timestamp=frame.timestamp,
                         final=final,
+                        speaker=frame.speaker,
                     )
                 )
             )
@@ -1149,6 +1157,7 @@ class RTVIObserver(BaseObserver):
         user_id: str | None = None,
         msg_id: str | None = None,
         perception: list[PerceptionSignal] | None = None,
+        speaker: TranscriptionSpeaker | None = None,
     ):
         """Send a user input message."""
         signals = None
@@ -1171,6 +1180,7 @@ class RTVIObserver(BaseObserver):
                 user_id=user_id,
                 msg_id=msg_id,
                 perception=signals,
+                speaker=speaker,
             )
         )
         await self.send_rtvi_message(message)

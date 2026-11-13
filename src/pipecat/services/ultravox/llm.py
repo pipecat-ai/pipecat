@@ -496,7 +496,11 @@ class UltravoxRealtimeLLMService(LLMService):
         channel, or as text when the call was already settled with the
         placeholder that unfreezes an async one.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:

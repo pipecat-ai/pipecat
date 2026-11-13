@@ -6,16 +6,22 @@
 
 """Sarvam AI Speech-to-Text service implementations.
 
-Both services stream audio to Sarvam's WebSocket API for Indian language speech
-recognition. :class:`SarvamSTTService` covers the transcription endpoint, with
-Voice Activity Detection and a choice of audio formats.
-:class:`SarvamRealtimeSTTService` targets the realtime endpoint, which adds
+:class:`SarvamSTTService` and :class:`SarvamRealtimeSTTService` stream audio to
+Sarvam's WebSocket APIs for Indian language speech recognition. The former
+covers the transcription endpoint, with Voice Activity Detection and a choice
+of audio formats; the latter targets the realtime endpoint, which adds
 server-side endpointing and in-band configuration updates.
+
+:class:`SarvamHttpSTTService` instead sends each VAD-detected speech segment to
+Sarvam's synchronous REST API and yields the transcription inline, so it also
+suits callers that use ``run_stt()`` directly.
 """
 
 import asyncio
 import base64
+import io
 import json
+import wave
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, cast
@@ -42,8 +48,12 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import SARVAM_REALTIME_TTFS_P99, SARVAM_TTFS_P99
-from pipecat.services.stt_service import STTService, WebsocketSTTService
+from pipecat.services.stt_latency import (
+    SARVAM_HTTP_TTFS_P99,
+    SARVAM_REALTIME_TTFS_P99,
+    SARVAM_TTFS_P99,
+)
+from pipecat.services.stt_service import SegmentedSTTService, STTService, WebsocketSTTService
 from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -126,6 +136,67 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+# Sarvam language codes mapped back to pipecat Language values, for the codes
+# Sarvam reports on transcription results.
+_SARVAM_CODE_TO_LANGUAGE = {
+    "bn-IN": Language.BN_IN,
+    "gu-IN": Language.GU_IN,
+    "hi-IN": Language.HI_IN,
+    "kn-IN": Language.KN_IN,
+    "ml-IN": Language.ML_IN,
+    "mr-IN": Language.MR_IN,
+    "ta-IN": Language.TA_IN,
+    "te-IN": Language.TE_IN,
+    "pa-IN": Language.PA_IN,
+    "od-IN": Language.OR_IN,
+    "en-US": Language.EN_US,
+    "en-IN": Language.EN_IN,
+    "as-IN": Language.AS_IN,
+    "ur-IN": Language.UR_IN,
+    "mai-IN": Language.MAI_IN,
+    "sd-IN": Language.SD_IN,
+    "kok-IN": Language.KOK_IN,
+    "ne-IN": Language.NE_IN,
+    "ks-IN": Language.KS_IN,
+    "sa-IN": Language.SA_IN,
+    "sat-IN": Language.SAT_IN,
+    "mni-IN": Language.MNI_IN,
+    "brx-IN": Language.BRX_IN,
+    "doi-IN": Language.DOI_IN,
+}
+
+
+def _language_code_to_language(
+    language_code: str | None, warned: set[str], service: Any
+) -> Language | None:
+    """Map a Sarvam language code to a pipecat Language, or None if unresolved.
+
+    Returns None for Sarvam's own "unknown"/auto-detect placeholder and for
+    any code -- present or future -- the table doesn't have an entry for,
+    rather than guessing a specific language. A code the table doesn't carry
+    only logs a warning once per ``warned`` set, so a long-running session
+    doesn't spam it every turn.
+
+    Args:
+        language_code: The code Sarvam reported, or the configured one.
+        warned: The owning service's set of codes already warned about.
+        service: The owning service, named in the warning.
+    """
+    # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
+    # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
+    if not language_code or language_code == "unknown":
+        return None
+    language = _SARVAM_CODE_TO_LANGUAGE.get(language_code)
+    if language is None and language_code not in warned:
+        warned.add(language_code)
+        logger.warning(
+            f"{service} received Sarvam language code {language_code!r}, which has no "
+            "Language mapping; leaving TranscriptionFrame.language unset for it "
+            "rather than guessing."
+        )
+    return language
+
+
 SarvamMode = Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
 
 
@@ -160,6 +231,20 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         default_mode="transcribe",
     ),
 }
+
+
+def _configured_language_code(settings: STTSettings, config: ModelConfig) -> str | None:
+    """Return the Sarvam language code to send for the configured language.
+
+    ``STTService`` stores the configured language already converted to a Sarvam
+    code, so it is sent as-is. With no language configured, the model's default
+    is sent (``"unknown"``, Sarvam's auto-detect).
+
+    Args:
+        settings: The service's settings.
+        config: The capabilities of the configured model.
+    """
+    return assert_given(settings.language) or config.default_language
 
 
 @dataclass
@@ -408,12 +493,7 @@ class SarvamSTTService(STTService):
 
     def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
-        # The stored language is a Sarvam code rather than a Language, but the
-        # mapping keys compare equal either way.
-        language = cast(Language, assert_given(self._settings.language))
-        if language:
-            return language_to_sarvam_language(language)
-        return self._config.default_language
+        return _configured_language_code(self._settings, self._config)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -786,45 +866,7 @@ class SarvamSTTService(STTService):
         maps to a language this table doesn't carry only logs a warning once,
         so a long-running session doesn't spam it every turn.
         """
-        mapping = {
-            "bn-IN": Language.BN_IN,
-            "gu-IN": Language.GU_IN,
-            "hi-IN": Language.HI_IN,
-            "kn-IN": Language.KN_IN,
-            "ml-IN": Language.ML_IN,
-            "mr-IN": Language.MR_IN,
-            "ta-IN": Language.TA_IN,
-            "te-IN": Language.TE_IN,
-            "pa-IN": Language.PA_IN,
-            "od-IN": Language.OR_IN,
-            "en-US": Language.EN_US,
-            "en-IN": Language.EN_IN,
-            "as-IN": Language.AS_IN,
-            "ur-IN": Language.UR_IN,
-            "mai-IN": Language.MAI_IN,
-            "sd-IN": Language.SD_IN,
-            "kok-IN": Language.KOK_IN,
-            "ne-IN": Language.NE_IN,
-            "ks-IN": Language.KS_IN,
-            "sa-IN": Language.SA_IN,
-            "sat-IN": Language.SAT_IN,
-            "mni-IN": Language.MNI_IN,
-            "brx-IN": Language.BRX_IN,
-            "doi-IN": Language.DOI_IN,
-        }
-        # "unknown" is Sarvam's own placeholder for "not detected/configured yet"
-        # (see MODEL_CONFIGS.default_language), not a data gap worth warning about.
-        if not language_code or language_code == "unknown":
-            return None
-        language = mapping.get(language_code)
-        if language is None and language_code not in self._unmapped_language_codes_warned:
-            self._unmapped_language_codes_warned.add(language_code)
-            logger.warning(
-                f"{self} received Sarvam language code {language_code!r}, which has no "
-                "Language mapping; leaving TranscriptionFrame.language unset for it "
-                "rather than guessing."
-            )
-        return language
+        return _language_code_to_language(language_code, self._unmapped_language_codes_warned, self)
 
     def _is_keepalive_ready(self) -> bool:
         """Check if the Sarvam SDK websocket client is connected."""
@@ -1750,3 +1792,267 @@ def _without_language_code(settings: SarvamRealtimeSTTSettings) -> SarvamRealtim
     folded.language = _language_from_code(settings.language_code)
     folded.language_code = NOT_GIVEN
     return folded
+
+
+# Longest audio, in seconds, Sarvam's synchronous REST endpoint accepts in one
+# request; longer audio is rejected.
+_HTTP_MAX_REQUEST_SECS = 30
+
+
+def _split_wav(audio: bytes, max_secs: float) -> list[bytes]:
+    """Split a WAV file into WAV files of at most ``max_secs`` each.
+
+    Audio that already fits is returned whole and unchanged, as is audio that
+    isn't WAV (Sarvam's REST endpoint also accepts other formats).
+
+    Args:
+        audio: The audio file to split.
+        max_secs: The longest duration of each returned file, in seconds.
+    """
+    try:
+        with wave.open(io.BytesIO(audio)) as wav:
+            params = wav.getparams()
+            frames = wav.readframes(params.nframes)
+    except (wave.Error, EOFError):
+        return [audio]
+
+    max_frames = int(params.framerate * max_secs)
+    if params.nframes <= max_frames:
+        return [audio]
+
+    chunk_bytes = max_frames * params.sampwidth * params.nchannels
+    chunks = []
+    for start in range(0, len(frames), chunk_bytes):
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as chunk:
+            chunk.setparams(params)
+            chunk.writeframes(frames[start : start + chunk_bytes])
+        chunks.append(buffer.getvalue())
+    return chunks
+
+
+@dataclass
+class SarvamHttpSTTSettings(STTSettings):
+    """Settings for SarvamHttpSTTService."""
+
+    pass
+
+
+class SarvamHttpSTTService(SegmentedSTTService):
+    """Sarvam speech-to-text service using the synchronous REST API.
+
+    The HTTP sibling of the WebSocket :class:`SarvamSTTService`: each
+    VAD-detected speech segment is sent to Sarvam's REST speech-to-text
+    endpoint and the transcription is yielded inline from ``run_stt()``, so
+    it suits pipelines that prefer per-segment HTTP requests over a long-lived
+    socket, and callers that use ``run_stt()`` directly.
+
+    The REST endpoint accepts at most 30 seconds of audio per request, so a
+    longer segment is sent as consecutive 30-second pieces whose transcripts
+    are joined into one ``TranscriptionFrame``. A word spoken across a piece
+    boundary may be transcribed less accurately.
+
+    Requires VAD to be enabled in the pipeline.
+    """
+
+    Settings = SarvamHttpSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        mode: SarvamMode | None = None,
+        keyterms: list[str] | None = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SARVAM_HTTP_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the Sarvam HTTP STT service.
+
+        Args:
+            api_key: Sarvam API key for authentication.
+            mode: Mode of operation. Options: transcribe, translate, verbatim,
+                translit, codemix. Only applicable to models that support it.
+                Defaults to the model's default mode.
+            keyterms: Recognition hints for saaras:v4, sent with every request.
+                At most 50 terms of 64 characters each; put each phrase in a
+                separate item.
+            sample_rate: Audio sample rate. If None, uses the pipeline's rate.
+                Sarvam's REST API performs best with 16 kHz audio.
+            settings: Runtime-updatable settings. Defaults to the
+                ``saaras:v4`` model with automatic language detection.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
+        default_settings = self.Settings(
+            model="saaras:v4",
+            language=None,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        self._config = MODEL_CONFIGS[resolved_model]
+
+        if mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{resolved_model}' does not support mode parameter.")
+        if mode is None:
+            mode = self._config.default_mode
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._mode = mode
+        self._keyterms = list(keyterms) if keyterms is not None else None
+        # Warn only once per unrecognized language code, so a session stuck
+        # detecting one unmapped language doesn't spam a warning per turn.
+        self._unmapped_language_codes_warned: set[str] = set()
+
+        self._sdk_headers = sdk_headers()
+        self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key, headers=self._sdk_headers)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Sarvam HTTP service supports metrics generation.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert pipecat Language enum to Sarvam's language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            The Sarvam language code string.
+        """
+        return language_to_sarvam_language(language)
+
+    def _get_language_string(self) -> str | None:
+        """Resolve the current language setting to a Sarvam language code string."""
+        return _configured_language_code(self._settings, self._config)
+
+    def _map_language_code_to_enum(self, language_code: str | None) -> Language | None:
+        """Map a Sarvam language code to a pipecat Language, or None if unresolved."""
+        return _language_code_to_language(language_code, self._unmapped_language_codes_warned, self)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta; model and language take effect on the next request.
+
+        Args:
+            delta: A :class:`STTSettings` (or ``SarvamHttpSTTService.Settings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+
+        Raises:
+            ValueError: If the delta names a model the REST API does not offer.
+        """
+        # Validate before applying so a rejected delta leaves the store intact.
+        if is_given(delta.model) and delta.model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{delta.model}'. Allowed values: {allowed}.")
+
+        changed = await super()._update_settings(delta)
+
+        if "model" in changed:
+            # The delta was validated above, so the stored model is a known key.
+            self._config = MODEL_CONFIGS[cast(str, self._settings.model)]
+
+        return changed
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
+    async def _transcribe(self, audio: bytes) -> Any:
+        """Send one request, of at most 30 seconds of audio, to Sarvam's REST API."""
+        request_kwargs: dict[str, Any] = {
+            "file": ("segment.wav", audio, "audio/wav"),
+            "model": self._settings.model,
+        }
+
+        language_string = self._get_language_string()
+        if language_string is not None:
+            request_kwargs["language_code"] = language_string
+
+        if self._config.supports_mode and self._mode is not None:
+            request_kwargs["mode"] = self._mode
+
+        if self._keyterms is not None:
+            # transcribe() has no keyterms parameter; the REST API takes it as
+            # a form field holding a JSON array.
+            request_options: RequestOptions = {
+                "additional_body_parameters": {"keyterms": json.dumps(self._keyterms)}
+            }
+            request_kwargs["request_options"] = request_options
+
+        return await self._sarvam_client.speech_to_text.transcribe(**request_kwargs)
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Transcribe an audio segment using Sarvam's REST API.
+
+        A segment longer than the REST endpoint's 30-second limit is sent as
+        consecutive pieces, and their transcripts are joined.
+
+        Args:
+            audio: Audio segment in WAV format (already wrapped by the
+                SegmentedSTTService base class).
+
+        Yields:
+            Frame: TranscriptionFrame containing the transcribed text, or
+            ErrorFrame on failure. Empty transcriptions are not yielded.
+        """
+        try:
+            await self.start_processing_metrics()
+
+            responses = [
+                await self._transcribe(chunk) for chunk in _split_wav(audio, _HTTP_MAX_REQUEST_SECS)
+            ]
+
+            await self.stop_processing_metrics()
+
+            transcript = " ".join(
+                r.transcript.strip() for r in responses if r.transcript and r.transcript.strip()
+            )
+            if not transcript:
+                return
+
+            # Prefer the language Sarvam detected; fall back to the configured one.
+            # Either can resolve to None -- an unrecognized code, or Sarvam's own
+            # "unknown"/auto-detect placeholder -- in which case the frame is left
+            # without a language rather than guessing one.
+            detected = next((r.language_code for r in responses if r.language_code), None)
+            language = self._map_language_code_to_enum(detected or self._get_language_string())
+
+            await self._handle_transcription(transcript, True, language)
+            logger.debug(f"Transcription: [{transcript}]")
+            yield TranscriptionFrame(
+                transcript,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=(
+                    responses[0].dict() if len(responses) == 1 else [r.dict() for r in responses]
+                ),
+            )
+
+        except Exception as e:
+            yield ErrorFrame(error=f"Sarvam HTTP STT error: {e}", exception=e)

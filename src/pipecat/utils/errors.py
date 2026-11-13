@@ -40,6 +40,9 @@ class ErrorCategory(Enum):
             application-supplied content a provider rejected once the service
             has repaired its context (e.g. removed the rejected file message).
             Either way the failure says nothing about the service's own health.
+        CONTENT_FILTERED: The provider's content policy rejected the request's
+            content. The failure is about that content, not the service's
+            health, but no response is coming for the request.
     """
 
     UNKNOWN = "unknown"
@@ -51,6 +54,7 @@ class ErrorCategory(Enum):
     CONNECTIVITY = "connectivity"
     SERVER = "server"
     APPLICATION = "application"
+    CONTENT_FILTERED = "content_filtered"
 
     @property
     def is_permanent(self) -> bool:

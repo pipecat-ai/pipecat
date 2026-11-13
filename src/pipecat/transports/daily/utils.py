@@ -6,7 +6,8 @@
 
 """Daily REST Helpers.
 
-Methods that wrap the Daily API to create rooms, check room URLs, and get meeting tokens.
+Methods that wrap the Daily API to create rooms, check room URLs, get meeting
+tokens, and manage SIP clients.
 """
 
 import time
@@ -221,6 +222,64 @@ class DailyMeetingTokenParams(BaseModel):
     properties: DailyMeetingTokenProperties = Field(default_factory=DailyMeetingTokenProperties)
 
 
+class DailySIPClientParams(BaseModel):
+    """Parameters for creating a Daily SIP client.
+
+    A SIP client is a set of plain SIP credentials on your Daily domain: any
+    SIP user agent can register with them and then receive calls at its
+    ``sip_uri`` or place calls through the domain. This is distinct from
+    ``DailyRoomSipParams``, which configures a room's SIP interconnect.
+
+    Parameters:
+        username: SIP username. Same naming rules as room names, with an
+            optional ``.<n>`` suffix (e.g. "support.1"); at most 64 characters.
+        password: Optional password (12-64 characters, at least one letter and
+            one digit). Auto-generated when omitted.
+        expires_in_seconds: Optional TTL in seconds (60-2592000). The client is
+            deleted automatically when it expires; never expires when omitted.
+    """
+
+    username: str
+    password: str | None = None
+    expires_in_seconds: int | None = None
+
+
+class DailySIPClientObject(BaseModel):
+    """Represents a Daily SIP client returned by the API.
+
+    Parameters:
+        username: SIP username.
+        domain: SIP domain to register with (e.g. "mydomain.sip-us.daily.co").
+        sip_uri: The client's dialable SIP URI.
+        password: SIP password. Only present in create and rotate responses —
+            it cannot be retrieved later, only rotated.
+        expires_at: Expiration timestamp in ISO 8601 format, or None if the
+            client never expires.
+    """
+
+    username: str
+    domain: str
+    sip_uri: str
+    password: str | None = None
+    expires_at: str | None = None
+
+
+class DailySIPClientPage(BaseModel):
+    """A page of Daily SIP clients returned by the list endpoint.
+
+    Parameters:
+        sip_clients: SIP clients in this page (passwords never included).
+        total: Total number of SIP clients on the domain.
+        limit: Page size used for this response.
+        offset: Offset used for this response.
+    """
+
+    sip_clients: list[DailySIPClientObject]
+    total: int
+    limit: int
+    offset: int
+
+
 class DailyRESTHelper:
     """Helper class for interacting with Daily's REST API.
 
@@ -302,20 +361,28 @@ class DailyRESTHelper:
         self,
         room_url: str,
         expiry_time: float = 60 * 60,
-        eject_at_token_exp: bool = False,
+        eject_at_token_exp: bool | None = None,
         owner: bool = True,
         params: DailyMeetingTokenParams | None = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 
+        `room_name` is always taken from `room_url`. For `exp` and
+        `is_owner`, a value set in `params` is kept; otherwise
+        `expiry_time` and `owner` are used.
+
         Args:
             room_url: Daily room URL.
             expiry_time: Token validity duration in seconds (default: 1 hour).
-            eject_at_token_exp: Whether to eject user when token expires.
-            owner: Whether token has owner privileges.
-            params: Optional additional token properties. Note that room_name,
-                exp, and is_owner will be set based on the other function
-                parameters regardless of values in params.
+                Ignored if `params` sets `exp`.
+            eject_at_token_exp: Whether to eject the user when the token
+                expires. If unset, the value in `params` is kept; if that is
+                unset too, the field is left out so the room's
+                `eject_at_room_exp` setting applies. Setting it to True or
+                False overrides the room's ejection settings for this token.
+            owner: Whether token has owner privileges (default: True).
+                Ignored if `params` sets `is_owner`.
+            params: Optional additional token properties.
 
         Returns:
             Meeting token.
@@ -328,26 +395,29 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: int = int(time.time() + expiry_time)
-
         room_name = self.get_name_from_url(room_url)
 
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
 
         if params is None:
-            params = DailyMeetingTokenParams(
-                properties=DailyMeetingTokenProperties(
-                    room_name=room_name,
-                    is_owner=owner,
-                    exp=expiration,
-                    eject_at_token_exp=eject_at_token_exp,
-                )
-            )
+            params = DailyMeetingTokenParams(properties=DailyMeetingTokenProperties())
         else:
-            params.properties.room_name = room_name
-            params.properties.exp = expiration
-            params.properties.eject_at_token_exp = eject_at_token_exp
-            params.properties.is_owner = owner
+            # Fill in a copy. Written onto the caller's object, the defaults
+            # below would look like the caller's own values on the next call
+            # with the same `params`, and win over that call's arguments.
+            params = params.model_copy(deep=True)
+
+        properties = params.properties
+        properties.room_name = room_name
+
+        if properties.exp is None:
+            properties.exp = int(time.time() + expiry_time)
+
+        if properties.is_owner is None:
+            properties.is_owner = owner
+
+        if eject_at_token_exp is not None:
+            properties.eject_at_token_exp = eject_at_token_exp
 
         json = params.model_dump(exclude_none=True)
 
@@ -395,6 +465,181 @@ class DailyRESTHelper:
                 raise Exception(f"Failed to delete room [{room_name}] (status: {r.status}): {text}")
 
         return True
+
+    async def create_sip_client(self, params: DailySIPClientParams) -> DailySIPClientObject:
+        """Create a SIP client on the Daily domain.
+
+        The response is the only place the password is returned — store it if
+        you need it again later (it can only be rotated, not retrieved). The
+        credentials plug directly into the SIP transport::
+
+            client = await helper.create_sip_client(DailySIPClientParams(username="bot"))
+            connection = SIPConnection(
+                user=client.username,
+                domain=client.domain,
+                password=client.password,
+                transport="tls",
+            )
+
+        Args:
+            params: SIP client configuration parameters.
+
+        Returns:
+            DailySIPClientObject instance including the password.
+
+        Raises:
+            Exception: If creation fails — including 403 (domain SIP client
+                limit reached) and 409 (username already exists).
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = params.model_dump(exclude_none=True)
+        async with self.aiohttp_session.post(
+            f"{self.daily_api_url}/sip-clients", headers=headers, json=json
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to create SIP client (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
+
+    async def list_sip_clients(
+        self, limit: int | None = None, offset: int | None = None
+    ) -> DailySIPClientPage:
+        """List the SIP clients on the Daily domain.
+
+        Args:
+            limit: Maximum clients per page (1-100, API default 50).
+            offset: Number of clients to skip (API default 0).
+
+        Returns:
+            DailySIPClientPage with the clients (passwords never included).
+
+        Raises:
+            Exception: If the request fails or the response is invalid.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        params: dict[str, int] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        async with self.aiohttp_session.get(
+            f"{self.daily_api_url}/sip-clients", headers=headers, params=params
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to list SIP clients (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        try:
+            page = DailySIPClientPage(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return page
+
+    async def get_sip_client(self, username: str) -> DailySIPClientObject:
+        """Get a SIP client by username.
+
+        Args:
+            username: SIP username.
+
+        Returns:
+            DailySIPClientObject instance (password never included).
+
+        Raises:
+            Exception: If the client does not exist or the request fails.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.get(
+            f"{self.daily_api_url}/sip-clients/{username}", headers=headers
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(
+                    f"Unable to get SIP client [{username}] (status: {r.status}): {text}"
+                )
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
+
+    async def delete_sip_client(self, username: str) -> bool:
+        """Delete a SIP client by username.
+
+        Args:
+            username: SIP username.
+
+        Returns:
+            True if deletion was successful.
+
+        Raises:
+            Exception: If deletion fails (excluding 404 Not Found).
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.delete(
+            f"{self.daily_api_url}/sip-clients/{username}", headers=headers
+        ) as r:
+            if r.status != 200 and r.status != 404:
+                text = await r.text()
+                raise Exception(
+                    f"Failed to delete SIP client [{username}] (status: {r.status}): {text}"
+                )
+
+        return True
+
+    async def rotate_sip_client_password(
+        self, username: str, password: str | None = None
+    ) -> DailySIPClientObject:
+        """Rotate a SIP client's password.
+
+        The client's URI and expiration are unchanged; the response is the
+        only place the new password is returned.
+
+        Args:
+            username: SIP username.
+            password: Optional new password (12-64 characters, at least one
+                letter and one digit). Auto-generated when omitted.
+
+        Returns:
+            DailySIPClientObject instance including the new password.
+
+        Raises:
+            Exception: If the client does not exist or the request fails.
+        """
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = {"password": password} if password is not None else {}
+        async with self.aiohttp_session.post(
+            f"{self.daily_api_url}/sip-clients/{username}/rotate", headers=headers, json=json
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(
+                    f"Unable to rotate SIP client password [{username}] "
+                    f"(status: {r.status}): {text}"
+                )
+
+            data = await r.json()
+
+        try:
+            client = DailySIPClientObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
+
+        return client
 
     async def _get_room_from_name(self, room_name: str) -> DailyRoomObject:
         """Internal method to get room details by name."""

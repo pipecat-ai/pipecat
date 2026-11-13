@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     LLMContextUserTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -1689,6 +1690,56 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_function_call_falsy_result_runs_llm(self):
+        """A falsy final result is a real result: it runs the LLM and is kept as is."""
+        for result in [{}, [], 0, False, ""]:
+            with self.subTest(result=result):
+                context = LLMContext()
+                aggregator = LLMAssistantAggregator(context)
+                frames_to_send = [
+                    FunctionCallInProgressFrame(
+                        function_name="lookup",
+                        tool_call_id="1",
+                        arguments={},
+                        cancel_on_interruption=True,
+                    ),
+                    SleepFrame(),
+                    FunctionCallResultFrame(
+                        function_name="lookup", tool_call_id="1", arguments={}, result=result
+                    ),
+                ]
+                await run_test(
+                    aggregator,
+                    frames_to_send=frames_to_send,
+                    expected_down_frames=[],
+                    expected_up_frames=[LLMContextFrame],
+                )
+                self.assertEqual(json.loads(context.messages[-1]["content"]), result)
+
+    async def test_function_call_none_result_completes_without_llm(self):
+        """A None result completes the call without running the LLM."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result=None
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+            expected_up_frames=[],
+        )
+        self.assertEqual(context.messages[-1]["content"], "COMPLETED")
+
     async def test_function_call_cancel(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)
@@ -2553,10 +2604,11 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
             stop_messages.append(message)
 
-        # Send text with a turn completion marker
+        # The turn completion mixin delivers markers as LLMMarkerFrames
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            LLMTextFrame(f"{USER_TURN_COMPLETE_MARKER} Hello from Pipecat!"),
+            LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False),
+            LLMTextFrame("Hello from Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
@@ -2565,7 +2617,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
 
-        # Test incomplete markers are also stripped
+        # Test incomplete markers stay out of the transcript
         stop_messages.clear()
         context2 = LLMContext()
         aggregator2 = LLMAssistantAggregator(context2)
@@ -2576,14 +2628,37 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            LLMTextFrame(USER_TURN_INCOMPLETE_SHORT_MARKER),
+            LLMMarkerFrame(USER_TURN_INCOMPLETE_SHORT_MARKER, append_to_context_immediately=True),
             LLMFullResponseEndFrame(),
         ]
         await run_test(aggregator2, frames_to_send=frames_to_send)
 
-        # The incomplete marker should be stripped (resulting in empty content)
+        # The incomplete marker is its own context message, not part of the transcript
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+        self.assertEqual(context2.messages[-1]["content"], USER_TURN_INCOMPLETE_SHORT_MARKER)
+
+    async def test_marker_characters_kept_without_marker_frames(self):
+        """Marker characters in plain LLM text are content, not turn markers."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("○ Option A ● Option B"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "○ Option A ● Option B")
+        self.assertEqual(context.messages[-1]["content"], stop_messages[0].content)
 
     async def test_llm_run(self):
         context = LLMContext()

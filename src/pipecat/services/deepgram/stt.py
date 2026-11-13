@@ -11,7 +11,7 @@ import inspect
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import Any, ClassVar
 
 from loguru import logger
 
@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -185,12 +184,20 @@ class DeepgramSTTSettings(STTSettings):
 
     Parameters:
         detect_entities: Enable named entity detection.
-        diarize: Enable speaker diarization.
+        diarize: Enable speaker diarization. Each contiguous speaker run of a
+            final result is emitted as its own frame with Deepgram's speaker number
+            (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results are not
+            labelled.
         dictation: Enable dictation mode (converts commands to punctuation).
         endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
         interim_results: Whether to emit interim transcriptions.
         keyterm: Keyterms to boost (str or list of str).
         keywords: Keywords to boost (str or list of str).
+        language_hint: BCP-47 language tag, or list of tags, biasing language
+            detection on Nova-3 multilingual. Deepgram ignores it unless the
+            request sets ``model="nova-3"`` and ``language="multi"``, and
+            rejects a tag the multilingual model does not cover. Requires
+            deepgram-sdk 7.15.0 or later.
         numerals: Convert spoken numbers to numerals.
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
@@ -202,6 +209,11 @@ class DeepgramSTTSettings(STTSettings):
         version: Model version to transcribe with, e.g. a dated standard-model
             version such as ``"2021-03-17.0"`` or a custom model's version id.
             ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -211,6 +223,7 @@ class DeepgramSTTSettings(STTSettings):
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hint: str | list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     numerals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -220,6 +233,11 @@ class DeepgramSTTSettings(STTSettings):
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     version: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — never sent to Deepgram, and
+    #: changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -359,6 +377,7 @@ class DeepgramSTTService(STTService):
             interim_results=True,
             keyterm=None,
             keywords=None,
+            language_hint=None,
             numerals=False,
             profanity_filter=None,
             punctuate=True,
@@ -368,6 +387,7 @@ class DeepgramSTTService(STTService):
             smart_format=False,
             utterance_end_ms=None,
             version=None,
+            speaker_format=None,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -500,7 +520,7 @@ class DeepgramSTTService(STTService):
             raise ConnectionError(f"{self} could not reconnect to Deepgram")
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if anything changed."""
+        """Apply a settings delta and reconnect if a connection setting changed."""
         if isinstance(delta, self.Settings):
             delta = delta.copy()
             delta._sync_extra_to_fields()
@@ -514,7 +534,8 @@ class DeepgramSTTService(STTService):
         if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
-        await self._request_reconnect()
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
+            await self._request_reconnect()
 
         return changed
 
@@ -575,6 +596,8 @@ class DeepgramSTTService(STTService):
         # Declared Deepgram-specific fields
         for f in fields(s):
             if f.name in ("model", "language", "extra") or f.name.startswith("_"):
+                continue
+            if f.name in self.Settings.LOCAL_FIELDS:
                 continue
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
@@ -761,18 +784,17 @@ class DeepgramSTTService(STTService):
                 if from_finalize:
                     self.confirm_finalize()
                 if len(transcript) > 0:
+                    words = None
+                    if self._settings.diarize:
+                        words = [
+                            (word.punctuated_word or word.word, word.speaker)
+                            for word in message.channel.alternatives[0].words or []
+                        ]
+                    runs = self._diarized_runs(transcript, words)
                     # Report usage before the transcription frame so tracing can
                     # attach it to the STT span the frame closes.
                     await self.emit_stt_usage_metrics()
-                    await self.push_frame(
-                        TranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=message,
-                        )
-                    )
+                    await self._push_transcription_runs(runs, language=language, result=message)
                     await self._handle_transcription(transcript, is_final, language)
                 elif from_finalize:
                     # Deepgram already sent the transcript via a regular is_final

@@ -43,10 +43,85 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_delimiter_lengths(self):
+        cases = {
+            "Use ``__init__`` here.": "Use __init__ here.",
+            "Use ``a ` b`` here.": "Use a ` b here.",
+            "Use `a `` b` here.": "Use a `` b here.",
+            "``one ` two`` and `three`": "one ` two and three",
+            "**bold ``a ` b``** end": "bold a ` b end",
+            "``first\nsecond``": "first\nsecond",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
+    async def test_double_backtick_code_keeps_link_markup(self):
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in (
+                ("``[label](url)``", "[label](url)"),
+                ("``![alt](image.png)``", "![alt](image.png)"),
+            ):
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_unmatched_code_delimiters(self):
+        for text in ("Use ``unclosed` here.", "Use `unclosed`` here.", "Use ``unclosed here."):
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), text)
+
+    async def test_fenced_code_with_backticks_removed(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                text = f"Before {fence}python\nvalue = `code`\n{fence} after ``shown``."
+                self.assertEqual(await strip_markdown(text, "*"), "Before  after shown.")
+
+    async def test_inline_code_content_kept(self):
+        cases = {
+            "call `__init__` please": "call __init__ please",
+            "`*args`": "*args",
+            "`# comment`": "# comment",
+            "`> quoted`": "> quoted",
+            "`- item`": "- item",
+            "**bold `__x__`** end": "bold __x__ end",
+            "- `*x*` item": "*x* item",
+            "`a_b` and `c*d`": "a_b and c*d",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
     async def test_alnum_preserving(self):
         text = "**Hello** and _world_"
         result = await strip_markdown(text, "*")
         self.assertEqual(alnum_only(result), alnum_only(text))
+
+    async def test_link_markup_in_inline_code_kept(self):
+        cases = {
+            "Use `[label](https://example.com)` here.": ("Use [label](https://example.com) here."),
+            "Use `![alt](image.png)` here.": "Use ![alt](image.png) here.",
+            "`[Python](https://example.com/Python_(language))`": (
+                "[Python](https://example.com/Python_(language))"
+            ),
+        }
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in cases.items():
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_inline_code_and_normal_links(self):
+        cases = {
+            "[Guide](https://example.com) shows `[label](url)` and `![alt](image.png)`.": (
+                "Guide shows [label](url) and ![alt](image.png)."
+            ),
+            "Read [`__init__`](https://example.com).": "Read __init__.",
+            "[Link](`url`) followed by `[label](target)`.": ("Link followed by [label](target)."),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
 
     async def test_no_change_to_plain_text(self):
         text = "Hello world"
@@ -96,6 +171,12 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
             "Go to [example.com](https://example.com).": "Go to example.com.",
             "Visit https://example.com today": "Visit https://example.com today",
             "[**bold** link](x)": "bold link",
+            "See [Python (language)](https://en.wikipedia.org/wiki/Python_(language)) now.": (
+                "See Python (language) now."
+            ),
+            '![chart](c.png "Q3 (draft)")': "chart",
+            "Read [the [beta] guide](https://example.com/guide).": "Read the [beta] guide.",
+            "Open [the page](https://example.com/a_(b) now.": "Open the page now.",
         }
         for text, expected in cases.items():
             self.assertEqual(await strip_markdown(text, "*"), expected, text)
@@ -257,6 +338,22 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         result = await expand_percentages(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
 
+    async def test_thousands_separator(self):
+        # The separator is part of the number, not a prefix left in front of it.
+        self.assertEqual(
+            await expand_percentages("1,500%", "*"), "one thousand, five hundred percent"
+        )
+        self.assertEqual(
+            await expand_percentages("12,500%", "*"), "twelve thousand, five hundred percent"
+        )
+        self.assertEqual(await expand_percentages("1,000,000%", "*"), "one million percent")
+        self.assertEqual(
+            await expand_percentages("1,234.5%", "*"),
+            "one thousand, two hundred and thirty-four point five percent",
+        )
+        # A long number without a separator is still read whole.
+        self.assertEqual(await expand_percentages("1000%", "*"), "one thousand percent")
+
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
     async def test_km(self):
@@ -295,6 +392,17 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         """'g' standing alone in prose must not expand to 'grams'."""
         result = await expand_units("1 g of something", "*")
         self.assertNotIn("grams", result)
+
+    async def test_ambiguous_uppercase_not_expanded(self):
+        """Uppercase 'M' and 'G' after a number are not meters or grams."""
+        self.assertEqual(await expand_units("We raised $5M", "*"), "We raised $5M")
+        self.assertEqual(await expand_units("10M downloads", "*"), "10M downloads")
+        self.assertEqual(await expand_units("Works on 5G networks", "*"), "Works on 5G networks")
+
+    async def test_ambiguous_lowercase_and_liter_symbol_expanded(self):
+        self.assertEqual(await expand_units("Run 5m", "*"), "Run 5 meters")
+        self.assertEqual(await expand_units("Add 200g of flour", "*"), "Add 200 grams of flour")
+        self.assertEqual(await expand_units("Buy 2L of milk", "*"), "Buy 2 liters of milk")
 
 
 class TestExpandUnitsSingular(unittest.IsolatedAsyncioTestCase):
@@ -495,6 +603,69 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_scaled_amount_drops_trailing_zeros(self):
+        # "$2.50 million" is two and a half million, so the zero is not read out.
+        self.assertEqual(
+            await expand_currency("We raised $2.50 million", "*"),
+            "We raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("$1.50 billion", "*"), "one point five billion dollars"
+        )
+        self.assertEqual(await expand_currency("$1.0 million", "*"), "one million dollars")
+        # A zero inside the fraction is content and stays read.
+        self.assertEqual(
+            await expand_currency("$2.05 million", "*"), "two point zero five million dollars"
+        )
+
+    async def test_abbreviated_scale_after_amount(self):
+        # "$2.5m" used to read "two dollars and fifty centsm", and "$5m" was left
+        # for expand_units to turn into "$5 meters" in the full formatter.
+        self.assertEqual(
+            await expand_currency("They raised $2.5m", "*"),
+            "They raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("a $1.5bn deal", "*"), "a one point five billion dollars deal"
+        )
+        self.assertEqual(await expand_currency("$5m", "*"), "five million dollars")
+        self.assertEqual(await expand_currency("$500k", "*"), "five hundred thousand dollars")
+        self.assertEqual(await expand_currency("$3B", "*"), "three billion dollars")
+        self.assertEqual(await expand_currency("£3.5mn", "*"), "three point five million pounds")
+        self.assertEqual(await expand_currency("$1T", "*"), "one trillion dollars")
+        self.assertEqual(
+            await VoiceFormatter()("raised $5m last year", "*"),
+            "raised five million dollars last year",
+        )
+
+    async def test_amount_followed_by_other_letters_is_left_alone(self):
+        # An unrecognised suffix is not a scale, and the amount is not read as cents.
+        self.assertEqual(await expand_currency("$1.5x", "*"), "$1.5x")
+        self.assertEqual(await expand_currency("$5mo", "*"), "$5mo")
+
+    async def test_currency_code_stays_apart_from_the_amount(self):
+        # "US$5" used to expand to "USfive dollars".
+        self.assertEqual(await expand_currency("US$5", "*"), "US five dollars")
+        self.assertEqual(await expand_currency("CAD$10", "*"), "CAD ten dollars")
+        # A symbol with no code before it is unchanged.
+        self.assertEqual(await expand_currency(" pay $5", "*"), " pay five dollars")
+
+    async def test_scale_word_after_amount(self):
+        # "$2.5 billion" is two and a half billion dollars, not two dollars and
+        # fifty cents followed by a stray "billion".
+        self.assertEqual(
+            await expand_currency("Revenue hit $2.5 billion last year", "*"),
+            "Revenue hit two point five billion dollars last year",
+        )
+        self.assertEqual(
+            await expand_currency("We raised $5 million", "*"), "We raised five million dollars"
+        )
+        self.assertEqual(await expand_currency("$1 million", "*"), "one million dollars")
+        self.assertEqual(
+            await expand_currency("€3.25 Trillion", "*"), "three point two five trillion euros"
+        )
+        self.assertEqual(await expand_currency("¥40 thousand", "*"), "forty thousand yen")
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
@@ -532,6 +703,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("21st", await normalize_dates("2023-05-21", "*"))
         self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
         self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
+
+    async def test_year_is_read_as_a_year(self):
+        # A year is spoken the way a date is said aloud, not as a cardinal
+        # quantity ("one thousand, nine hundred and ninety-nine").
+        self.assertEqual(
+            await normalize_dates("Born on 1999-03-05", "*"),
+            "Born on March 5th, nineteen ninety-nine",
+        )
+        self.assertEqual(
+            await normalize_dates("Due 07/04/1905", "*"),
+            "Due July 4th, nineteen oh-five",
+        )
+        self.assertEqual(
+            await normalize_dates("Meeting on 2023-05-10", "*"),
+            "Meeting on May 10th, twenty twenty-three",
+        )
+        self.assertEqual(
+            await normalize_dates("Launch on 2005-01-02", "*"),
+            "Launch on January 2nd, two thousand and five",
+        )
 
     async def test_month_is_english_under_non_english_locale(self):
         # The month must stay English even when LC_TIME is a non-English locale,

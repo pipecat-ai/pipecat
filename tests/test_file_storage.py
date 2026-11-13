@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,6 +78,25 @@ class TestLocalFileStorage(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(FileNotFoundError):
                 await storage.load(first)
             self.assertEqual(len(list(Path(tmpdir).iterdir())), 2)
+
+    async def test_trim_ignores_files_it_did_not_save(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            other = Path(tmpdir) / "notes.txt"
+            other.write_text("keep me")
+            os.utime(other, (0, 0))
+            storage = LocalFileStorage(tmpdir, max_files=2)
+            first = await storage.save("a.txt", b"1")
+            second = await storage.save("b.txt", b"2")
+
+            self.assertTrue(other.exists())
+            self.assertEqual(await storage.load(first), b"1")
+            self.assertEqual(await storage.load(second), b"2")
+
+            await storage.save("c.txt", b"3")
+
+            self.assertTrue(other.exists())
+            with self.assertRaises(FileNotFoundError):
+                await storage.load(first)
 
     async def test_max_files_zero_disables_trimming(self):
         with tempfile.TemporaryDirectory() as tmpdir:

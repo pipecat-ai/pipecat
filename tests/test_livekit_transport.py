@@ -11,11 +11,15 @@ but video tracks are subscribed. The fix ensures video stream processing
 only starts when there is a consumer for the frames.
 """
 
+from __future__ import annotations
+
 import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+
+from pipecat.audio.utils import create_stream_resampler
 
 try:
     from livekit import rtc
@@ -323,7 +327,7 @@ class TestLiveKitInputResamplesEachParticipantSeparately(unittest.IsolatedAsynci
 
     RATE_IN, RATE_OUT, TONES = 48000, 16000, {"alice": 440.0, "bob": 1000.0}
 
-    def _frame(self, hz: float, index: int) -> "rtc.AudioFrameEvent":
+    def _frame(self, hz: float, index: int) -> rtc.AudioFrameEvent:
         n = self.RATE_IN // 100  # 10 ms
         t = (np.arange(n) + index * n) / self.RATE_IN
         pcm = (8000 * np.sin(2 * np.pi * hz * t)).astype(np.int16).tobytes()
@@ -938,7 +942,7 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
         self.assertIn(rtc.TrackSource.SOURCE_CAMERA, published_sources)
         self.assertIn(rtc.TrackSource.SOURCE_MICROPHONE, published_sources)
 
-    def _video_publish_options(self, **params) -> "rtc.TrackPublishOptions":
+    def _video_publish_options(self, **params) -> rtc.TrackPublishOptions:
         client = self._create_client(video_out_enabled=True)
         client._params = LiveKitParams(video_out_enabled=True, **params)
         return client._video_publish_options()
@@ -1251,7 +1255,7 @@ class TestLiveKitParticipantsAlreadyInRoom(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_participant_connected.assert_awaited_with("bob")
 
 
-def _video_publication(source: "rtc.TrackSource.ValueType") -> MagicMock:
+def _video_publication(source: rtc.TrackSource.ValueType) -> MagicMock:
     publication = MagicMock()
     publication.sid = f"video-{source}"
     publication.source = source
@@ -1647,6 +1651,9 @@ class TestLiveKitAudioInUserTracks(unittest.IsolatedAsyncioTestCase):
         )
         input_transport = transport.input()
         input_transport._sample_rate = 16000
+        # A pause in the test run, such as a garbage collection, must not clear
+        # the resampler in the middle of the stream.
+        input_transport._mixed_resampler = create_stream_resampler(clear_after_secs=None)
         input_transport.push_audio_frame = AsyncMock()
 
         async def frames():

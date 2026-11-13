@@ -17,7 +17,7 @@ Usage::
     TYPESAFE_API_KEY=... python evals/classifiers/measure_turn_completion.py
     python evals/classifiers/measure_turn_completion.py --no-context
     python evals/classifiers/measure_turn_completion.py --repeat 3
-    OPENAI_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm openai/gpt-4o-mini
+    OPENAI_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm openai/gpt-6-luna
     ANTHROPIC_API_KEY=... python evals/classifiers/measure_turn_completion.py --llm anthropic/claude-haiku-4-5
 """
 

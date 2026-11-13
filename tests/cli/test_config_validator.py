@@ -622,6 +622,17 @@ class TestConfigFile:
         with pytest.raises(json.JSONDecodeError):
             load_config_from_file(bad_file)
 
+    def test_load_file_with_non_ascii_content(self, tmp_path):
+        """A config written as UTF-8 with non-ASCII text loads unchanged."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"project_name": "café — 测试"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        loaded = load_config_from_file(config_file)
+        assert loaded["project_name"] == "café — 测试"
+
 
 def _parse_config_dict(file_data: dict) -> ProjectConfig:
     """Simulate the merging logic from resolve_scaffold_config: map config dict keys to

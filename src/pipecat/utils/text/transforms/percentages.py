@@ -12,11 +12,13 @@ from num2words import num2words
 
 from pipecat.frames.frames import TextType
 
-_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
 
 
 def _percent_to_words(match: re.Match) -> str:
-    value = match.group(1)
+    value = match.group(1).replace(",", "")
+    if match.group(2):
+        value += "." + match.group(2)
     number_str = num2words(float(value), lang="en")
     return f"{number_str} percent"
 

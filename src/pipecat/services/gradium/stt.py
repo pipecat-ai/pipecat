@@ -23,7 +23,6 @@ from loguru import logger
 from pydantic import BaseModel
 from websockets.protocol import State
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -367,8 +366,6 @@ class GradiumSTTService(WebsocketSTTService):
         self._receive_task = None
 
         self._input_format = ""
-        self._send_sample_rate = 0
-        self._resampler = create_stream_resampler()
 
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 80
@@ -397,6 +394,17 @@ class GradiumSTTService(WebsocketSTTService):
             True if metrics generation is supported.
         """
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, one Gradium takes for PCM encoding.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        if self._encoding == "pcm":
+            return _gradium_pcm_sample_rate(self.sample_rate)
+        return self.sample_rate
 
     @property
     def supports_ttfs(self) -> bool:
@@ -451,13 +459,8 @@ class GradiumSTTService(WebsocketSTTService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._send_sample_rate = (
-            _gradium_pcm_sample_rate(self.sample_rate)
-            if self._encoding == "pcm"
-            else self.sample_rate
-        )
-        self._input_format = _input_format_from_encoding(self._encoding, self._send_sample_rate)
-        self._chunk_size_bytes = int(self._chunk_size_ms * self._send_sample_rate * 2 / 1000)
+        self._input_format = _input_format_from_encoding(self._encoding, self.send_sample_rate)
+        self._chunk_size_bytes = int(self._chunk_size_ms * self.send_sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -526,7 +529,6 @@ class GradiumSTTService(WebsocketSTTService):
         Yields:
             None (processing handled via WebSocket messages).
         """
-        audio = await self._resampler.resample(audio, self.sample_rate, self._send_sample_rate)
         self._audio_buffer.extend(audio)
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:

@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import STTSettings
@@ -91,7 +90,26 @@ class XAISTTSettings(STTSettings):
         channels: Number of interleaved channels (2-8). Required when
             ``multichannel`` is True.
         diarize: When True, the server attaches a ``speaker`` field to each
-            word identifying the detected speaker.
+            word identifying the detected speaker. Each contiguous speaker run of
+            a final transcript is emitted as its own frame with that speaker as
+            ``speaker.label``. Interim transcripts are not labelled.
+        keyterm: Terms to bias recognition towards, such as product or proper
+            names. Up to 100 terms of 50 characters each.
+        filler_words: When True, transcripts keep disfluencies such as "uh"
+            and "um" instead of dropping them.
+        vad_threshold: Speech probability, 0.0-1.0, above which audio is sent
+            for transcription. Server default is 0.08; lower it for quiet or
+            noisy speech.
+        smart_turn: Confidence threshold, 0.0-1.0, for the server's semantic
+            end-of-turn detection. When set, ``speech_final`` follows the
+            detected turn rather than the ``endpointing`` silence timer.
+        smart_turn_timeout: Milliseconds, 1-5000, after which the server marks
+            the turn final even if end-of-turn detection has not fired.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
     """
 
     interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -99,6 +117,15 @@ class XAISTTSettings(STTSettings):
     multichannel: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     channels: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filler_words: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_turn: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_turn_timeout: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 class XAISTTService(WebsocketSTTService):
@@ -142,7 +169,7 @@ class XAISTTService(WebsocketSTTService):
                 16000, 22050, 24000, 44100, 48000. If None, uses the input
                 sample rate from the start frame.
             encoding: Audio encoding. One of ``"pcm"`` (signed 16-bit LE),
-                ``"mulaw"``, or ``"alaw"``. Defaults to ``"pcm"``.
+                ``"mulaw"``, ``"alaw"``, or ``"opus"``. Defaults to ``"pcm"``.
             settings: Runtime-updatable settings overriding defaults.
             ttfs_p99_latency: P99 latency from speech end to final transcript
                 in seconds. See https://github.com/pipecat-ai/stt-benchmark.
@@ -156,6 +183,12 @@ class XAISTTService(WebsocketSTTService):
             multichannel=None,
             channels=None,
             diarize=None,
+            keyterm=None,
+            filler_words=None,
+            vad_threshold=None,
+            smart_turn=None,
+            smart_turn_timeout=None,
+            speaker_format=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -193,7 +226,7 @@ class XAISTTService(WebsocketSTTService):
         change requires a fresh connection.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not changed.keys() - self.Settings.LOCAL_FIELDS:
             return changed
         await self._disconnect()
         await self._connect()
@@ -249,6 +282,11 @@ class XAISTTService(WebsocketSTTService):
             "multichannel": s.multichannel,
             "channels": s.channels,
             "diarize": s.diarize,
+            "keyterm": s.keyterm,
+            "filler_words": s.filler_words,
+            "vad_threshold": s.vad_threshold,
+            "smart_turn": s.smart_turn,
+            "smart_turn_timeout": s.smart_turn_timeout,
         }
         for key, val in optional_fields.items():
             if val is None:
@@ -258,7 +296,9 @@ class XAISTTService(WebsocketSTTService):
             else:
                 params[key] = val
 
-        return f"{self._ws_url}?{urlencode(params)}"
+        # `keyterm` is a repeatable parameter, so its list value expands into
+        # one query pair per term.
+        return f"{self._ws_url}?{urlencode(params, doseq=True)}"
 
     async def _connect(self):
         """Establish the WebSocket connection and start the receive task."""
@@ -385,19 +425,17 @@ class XAISTTService(WebsocketSTTService):
             return
         language = language if language is not None else self._language_for_frame()
 
+        words = None
+        if self._settings.diarize:
+            words = [
+                (word.get("text") or word.get("word", ""), word.get("speaker"))
+                for word in message.get("words") or []
+            ]
+        runs = self._diarized_runs(text, words)
         # Report usage before the transcription frame so tracing can attach
         # it to the STT span the frame closes.
         await self.emit_stt_usage_metrics()
-        await self.push_frame(
-            TranscriptionFrame(
-                text,
-                self._user_id,
-                time_now_iso8601(),
-                language,
-                result=message,
-                finalized=True,
-            )
-        )
+        await self._push_transcription_runs(runs, language=language, result=message, finalized=True)
         await self._trace_transcription(text, True, language)
 
     def _language_for_frame(self) -> Language:

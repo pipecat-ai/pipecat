@@ -223,15 +223,59 @@
       "location": "pipecat/adapters/services/perplexity_adapter.py"
     },
     {
+      "subject": "RNNoiseFilter.resampler_quality",
+      "module": "pipecat.audio.filters.rnnoise_filter",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/filters/rnnoise_filter.py"
+    },
+    {
       "subject": "ResampyResampler",
       "module": "pipecat.audio.resamplers.resampy_resampler",
       "kind": "class",
       "deprecated_in": "1.2.0",
       "removed_in": "2.0.0",
       "relation": "use_existing",
-      "replacement": "SOXRAudioResampler",
-      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SOXRAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
+      "replacement": "SincAudioResampler",
+      "message": "`ResampyResampler` is deprecated since 1.2.0 and will be removed in 2.0.0. Use `SincAudioResampler`, `create_file_resampler()`, or `create_stream_resampler()` instead.",
       "location": "pipecat/audio/resamplers/resampy_resampler.py"
+    },
+    {
+      "subject": "SincStreamAudioResampler.clear_after_secs",
+      "module": "pipecat.audio.resamplers.sinc_stream_resampler",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "flush",
+      "message": "Use :meth:`flush` or :meth:`reset` at the end of each stream instead. Will be removed in 2.0.0.",
+      "location": "pipecat/audio/resamplers/sinc_stream_resampler.py"
+    },
+    {
+      "subject": "SOXRAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincAudioResampler",
+      "message": "`SOXRAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_resampler.py"
+    },
+    {
+      "subject": "SOXRStreamAudioResampler",
+      "module": "pipecat.audio.resamplers.soxr_stream_resampler",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "SincStreamAudioResampler",
+      "message": "`SOXRStreamAudioResampler` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `SincStreamAudioResampler` instead.",
+      "location": "pipecat/audio/resamplers/soxr_stream_resampler.py"
     },
     {
       "subject": "LocalCoreMLSmartTurnAnalyzer",
@@ -254,6 +298,50 @@
       "replacement": "LocalSmartTurnAnalyzerV3",
       "message": "`LocalSmartTurnAnalyzerV2` is deprecated since 0.0.106 and will be removed in 2.0.0. Use `LocalSmartTurnAnalyzerV3` instead.",
       "location": "pipecat/audio/turn/smart_turn/local_smart_turn_v2.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.alaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.alaw_to_pcm",
+      "message": "`pipecat.audio.utils.alaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.alaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_alaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_alaw",
+      "message": "`pipecat.audio.utils.pcm_to_alaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_alaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.pcm_to_ulaw",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.pcm_to_ulaw",
+      "message": "`pipecat.audio.utils.pcm_to_ulaw` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.pcm_to_ulaw` instead.",
+      "location": "pipecat/audio/utils.py"
+    },
+    {
+      "subject": "pipecat.audio.utils.ulaw_to_pcm",
+      "module": "pipecat.audio.utils",
+      "kind": "function",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.audio.g711.ulaw_to_pcm",
+      "message": "`pipecat.audio.utils.ulaw_to_pcm` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `pipecat.audio.g711.ulaw_to_pcm` instead.",
+      "location": "pipecat/audio/utils.py"
     },
     {
       "subject": "AICQuailVADAnalyzer.minimum_speech_duration",
@@ -298,6 +386,50 @@
       "replacement": "target_worker",
       "message": "Use ``target_worker`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/bus/bridge_processor.py"
+    },
+    {
+      "subject": "BaseClassifier.ask.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.choice.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.score.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
+    },
+    {
+      "subject": "BaseClassifier.yes_no.images",
+      "module": "pipecat.classifiers.base_classifier",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "inputs",
+      "message": "Use ``inputs`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/classifiers/base_classifier.py"
     },
     {
       "subject": "pipecat.classifiers.jev.classifier",
@@ -1664,6 +1796,171 @@
       "location": "pipecat/runner/utils.py"
     },
     {
+      "subject": "FrameSerializer.InputParams.resampler_clear_after_secs",
+      "module": "pipecat.serializers.base_serializer",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "No replacement. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/base_serializer.py"
+    },
+    {
+      "subject": "ExotelFrameSerializer.InputParams.exotel_sample_rate",
+      "module": "pipecat.serializers.exotel",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/exotel.py"
+    },
+    {
+      "subject": "ExotelFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.exotel",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/exotel.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.InputParams.genesys_sample_rate",
+      "module": "pipecat.serializers.genesys",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.genesys",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.create_resumed_response",
+      "module": "pipecat.serializers.genesys",
+      "kind": "method",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "GenesysAudioHookSerializer.create_resume_request",
+      "message": "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.16.0 and will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` instead.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "GenesysAudioHookSerializer.on_pause",
+      "module": "pipecat.serializers.genesys",
+      "kind": "event",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "on_paused",
+      "message": "Use ``on_paused`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/genesys.py"
+    },
+    {
+      "subject": "PlivoFrameSerializer.InputParams.plivo_sample_rate",
+      "module": "pipecat.serializers.plivo",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/plivo.py"
+    },
+    {
+      "subject": "PlivoFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.plivo",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/plivo.py"
+    },
+    {
+      "subject": "TelnyxFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.telnyx",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/telnyx.py"
+    },
+    {
+      "subject": "TelnyxFrameSerializer.InputParams.telnyx_sample_rate",
+      "module": "pipecat.serializers.telnyx",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/telnyx.py"
+    },
+    {
+      "subject": "TwilioFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.twilio",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/twilio.py"
+    },
+    {
+      "subject": "TwilioFrameSerializer.InputParams.twilio_sample_rate",
+      "module": "pipecat.serializers.twilio",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/twilio.py"
+    },
+    {
+      "subject": "VonageFrameSerializer.InputParams.sample_rate",
+      "module": "pipecat.serializers.vonage",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate",
+      "message": "Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/vonage.py"
+    },
+    {
+      "subject": "VonageFrameSerializer.InputParams.vonage_sample_rate",
+      "module": "pipecat.serializers.vonage",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "audio_in_sample_rate",
+      "message": "Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/serializers/vonage.py"
+    },
+    {
       "subject": "AnthropicLLMService.InputParams",
       "module": "pipecat.services.anthropic.llm",
       "kind": "class",
@@ -1727,6 +2024,17 @@
       "relation": "use_existing",
       "replacement": "settings=AssemblyAISTTService.Settings(language=...)",
       "message": "Use ``settings=AssemblyAISTTService.Settings(language=...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/assemblyai/stt.py"
+    },
+    {
+      "subject": "AssemblyAISTTService.speaker_format",
+      "module": "pipecat.services.assemblyai.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "settings=AssemblyAISTTService.Settings(speaker_format=...)",
+      "message": "Use ``settings=AssemblyAISTTService.Settings(speaker_format=...)`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/assemblyai/stt.py"
     },
     {
@@ -3292,6 +3600,17 @@
       "location": "pipecat/services/groq/tts.py"
     },
     {
+      "subject": "HumeTTSService",
+      "module": "pipecat.services.hume.tts",
+      "kind": "class",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`HumeTTSService` is deprecated since 1.16.0 and will be removed in 2.0.0. No replacement. Hume shuts down its TTS API on November 13, 2026.",
+      "location": "pipecat/services/hume/tts.py"
+    },
+    {
       "subject": "HumeTTSService.InputParams",
       "module": "pipecat.services.hume.tts",
       "kind": "class",
@@ -3600,6 +3919,17 @@
       "location": "pipecat/services/minimax/tts.py"
     },
     {
+      "subject": "MiniMaxTTSSettings.text_normalization",
+      "module": "pipecat.services.minimax.tts",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_normalization_mode=\"basic\"",
+      "message": "Use ``text_normalization_mode=\"basic\"`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/minimax/tts.py"
+    },
+    {
       "subject": "MistralLLMService.model",
       "module": "pipecat.services.mistral.llm",
       "kind": "parameter",
@@ -3762,6 +4092,17 @@
       "relation": "use_existing",
       "replacement": "settings=NvidiaSegmentedSTTService.Settings(...)",
       "message": "Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/nvidia/stt.py"
+    },
+    {
+      "subject": "_NvidiaBaseSTTSettings.diarization_max_speakers",
+      "module": "pipecat.services.nvidia.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "max_speakers",
+      "message": "Use ``max_speakers`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/services/nvidia/stt.py"
     },
     {
@@ -4601,6 +4942,17 @@
       "location": "pipecat/services/speechmatics/stt.py"
     },
     {
+      "subject": "SpeechmaticsSTTSettings.speaker_active_format",
+      "module": "pipecat.services.speechmatics.stt",
+      "kind": "parameter",
+      "deprecated_in": "1.16.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "speaker_format",
+      "message": "Use ``speaker_format`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/speechmatics/stt.py"
+    },
+    {
       "subject": "SpeechmaticsTTSService.InputParams",
       "module": "pipecat.services.speechmatics.tts",
       "kind": "class",
@@ -5127,6 +5479,17 @@
       "replacement": "(connection,)",
       "message": "The single-argument ``(connection,)`` signature is deprecated. Use ``(connection, call: WhatsAppConnectCall)`` instead. Will be removed in 2.0.0.",
       "location": "pipecat/transports/whatsapp/client.py"
+    },
+    {
+      "subject": "EagerEndOfTurnSTTServiceMixin.recommended_user_turn_strategies",
+      "module": "pipecat.turns.eager_end_of_turn_mixin",
+      "kind": "method",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "EagerEndOfTurnSTTServiceMixin.eager_user_turn_strategies",
+      "message": "`EagerEndOfTurnSTTServiceMixin.recommended_user_turn_strategies` is deprecated since 1.17.0 and will be removed in 2.0.0. Use `EagerEndOfTurnSTTServiceMixin.eager_user_turn_strategies` instead.",
+      "location": "pipecat/turns/eager_end_of_turn_mixin.py"
     },
     {
       "subject": "ProcessFrameResult",

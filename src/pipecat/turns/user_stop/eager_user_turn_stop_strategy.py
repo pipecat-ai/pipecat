@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     EagerTranscriptionFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserTurnResponseCancelFrame,
     VADUserStartedSpeakingFrame,
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.turns.types import UserTurnSpeculation
 from pipecat.turns.user_stop.eager_match_policy import EagerMatchPolicy, NormalizedMatch
 from pipecat.turns.user_stop.external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 
 class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
@@ -30,6 +32,13 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
     withdraw the prediction if the user turns out to be mid-sentence. This
     strategy starts generating a response on that prediction, so the gap between
     it and the committed end of turn is spent generating rather than waiting.
+
+    A prediction covers the speech since the service last committed a
+    transcript, and is checked against the transcript committed after it. A turn
+    held open across several commits, such as by
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`,
+    predicts each in turn, and the user aggregator puts any earlier transcripts
+    the context doesn't hold yet ahead of it.
 
     The prediction can be wrong in three ways, and each withdraws the response:
 
@@ -84,11 +93,19 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         # The speculation this turn's end confirmed. Other stop strategies
         # may still be deciding, and a stop asked for again confirms it again.
         self._confirmed: UserTurnSpeculation | None = None
+        # Transcripts committed since the last eager end of turn, which its
+        # prediction is checked against.
+        self._committed_parts: list[TextPartForConcatenation] = []
 
     @property
     def match_policy(self) -> EagerMatchPolicy:
         """The policy deciding whether a speculative response still applies."""
         return self._match_policy
+
+    async def cleanup(self):
+        """Cleanup the strategy, stopping the timer of a speculation in flight."""
+        await super().cleanup()
+        await self._take_speculation()
 
     async def process_frame(self, frame: Frame):
         """Start a speculation on an eager end of turn, withdraw one, or forget one.
@@ -113,6 +130,12 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             # Speech voids the turn's answer, and with it the confirmation of
             # the speculation that gave it.
             self._confirmed = None
+        elif isinstance(frame, TranscriptionFrame):
+            self._committed_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
 
         await super().process_frame(frame)
 
@@ -140,7 +163,8 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
             )
             return
 
-        if self._match_policy.matches(speculation.text, self._text):
+        committed = concatenate_aggregated_text(self._committed_parts)
+        if self._match_policy.matches(speculation.text, committed):
             logger.debug(f"{self}: eager end of turn held, keeping the speculative response")
             self._confirmed = speculation
             # Inference already ran, on the eager transcript. The
@@ -155,7 +179,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
         logger.debug(
             f"{self}: eager end of turn missed, discarding the speculative response "
-            f"(eager: [{speculation.text}], committed: [{self._text}])"
+            f"(eager: [{speculation.text}], committed: [{committed}])"
         )
         self._confirmed = None
         await self.cancel_user_turn_speculation()
@@ -169,6 +193,7 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
         """Clear per-turn state. Runs at both turn boundaries."""
         speculation = await self._take_speculation()
         self._confirmed = None
+        self._committed_parts = []
         await super()._reset()
         if speculation:
             # The turn ended without resolving the speculation — the stop
@@ -179,11 +204,10 @@ class EagerUserTurnStopStrategy(ExternalUserTurnStopStrategy):
 
     async def _speculate(self, frame: EagerTranscriptionFrame):
         """Answer an eager end of turn, leaving the turn open."""
-        # Segments committed earlier in this turn are part of what the LLM will
-        # see, so they're part of what the committed transcript is compared to.
-        speculation = UserTurnSpeculation(text=self._text + frame.text, perception=frame.perception)
+        speculation = UserTurnSpeculation(text=frame.text, perception=frame.perception)
         self._speculation = speculation
         self._confirmed = None
+        self._committed_parts = []
         self._speculation_timeout_task = self.task_manager.create_task(
             self._speculation_timeout_handler(speculation),
             f"{self}::_speculation_timeout_handler",

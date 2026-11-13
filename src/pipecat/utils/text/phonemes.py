@@ -123,7 +123,7 @@ def ipa_phones(ipa: str) -> list[str]:
 
 def is_ipa_vowel(phone: str) -> bool:
     """Whether an IPA phone (as returned by :func:`ipa_phones`) is a vowel."""
-    return bool(phone) and phone[0] in _IPA_VOWELS
+    return bool(phone) and unicodedata.normalize("NFD", phone)[0] in _IPA_VOWELS
 
 
 def stress_before_vowels(phones: list[str]) -> list[str]:

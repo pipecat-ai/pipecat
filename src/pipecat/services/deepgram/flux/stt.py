@@ -208,6 +208,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
             language_hints=None,
         )
 
@@ -246,7 +247,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
+        WebsocketService.__init__(self, **kwargs)
 
         self._api_key = api_key
         self._url = url

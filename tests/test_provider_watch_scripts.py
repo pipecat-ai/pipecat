@@ -74,7 +74,7 @@ class TestInventory:
         for unit in units:
             for cls in unit.classes:
                 source = (REPO_ROOT / "src" / Path(*cls.module.split("."))).with_suffix(".py")
-                text = source.read_text()
+                text = source.read_text(encoding="utf-8")
                 if f"class {cls.name}(" not in text:
                     continue
                 section = text.split(f"class {cls.name}(")[1].split("\nclass ")[0]
@@ -170,7 +170,7 @@ class TestDigest:
         def write(unit, body):
             path = tmp_path / "reports" / unit / "2026-08-20.md"
             path.parent.mkdir(parents=True)
-            path.write_text(body)
+            path.write_text(body, encoding="utf-8")
 
         write(
             "openai/llm",
@@ -247,6 +247,46 @@ class TestDigest:
         )
         assert text.rstrip().endswith("#the-weekly-loop).")
 
+    def test_render_issue_lists_only_high_priority_titles(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        text = digest.render_issue(
+            reports,
+            date="2026-08-20",
+            highlights="- Big week for LLMs",
+            repo_url="https://x/y",
+            digest_url="https://x/y/blob/main/digests/2026-08-20.md",
+        )
+
+        assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
+        sections = [line for line in text.splitlines() if line.startswith("## ")]
+        assert sections == [
+            "## PRs to review",
+            "## Branches not opened as PRs (dry run)",
+            "## Changes to consider",
+            "## Did not complete",
+            "## Nothing new",
+        ]
+        consider = text.split("## Changes to consider")[1].split("## Did not complete")[0]
+        assert "emotion controls unreachable\n" in consider
+        assert "needs a call" not in consider
+        assert "sonic-4 preview" not in consider
+        assert (
+            "The [full digest](https://x/y/blob/main/digests/2026-08-20.md) lists every change "
+            "to consider with its notes, including 1 low." in consider
+        )
+        assert text.rstrip().endswith("#the-weekly-loop).")
+
+    def test_highlights_of_a_rendered_digest(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        highlights = "- Big week for LLMs\n- **Two** services broke"
+        rendered = digest.render(
+            reports, date="2026-08-20", highlights=highlights, repo_url="https://x/y"
+        )
+        plain = digest.render(reports, date="2026-08-20", highlights=None, repo_url="https://x/y")
+
+        assert digest.highlights_of(rendered) == highlights
+        assert digest.highlights_of(plain) is None
+
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
         subprocess.run(
@@ -264,8 +304,8 @@ class TestDigest:
             ],
             check=True,
         )
-        assert out.read_text().startswith("# Provider watch — 2026-08-20")
-        assert "`openai/llm`" in out.read_text()
+        assert out.read_text(encoding="utf-8").startswith("# Provider watch — 2026-08-20")
+        assert "`openai/llm`" in out.read_text(encoding="utf-8")
 
 
 class TestProbe:
@@ -437,7 +477,8 @@ class TestPublish:
             path.write_text(
                 f"---\nservice: {unit}\nprs:\n  - branch: {branch}\n"
                 f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-                f"- `{branch}` — review: `git show {branch}` — s\n"
+                f"- `{branch}` — review: `git show {branch}` — s\n",
+                encoding="utf-8",
             )
 
         write("fireworks/llm", "provider-watch/fireworks-llm-default")
@@ -472,14 +513,14 @@ class TestPublish:
         ]
         assert outcome.adopted == ["https://github.com/pipecat-ai/pipecat/pull/7"]
 
-        fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text()
+        fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text(encoding="utf-8")
         assert (
             "state: open" in fireworks
             and "url: https://github.com/pipecat-ai/pipecat/pull/101" in fireworks
         )
         assert "- https://github.com/pipecat-ai/pipecat/pull/101 — s" in fireworks
         assert "git diff" not in fireworks
-        ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text()
+        ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text(encoding="utf-8")
         assert (
             "state: open" in ollama
             and "url: https://github.com/pipecat-ai/pipecat/pull/102" in ollama
@@ -504,7 +545,8 @@ class TestPublish:
         path.write_text(
             f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
             f"    state: branch\n    summary: Track Cartesia's sonic-4 rollout\n---\n\n"
-            f"# R\n\n## PRs\n- `{branch}` — review: `git show {branch}` — s\n"
+            f"# R\n\n## PRs\n- `{branch}` — review: `git show {branch}` — s\n",
+            encoding="utf-8",
         )
         sh = self.FakeShell(
             branches=[branch],
@@ -663,16 +705,31 @@ class TestPublish:
         tmp_path, publish = reports_dir
         digest_file = tmp_path / "digests" / "2026-08-20.md"
         digest_file.parent.mkdir(parents=True)
-        digest_file.write_text("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        digest_file.write_text(
+            "# Provider watch — 2026-08-20\n\n- authored highlight\n", encoding="utf-8"
+        )
         assert publish.ensure_digest(tmp_path, "2026-08-20", "o/r") == digest_file
-        assert "authored highlight" in digest_file.read_text()
+        assert "authored highlight" in digest_file.read_text(encoding="utf-8")
 
     def test_ensure_digest_renders_plain_when_missing(self, reports_dir):
         tmp_path, publish = reports_dir
         out = publish.ensure_digest(tmp_path, "2026-08-20", "o/r")
-        text = out.read_text()
+        text = out.read_text(encoding="utf-8")
         assert out == tmp_path / "digests" / "2026-08-20.md"
         assert "3 units researched" in text and "fireworks/llm" in text
+
+    def test_issue_body_keeps_the_digest_highlights_and_links_it(self, reports_dir):
+        tmp_path, publish = reports_dir
+        digest_file = tmp_path / "digests" / "2026-08-20.md"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text(
+            "# Provider watch — 2026-08-20\n\n- authored highlight\n\n**3 units researched** — …\n",
+            encoding="utf-8",
+        )
+        body = publish.issue_body(tmp_path, "2026-08-20", "o/r", digest_file)
+
+        assert body.startswith("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        assert "3 units researched" in body and "fireworks/llm" in body
 
     def test_worth_an_issue(self, reports_dir, tmp_path):
         _, publish = reports_dir
@@ -680,10 +737,13 @@ class TestPublish:
         quiet = tmp_path / "quiet" / "reports" / "groq" / "llm"
         quiet.mkdir(parents=True)
         (quiet / "2026-08-20.md").write_text(
-            "---\nservice: groq/llm\ngaps: []\nprs: []\nerror: null\n---\n"
+            "---\nservice: groq/llm\ngaps: []\nprs: []\nerror: null\n---\n",
+            encoding="utf-8",
         )
         assert not publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
-        (quiet / "2026-08-20.md").write_text("---\nservice: groq/llm\nerror: boom\n---\n")
+        (quiet / "2026-08-20.md").write_text(
+            "---\nservice: groq/llm\nerror: boom\n---\n", encoding="utf-8"
+        )
         assert publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
 
     def test_missing_branch_is_skipped(self, reports_dir):
