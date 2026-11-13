@@ -351,12 +351,26 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(turn.user, "So last week I went to Spain.")
         self.assertEqual(turn.parts, ["So last week I went to", 2000, "Spain."])
 
+    def test_a_turn_can_pause_up_to_the_limit(self):
+        s = _script(
+            _write(
+                "name: a\n"
+                "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+                "turns: [{user: ['Hi', {pause_ms: 30000}, 'so', {pause_ms: 30000}]}]\n"
+            )
+        )
+        self.assertEqual(s.turns[0].parts, ["Hi", 30000, "so", 30000])
+
     def test_user_turn_pauses_are_validated(self):
         audio = "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
         cases = {
             "pauses but no text": audio + "turns: [{user: [{pause_ms: 500}]}]\n",
             "items must be text": audio + "turns: [{user: ['Hi', {pause_ms: 0}]}]\n",
             "text modality": "turns: [{user: ['Hi', {pause_ms: 500}, 'there']}]\n",
+            "60001 ms in total": audio + "turns: [{user: ['Hi', {pause_ms: 60001}]}]\n",
+            "60500 ms in total": (
+                audio + "turns: [{user: ['Hi', {pause_ms: 30000}, 'so', {pause_ms: 30500}]}]\n"
+            ),
         }
         for message, body in cases.items():
             with self.subTest(message=message):
