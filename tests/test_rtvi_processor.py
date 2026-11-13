@@ -183,16 +183,42 @@ class TestRTVIFrameBasedAudio(unittest.IsolatedAsyncioTestCase):
             self.processor = RTVIProcessor(transport=Mock())
         self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
 
-    async def test_audio_buffer_pushes_input_audio_frame_downstream(self):
+    async def _handle(self, type: str, data: dict) -> list:
         self.processor = RTVIProcessor()
         self.processor.push_frame = AsyncMock()
-        await self.processor._handle_audio_buffer(
-            {"base64Audio": "AAAA", "sampleRate": 16000, "numChannels": 1}
+        self.processor._send_error_response = AsyncMock()
+        await self.processor._handle_message(RTVI.Message(type=type, id="1", data=data))
+        return [c.args[0] for c in self.processor.push_frame.call_args_list]
+
+    async def test_raw_audio_pushes_input_audio_frame_downstream(self):
+        pushed = await self._handle(
+            "raw-audio", {"base64Audio": "AAAA", "sampleRate": 16000, "numChannels": 1}
         )
-        pushed = [c.args[0] for c in self.processor.push_frame.call_args_list]
+        self.processor._send_error_response.assert_not_called()
         self.assertEqual(len(pushed), 1)
         self.assertIsInstance(pushed[0], InputAudioRawFrame)
         self.assertEqual(pushed[0].sample_rate, 16000)
+
+    async def test_raw_audio_batch_pushes_one_frame_per_chunk_in_order(self):
+        chunks = [base64.b64encode(b"\x01\x00").decode(), base64.b64encode(b"\x02\x00").decode()]
+        pushed = await self._handle(
+            "raw-audio-batch", {"base64AudioBatch": chunks, "sampleRate": 16000, "numChannels": 1}
+        )
+        self.processor._send_error_response.assert_not_called()
+        self.assertEqual([f.audio for f in pushed], [b"\x01\x00", b"\x02\x00"])
+
+    async def test_raw_audio_without_sample_rate_gets_error_response(self):
+        pushed = await self._handle("raw-audio", {"base64Audio": "AAAA", "numChannels": 1})
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(pushed, [])
+
+    async def test_raw_audio_batch_with_bad_chunk_pushes_nothing(self):
+        pushed = await self._handle(
+            "raw-audio-batch",
+            {"base64AudioBatch": ["AAAA", "not base64!"], "sampleRate": 16000, "numChannels": 1},
+        )
+        self.processor._send_error_response.assert_called_once()
+        self.assertEqual(pushed, [])
 
 
 class TestRTVIDTMF(unittest.IsolatedAsyncioTestCase):
