@@ -14,6 +14,15 @@ from pipecat.frames.frames import TextType
 
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
 
+# A range such as "5-10%" or "5%–10%": the dash becomes "to". The first number must not
+# be glued to a word ("Q3-5%"), so only standalone numbers start a range.
+_PERCENT_RANGE_RE = re.compile(
+    r"(?<![\w.,])(\d[\d,]*(?:\.\d+)?\s*%?)\s*[-–]\s*(?=\d[\d,]*(?:\.\d+)?\s*%)"
+)
+
+# A minus sign in front of a percentage, not a hyphen joined to a preceding word or number.
+_NEGATIVE_PERCENT_RE = re.compile(r"(?<![\w.,%/+])[-−](?=\d[\d,]*(?:\.\d+)?\s*%)")
+
 
 def _percent_to_words(match: re.Match) -> str:
     value = match.group(1).replace(",", "")
@@ -38,4 +47,6 @@ async def expand_percentages(text: str, text_type: str | TextType) -> str:
         result = await expand_percentages("50% off today", "*")
         # "fifty percent off today"
     """
+    text = _PERCENT_RANGE_RE.sub(lambda m: f"{m.group(1).rstrip()} to ", text)
+    text = _NEGATIVE_PERCENT_RE.sub("minus ", text)
     return _PERCENT_RE.sub(_percent_to_words, text)
