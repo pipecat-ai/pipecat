@@ -221,6 +221,19 @@ class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
         result = await expand_phone_numbers(text, "*")
         self.assertEqual(result, text)
 
+    async def test_no_match_in_decimal_fraction(self):
+        # The digits after a decimal point are not a phone number.
+        for text in ("Pi is approximately 3.1415926535.", "Latitude 40.7127753000"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_no_match_in_currency_amount(self):
+        for text in ("The budget is $2500000000.", "It cost ₹2500000000 to build"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_dotted_number_with_country_code(self):
+        result = await expand_phone_numbers("Call 1.800.555.1234 or 800.555.1234", "*")
+        self.assertEqual(result, "Call 1 8 0 0 5 5 5 1 2 3 4 or 8 0 0 5 5 5 1 2 3 4")
+
 
 class TestNormalizeAcronyms(unittest.IsolatedAsyncioTestCase):
     async def test_nasa(self):
@@ -636,6 +649,14 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await VoiceFormatter()("raised $5m last year", "*"),
             "raised five million dollars last year",
+        )
+
+    async def test_ten_digit_amount_is_not_read_as_a_phone_number(self):
+        # The phone transform runs first and used to take the last nine digits,
+        # leaving "two dollars 5 0 0 0 0 0 0 0 0".
+        self.assertEqual(
+            await VoiceFormatter()("The budget is $2500000000.", "*"),
+            "The budget is two billion, five hundred million dollars.",
         )
 
     async def test_amount_followed_by_other_letters_is_left_alone(self):
