@@ -3223,6 +3223,149 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
 
 
+class TestAudioSupportCheck(unittest.IsolatedAsyncioTestCase):
+    """An audio run checks the audio the bot's ``bot-ready`` reports its transport carries."""
+
+    CALLER_AUDIO_OFF = {"audio_in": False, "audio_out": True}
+    BOT_AUDIO_OFF = {"audio_in": True, "audio_out": False}
+    BOTH_OFF = {"audio_in": False, "audio_out": False}
+    BOTH_ON = {"audio_in": True, "audio_out": True}
+
+    @staticmethod
+    def _bot(capabilities: dict | None):
+        """A bot that reports ``capabilities`` in ``bot-ready``, then greets."""
+
+        async def bot(ws):
+            async for raw in ws:
+                if json.loads(raw).get("type") == "client-ready":
+                    data = {"version": RTVI.PROTOCOL_VERSION}
+                    if capabilities is not None:
+                        data["capabilities"] = capabilities
+                    await ws.send(_rtvi("bot-ready", data))
+                    await ws.send(_rtvi("bot-llm-started"))
+                    await ws.send(_rtvi("bot-llm-text", {"text": "Welcome!"}))
+                    await ws.send(_rtvi("bot-llm-stopped"))
+
+        return bot
+
+    @staticmethod
+    def _params(check: str | None) -> EvalSessionParams:
+        if check is None:
+            return EvalSessionParams()
+        return EvalSessionParams(audio_support_check=check)
+
+    @staticmethod
+    def _voice() -> CachingTTSService:
+        # The caller never speaks; the voice only makes the run send caller audio.
+        return CachingTTSService(_FailingTTS(), cache_key="unused", use_cache=False)
+
+    async def _run(
+        self,
+        capabilities: dict | None,
+        *,
+        user_audio: bool = True,
+        bot_audio: bool = False,
+        check: str | None = "when_advertised",
+    ):
+        """Run a scenario that expects the bot's greeting; return the result and how long it took."""
+        scenario = EvalScriptScenario(
+            name="greeting",
+            bot_audio=bot_audio,
+            user_audio=user_audio,
+            turns=[
+                EvalScriptTurn(
+                    user=None, expect=[EvalExpectation(event="llm_response", within_ms=2000)]
+                )
+            ],
+        )
+        port = _free_port()
+        async with websockets.serve(self._bot(capabilities), "localhost", port):
+            started = time.monotonic()
+            result = await EvalScriptSession.from_scenario(
+                scenario,
+                f"ws://localhost:{port}",
+                params=self._params(check),
+                user_tts=self._voice() if user_audio else None,
+            ).run()
+            return result, time.monotonic() - started
+
+    async def test_a_transport_off_for_audio_the_run_uses_is_refused_at_once(self):
+        cases = [
+            # (user_audio, bot_audio, what the bot reports, the settings the refusal names)
+            (True, False, self.CALLER_AUDIO_OFF, ["audio_in_enabled"]),
+            (False, True, self.BOTH_OFF, ["audio_out_enabled"]),
+            (True, True, self.BOTH_OFF, ["audio_in_enabled", "audio_out_enabled"]),
+        ]
+        for user_audio, bot_audio, capabilities, named in cases:
+            with self.subTest(user_audio=user_audio, bot_audio=bot_audio):
+                result, elapsed = await self._run(
+                    capabilities, user_audio=user_audio, bot_audio=bot_audio
+                )
+
+                self.assertLess(elapsed, 2)
+                self.assertEqual([f.kind for f in result.failures], ["audio_unsupported"])
+                failure = result.failures[0]
+                self.assertEqual(failure.event_name, "<bot-ready>")
+                for setting in ("audio_in_enabled", "audio_out_enabled"):
+                    if setting in named:
+                        self.assertIn(setting, failure.reason)
+                    else:
+                        self.assertNotIn(setting, failure.reason)
+                self.assertEqual([t.status for t in result.turns], ["not_run"])
+
+    async def test_a_run_goes_ahead_when_the_audio_it_uses_is_on_or_unreported(self):
+        cases = [
+            # (user_audio, bot_audio, what the bot reports)
+            (True, False, self.BOTH_ON),
+            (True, True, self.BOTH_ON),
+            # Bots on Pipecat before 1.13 send bot-ready without capabilities.
+            (True, True, None),
+            # A direction the run doesn't use is off.
+            (False, True, self.CALLER_AUDIO_OFF),
+            (True, False, self.BOT_AUDIO_OFF),
+            (False, False, self.BOTH_OFF),
+        ]
+        for user_audio, bot_audio, capabilities in cases:
+            with self.subTest(user_audio=user_audio, bot_audio=bot_audio, reports=capabilities):
+                result, _ = await self._run(
+                    capabilities, user_audio=user_audio, bot_audio=bot_audio
+                )
+
+                self.assertTrue(result.passed, [str(f) for f in result.failures])
+
+    async def test_the_check_is_off_by_default(self):
+        result, _ = await self._run(self.CALLER_AUDIO_OFF, check=None)
+
+        self.assertTrue(result.passed, [str(f) for f in result.failures])
+
+    async def test_a_refused_simulation_is_an_error_the_persona_never_answers(self):
+        # The bot greets right after bot-ready, while the refused run is torn down.
+        persona = _ScriptedPersonaLLM({"Welcome!": "A table for two, please."})
+        simulation = EvalSimulationScenario(
+            name="table",
+            persona="A diner.",
+            goal="Book a table for two.",
+            simulator={"service": "scripted"},
+            success="a table was booked",
+            max_turns=5,
+            max_duration_s=10.0,
+        )
+        port = _free_port()
+        async with websockets.serve(self._bot(self.CALLER_AUDIO_OFF), "localhost", port):
+            result = await EvalSimulationSession(
+                simulation,
+                f"ws://localhost:{port}",
+                params=self._params("when_advertised"),
+                persona_llm=persona,
+                judge=_YesJudge(),
+                user_tts=self._voice(),
+            ).run()
+
+        self.assertFalse(result.succeeded)
+        self.assertIn("audio_in_enabled", result.error or "")
+        self.assertEqual(persona.seen, [])
+
+
 class TestSessionFromScenario(unittest.TestCase):
     """``EvalSession.from_scenario`` builds the session of the scenario's kind."""
 
