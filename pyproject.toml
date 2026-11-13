@@ -219,6 +219,7 @@ where = ["src"]
 "pipecat.audio.vad.data" = ["*.onnx"]
 "pipecat.flows" = ["flow_config.schema.json"]
 "pipecat.frames" = ["frames.proto"]
+"pipecat.processors.frameworks.rtvi.spec" = ["*/rtvi.asyncapi.json"]
 "pipecat.services.aws.nova_sonic" = ["ready.wav"]
 # CLI project-scaffolding templates (jinja + client TS/JS/JSON/CSS trees). The
 # `.gitignore` patterns are listed explicitly because glob `*` does not match dotfiles.
