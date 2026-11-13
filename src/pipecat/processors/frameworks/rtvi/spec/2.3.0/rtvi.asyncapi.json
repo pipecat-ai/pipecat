@@ -1,0 +1,3851 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "RTVI",
+    "version": "2.3.0",
+    "description": "The Real-Time Voice Interface protocol between a client and a Pipecat server, from the server's point of view. Every message is a JSON object labeled \"rtvi-ai\" that the transport carries as a data message."
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "rtvi": {
+      "description": "The session's data channel, in both directions.",
+      "messages": {
+        "client_ready": {
+          "$ref": "#/components/messages/client_ready"
+        },
+        "disconnect_bot": {
+          "$ref": "#/components/messages/disconnect_bot"
+        },
+        "client_message": {
+          "$ref": "#/components/messages/client_message"
+        },
+        "send_text": {
+          "$ref": "#/components/messages/send_text"
+        },
+        "send_file": {
+          "$ref": "#/components/messages/send_file"
+        },
+        "dtmf": {
+          "$ref": "#/components/messages/dtmf"
+        },
+        "llm_function_call_result": {
+          "$ref": "#/components/messages/llm_function_call_result"
+        },
+        "raw_audio": {
+          "$ref": "#/components/messages/raw_audio"
+        },
+        "raw_audio_batch": {
+          "$ref": "#/components/messages/raw_audio_batch"
+        },
+        "ui_event": {
+          "$ref": "#/components/messages/ui_event"
+        },
+        "ui_snapshot": {
+          "$ref": "#/components/messages/ui_snapshot"
+        },
+        "ui_cancel_job_group": {
+          "$ref": "#/components/messages/ui_cancel_job_group"
+        },
+        "bot_ready": {
+          "$ref": "#/components/messages/bot_ready"
+        },
+        "error": {
+          "$ref": "#/components/messages/error"
+        },
+        "error_response": {
+          "$ref": "#/components/messages/error_response"
+        },
+        "server_response": {
+          "$ref": "#/components/messages/server_response"
+        },
+        "server_message": {
+          "$ref": "#/components/messages/server_message"
+        },
+        "metrics": {
+          "$ref": "#/components/messages/metrics"
+        },
+        "system_log": {
+          "$ref": "#/components/messages/system_log"
+        },
+        "user_started_speaking": {
+          "$ref": "#/components/messages/user_started_speaking"
+        },
+        "user_stopped_speaking": {
+          "$ref": "#/components/messages/user_stopped_speaking"
+        },
+        "vad_user_started_speaking": {
+          "$ref": "#/components/messages/vad_user_started_speaking"
+        },
+        "vad_user_stopped_speaking": {
+          "$ref": "#/components/messages/vad_user_stopped_speaking"
+        },
+        "user_mute_started": {
+          "$ref": "#/components/messages/user_mute_started"
+        },
+        "user_mute_stopped": {
+          "$ref": "#/components/messages/user_mute_stopped"
+        },
+        "bot_started_speaking": {
+          "$ref": "#/components/messages/bot_started_speaking"
+        },
+        "bot_stopped_speaking": {
+          "$ref": "#/components/messages/bot_stopped_speaking"
+        },
+        "bot_interrupted": {
+          "$ref": "#/components/messages/bot_interrupted"
+        },
+        "user_audio_level": {
+          "$ref": "#/components/messages/user_audio_level"
+        },
+        "bot_audio_level": {
+          "$ref": "#/components/messages/bot_audio_level"
+        },
+        "user_input": {
+          "$ref": "#/components/messages/user_input"
+        },
+        "user_llm_text": {
+          "$ref": "#/components/messages/user_llm_text"
+        },
+        "stt_raw_text": {
+          "$ref": "#/components/messages/stt_raw_text"
+        },
+        "user_transcription": {
+          "$ref": "#/components/messages/user_transcription"
+        },
+        "bot_output": {
+          "$ref": "#/components/messages/bot_output"
+        },
+        "bot_llm_started": {
+          "$ref": "#/components/messages/bot_llm_started"
+        },
+        "bot_llm_stopped": {
+          "$ref": "#/components/messages/bot_llm_stopped"
+        },
+        "bot_tts_started": {
+          "$ref": "#/components/messages/bot_tts_started"
+        },
+        "bot_tts_stopped": {
+          "$ref": "#/components/messages/bot_tts_stopped"
+        },
+        "llm_raw_text": {
+          "$ref": "#/components/messages/llm_raw_text"
+        },
+        "tts_raw_text": {
+          "$ref": "#/components/messages/tts_raw_text"
+        },
+        "bot_llm_marker": {
+          "$ref": "#/components/messages/bot_llm_marker"
+        },
+        "bot_transcription": {
+          "$ref": "#/components/messages/bot_transcription"
+        },
+        "bot_llm_text": {
+          "$ref": "#/components/messages/bot_llm_text"
+        },
+        "bot_tts_text": {
+          "$ref": "#/components/messages/bot_tts_text"
+        },
+        "llm_function_call_started": {
+          "$ref": "#/components/messages/llm_function_call_started"
+        },
+        "llm_function_call_in_progress": {
+          "$ref": "#/components/messages/llm_function_call_in_progress"
+        },
+        "llm_function_call_stopped": {
+          "$ref": "#/components/messages/llm_function_call_stopped"
+        },
+        "llm_function_call": {
+          "$ref": "#/components/messages/llm_function_call"
+        },
+        "ui_command": {
+          "$ref": "#/components/messages/ui_command"
+        },
+        "ui_job_group": {
+          "$ref": "#/components/messages/ui_job_group"
+        }
+      }
+    }
+  },
+  "operations": {
+    "receiveClientMessages": {
+      "action": "receive",
+      "summary": "Messages the client sends to the server.",
+      "channel": {
+        "$ref": "#/channels/rtvi"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/rtvi/messages/client_ready"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/disconnect_bot"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/client_message"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/send_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/send_file"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/dtmf"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_function_call_result"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/raw_audio"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/raw_audio_batch"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/ui_event"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/ui_snapshot"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/ui_cancel_job_group"
+        }
+      ]
+    },
+    "sendServerMessages": {
+      "action": "send",
+      "summary": "Messages the server sends to the client.",
+      "channel": {
+        "$ref": "#/channels/rtvi"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/rtvi/messages/bot_ready"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/error"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/error_response"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/server_response"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/server_message"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/metrics"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/system_log"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_started_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_stopped_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/vad_user_started_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/vad_user_stopped_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_mute_started"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_mute_stopped"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_started_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_stopped_speaking"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_interrupted"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_audio_level"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_audio_level"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_input"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_llm_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/stt_raw_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/user_transcription"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_output"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_llm_started"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_llm_stopped"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_tts_started"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_tts_stopped"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_raw_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/tts_raw_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_llm_marker"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_transcription"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_llm_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_tts_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_function_call_started"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_function_call_in_progress"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_function_call_stopped"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/llm_function_call"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/ui_command"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/ui_job_group"
+        }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "client_ready": {
+        "name": "client-ready",
+        "summary": "Tells the server the client is ready, with the protocol version it speaks. The server answers with bot-ready.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "client-ready"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/ClientReadyData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "client-ready",
+              "id": "msg_1",
+              "data": {
+                "version": "2.3.0",
+                "about": {
+                  "library": "@pipecat-ai/client-js",
+                  "library_version": "1.16.0"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "disconnect_bot": {
+        "name": "disconnect-bot",
+        "summary": "Asks the server to end the session.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "disconnect-bot"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "disconnect-bot",
+              "id": "msg_1"
+            }
+          }
+        ]
+      },
+      "client_message": {
+        "name": "client-message",
+        "summary": "A custom message for the application. The server answers with server-response or error-response.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "client-message"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/RawClientMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "client-message",
+              "id": "msg_1",
+              "data": {
+                "t": "get-weather",
+                "d": {
+                  "city": "Lisbon"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "send_text": {
+        "name": "send-text",
+        "summary": "Text the user typed, sent to the bot as if the user had said it.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "send-text"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/SendTextData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "send-text",
+              "id": "msg_1",
+              "data": {
+                "content": "What's the weather like?",
+                "options": {
+                  "run_immediately": true
+                }
+              }
+            }
+          }
+        ]
+      },
+      "send_file": {
+        "name": "send-file",
+        "summary": "A file for the bot, with text that goes with it.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "send-file"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/SendFileData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "send-file",
+              "id": "msg_1",
+              "data": {
+                "content": "What is in this picture?",
+                "file": {
+                  "format": "image/png",
+                  "name": "photo.png",
+                  "source": {
+                    "type": "url",
+                    "url": "https://example.com/photo.png"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "dtmf": {
+        "name": "dtmf",
+        "summary": "Keypad presses, delivered in order.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "dtmf"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/DTMFInputData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "dtmf",
+              "id": "msg_1",
+              "data": {
+                "buttons": [
+                  "1",
+                  "#"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "llm_function_call_result": {
+        "name": "llm-function-call-result",
+        "summary": "The result of a function call the client ran for the bot's LLM.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-function-call-result"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/LLMFunctionCallResultData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-function-call-result",
+              "id": "msg_1",
+              "data": {
+                "function_name": "get_weather",
+                "tool_call_id": "call_123",
+                "arguments": {
+                  "city": "Lisbon"
+                },
+                "result": {
+                  "temperature": 21
+                }
+              }
+            }
+          }
+        ]
+      },
+      "raw_audio": {
+        "name": "raw-audio",
+        "summary": "A chunk of the user's audio, for transports that don't carry media.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "raw-audio"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/RawAudioData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "raw-audio",
+              "id": "msg_1",
+              "data": {
+                "base64Audio": "AAAAAA==",
+                "sampleRate": 16000,
+                "numChannels": 1
+              }
+            }
+          }
+        ]
+      },
+      "raw_audio_batch": {
+        "name": "raw-audio-batch",
+        "summary": "Several chunks of the user's audio, for transports that don't carry media.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "raw-audio-batch"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/RawAudioBatchData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "raw-audio-batch",
+              "id": "msg_1",
+              "data": {
+                "base64AudioBatch": [
+                  "AAAAAA==",
+                  "AAAAAA=="
+                ],
+                "sampleRate": 16000,
+                "numChannels": 1
+              }
+            }
+          }
+        ]
+      },
+      "ui_event": {
+        "name": "ui-event",
+        "summary": "An event from the client's UI, for a UI worker.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "ui-event"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UIEventData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "ui-event",
+              "id": "msg_1",
+              "data": {
+                "event": "button-clicked",
+                "payload": {
+                  "id": "checkout"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ui_snapshot": {
+        "name": "ui-snapshot",
+        "summary": "An accessibility snapshot of the client's UI, for a UI worker.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "ui-snapshot"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UISnapshotData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "ui-snapshot",
+              "id": "msg_1",
+              "data": {
+                "tree": {
+                  "root": {
+                    "ref": "e1",
+                    "role": "main",
+                    "children": [
+                      {
+                        "ref": "e2",
+                        "role": "button"
+                      }
+                    ]
+                  },
+                  "captured_at": 1767268800000
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ui_cancel_job_group": {
+        "name": "ui-cancel-job-group",
+        "summary": "Asks the server to cancel a job group it reported with ui-job-group.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "ui-cancel-job-group"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UICancelJobGroupData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "ui-cancel-job-group",
+              "id": "msg_1",
+              "data": {
+                "job_id": "job_1",
+                "reason": "User closed the panel"
+              }
+            }
+          }
+        ]
+      },
+      "bot_ready": {
+        "name": "bot-ready",
+        "summary": "Message indicating bot is ready for interaction.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-ready"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/BotReadyData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-ready",
+              "id": "msg_1",
+              "data": {
+                "version": "2.3.0",
+                "about": {
+                  "library": "pipecat-ai",
+                  "library_version": "1.3.0"
+                },
+                "capabilities": {
+                  "audio_in": true,
+                  "audio_out": true,
+                  "video_in": false
+                }
+              }
+            }
+          }
+        ]
+      },
+      "error": {
+        "name": "error",
+        "summary": "RTVI error event message.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "error"
+            },
+            "data": {
+              "$ref": "#/components/schemas/ErrorData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "error",
+              "data": {
+                "error": "The LLM service failed",
+                "fatal": false
+              }
+            }
+          }
+        ]
+      },
+      "error_response": {
+        "name": "error-response",
+        "summary": "RTVI error response message.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "error-response"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/ErrorResponseData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "error-response",
+              "id": "msg_1",
+              "data": {
+                "error": "Unsupported type foo"
+              }
+            }
+          }
+        ]
+      },
+      "server_response": {
+        "name": "server-response",
+        "summary": "The RTVI-formatted message response from the server to the client.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "server-response"
+            },
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/components/schemas/RawServerResponseData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "id",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "server-response",
+              "id": "msg_1",
+              "data": {
+                "t": "get-weather",
+                "d": {
+                  "temperature": 21
+                }
+              }
+            }
+          }
+        ]
+      },
+      "server_message": {
+        "name": "server-message",
+        "summary": "Generic server message.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "server-message"
+            },
+            "data": {}
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "server-message",
+              "data": {
+                "event": "order-updated",
+                "status": "shipped"
+              }
+            }
+          }
+        ]
+      },
+      "metrics": {
+        "name": "metrics",
+        "summary": "Message containing performance metrics.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "metrics"
+            },
+            "data": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "metrics",
+              "data": {
+                "ttfb": [
+                  {
+                    "processor": "OpenAILLMService#0",
+                    "value": 0.42
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "metrics_enabled"
+      },
+      "system_log": {
+        "name": "system-log",
+        "summary": "Message including a system log.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "system-log"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "system-log",
+              "data": {
+                "text": "Pipeline started"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "system_logs_enabled"
+      },
+      "user_started_speaking": {
+        "name": "user-started-speaking",
+        "summary": "Message indicating user has started speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-started-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-started-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_speaking_enabled"
+      },
+      "user_stopped_speaking": {
+        "name": "user-stopped-speaking",
+        "summary": "Message indicating user has stopped speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-stopped-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-stopped-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_speaking_enabled"
+      },
+      "vad_user_started_speaking": {
+        "name": "vad-user-started-speaking",
+        "summary": "Message indicating VAD detected the user started speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "vad-user-started-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "vad-user-started-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "vad_user_speaking_enabled"
+      },
+      "vad_user_stopped_speaking": {
+        "name": "vad-user-stopped-speaking",
+        "summary": "Message indicating VAD detected the user stopped speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "vad-user-stopped-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "vad-user-stopped-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "vad_user_speaking_enabled"
+      },
+      "user_mute_started": {
+        "name": "user-mute-started",
+        "summary": "Message indicating user has been muted.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-mute-started"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-mute-started"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_mute_enabled"
+      },
+      "user_mute_stopped": {
+        "name": "user-mute-stopped",
+        "summary": "Message indicating user has been unmuted.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-mute-stopped"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-mute-stopped"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_mute_enabled"
+      },
+      "bot_started_speaking": {
+        "name": "bot-started-speaking",
+        "summary": "Message indicating bot has started speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-started-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-started-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_speaking_enabled"
+      },
+      "bot_stopped_speaking": {
+        "name": "bot-stopped-speaking",
+        "summary": "Message indicating bot has stopped speaking.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-stopped-speaking"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-stopped-speaking"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_speaking_enabled"
+      },
+      "bot_interrupted": {
+        "name": "bot-interrupted",
+        "summary": "Message indicating the bot was interrupted and its in-flight output cut off.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-interrupted"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-interrupted"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_speaking_enabled"
+      },
+      "user_audio_level": {
+        "name": "user-audio-level",
+        "summary": "Message indicating user audio level.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-audio-level"
+            },
+            "data": {
+              "$ref": "#/components/schemas/AudioLevelMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-audio-level",
+              "data": {
+                "value": 0.3
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_audio_level_enabled"
+      },
+      "bot_audio_level": {
+        "name": "bot-audio-level",
+        "summary": "Message indicating bot audio level.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-audio-level"
+            },
+            "data": {
+              "$ref": "#/components/schemas/AudioLevelMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-audio-level",
+              "data": {
+                "value": 0.5
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_audio_level_enabled"
+      },
+      "user_input": {
+        "name": "user-input",
+        "summary": "Message containing what the user said or typed.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-input"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UserInputMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-input",
+              "data": {
+                "text": "What's the weather like?",
+                "input_type": "transcription",
+                "timestamp": "2026-01-01T12:00:00.000Z",
+                "final": true,
+                "user_id": "user_1"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_input_enabled"
+      },
+      "user_llm_text": {
+        "name": "user-llm-text",
+        "summary": "Message containing user text input for LLM.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-llm-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-llm-text",
+              "data": {
+                "text": "What's the weather like?"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_llm_enabled"
+      },
+      "stt_raw_text": {
+        "name": "stt-raw-text",
+        "summary": "Message reporting a transcription as the STT produced it, interim ones included.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "stt-raw-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/STTRawTextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "stt-raw-text",
+              "data": {
+                "text": "What's the",
+                "user_id": "user_1",
+                "timestamp": "2026-01-01T12:00:00.000Z",
+                "final": false
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "stt_raw_text_enabled",
+        "x-rtvi-min-client-version": "2.2.0"
+      },
+      "user_transcription": {
+        "name": "user-transcription",
+        "summary": "Message containing user transcription.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "user-transcription"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UserTranscriptionMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "user-transcription",
+              "data": {
+                "text": "What's the",
+                "user_id": "user_1",
+                "timestamp": "2026-01-01T12:00:00.000Z",
+                "final": false
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "user_transcription_enabled",
+        "x-rtvi-deprecated": "Use user-input or stt-raw-text instead."
+      },
+      "bot_output": {
+        "name": "bot-output",
+        "summary": "Message containing bot output text.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-output"
+            },
+            "data": {
+              "$ref": "#/components/schemas/BotOutputMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-output",
+              "data": {
+                "text": "It's sunny in Lisbon.",
+                "output_type": "sentence",
+                "segment_id": 1,
+                "will_be_spoken": true,
+                "spoken_status": "in-progress",
+                "spoken_progress": {
+                  "accumulated_text": "It's sunny",
+                  "remaining_text": " in Lisbon."
+                }
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_output_enabled"
+      },
+      "bot_llm_started": {
+        "name": "bot-llm-started",
+        "summary": "Message indicating bot LLM processing has started.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-llm-started"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-llm-started"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_llm_enabled"
+      },
+      "bot_llm_stopped": {
+        "name": "bot-llm-stopped",
+        "summary": "Message indicating bot LLM processing has stopped.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-llm-stopped"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-llm-stopped"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_llm_enabled"
+      },
+      "bot_tts_started": {
+        "name": "bot-tts-started",
+        "summary": "Message indicating bot TTS processing has started.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-tts-started"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-tts-started"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_tts_enabled"
+      },
+      "bot_tts_stopped": {
+        "name": "bot-tts-stopped",
+        "summary": "Message indicating bot TTS processing has stopped.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-tts-stopped"
+            }
+          },
+          "required": [
+            "label",
+            "type"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-tts-stopped"
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_tts_enabled"
+      },
+      "llm_raw_text": {
+        "name": "llm-raw-text",
+        "summary": "Message reporting a chunk of text as the LLM streamed it.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-raw-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-raw-text",
+              "data": {
+                "text": "It's sunny"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "llm_raw_text_enabled",
+        "x-rtvi-min-client-version": "2.2.0"
+      },
+      "tts_raw_text": {
+        "name": "tts-raw-text",
+        "summary": "Message reporting text the TTS speaks, as it is spoken.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "tts-raw-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "tts-raw-text",
+              "data": {
+                "text": "It's"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "tts_raw_text_enabled",
+        "x-rtvi-min-client-version": "2.2.0"
+      },
+      "bot_llm_marker": {
+        "name": "bot-llm-marker",
+        "summary": "Message reporting the sideband marker the bot's LLM emitted in a response.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-llm-marker"
+            },
+            "data": {
+              "$ref": "#/components/schemas/BotLLMMarkerMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-llm-marker",
+              "data": {
+                "text": "✓",
+                "kind": "complete",
+                "raw": "✓ It's sunny in Lisbon.",
+                "markers": [
+                  "✓"
+                ]
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_llm_marker_enabled"
+      },
+      "bot_transcription": {
+        "name": "bot-transcription",
+        "summary": "Message containing bot transcription text.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-transcription"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-transcription",
+              "data": {
+                "text": "It's sunny in Lisbon."
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_llm_enabled"
+      },
+      "bot_llm_text": {
+        "name": "bot-llm-text",
+        "summary": "Message containing bot LLM text output.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-llm-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-llm-text",
+              "data": {
+                "text": "It's sunny"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_llm_enabled",
+        "x-rtvi-deprecated": "Use llm-raw-text instead."
+      },
+      "bot_tts_text": {
+        "name": "bot-tts-text",
+        "summary": "Message containing bot TTS text output.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-tts-text"
+            },
+            "data": {
+              "$ref": "#/components/schemas/TextMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-tts-text",
+              "data": {
+                "text": "It's"
+              }
+            }
+          }
+        ],
+        "x-rtvi-enabled-by": "bot_tts_enabled",
+        "x-rtvi-deprecated": "Use tts-raw-text instead."
+      },
+      "llm_function_call_started": {
+        "name": "llm-function-call-started",
+        "summary": "Message notifying that an LLM function call has started.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-function-call-started"
+            },
+            "data": {
+              "$ref": "#/components/schemas/LLMFunctionCallStartMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-function-call-started",
+              "data": {
+                "function_name": "get_weather"
+              }
+            }
+          }
+        ]
+      },
+      "llm_function_call_in_progress": {
+        "name": "llm-function-call-in-progress",
+        "summary": "Message notifying that an LLM function call is in progress.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-function-call-in-progress"
+            },
+            "data": {
+              "$ref": "#/components/schemas/LLMFunctionCallInProgressMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-function-call-in-progress",
+              "data": {
+                "tool_call_id": "call_123",
+                "function_name": "get_weather",
+                "arguments": {
+                  "city": "Lisbon"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "llm_function_call_stopped": {
+        "name": "llm-function-call-stopped",
+        "summary": "Message notifying that an LLM function call has stopped.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-function-call-stopped"
+            },
+            "data": {
+              "$ref": "#/components/schemas/LLMFunctionCallStoppedMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-function-call-stopped",
+              "data": {
+                "tool_call_id": "call_123",
+                "cancelled": false,
+                "function_name": "get_weather"
+              }
+            }
+          }
+        ]
+      },
+      "llm_function_call": {
+        "name": "llm-function-call",
+        "summary": "Message notifying of an LLM function call.",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "llm-function-call"
+            },
+            "data": {
+              "$ref": "#/components/schemas/LLMFunctionCallMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "llm-function-call",
+              "data": {
+                "function_name": "get_weather",
+                "tool_call_id": "call_123",
+                "args": {
+                  "city": "Lisbon"
+                }
+              }
+            }
+          }
+        ],
+        "x-rtvi-deprecated": "Use llm-function-call-in-progress instead."
+      },
+      "ui_command": {
+        "name": "ui-command",
+        "summary": "RTVI ``ui-command`` message (server → client).",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "ui-command"
+            },
+            "data": {
+              "$ref": "#/components/schemas/UICommandData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "ui-command",
+              "data": {
+                "command": "toast",
+                "payload": {
+                  "title": "Order shipped"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ui_job_group": {
+        "name": "ui-job-group",
+        "summary": "RTVI ``ui-job-group`` message (server → client).",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "ui-job-group"
+            },
+            "data": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UIJobGroupStartedData"
+                },
+                {
+                  "$ref": "#/components/schemas/UIJobUpdateData"
+                },
+                {
+                  "$ref": "#/components/schemas/UIJobCompletedData"
+                },
+                {
+                  "$ref": "#/components/schemas/UIJobGroupCompletedData"
+                }
+              ]
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "ui-job-group",
+              "data": {
+                "kind": "group_started",
+                "job_id": "job_1",
+                "workers": [
+                  "researcher"
+                ],
+                "label": "Researching",
+                "cancellable": true,
+                "at": 1767268800000
+              }
+            }
+          }
+        ]
+      }
+    },
+    "schemas": {
+      "A11yNode": {
+        "additionalProperties": true,
+        "description": "One node in the UI accessibility snapshot tree.\n\nMirrors the client-side ``A11yNode`` wire shape. Extra fields are\nallowed so clients can add platform-specific or future metadata\nwithout breaking older servers.\n\nParameters:\n    ref: Stable client-assigned element reference.\n    role: ARIA-style role for the node.\n    name: Optional accessible name.\n    value: Optional current value for inputs/progress/etc.\n    state: Optional short state tags (e.g. ``\"focused\"``,\n        ``\"disabled\"``, ``\"offscreen\"``).\n    level: Optional heading level.\n    colcount: Optional column count for grid-like containers.\n    rowcount: Optional row count for grid-like containers.\n    children: Optional child nodes.",
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Level"
+          },
+          "colcount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Colcount"
+          },
+          "rowcount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rowcount"
+          },
+          "children": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/A11yNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Children"
+          }
+        },
+        "required": [
+          "ref",
+          "role"
+        ],
+        "title": "A11yNode",
+        "type": "object"
+      },
+      "A11ySelection": {
+        "additionalProperties": true,
+        "description": "The user's current text selection in the UI snapshot.\n\nExtra fields are allowed for forward compatibility with client\nsnapshot additions.\n\nParameters:\n    ref: Ref of the element that carries the selection.\n    text: Selected text.\n    start_offset: Optional selection start offset.\n    end_offset: Optional selection end offset.",
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "start_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Offset"
+          },
+          "end_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End Offset"
+          }
+        },
+        "required": [
+          "ref",
+          "text"
+        ],
+        "title": "A11ySelection",
+        "type": "object"
+      },
+      "A11ySnapshot": {
+        "additionalProperties": true,
+        "description": "Client accessibility snapshot sent in a ``ui-snapshot`` message.\n\nMirrors the client-side ``A11ySnapshot`` wire shape. Extra fields\nare allowed so clients can add compatible metadata over time.\n\nParameters:\n    root: Root accessibility node.\n    captured_at: Client-side epoch milliseconds when captured.\n    selection: Optional current text selection.",
+        "properties": {
+          "root": {
+            "$ref": "#/components/schemas/A11yNode"
+          },
+          "captured_at": {
+            "title": "Captured At",
+            "type": "integer"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/A11ySelection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "root",
+          "captured_at"
+        ],
+        "title": "A11ySnapshot",
+        "type": "object"
+      },
+      "AboutClientData": {
+        "description": "Data about the RTVI client.\n\nContains information about the client, including which RTVI library it\nis using, what platform it is on and any additional details, if available.",
+        "properties": {
+          "library": {
+            "title": "Library",
+            "type": "string"
+          },
+          "library_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Library Version"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Platform"
+          },
+          "platform_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Platform Version"
+          },
+          "platform_details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Platform Details"
+          }
+        },
+        "required": [
+          "library"
+        ],
+        "title": "AboutClientData",
+        "type": "object"
+      },
+      "AudioLevelMessageData": {
+        "description": "Data format for sending audio levels.",
+        "properties": {
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "AudioLevelMessageData",
+        "type": "object"
+      },
+      "BotCapabilities": {
+        "description": "What a bot does in a session.\n\nEvery field is optional: ``None`` means unknown, and a client should keep\nits default behavior for it. ``False`` means the bot does not do it, so a\nclient can hide the matching UI.\n\nParameters:\n    audio_in: Whether the bot receives the user's audio.\n    audio_out: Whether the bot sends audio to the user.\n    video_in: Whether the bot receives the user's video.\n    screen_in: Whether the bot receives the user's screen share. Known when\n        the transport captures its video sources from ``video_in_sources``;\n        unknown when the application captures them itself.\n    video_out: Whether the bot sends video to the user.\n    metrics: Whether the bot reports metrics.",
+        "properties": {
+          "audio_in": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audio In"
+          },
+          "audio_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audio Out"
+          },
+          "video_in": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Video In"
+          },
+          "screen_in": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Screen In"
+          },
+          "video_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Video Out"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Metrics"
+          }
+        },
+        "title": "BotCapabilities",
+        "type": "object"
+      },
+      "BotLLMMarkerMessageData": {
+        "description": "Data for a bot LLM marker message.\n\nParameters:\n    text: The marker as the LLM produced it; empty when the response\n        carried none.\n    kind: What the marker means, in the emitter's vocabulary (the\n        turn-completion mixin's ``complete``, ``short`` or ``long``), or\n        ``None`` when the emitter gave none.\n    raw: The response's text as the LLM produced it, markers included.\n    markers: Every marker the emitter recognizes.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "raw": {
+            "default": "",
+            "title": "Raw",
+            "type": "string"
+          },
+          "markers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Markers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "BotLLMMarkerMessageData",
+        "type": "object"
+      },
+      "BotOutputMessageData": {
+        "description": "Data for bot output RTVI messages.\n\nExtends TextMessageData to include metadata about the output.\n\nThis class supports both protocol v1 (1.4.x) and v2 (2.0.0+) clients. The\nobserver populates different field subsets depending on the negotiated version;\n``send_rtvi_message`` serialises with ``exclude_none=True`` so each client\nonly sees the fields relevant to its version.\n\nParameters:\n    output_type: What form the text is in (e.g., sentence, code, etc.).\n    text_type: What form the text is in, always the same as ``output_type``.\n\n        .. deprecated:: 1.14.0\n            Use ``output_type`` instead.\n            Will be removed in 2.0.0.\n\n    aggregated_by: What form the text is in, always the same as ``output_type``.\n\n        .. deprecated:: 1.13.0\n            Use ``output_type`` instead.\n            Will be removed in 2.0.0.\n\n    segment_id: ID of the source AggregatedTextFrame.\n    spoken: **(v1 only)** Whether the text has been spoken by TTS.\n    will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.\n    spoken_status: **(v2+)** Lifecycle status of the segment: ``\"new\"`` on\n        its first message, the only one for text that isn't spoken;\n        ``\"in-progress\"`` as each of its words is spoken, for TTS services\n        with word timestamps; ``\"completed\"`` once its last word is spoken.\n    spoken_progress: **(v2+)** Accumulated / remaining text breakdown.\n        Present when ``will_be_spoken`` is ``True``.\n    delivery: **(2.3.0+)** The delivery of the text just spoken, by its\n        universal names, such as ``[\"warm\", \"emphasis\"]``, empty for the\n        voice's baseline. They change within a segment where its delivery\n        does, so a segment's ``\"new\"`` message has none. Present in\n        expressive conversation (alpha).",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "output_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextType"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Output Type"
+          },
+          "text_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextType"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text Type"
+          },
+          "aggregated_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextType"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregated By"
+          },
+          "segment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segment Id"
+          },
+          "spoken": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Spoken"
+          },
+          "will_be_spoken": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Will Be Spoken"
+          },
+          "spoken_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new",
+                  "in-progress",
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Spoken Status"
+          },
+          "spoken_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpokenProgressData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "delivery": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Delivery"
+          }
+        },
+        "required": [
+          "text",
+          "output_type"
+        ],
+        "title": "BotOutputMessageData",
+        "type": "object"
+      },
+      "BotReadyData": {
+        "description": "Data for bot ready notification.\n\nContains protocol version and initial configuration.\n\nParameters:\n    version: The RTVI protocol version the bot speaks with this client.\n    about: Information about the bot, such as the Pipecat library and version.\n    capabilities: What the bot does in this session (media sent and received,\n        metrics), so the client can show only the UI that applies. Added in\n        protocol 2.2.0.",
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "about": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "About"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BotReadyData",
+        "type": "object"
+      },
+      "ClientReadyData": {
+        "description": "Data format of client ready messages.\n\nContains the RTVI protocol version and client information.",
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "about": {
+            "$ref": "#/components/schemas/AboutClientData"
+          }
+        },
+        "required": [
+          "version",
+          "about"
+        ],
+        "title": "ClientReadyData",
+        "type": "object"
+      },
+      "DTMFInputData": {
+        "description": "Data format for DTMF keypresses sent from the client.\n\nCarries one or more keypad entries (``0``-``9``, ``*``, ``#``), delivered\nin order, so the bot's DTMF handling (e.g. a ``DTMFAggregator``) sees them\nexactly as a telephony transport would deliver rapid keypresses.\n\nProtocol 2.1.0 replaced the single ``button`` field with ``buttons``.",
+        "properties": {
+          "buttons": {
+            "items": {
+              "$ref": "#/components/schemas/KeypadEntry"
+            },
+            "minItems": 1,
+            "title": "Buttons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "buttons"
+        ],
+        "title": "DTMFInputData",
+        "type": "object"
+      },
+      "ErrorData": {
+        "description": "Data for an RTVI error event.\n\nContains error information including whether it's fatal.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "fatal": {
+            "title": "Fatal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "error",
+          "fatal"
+        ],
+        "title": "ErrorData",
+        "type": "object"
+      },
+      "ErrorResponseData": {
+        "description": "Data for an RTVI error response.\n\nContains the error message to send back to the client.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponseData",
+        "type": "object"
+      },
+      "File": {
+        "description": "File data structure for RTVI file sending.",
+        "properties": {
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileBytes"
+              },
+              {
+                "$ref": "#/components/schemas/FileUrl"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "format",
+          "source"
+        ],
+        "title": "File",
+        "type": "object"
+      },
+      "FileBytes": {
+        "description": "File source as base64-encoded bytes.",
+        "properties": {
+          "type": {
+            "default": "bytes",
+            "enum": [
+              "bytes",
+              "url"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Height"
+          }
+        },
+        "required": [
+          "bytes"
+        ],
+        "title": "FileBytes",
+        "type": "object"
+      },
+      "FileUrl": {
+        "description": "File source as a URL.\n\nParameters:\n    url: The file's URL: whatever the ``POST /files`` upload endpoint\n        returned (``pipecat:<id>`` with the default local storage, or a\n        URL minted by a custom storage backend), a cloud-storage URI\n        (``s3://``, ``gs://``), or a plain ``http(s)`` URL. The URL is\n        resolved at completion time: the LLM provider fetches it itself\n        when it can (public URLs, its own cloud IAM), and otherwise the\n        LLM service's :class:`~pipecat.utils.file_resolver.FileResolver`\n        downloads the bytes and inlines them.",
+        "properties": {
+          "type": {
+            "default": "url",
+            "enum": [
+              "bytes",
+              "url"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "FileUrl",
+        "type": "object"
+      },
+      "KeypadEntry": {
+        "description": "DTMF keypad entries for phone system integration.\n\nParameters:\n    ONE: Number key 1.\n    TWO: Number key 2.\n    THREE: Number key 3.\n    FOUR: Number key 4.\n    FIVE: Number key 5.\n    SIX: Number key 6.\n    SEVEN: Number key 7.\n    EIGHT: Number key 8.\n    NINE: Number key 9.\n    ZERO: Number key 0.\n    POUND: Pound/hash key (#).\n    STAR: Star/asterisk key (*).",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "0",
+          "#",
+          "*"
+        ],
+        "title": "KeypadEntry",
+        "type": "string"
+      },
+      "LLMFunctionCallInProgressMessageData": {
+        "description": "Data for LLM function call in-progress notification.\n\nContains function call details including name, ID, and arguments.\nFields may be omitted based on the configured function_call_report_level for security.\n\nParameters:\n    tool_call_id: Unique identifier of the call.\n    function_name: Name of the function called.\n    arguments: Arguments passed to the function.",
+        "properties": {
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "function_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function Name"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Arguments"
+          }
+        },
+        "required": [
+          "tool_call_id"
+        ],
+        "title": "LLMFunctionCallInProgressMessageData",
+        "type": "object"
+      },
+      "LLMFunctionCallMessageData": {
+        "deprecated": true,
+        "description": "Data for LLM function call notification.\n\nContains function call details including name, ID, and arguments.\n\n.. deprecated:: 0.0.102\n    Use :class:`LLMFunctionCallInProgressMessageData` instead. Will be removed in 2.0.0.",
+        "properties": {
+          "function_name": {
+            "title": "Function Name",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          }
+        },
+        "required": [
+          "function_name",
+          "tool_call_id",
+          "args"
+        ],
+        "title": "LLMFunctionCallMessageData",
+        "type": "object"
+      },
+      "LLMFunctionCallResultData": {
+        "description": "Data for LLM function call result.\n\nContains function call details and result.",
+        "properties": {
+          "function_name": {
+            "title": "Function Name",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "function_name",
+          "tool_call_id",
+          "arguments",
+          "result"
+        ],
+        "title": "LLMFunctionCallResultData",
+        "type": "object"
+      },
+      "LLMFunctionCallStartMessageData": {
+        "description": "Data for LLM function call start notification.\n\nContains the function name being called. Fields may be omitted based on\nthe configured function_call_report_level for security.\n\nParameters:\n    function_name: Name of the function called.",
+        "properties": {
+          "function_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function Name"
+          }
+        },
+        "title": "LLMFunctionCallStartMessageData",
+        "type": "object"
+      },
+      "LLMFunctionCallStoppedMessageData": {
+        "description": "Data for LLM function call stopped notification.\n\nContains details about the function call that stopped, including\nwhether it was cancelled or completed with a result.\nFields may be omitted based on the configured function_call_report_level for security.\n\nParameters:\n    tool_call_id: Unique identifier of the call.\n    cancelled: Whether the call was cancelled rather than completed.\n    function_name: Name of the function called.\n    result: The result, when the call completed with one.",
+        "properties": {
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "function_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function Name"
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result"
+          }
+        },
+        "required": [
+          "tool_call_id",
+          "cancelled"
+        ],
+        "title": "LLMFunctionCallStoppedMessageData",
+        "type": "object"
+      },
+      "RawAudioBatchData": {
+        "description": "Data format for a ``raw-audio-batch`` message: several chunks of the user's audio.\n\nParameters:\n    base64AudioBatch: Chunks of 16-bit PCM audio, each base64-encoded, in order.\n    sampleRate: The audio's sample rate, in Hz.\n    numChannels: The audio's number of channels.",
+        "properties": {
+          "base64AudioBatch": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Base64Audiobatch",
+            "type": "array"
+          },
+          "sampleRate": {
+            "title": "Samplerate",
+            "type": "integer"
+          },
+          "numChannels": {
+            "title": "Numchannels",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "base64AudioBatch",
+          "sampleRate",
+          "numChannels"
+        ],
+        "title": "RawAudioBatchData",
+        "type": "object"
+      },
+      "RawAudioData": {
+        "description": "Data format for a ``raw-audio`` message: one chunk of the user's audio.\n\nParameters:\n    base64Audio: 16-bit PCM audio, base64-encoded.\n    sampleRate: The audio's sample rate, in Hz.\n    numChannels: The audio's number of channels.",
+        "properties": {
+          "base64Audio": {
+            "title": "Base64Audio",
+            "type": "string"
+          },
+          "sampleRate": {
+            "title": "Samplerate",
+            "type": "integer"
+          },
+          "numChannels": {
+            "title": "Numchannels",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "base64Audio",
+          "sampleRate",
+          "numChannels"
+        ],
+        "title": "RawAudioData",
+        "type": "object"
+      },
+      "RawClientMessageData": {
+        "description": "Data structure expected from client messages sent to the RTVI server.",
+        "properties": {
+          "t": {
+            "title": "T",
+            "type": "string"
+          },
+          "d": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "D"
+          }
+        },
+        "required": [
+          "t"
+        ],
+        "title": "RawClientMessageData",
+        "type": "object"
+      },
+      "RawServerResponseData": {
+        "description": "Data structure for server responses to client messages.",
+        "properties": {
+          "t": {
+            "title": "T",
+            "type": "string"
+          },
+          "d": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "D"
+          }
+        },
+        "required": [
+          "t"
+        ],
+        "title": "RawServerResponseData",
+        "type": "object"
+      },
+      "STTRawTextMessageData": {
+        "description": "Data for STT raw text messages.\n\nParameters:\n    text: The transcribed text.\n    user_id: Identifier for the user who spoke.\n    timestamp: When the user said it.\n    final: Whether the transcription is final, as opposed to interim.\n    speaker: Who said it, when the STT service's diarization tells speakers\n        apart.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "final": {
+            "title": "Final",
+            "type": "boolean"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptionSpeaker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "text",
+          "user_id",
+          "timestamp",
+          "final"
+        ],
+        "title": "STTRawTextMessageData",
+        "type": "object"
+      },
+      "SendFileData": {
+        "description": "Data format for sending a file to the LLM.\n\nContains the information of the file to send and any options for how the pipeline should process it.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "file": {
+            "$ref": "#/components/schemas/File"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SendFileOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "content",
+          "file"
+        ],
+        "title": "SendFileData",
+        "type": "object"
+      },
+      "SendFileOptions": {
+        "description": "Options for sending a file to the LLM.",
+        "properties": {
+          "run_immediately": {
+            "default": true,
+            "title": "Run Immediately",
+            "type": "boolean"
+          },
+          "audio_response": {
+            "default": true,
+            "title": "Audio Response",
+            "type": "boolean"
+          },
+          "custom_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Custom Options"
+          }
+        },
+        "title": "SendFileOptions",
+        "type": "object"
+      },
+      "SendTextData": {
+        "description": "Data format for sending text input to the LLM.\n\nContains the text content to send and any options for how the pipeline should process it.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SendTextOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendTextData",
+        "type": "object"
+      },
+      "SendTextOptions": {
+        "description": "Options for sending text input to the LLM.\n\nContains options for how the pipeline should process the text input.",
+        "properties": {
+          "run_immediately": {
+            "default": true,
+            "title": "Run Immediately",
+            "type": "boolean"
+          },
+          "audio_response": {
+            "default": true,
+            "title": "Audio Response",
+            "type": "boolean"
+          }
+        },
+        "title": "SendTextOptions",
+        "type": "object"
+      },
+      "SpokenProgressData": {
+        "description": "Word-level TTS progress within a spoken segment.\n\nParameters:\n    accumulated_text: Text already spoken in this segment, including the current word.\n    remaining_text: Text not yet spoken in this segment.",
+        "properties": {
+          "accumulated_text": {
+            "title": "Accumulated Text",
+            "type": "string"
+          },
+          "remaining_text": {
+            "title": "Remaining Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accumulated_text",
+          "remaining_text"
+        ],
+        "title": "SpokenProgressData",
+        "type": "object"
+      },
+      "TextMessageData": {
+        "description": "Data for text-based RTVI messages.\n\nContains text content.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TextMessageData",
+        "type": "object"
+      },
+      "TextType": {
+        "description": "Built-in text types.\n\n``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,\nsuch as \"Mm-hmm.\". Text can also have a type of its own, such as ``\"code\"``.\n\n``EXPRESSION_SOUND`` and ``EXPRESSION_PAUSE`` are part of expressive\nconversation (alpha): a sound or a silence an LLM writes into its reply,\nwhich isn't spoken as words. The text is the sound's name, as written in\nits tag, or the pause's duration in milliseconds.",
+        "enum": [
+          "backchannel",
+          "expression_sound",
+          "expression_pause",
+          "sentence",
+          "token",
+          "word"
+        ],
+        "title": "TextType",
+        "type": "string"
+      },
+      "TranscriptionSpeaker": {
+        "description": "A speaker an STT service's diarization told apart in a transcription stream.\n\nLabels are opaque and provider-specific. Numbers count speakers in the order\nthey first appeared in the STT service's session, so they read the same\nwhatever labels the provider uses. Both only hold within that session: a\nprovider that restarts its labels (e.g. after a reconnect) may give a known\nlabel, and so its number, to a different person, and services that diarize\neach speech segment separately don't keep labels across segments.\n\nParameters:\n    label: The provider's label for the speaker (e.g. ``\"A\"``, ``\"S1\"``,\n        ``\"2\"``).\n    number: The speaker's place in the order speakers first appeared,\n        starting at ``1``.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "number"
+        ],
+        "title": "TranscriptionSpeaker",
+        "type": "object"
+      },
+      "UICancelJobGroupData": {
+        "description": "Inner ``data`` for a ``ui-cancel-job-group`` message.\n\nParameters:\n    job_id: The job group id the client wants cancelled.\n    reason: Optional human-readable reason.",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "UICancelJobGroupData",
+        "type": "object"
+      },
+      "UICommandData": {
+        "description": "Inner ``data`` for a ``ui-command`` message.\n\nParameters:\n    command: App-defined command.\n    payload: App-defined payload (already a plain dict by the\n        time it lands on the wire). The standard command payload models\n        below produce the right shape via ``model_dump()``.",
+        "properties": {
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Payload"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "UICommandData",
+        "type": "object"
+      },
+      "UIEventData": {
+        "description": "Inner ``data`` for a ``ui-event`` message.\n\nParameters:\n    event: App-defined event.\n    payload: App-defined payload, schemaless by design.",
+        "properties": {
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Payload"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "title": "UIEventData",
+        "type": "object"
+      },
+      "UIJobCompletedData": {
+        "description": "``data`` for a ``ui-job-group`` envelope with kind ``job_completed``.\n\nParameters:\n    kind: Always ``\"job_completed\"``.\n    job_id: The shared job-group identifier.\n    worker_name: The worker that produced the response.\n    status: Completion status string.\n    response: The worker's response payload.\n    at: Epoch milliseconds when the response was received.",
+        "properties": {
+          "kind": {
+            "const": "job_completed",
+            "default": "job_completed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "worker_name": {
+            "title": "Worker Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "response": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Response"
+          },
+          "at": {
+            "default": 0,
+            "title": "At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "worker_name",
+          "status"
+        ],
+        "title": "UIJobCompletedData",
+        "type": "object"
+      },
+      "UIJobGroupCompletedData": {
+        "description": "``data`` for a ``ui-job-group`` envelope with kind ``group_completed``.\n\nParameters:\n    kind: Always ``\"group_completed\"``.\n    job_id: The shared job-group identifier.\n    at: Epoch milliseconds when the group completed.",
+        "properties": {
+          "kind": {
+            "const": "group_completed",
+            "default": "group_completed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "at": {
+            "default": 0,
+            "title": "At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "UIJobGroupCompletedData",
+        "type": "object"
+      },
+      "UIJobGroupStartedData": {
+        "description": "``data`` for a ``ui-job-group`` envelope with kind ``group_started``.\n\nParameters:\n    kind: Always ``\"group_started\"``.\n    job_id: Shared job-group identifier for the group.\n    workers: Names of the workers the work was dispatched to.\n    label: Optional human-readable label for the group.\n    cancellable: Whether the client may request cancellation.\n    at: Epoch milliseconds when the group started.",
+        "properties": {
+          "kind": {
+            "const": "group_started",
+            "default": "group_started",
+            "title": "Kind",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "workers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workers"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "cancellable": {
+            "default": true,
+            "title": "Cancellable",
+            "type": "boolean"
+          },
+          "at": {
+            "default": 0,
+            "title": "At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "UIJobGroupStartedData",
+        "type": "object"
+      },
+      "UIJobUpdateData": {
+        "description": "``data`` for a ``ui-job-group`` envelope with kind ``job_update``.\n\nParameters:\n    kind: Always ``\"job_update\"``.\n    job_id: The shared job-group identifier.\n    worker_name: The worker that produced the update.\n    data: The worker's update payload, forwarded verbatim.\n    at: Epoch milliseconds when the update was emitted.",
+        "properties": {
+          "kind": {
+            "const": "job_update",
+            "default": "job_update",
+            "title": "Kind",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "worker_name": {
+            "title": "Worker Name",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          },
+          "at": {
+            "default": 0,
+            "title": "At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "worker_name"
+        ],
+        "title": "UIJobUpdateData",
+        "type": "object"
+      },
+      "UISnapshotData": {
+        "description": "Inner ``data`` for a ``ui-snapshot`` message.\n\nThe accessibility snapshot tree mirrors the client-side\n``A11ySnapshot`` wire shape and is kept forward-compatible by\nallowing extra fields on the snapshot models.\n\nParameters:\n    tree: The serialized accessibility tree.",
+        "properties": {
+          "tree": {
+            "$ref": "#/components/schemas/A11ySnapshot"
+          }
+        },
+        "required": [
+          "tree"
+        ],
+        "title": "UISnapshotData",
+        "type": "object"
+      },
+      "UserInputMessageData": {
+        "description": "Data for user input messages.\n\nParameters:\n    text: What the user said or typed.\n    input_type: What kind of input it is: ``\"transcription\"`` for speech\n        transcribed by the STT, ``\"chat\"`` for text the client sent, or\n        ``\"backchannel\"`` for a short acknowledgment the user said while the\n        bot talks, such as \"mhm\".\n    timestamp: When the user said or sent it.\n    final: Whether the text is final. Only an interim transcription isn't.\n    user_id: Identifier for the user who spoke or typed. For chat, set only\n        when the transport knows the sender, such as Daily and LiveKit.\n    msg_id: For chat, the id of the client's ``send-text`` message.\n    perception: For a transcription, how the user said it, when the STT\n        service reports a reading with it. Part of expressive conversation\n        (alpha).\n    speaker: For a transcription, who said it, when the STT service's\n        diarization tells speakers apart.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "input_type": {
+            "enum": [
+              "transcription",
+              "chat",
+              "backchannel"
+            ],
+            "title": "Input Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "final": {
+            "title": "Final",
+            "type": "boolean"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "User Id"
+          },
+          "msg_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Msg Id"
+          },
+          "perception": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserPerceptionSignal"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Perception"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptionSpeaker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "text",
+          "input_type",
+          "timestamp",
+          "final"
+        ],
+        "title": "UserInputMessageData",
+        "type": "object"
+      },
+      "UserPerceptionLabel": {
+        "description": "A label of a perception signal, with how sure the reading is.\n\nParameters:\n    label: The label, such as ``\"frustrated\"``.\n    confidence: How sure the reading is, from 0 to 1.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "confidence"
+        ],
+        "title": "UserPerceptionLabel",
+        "type": "object"
+      },
+      "UserPerceptionSignal": {
+        "description": "One signal of a reading of how the user spoke.\n\nParameters:\n    name: What is read, such as ``\"tone\"``.\n    labels: The likeliest labels, likeliest first, for a signal read as labels.\n    value: The measure, for a signal read as a value.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "labels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UserPerceptionLabel"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "UserPerceptionSignal",
+        "type": "object"
+      },
+      "UserTranscriptionMessageData": {
+        "description": "Data for user transcription messages.\n\nContains transcription text and metadata.\n\n.. deprecated:: 1.13.0\n    Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "final": {
+            "title": "Final",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "user_id",
+          "timestamp",
+          "final"
+        ],
+        "title": "UserTranscriptionMessageData",
+        "type": "object"
+      }
+    }
+  }
+}

@@ -332,6 +332,34 @@ class DTMFInputData(BaseModel):
     buttons: list[KeypadEntry] = Field(min_length=1)
 
 
+class RawAudioData(BaseModel):
+    """Data format for a ``raw-audio`` message: one chunk of the user's audio.
+
+    Parameters:
+        base64Audio: 16-bit PCM audio, base64-encoded.
+        sampleRate: The audio's sample rate, in Hz.
+        numChannels: The audio's number of channels.
+    """
+
+    base64Audio: str
+    sampleRate: int
+    numChannels: int
+
+
+class RawAudioBatchData(BaseModel):
+    """Data format for a ``raw-audio-batch`` message: several chunks of the user's audio.
+
+    Parameters:
+        base64AudioBatch: Chunks of 16-bit PCM audio, each base64-encoded, in order.
+        sampleRate: The audio's sample rate, in Hz.
+        numChannels: The audio's number of channels.
+    """
+
+    base64AudioBatch: list[str]
+    sampleRate: int
+    numChannels: int
+
+
 class LLMFunctionCallStartMessageData(BaseModel):
     """Data for LLM function call start notification.
 

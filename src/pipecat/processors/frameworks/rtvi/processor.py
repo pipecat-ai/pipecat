@@ -373,8 +373,16 @@ class RTVIProcessor(FrameProcessor):
                 case "send-file":
                     data = RTVI.SendFileData.model_validate(message.data)
                     await self._handle_send_file(data, message.id)
-                case "raw-audio" | "raw-audio-batch":
-                    await self._handle_audio_buffer(message.data)
+                case "raw-audio":
+                    data = RTVI.RawAudioData.model_validate(message.data)
+                    await self._handle_audio_buffer(
+                        [data.base64Audio], data.sampleRate, data.numChannels
+                    )
+                case "raw-audio-batch":
+                    data = RTVI.RawAudioBatchData.model_validate(message.data)
+                    await self._handle_audio_buffer(
+                        data.base64AudioBatch, data.sampleRate, data.numChannels
+                    )
                 case "dtmf":
                     data = RTVI.DTMFInputData.model_validate(message.data)
                     await self._handle_dtmf(data)
@@ -438,30 +446,26 @@ class RTVIProcessor(FrameProcessor):
         self._client_ready_id = request_id
         await self.set_client_ready()
 
-    async def _handle_audio_buffer(self, data):
-        """Handle incoming audio buffer data.
+    async def _handle_audio_buffer(self, chunks: list[str], sample_rate: int, num_channels: int):
+        """Handle chunks of the user's audio from a ``raw-audio`` or ``raw-audio-batch`` message.
 
         The RTVIProcessor is prepended to the very top of the pipeline, so
         pushing ``InputAudioRawFrame`` downstream reaches the input transport,
         which feeds it through its VAD/processing path. Frame-based so we don't
         hold a transport reference.
+
+        Args:
+            chunks: Chunks of 16-bit PCM audio, each base64-encoded, in order.
+            sample_rate: The audio's sample rate, in Hz.
+            num_channels: The audio's number of channels.
         """
-        # Extract audio batch ensuring it's a list
-        audio_list = data.get("base64AudioBatch") or [data.get("base64Audio")]
-
-        try:
-            for base64_audio in filter(None, audio_list):  # Filter out None values
-                pcm_bytes = base64.b64decode(base64_audio)
-                frame = InputAudioRawFrame(
-                    audio=pcm_bytes,
-                    sample_rate=data["sampleRate"],
-                    num_channels=data["numChannels"],
-                )
-                await self.push_frame(frame)
-
-        except (KeyError, TypeError, ValueError) as e:
-            # Handle missing keys, decoding errors, and invalid types
-            logger.error(f"Error processing audio buffer: {e}")
+        # Decode every chunk first, so a bad one pushes none of the batch.
+        audio = [base64.b64decode(chunk, validate=True) for chunk in chunks]
+        for pcm_bytes in audio:
+            frame = InputAudioRawFrame(
+                audio=pcm_bytes, sample_rate=sample_rate, num_channels=num_channels
+            )
+            await self.push_frame(frame)
 
     async def _handle_dtmf(self, data: RTVI.DTMFInputData):
         """Handle DTMF keypresses from the client.
