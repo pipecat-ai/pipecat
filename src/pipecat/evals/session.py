@@ -473,7 +473,7 @@ class EvalSession(BaseObject, Generic[R]):
             await self._client.handshake()
         except EvalBotUnavailableError as e:
             self._trace.log(f"handshake: failed ({e})")
-            where = "<connect>" if e.kind == "connect_failed" else "<bot-ready>"
+            where = {"connect_failed": "<connect>", "error": "<harness>"}.get(e.kind, "<bot-ready>")
             return [self._failure(where, str(e), e.kind)]
         except TimeoutError as e:
             self._trace.log("handshake: failed (bot-ready not received)")

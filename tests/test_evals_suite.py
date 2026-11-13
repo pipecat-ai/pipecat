@@ -899,6 +899,33 @@ class TestSimulationRecords(unittest.TestCase):
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
 
+    def test_a_failed_runs_kind_is_saved_and_read_back(self):
+        result = EvalSimulationResult(
+            simulation_name="book",
+            succeeded=False,
+            reason="server rejected WebSocket connection: HTTP 403",
+            error="server rejected WebSocket connection: HTTP 403",
+            failure_kind="connect_failed",
+        )
+        saved = json.loads(json.dumps(dataclasses.asdict(result)))
+        self.assertEqual(_simulation_result_from_dict(saved).failure_kind, "connect_failed")
+        # A saved result without the field reads back without a kind.
+        del saved["failure_kind"]
+        self.assertIsNone(_simulation_result_from_dict(saved).failure_kind)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                status="done",
+                result=result,
+            )
+            _append_result(base / "results.jsonl", run, "flows_x.py__book", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+        self.assertEqual(record["failure_kind"], "connect_failed")
+
     def test_results_jsonl_record_for_a_simulation_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
