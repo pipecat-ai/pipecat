@@ -26,7 +26,7 @@ import time
 import traceback
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
@@ -98,6 +98,13 @@ class EvalSessionParams(BaseModel):
             transcription assertion. With streaming STT, speech must be fully
             transcribed before another input; interrupting speech needs a
             segmented STT that preserves its source time. Defaults to False.
+        audio_support_check: Whether an audio run checks that the bot's
+            transport carries the audio it uses, as the bot reports in
+            ``bot-ready``. With ``when_advertised``, a bot that reports a
+            direction the run uses as off is refused before the conversation
+            (failure kind ``audio_unsupported``); a bot that reports nothing,
+            such as one on Pipecat before 1.13, runs unchecked. Defaults to
+            ``off``.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -123,6 +130,7 @@ class EvalSessionParams(BaseModel):
     max_user_audio_buffer_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     max_bot_audio_bytes: int | None = Field(default=None, strict=True, gt=0, multiple_of=2)
     capture_conversation: bool = False
+    audio_support_check: Literal["off", "when_advertised"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

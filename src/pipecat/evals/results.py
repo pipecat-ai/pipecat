@@ -36,6 +36,7 @@ FAILURE_KINDS = (
     "connect_failed",  # never connected to the bot's eval transport
     "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready
+    "audio_unsupported",  # bot-ready said the transport is off for audio the run uses
     "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
