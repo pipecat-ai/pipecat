@@ -678,6 +678,11 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("−€3", "*"), "minus three euros")
         self.assertEqual(await expand_currency("(-$5)", "*"), "(minus five dollars)")
         self.assertEqual(await expand_currency("$10-$20", "*"), "ten dollars-twenty dollars")
+        # A spaced hyphen is a dash separator, not a minus sign.
+        self.assertEqual(
+            await expand_currency("Latte - $4.50", "*"), "Latte - four dollars and fifty cents"
+        )
+        self.assertEqual(await expand_currency("$10 - $20", "*"), "ten dollars - twenty dollars")
         self.assertEqual(
             await VoiceFormatter()("charged -$5 last month", "*"),
             "charged minus five dollars last month",
@@ -758,6 +763,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
+    async def test_leading_minus_is_read_as_minus(self):
+        transform = expand_numbers(digit_cutoff=2025)
+        self.assertEqual(await transform("-5", "*"), "minus five")
+        self.assertEqual(await transform("(-5)", "*"), "(minus five)")
+        self.assertEqual(
+            await transform("It is -5 outside and -2.5 inside", "*"),
+            "It is minus five outside and minus two point five inside",
+        )
+        self.assertEqual(await transform("−3", "*"), "minus three")
+        self.assertEqual(await transform("-2026", "*"), "minus 2 0 2 6")
+
+    async def test_hyphen_between_numbers_is_kept(self):
+        transform = expand_numbers(digit_cutoff=None)
+        for text in ("5-10", "555-1234", "2024-01-05", "COVID-19", "10 - 5"):
+            with self.subTest(text=text):
+                self.assertNotIn("minus", await transform(text, "*"))
+        self.assertEqual(await transform("5-10", "*"), "five-ten")
+        self.assertEqual(await transform("10 - 5", "*"), "ten - five")
+        self.assertEqual(await transform("COVID-19", "*"), "COVID-nineteen")
+
     async def test_below_cutoff_expands_to_words(self):
         result = await expand_numbers(digit_cutoff=2025)("Room 42", "*")
         self.assertIn("forty-two", result)

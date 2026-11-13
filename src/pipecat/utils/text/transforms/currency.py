@@ -42,8 +42,9 @@ _CURRENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A minus sign in front of a currency amount, not a hyphen in a range like $10-$20.
-_NEGATIVE_CURRENCY_RE = re.compile(r"(?<![\w.,])[-−](?=\s*[€£¥₹\$])")
+# A minus sign touching a currency amount, not a hyphen in a range like $10-$20
+# or a spaced dash separator like "Latte - $4.50".
+_NEGATIVE_CURRENCY_RE = re.compile(r"(?<![\w.,])[-−](?=[€£¥₹\$])")
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
