@@ -7,6 +7,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from openai import NotGiven
 from openai._types import NOT_GIVEN as OPENAI_NOT_GIVEN
 
@@ -169,7 +170,7 @@ async def test_anthropic_run_inference_with_llm_context():
     test_messages = [{"role": "user", "content": "Hello, world!"}]
     test_system = "You are a helpful assistant"
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=test_messages, system=test_system, tools=[]
+        messages=test_messages, system=test_system, tools=[], tool_choice=ANTHROPIC_NOT_GIVEN
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
 
@@ -199,6 +200,7 @@ async def test_anthropic_run_inference_with_llm_context():
         messages=test_messages,
         system=test_system,
         tools=[],
+        tool_choice=ANTHROPIC_NOT_GIVEN,
         betas=["interleaved-thinking-2025-05-14"],
         extra_body={"temperature": 0.6, "top_k": 50, "top_p": 0.95},
     )
@@ -215,7 +217,7 @@ async def test_anthropic_run_inference_client_exception():
     mock_context = MagicMock(spec=LLMContext)
     mock_adapter = _mock_adapter()
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=[], system="Test system", tools=[]
+        messages=[], system="Test system", tools=[], tool_choice=ANTHROPIC_NOT_GIVEN
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
     service._client.beta.messages.create.side_effect = Exception("Anthropic API Error")
@@ -534,7 +536,7 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
     mock_adapter = _mock_adapter()
     test_messages = [{"role": "user", "content": "Hello"}]
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=test_messages, system="Original system", tools=[]
+        messages=test_messages, system="Original system", tools=[], tool_choice=ANTHROPIC_NOT_GIVEN
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
 
@@ -592,7 +594,7 @@ async def test_anthropic_run_inference_system_instruction_none_unchanged():
     mock_adapter = _mock_adapter()
     test_messages = [{"role": "user", "content": "Hello"}]
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=test_messages, system="Original system", tools=[]
+        messages=test_messages, system="Original system", tools=[], tool_choice=ANTHROPIC_NOT_GIVEN
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
 
@@ -1169,7 +1171,10 @@ async def test_anthropic_run_inference_response_schema():
     service._client = AsyncMock()
     mock_adapter = _mock_adapter()
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=[{"role": "user", "content": "Is water wet?"}], system="Answer.", tools=[]
+        messages=[{"role": "user", "content": "Is water wet?"}],
+        system="Answer.",
+        tools=[],
+        tool_choice=ANTHROPIC_NOT_GIVEN,
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
     mock_response = MagicMock()
@@ -1349,7 +1354,10 @@ async def test_anthropic_run_inference_response_schema_ignored_on_legacy_model()
     service._client = AsyncMock()
     mock_adapter = _mock_adapter()
     mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
-        messages=[{"role": "user", "content": "Is water wet?"}], system="Answer.", tools=[]
+        messages=[{"role": "user", "content": "Is water wet?"}],
+        system="Answer.",
+        tools=[],
+        tool_choice=ANTHROPIC_NOT_GIVEN,
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
     mock_response = MagicMock()
