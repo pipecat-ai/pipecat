@@ -79,6 +79,8 @@ A fix or follow-up to a change that has not shipped yet needs no entry of its ow
    <PR_number>.<type>.md
    ```
 
+   The number only exists once the PR is open, so open the PR first and then push the fragment. CI checks every fragment name and fails the PR on one without a number, such as `+my-change.added.md`. To check locally, run `uv run python scripts/check-changelog-fragments.py`.
+
 2. Choose the appropriate type:
    - `added.md` - New features
    - `changed.md` - Changes in existing functionality

@@ -27,6 +27,9 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
+# Check changelog fragment names (CI runs this on every PR)
+uv run python scripts/check-changelog-fragments.py
+
 # Run a behavioral eval scenario against a running bot (started with `python bot.py`)
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
