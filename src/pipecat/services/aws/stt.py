@@ -64,6 +64,21 @@ class AWSTranscribeSTTSettings(STTSettings):
             speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
             ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
             so changing it does not reconnect.
+        language_options: Languages AWS chooses among to identify the spoken
+            language: at least two, one locale per language (``Language.EN_US``
+            and ``Language.EN_GB`` can't both be listed), and AWS recommends no
+            more than five. When set, any configured ``language`` is ignored and
+            each transcription frame carries whichever language AWS identified.
+            Updating it at runtime triggers a reconnect. See
+            https://docs.aws.amazon.com/transcribe/latest/dg/lang-id-stream.html.
+            Defaults to ``None``, which means "use ``language`` (or its default)".
+        identify_multiple_languages: Identify the language of each segment, for
+            speakers who switch languages mid-conversation. Turning it on
+            requires ``language_options``. Updating it at runtime triggers a
+            reconnect.
+        preferred_language: The most likely of ``language_options``, which helps
+            AWS identify the language sooner. Setting it requires
+            ``language_options``. Updating it at runtime triggers a reconnect.
     """
 
     partial_results_stability: Literal["high", "medium", "low"] | NotGiven = field(
@@ -71,6 +86,9 @@ class AWSTranscribeSTTSettings(STTSettings):
     )
     show_speaker_label: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_options: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    identify_multiple_languages: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    preferred_language: Language | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields applied locally to transcripts — changing them needs no reconnect.
     LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
@@ -135,6 +153,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
+
+        Raises:
+            ValueError: If the language identification settings conflict.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
@@ -143,6 +164,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             partial_results_stability="high",
             show_speaker_label=False,
             speaker_format=None,
+            language_options=None,
+            identify_multiple_languages=False,
+            preferred_language=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -162,6 +186,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             settings=default_settings,
             **kwargs,
         )
+        self._validate_language_identification(self._settings)
 
         # Init-only connection config (not runtime-updatable).
         self._media_encoding = "linear16"
@@ -226,7 +251,23 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         ]
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if a connection setting changed."""
+        """Apply a settings delta and reconnect if a connection setting changed.
+
+        A delta whose language identification settings conflict is rejected
+        whole, with a non-fatal error, and the current settings stay in effect.
+        """
+        candidate = self._settings.copy()
+        candidate.apply_update(cast(AWSTranscribeSTTSettings, delta))
+        try:
+            self._validate_language_identification(candidate)
+        except ValueError as e:
+            await self.push_error(
+                f"AWS Transcribe settings update rejected: {e}",
+                exception=e,
+                category=ErrorCategory.APPLICATION,
+            )
+            return {}
+
         changed = await super()._update_settings(delta)
 
         if changed.keys() - self.Settings.LOCAL_FIELDS and self._websocket:
@@ -366,10 +407,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to AWS Transcribe WebSocket")
 
-            language_code = assert_given(self._settings.language)
-            if not language_code:
-                raise ValueError(f"Unsupported language: {language_code}")
-
             if self.send_sample_rate != self.sample_rate:
                 logger.debug(
                     f"{self} resampling audio from {self.sample_rate} Hz to "
@@ -395,7 +432,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             presigned_url = get_presigned_url(
                 region=self._credentials.region,
                 credentials=await self._signing_credentials(),
-                language_code=language_code,
+                **self._language_params(),
                 media_encoding=self.get_service_encoding(
                     self._media_encoding
                 ),  # Convert to AWS format
@@ -439,7 +476,73 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def _language_params(self) -> dict[str, Any]:
+        """Presigned URL parameters for the configured language or language identification."""
+        language_options = assert_given(self._settings.language_options)
+        if not language_options:
+            language_code = assert_given(self._settings.language)
+            if not language_code:
+                raise ValueError(f"Unsupported language: {language_code}")
+            return {"language_code": language_code}
+
+        identify_multiple_languages = assert_given(self._settings.identify_multiple_languages)
+        preferred_language = assert_given(self._settings.preferred_language)
+        return {
+            "identify_language": not identify_multiple_languages,
+            "identify_multiple_languages": identify_multiple_languages,
+            "language_options": self._language_option_codes(language_options),
+            "preferred_language": (
+                self.language_to_service_language(preferred_language)
+                if preferred_language
+                else None
+            ),
+        }
+
+    def _language_option_codes(self, language_options: list[Language]) -> list[str]:
+        """AWS codes for ``language_options``, each listed once.
+
+        Different languages can resolve to one code (``Language.EN`` and
+        ``Language.EN_US`` are both ``en-US``), and AWS rejects a repeated code.
+        """
+        return list(dict.fromkeys(map(self.language_to_service_language, language_options)))
+
+    def _validate_language_identification(self, settings: Settings):
+        """Raise ValueError if the language identification settings conflict.
+
+        AWS rejects a conflict only once connected, so it would fail the
+        connection and every reconnect after it. AWS's rule of one locale per
+        language is left to AWS: some locales sharing a prefix, such as
+        ``zh-CN`` and ``zh-HK``, are different languages to it.
+        """
+        language_options = assert_given(settings.language_options)
+        preferred_language = assert_given(settings.preferred_language)
+        if not language_options:
+            if assert_given(settings.identify_multiple_languages):
+                raise ValueError("identify_multiple_languages requires language_options")
+            if preferred_language is not None:
+                raise ValueError("preferred_language requires language_options")
+            return
+
+        codes = self._language_option_codes(language_options)
+        if len(codes) < 2:
+            raise ValueError("language_options needs at least two languages")
+        if (
+            preferred_language is not None
+            and self.language_to_service_language(preferred_language) not in codes
+        ):
+            raise ValueError("preferred_language must be one of language_options")
+
+    def _result_language(self, result: dict[str, Any]) -> Language | None:
+        """The language of a result: the one AWS identified, or the configured one.
+
+        Either may be an AWS code string; ``Language`` is a StrEnum, so
+        downstream handles both.
+        """
+        if assert_given(self._settings.language_options):
+            return cast("Language | None", result.get("LanguageCode"))
+        return cast("Language | None", assert_given(self._settings.language))
+
+    def language_to_service_language(self, language: Language) -> str:
         """Convert internal language enum to AWS Transcribe language code.
 
         Source:
@@ -449,7 +552,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             language: Internal language enumeration value.
 
         Returns:
-            AWS Transcribe compatible language code, or None if unsupported.
+            AWS Transcribe compatible language code.
         """
         LANGUAGE_MAP = {
             # Afrikaans
@@ -749,11 +852,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
-                                # Technically `_settings.language` could be a raw string, but
-                                # Language is a StrEnum so downstream handles either.
-                                language = cast(
-                                    "Language | None", assert_given(self._settings.language)
-                                )
+                                language = self._result_language(result)
                                 if is_final:
                                     runs = self._diarized_runs(
                                         transcript, self._speaker_words(alternatives[0])
