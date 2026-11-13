@@ -649,6 +649,26 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
         assert failure is not None
         self.assertEqual(failure.kind, "judge_no")
 
+    async def test_a_failed_judge_call_is_no_verdict_at_once(self):
+        # A provider out of credits, say: nothing was decided about the reply.
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge, bot_audio=True)
+        await s._stream.append({"type": "response", "text": "I like turtles."})
+        failure = await self._match(s)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none: (none)", failure.reason)
+
+    async def test_a_failed_judge_call_on_a_single_event_is_no_verdict(self):
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge)
+        await s._stream.append({"type": "user_transcription", "text": "hello"})
+        exp = EvalExpectation(event="user_transcription", eval="says hello")
+        failure = await s.match(exp, time.monotonic(), 1000, 0, 0)
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none — (none)", failure.reason)
+
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):
     """The bot's finished spoken turn is the reply only once its LLM has answered the input."""
@@ -1173,6 +1193,15 @@ class TestFunctionCallEval(unittest.IsolatedAsyncioTestCase):
         assert failure is not None
         self.assertEqual(failure.kind, "judge_no")
         self.assertIn("judge said continue", failure.reason)
+
+    async def test_a_failed_judge_call_is_no_verdict(self):
+        judge = _FakeJudge(["none"])
+        s = _matcher(judge)
+        await s._stream.append(_call("submit_session_suggestion", self.ARGS))
+        failure = await self._match(s, self._exp("submit_session_suggestion"))
+        assert failure is not None
+        self.assertEqual(failure.kind, "judge_no_verdict")
+        self.assertIn("judge said none — (none)", failure.reason)
 
     async def test_every_listed_call_is_judged(self):
         judge = _FakeJudge(["yes", "no"])

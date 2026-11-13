@@ -201,6 +201,7 @@ class TestJevConnection(unittest.IsolatedAsyncioTestCase):
     async def test_a_second_failure_fails_the_question(self):
         judge, api = _judge([httpx.ReadTimeout("stalled")] * 2)
         verdict = await self._ask(judge)
+        self.assertEqual(verdict.verdict, "none")
         self.assertEqual(verdict.reason, "judge call failed")
         self.assertEqual(len(api.posts), 2)
 

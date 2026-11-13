@@ -193,7 +193,21 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         await judge.evaluate("mentions weather")
         self.assertEqual(len(classifier.asked), 1)
 
-    async def test_a_failed_question_is_asked_again_then_gives_a_no(self):
+    async def test_a_failed_question_is_not_cached(self):
+        judge, classifier = _judge([ClassifierError("down")] * 2 + [{"verdict": _choice("yes")}])
+        judge.add_assistant_message("It rains.")
+        self.assertEqual((await judge.evaluate("mentions weather")).verdict, "none")
+        self.assertTrue((await judge.evaluate("mentions weather")).passed)
+        self.assertEqual(len(classifier.asked), 3)
+
+        judge, classifier = _judge(
+            [ClassifierError("down")] * 2 + [{"answer": YesNoResult(probability=0.9)}]
+        )
+        self.assertEqual((await judge.evaluate_call("book", {}, "books")).verdict, "none")
+        self.assertTrue((await judge.evaluate_call("book", {}, "books")).passed)
+        self.assertEqual(len(classifier.asked), 3)
+
+    async def test_a_failed_question_is_asked_again_then_gives_no_verdict(self):
         judge, classifier = _judge([ClassifierError("boom"), {"verdict": _choice("yes")}])
         judge.add_assistant_message("It rains.")
         self.assertTrue((await judge.evaluate("mentions weather")).passed)
@@ -202,7 +216,7 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge, classifier = _judge([ClassifierError("boom")] * 2)
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
-        self.assertEqual(verdict.verdict, "no")
+        self.assertEqual(verdict.verdict, "none")
         self.assertEqual(verdict.reason, "judge call failed")
         self.assertEqual(len(classifier.asked), 2)
 
@@ -210,7 +224,7 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge, _ = _judge([{"verdict": YesNoResult(probability=0.9)}] * 2)
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
-        self.assertEqual(verdict.verdict, "no")
+        self.assertEqual(verdict.verdict, "none")
         self.assertEqual(verdict.reason, "judge call failed")
 
 
@@ -326,6 +340,23 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
             return {name: _turn(turns[reply]) for name in questions}
 
         return respond
+
+    async def test_a_run_with_a_failed_question_is_not_cached(self):
+        replies = {"Let me check. Done, six o'clock.": 0.8, "You're welcome.": 0.9}
+        down = self._answer(0.9, replies, failing="goal")
+        up = self._answer(0.9, replies)
+        state = {"answer": down}
+        judge, classifier = _judge(lambda s, q: state["answer"](s, q))
+        self._converse(judge)
+
+        failed = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        state["answer"] = up
+        judged = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        again = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+
+        self.assertEqual(failed.goal.verdict, "none")
+        self.assertTrue(judged.goal.passed)
+        self.assertIs(again, judged)  # a run that decided everything is cached
 
     async def test_the_goal_is_asked_over_the_whole_conversation(self):
         judge, classifier = _judge(
