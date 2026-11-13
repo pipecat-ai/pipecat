@@ -248,7 +248,8 @@ is sent at its own sample rate, so it need not match the bot's input rate, and
 
 In audio modality a spoken turn may also pause, as a person does mid-thought:
 ``user:`` is then a list of text and ``pause_ms:`` silences, played to the bot
-as one stretch of audio. The judge and ``text_contains`` see the text alone::
+as one stretch of audio. The judge and ``text_contains`` see the text alone.
+A turn's pauses can total at most 60 seconds (``MAX_TURN_PAUSE_MS``)::
 
     turns:
       - user:
@@ -341,6 +342,10 @@ from pipecat.evals.scenario_config import (
     _parse_user_block,
 )
 from pipecat.utils.deprecation import deprecated
+
+# The most a turn's pauses can add up to. A caller silent for longer has stopped
+# taking part, and the turn's audio, silence included, is built in memory.
+MAX_TURN_PAUSE_MS = 60_000
 
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate, including the expression the bot's TTS performed. Asserting
@@ -515,7 +520,8 @@ class EvalScriptTurn:
             expected events.
         parts: The turn's text and pauses, in order, when it pauses: text to
             speak, or the milliseconds of silence between texts. ``user`` then
-            holds the text alone. Requires ``user.modality: audio``.
+            holds the text alone. Requires ``user.modality: audio``, and the
+            pauses can total at most :data:`MAX_TURN_PAUSE_MS`.
         audio: Optional path to an audio file (resolved relative to the scenario
             file) played as this turn instead of synthesizing ``user``. Any
             format ``soundfile`` reads works (WAV, MP3, FLAC, OGG, ...);
@@ -907,6 +913,12 @@ def _parse_user(user: Any, path: Path, turn_idx: int) -> tuple[str | None, list[
     texts = [part for part in parts if isinstance(part, str)]
     if not texts:
         raise ValueError(f"{path}: turn #{turn_idx} 'user:' has pauses but no text")
+    pause_ms = sum(part for part in parts if isinstance(part, int))
+    if pause_ms > MAX_TURN_PAUSE_MS:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} pauses for {pause_ms} ms in total; "
+            f"a turn can pause for at most {MAX_TURN_PAUSE_MS} ms"
+        )
     return " ".join(texts), parts
 
 
