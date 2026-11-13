@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     TranscriptionFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
@@ -98,6 +99,21 @@ class TestRTVIClientTransportHandshake(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(RTVIClientTransport._is_bot_ready(not_ready))
         self.assertFalse(RTVIClientTransport._is_bot_ready(no_label))
         self.assertFalse(RTVIClientTransport._is_bot_ready("not json"))
+
+    def test_capabilities(self):
+        def bot_ready(data):
+            return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": "bot-ready", "data": data})
+
+        reported = RTVIClientTransport._capabilities(
+            bot_ready({"version": "2.0.0", "capabilities": {"audio_in": False, "audio_out": True}})
+        )
+
+        self.assertEqual(reported, BotCapabilities(audio_in=False, audio_out=True))
+        self.assertIsNone(RTVIClientTransport._capabilities(bot_ready({"version": "1.0.0"})))
+        self.assertIsNone(RTVIClientTransport._capabilities(bot_ready(None)))
+        self.assertIsNone(
+            RTVIClientTransport._capabilities(bot_ready({"capabilities": {"audio_in": "maybe"}}))
+        )
 
     async def test_bot_ready_flag_set_on_message(self):
         self.assertFalse(self.transport.bot_ready)
