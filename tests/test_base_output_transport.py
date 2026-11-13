@@ -695,6 +695,94 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    def _protected_frames(self, value: int, sample_count: int):
+        frames = self._constant_frames(value, sample_count)
+        for frame in frames:
+            frame.interruptible = False
+        return frames
+
+    async def _make_paced_transport(self):
+        """A transport whose writes take as long as the audio they play."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+
+        async def write_audio_frame(frame):
+            await asyncio.sleep(len(frame.audio) / 2 / self.OUT_RATE)
+            return True
+
+        transport.write_audio_frame = AsyncMock(side_effect=write_audio_frame)
+        return transport
+
+    def _samples(self, transport, start: int = 0) -> np.ndarray:
+        audio = b"".join(
+            call.args[0].audio for call in transport.write_audio_frame.call_args_list[start:]
+        )
+        return np.frombuffer(audio, dtype=np.int16)
+
+    async def test_interruption_keeps_the_end_of_uninterruptible_audio(self):
+        """The end of uninterruptible audio still in the resampler survives an interruption.
+
+        The resampler holds back the end of the audio it was last fed, so when
+        interruptible audio follows uninterruptible audio, that end must stay
+        with the uninterruptible audio rather than be dropped with what follows.
+        """
+        transport = await self._make_paced_transport()
+        try:
+            protected_samples = 3200
+            for frame in self._protected_frames(8000, protected_samples):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            for frame in self._constant_frames(-8000, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.4)
+
+            # All of the uninterruptible audio plays. Of the rest, only what
+            # shares a chunk with the end of the uninterruptible audio does.
+            sender = transport._media_senders[None]
+            samples = self._samples(transport)
+            expected = protected_samples * self.OUT_RATE // self.TTS_RATE
+            self.assertGreaterEqual(int(np.sum(samples > 4000)), expected - 8)
+            self.assertLess(int(np.sum(samples < -4000)), sender.audio_chunk_size // 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_with_uninterruptible_audio_left_drops_resampled_audio(self):
+        """Interrupted audio in the resampler is dropped while uninterruptible audio plays.
+
+        The bot keeps speaking through the uninterruptible audio, so the end of
+        the interrupted audio has to leave the resampler at the interruption
+        rather than come out ahead of the next audio.
+        """
+        transport = await self._make_paced_transport()
+        try:
+            sender = transport._media_senders[None]
+            for frame in self._protected_frames(8000, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            # The uninterruptible speech ends before the interrupted speech
+            # starts, so no chunk holds both.
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            for frame in self._constant_frames(-8000, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            self.assertTrue(sender._bot_speaking)
+
+            for frame in self._constant_frames(8000, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.6)
+
+            self.assertEqual(int(np.sum(self._samples(transport) < -4000)), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_a_turn_without_audio_writes_nothing(self):
         """A TTS turn that produced no audio writes nothing and starts no bot turn.
 
