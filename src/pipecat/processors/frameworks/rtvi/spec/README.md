@@ -44,3 +44,16 @@ Payloads of client messages describe what the server accepts, and payloads of se
 
 A change to the wire format without a version bump rewrites the current version's document, so keep changes to a released version backward compatible, such as a new optional field.
 
+## Testing the server against the documents
+
+`tests/test_rtvi_conformance.py` checks that Pipecat speaks each version as its document says. It runs the real `RTVIProcessor` and `RTVIObserver` through a session with a client of each version that has a document, and checks every message they put on the wire:
+
+- It is a message the document lists for the server to send.
+- Its payload matches the document's schema. The check reads the JSON document, not the Python models.
+- The client is at least the message's `x-rtvi-min-client-version`. Sessions with clients just below each minimum check that those messages are left out.
+
+For messages a client sends, the server must accept each document's example without an error response, and answer a message that is missing its required `data`, or has an unknown type, with an `error-response` carrying the same `id`.
+
+The session must make the server send every message of the current version, so a message added to the spec fails the test until `_run_session` in the test makes the server send it.
+
+Schemas allow fields they don't list, since a client ignores fields it doesn't know. A field added to a model without regenerating the document passes this test, and `tests/test_rtvi_spec.py` catches it.
