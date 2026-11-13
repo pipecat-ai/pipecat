@@ -15,6 +15,7 @@ from pipecat.extensions.voicemail.voicemail_detector import (
 from pipecat.frames.frames import (
     EndWorkerFrame,
     Frame,
+    InterruptionFrame,
     LLMTextFrame,
     MetricsFrame,
     TranscriptionFrame,
@@ -417,6 +418,27 @@ class TestVoicemailDetectorGating(unittest.IsolatedAsyncioTestCase):
         names = _names(down)
         self.assertIn("TTSTextFrame", names)
         self.assertLess(names.index("TTSStartedFrame"), names.index("TTSTextFrame"))
+
+    async def test_interruption_drops_held_speech_of_the_interrupted_reply(self):
+        detector, _ = _detector(("conversation", 0.9))
+        down, _ = await run_test(
+            Pipeline([detector, detector.gate()]),
+            frames_to_send=[
+                TTSStartedFrame(),
+                TTSTextFrame("Hi, this is Alex.", text_type=TextType.SENTENCE),
+                SleepFrame(0.1),
+                InterruptionFrame(),
+                SleepFrame(0.1),
+                TTSStartedFrame(),
+                TTSTextFrame("Sorry, go ahead.", text_type=TextType.SENTENCE),
+                SleepFrame(0.1),
+                _said("Hello? Who is this?"),
+                SleepFrame(VERDICT_SETTLE),
+            ],
+            start_timeout=5.0,
+        )
+        spoken = [f.text for f in down if isinstance(f, TTSTextFrame)]
+        self.assertEqual(spoken, ["Sorry, go ahead."])
 
     async def test_voicemail_drops_held_speech_and_blocks_later_input(self):
         detector, _ = _detector(("voicemail", 0.95))
