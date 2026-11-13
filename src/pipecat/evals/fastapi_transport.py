@@ -21,7 +21,7 @@ the harness disconnects, letting the bot end with it.
 from fastapi import WebSocket
 from loguru import logger
 
-from pipecat.evals.serializer import EvalConnectionFlags, EvalSerializer, eval_capabilities_message
+from pipecat.evals.serializer import EvalConnectionFlags, EvalSerializer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import (
     Frame,
@@ -129,13 +129,6 @@ class EvalFastAPIWebsocketTransport(FastAPIWebsocketTransport):
 
     async def _on_client_connected(self, websocket):
         """Configure the bot's output for the connection, then proceed (config before any greeting)."""
-        serializes_audio = isinstance(self._params.serializer, EvalSerializer)
-        await websocket.send_text(
-            eval_capabilities_message(
-                audio_input=serializes_audio and self._params.audio_in_enabled,
-                audio_output=serializes_audio and self._params.audio_out_enabled,
-            )
-        )
         skip_tts = self._flags.skip_tts
         logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
         await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))

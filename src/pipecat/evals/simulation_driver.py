@@ -241,7 +241,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
-        audio_support: str | None = None,
     ) -> EvalSimulationResult:
         """The run's result; a run-level failure makes it an error, not a goal failure."""
         error = skipped or ("; ".join(f.reason for f in failures) if failures else None)
@@ -263,7 +262,6 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             debug_log=debug_log,
             success=self._simulation.success,
             failure_kind=failures[0].kind if failures else None,
-            audio_support=audio_support,
         )
 
     def timeline(self) -> list[dict]:

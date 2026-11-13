@@ -37,7 +37,7 @@ from pipecat.frames.frames import LLMConfigureOutputFrame, UserImageRawFrame, Us
 def _ws(path=None, request_path=None):
     """A minimal stand-in for a websockets connection object."""
     request = types.SimpleNamespace(path=request_path) if request_path is not None else None
-    return types.SimpleNamespace(path=path, request=request, send=AsyncMock())
+    return types.SimpleNamespace(path=path, request=request)
 
 
 class TestQueryFlag(unittest.TestCase):
@@ -150,9 +150,7 @@ class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
                 ]
             )
 
-        websocket = MagicMock()
-        websocket.send_text = AsyncMock()
-        await transport._on_client_connected(websocket)
+        await transport._on_client_connected(MagicMock())
         return await asyncio.wait_for(greeting_settings.get(), timeout=1)
 
 

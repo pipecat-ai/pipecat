@@ -27,7 +27,6 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
-import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import create_file_resampler, mix_audio
 from pipecat.evals.events import (
     BOT_AUDIO_RECEIVED_EVENT,
@@ -35,16 +34,13 @@ from pipecat.evals.events import (
     USER_TEXT_SENT_EVENT,
 )
 from pipecat.evals.serializer import (
-    EVAL_CAPABILITIES_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
-    EvalAudioCapabilities,
     EvalAudioLimitError,
     EvalConnectionFlags,
     _bounded_json,
     _check_audio_message_size,
     _checked_audio_limit,
     eval_connect_message,
-    parse_eval_capabilities,
 )
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -582,21 +578,14 @@ class EvalClientTransport(RTVIClientTransport):
         self._max_bot_audio_bytes = _checked_audio_limit(max_bot_audio_bytes)
         self._audio_failure = audio_failure
         self._timing = timing
-        self._audio_capabilities: EvalAudioCapabilities | None = None
-
-    @property
-    def audio_capabilities(self) -> EvalAudioCapabilities | None:
-        """The target's advertised audio configuration, or ``None`` when unknown."""
-        return self._audio_capabilities
 
     async def _on_connected(self, websocket):
         """Send ``eval-connect`` first, then fire the user's handler and start the handshake."""
-        self._audio_capabilities = None
         await self._session.send(eval_connect_message(self._flags))
         await super()._on_connected(websocket)
 
     async def _on_message(self, websocket, message):
-        """Refuse oversized or invalid bounded input, and read target capabilities, before the RTVI ready parser."""
+        """Refuse oversized or invalid bounded input before the RTVI ready parser."""
         if self._max_bot_audio_bytes is not None:
             try:
                 _check_audio_message_size(message)
@@ -605,27 +594,10 @@ class EvalClientTransport(RTVIClientTransport):
             except EvalAudioLimitError as exc:
                 await self.input().fail_audio(str(exc))
                 return
-        if not self.bot_ready and self._read_capabilities(message):
-            return
         try:
             await super()._on_message(websocket, message)
         except EvalAudioLimitError as exc:
             await self.input().fail_audio(str(exc))
-
-    def _read_capabilities(self, message) -> bool:
-        """Record an ``eval-capabilities`` advertisement; whether ``message`` was one."""
-        try:
-            decoded = json.loads(message)
-        except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
-            return False
-        if (
-            isinstance(decoded, dict)
-            and decoded.get("label") == RTVI.MESSAGE_LABEL
-            and decoded.get("type") == EVAL_CAPABILITIES_MESSAGE_TYPE
-        ):
-            self._audio_capabilities = parse_eval_capabilities(decoded)
-            return True
-        return False
 
     def input(self) -> EvalClientInputTransport:
         """Return the gap-filling input transport."""

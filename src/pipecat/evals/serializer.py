@@ -25,7 +25,7 @@ from typing import Any
 
 from loguru import logger
 from PIL import Image
-from pydantic import BaseModel, StrictBool, ValidationError
+from pydantic import BaseModel
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
@@ -54,9 +54,6 @@ from pipecat.utils.deprecation import deprecated
 # ``create_transport`` recognizes an eval and how the flags reach the bot, since
 # only the session body survives the hops in between. The serializer consumes it.
 EVAL_CONNECT_MESSAGE_TYPE = "eval-connect"
-
-# The target's configured audio directions, sent before its RTVI handshake.
-EVAL_CAPABILITIES_MESSAGE_TYPE = "eval-capabilities"
 
 # A ``client-message`` with this ``t`` is intercepted by the serializer and
 # turned into an ``LLMMessagesUpdateFrame`` instead of being forwarded to the
@@ -211,39 +208,6 @@ class EvalFunctionCallCancelFrame(ControlFrame):
 
     function_name: str
     tool_call_id: str
-
-
-class EvalAudioCapabilities(BaseModel):
-    """Audio directions configured on the target's eval transport.
-
-    Parameters:
-        audio_input: The transport accepts the caller's raw PCM audio.
-        audio_output: The transport can forward the bot's raw PCM audio.
-    """
-
-    audio_input: StrictBool
-    audio_output: StrictBool
-
-
-def eval_capabilities_message(*, audio_input: bool, audio_output: bool) -> str:
-    """Advertise the configured audio directions, independently of current availability."""
-    return RTVI.Message(
-        type=EVAL_CAPABILITIES_MESSAGE_TYPE,
-        id=EVAL_CAPABILITIES_MESSAGE_TYPE,
-        data=EvalAudioCapabilities(audio_input=audio_input, audio_output=audio_output).model_dump(),
-    ).model_dump_json()
-
-
-def parse_eval_capabilities(message: Any) -> EvalAudioCapabilities | None:
-    """Read a valid capability advertisement; absent or malformed metadata proves no support."""
-    if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
-        return None
-    if message.get("type") != EVAL_CAPABILITIES_MESSAGE_TYPE:
-        return None
-    try:
-        return EvalAudioCapabilities.model_validate(message.get("data"))
-    except ValidationError:
-        return None
 
 
 class EvalSerializer(FrameSerializer):

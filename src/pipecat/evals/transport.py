@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from loguru import logger
 
-from pipecat.evals.serializer import EvalSerializer, eval_capabilities_message
+from pipecat.evals.serializer import EvalSerializer
 from pipecat.frames.frames import (
     Frame,
     LLMConfigureOutputFrame,
@@ -150,14 +150,6 @@ class EvalTransport(SingleClientWebsocketServerTransport):
             serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
         if serializer is not None and hasattr(serializer, "set_capture_images"):
             serializer.set_capture_images(_query_flag(websocket, CAPTURE_IMAGES_QUERY_PARAM))
-
-        serializes_audio = isinstance(serializer, EvalSerializer)
-        await websocket.send(
-            eval_capabilities_message(
-                audio_input=serializes_audio and self._params.audio_in_enabled,
-                audio_output=serializes_audio and self._params.audio_out_enabled,
-            )
-        )
 
         if self._input is not None:
             skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)

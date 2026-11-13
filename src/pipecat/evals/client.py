@@ -46,7 +46,6 @@ from pipecat.evals.serializer import (
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
     EVAL_STT_SAMPLE_RATE,
-    EvalAudioCapabilities,
     EvalClientSerializer,
     EvalConnectionFlags,
     EvalFunctionCallCancelFrame,
@@ -301,7 +300,6 @@ class _BotFrameSink(FrameProcessor):
         persona: EvalPersona | None = None,
         persona_hears: bool = False,
         conversation: _ScriptConversation | None = None,
-        answer_enabled: bool = True,
     ):
         """Initialize the sink.
 
@@ -311,27 +309,12 @@ class _BotFrameSink(FrameProcessor):
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
             conversation: Optional scripted conversation, separate from matching.
-            answer_enabled: Whether the caller may answer before admission.
         """
         super().__init__()
         self._stream = stream
         self._conversation = conversation
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
-        self._answer_enabled = answer_enabled
-        # Keep one answer trigger; the latest context contains all earlier messages.
-        self._pending_answer: LLMContextFrame | None = None
-
-    async def allow_answers(self) -> None:
-        """Admit the caller and replay an already observed greeting once."""
-        self._answer_enabled = True
-        pending, self._pending_answer = self._pending_answer, None
-        await self._answer(pending)
-
-    async def cleanup(self):
-        """Release any greeting held while the target's support was checked."""
-        self._pending_answer = None
-        await super().cleanup()
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -373,9 +356,6 @@ class _BotFrameSink(FrameProcessor):
     async def _answer(self, frame: LLMContextFrame | None) -> None:
         """Push the frame that has the persona answer, unless there is none or it hung up."""
         if frame is None or self._persona is None or self._persona.hung_up:
-            return
-        if not self._answer_enabled:
-            self._pending_answer = frame
             return
         await self.push_frame(frame)
 
@@ -515,7 +495,7 @@ class EvalClientParams(BaseModel):
 
 
 class EvalBotUnavailableError(Exception):
-    """The bot refused the connection, closed it before ``bot-ready``, or can't carry the run's audio."""
+    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
 
     def __init__(self, kind: str, reason: str):
         """Initialize the error.
@@ -523,9 +503,7 @@ class EvalBotUnavailableError(Exception):
         Args:
             kind: The failure kind the run records: ``connect_failed`` when the
                 bot refused the connection, ``closed_before_ready`` when it
-                closed the connection before ``bot-ready``, ``audio_unsupported``
-                or ``audio_unverified`` when its advertised audio support failed
-                the run's check.
+                closed the connection before ``bot-ready``.
             reason: What happened, with the close code and reason when there
                 was one.
         """
@@ -624,28 +602,7 @@ class EvalClient:
         self._active_transport: EvalClientTransport | None = None
         self._audio_failed = False
         self._audio_cancel_task: asyncio.Task[None] | None = None
-        self._audio_capabilities: EvalAudioCapabilities | None = None
-        self._audio_support: str | None = None
         self._next_id = 0
-
-    @property
-    def audio_support(self) -> str | None:
-        """What the handshake established about the target's audio support.
-
-        ``verified`` when the target advertised every audio direction the run
-        uses, ``unsupported`` when it advertised one of them as off, and
-        ``unverified`` when it advertised nothing readable. ``None`` when the
-        run uses no audio, its check is ``off``, or the handshake has not
-        reached the check.
-        """
-        return self._audio_support
-
-    @property
-    def _checks_audio_support(self) -> bool:
-        """Whether this run checks the target's advertised audio support."""
-        return self._session_params.audio_support_check != "off" and (
-            self.sends_user_audio or self._params.bot_audio
-        )
 
     @property
     def has_user_tts(self) -> bool:
@@ -752,8 +709,7 @@ class EvalClient:
 
         Raises:
             EvalBotUnavailableError: If the bot refuses the connection, closes
-                before ``bot-ready`` or fails the run's audio support check, or
-                a harness service fails during startup.
+                before ``bot-ready``, or a harness service fails during startup.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
@@ -774,9 +730,6 @@ class EvalClient:
             ready.cancel()
             failed.cancel()
             await asyncio.gather(ready, failed, return_exceptions=True)
-
-        if self._checks_audio_support:
-            self._admit_audio()
 
         # Ask the bot's RTVIObserver to expose what this scenario needs, for the
         # duration of this eval only (bots keep their defaults; only the eval
@@ -800,45 +753,11 @@ class EvalClient:
         if self._params.context:
             await self._send_eval(EVAL_CONTEXT_MESSAGE_TYPE, {"messages": self._params.context})
         self._raise_harness_failure()
-        if self._sink is not None:
-            await self._sink.allow_answers()
 
     def _raise_harness_failure(self) -> None:
         """Preserve a startup service error as a harness failure."""
         if self._stream.harness_error is not None:
             raise EvalBotUnavailableError("error", self._stream.harness_error)
-
-    def _admit_audio(self) -> None:
-        """Record what the target advertised, and refuse a run its transport can't carry.
-
-        Raises:
-            EvalBotUnavailableError: If the target advertised a direction the run
-                uses as off, or advertised nothing readable and the check is
-                ``required``.
-        """
-        capabilities = self._audio_capabilities
-        if capabilities is None:
-            self._audio_support = "unverified"
-            if self._session_params.audio_support_check == "required":
-                raise EvalBotUnavailableError(
-                    "audio_unverified",
-                    "The target did not advertise readable audio support for its eval "
-                    "transport, which this run requires",
-                )
-            return
-
-        missing = []
-        if self.sends_user_audio and not capabilities.audio_input:
-            missing.append("accept caller audio (audio_in_enabled)")
-        if self._params.bot_audio and not capabilities.audio_output:
-            missing.append("send bot audio (audio_out_enabled)")
-        if missing:
-            self._audio_support = "unsupported"
-            raise EvalBotUnavailableError(
-                "audio_unsupported",
-                f"The target's eval transport is not configured to {' or '.join(missing)}",
-            )
-        self._audio_support = "verified"
 
     async def stop(self) -> None:
         """Save the recording, end the bot's session, and end the pipeline."""
@@ -1129,7 +1048,6 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
-            self._audio_capabilities = _transport.audio_capabilities
             self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
@@ -1204,7 +1122,6 @@ class EvalClient:
             persona=persona,
             persona_hears=bot_stt is None,
             conversation=self._conversation,
-            answer_enabled=not self._checks_audio_support,
         )
 
         inbound: list = [transport.input()]

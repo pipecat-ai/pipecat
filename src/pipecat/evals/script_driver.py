@@ -169,7 +169,6 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
-        audio_support: str | None = None,
     ) -> EvalScriptResult:
         """The scenario's result: passed only if nothing failed and nothing was skipped."""
         # Required capture can fail while the client drains after the last assertion.
@@ -198,7 +197,6 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             debug_log=debug_log,
             skipped=skipped,
             conversation=self._client.conversation,
-            audio_support=audio_support,
         )
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:

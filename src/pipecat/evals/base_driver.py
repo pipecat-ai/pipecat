@@ -76,7 +76,6 @@ class BaseEvalDriver(ABC, Generic[R]):
         events_seen: list[dict],
         debug_log: list[str],
         skipped: str | None = None,
-        audio_support: str | None = None,
     ) -> R:
         """Assemble the run's result from what the driver scored and the session saw.
 
@@ -87,8 +86,6 @@ class BaseEvalDriver(ABC, Generic[R]):
             events_seen: Every event observed, for diagnostics.
             debug_log: The run's trace.
             skipped: Why the run was not driven at all, or ``None``.
-            audio_support: What the target's audio advertisement established,
-                or ``None`` when nothing was checked.
         """
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:
