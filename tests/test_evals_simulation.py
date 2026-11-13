@@ -221,6 +221,13 @@ metrics:
         with self.assertRaises(ValueError):
             _load_simulation(_write(MINIMAL + "max_duration_s: -1\n"))
 
+    def test_timeout_caps_must_be_finite(self):
+        for field in ("max_duration_s", "max_silence_s"):
+            for value in (".nan", ".inf", "-.inf"):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(ValueError, field):
+                        _load_simulation(_write(MINIMAL + f"{field}: {value}\n"))
+
     def test_describe(self):
         text = describe_simulation(_load_simulation(_write(MINIMAL)))
         self.assertIn(
