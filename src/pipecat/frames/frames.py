@@ -1890,6 +1890,45 @@ class FunctionCallCancelFrame(SystemFrame):
 
 
 @dataclass
+class ClientFunctionCallRequestFrame(SystemFrame):
+    """A function call the client executes, on its way to the client.
+
+    Pushed downstream by an LLM service for a function registered with
+    :meth:`~pipecat.services.llm_service.LLMService.register_client_function`.
+    The transport layer that speaks the client's protocol delivers it, and the
+    client's answer comes back as a :class:`ClientFunctionCallResultFrame` with
+    the same ``tool_call_id``.
+
+    Parameters:
+        function_name: Name of the function to call.
+        tool_call_id: Unique identifier of the call.
+        arguments: Arguments the LLM called the function with.
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+
+
+@dataclass
+class ClientFunctionCallResultFrame(SystemFrame):
+    """The client's result for a :class:`ClientFunctionCallRequestFrame`.
+
+    Pushed downstream toward the LLM service by the transport layer that
+    received the client's answer. The service settles the call with ``result``,
+    as if a server-side handler had reported it. A result for a call that has
+    already settled (it timed out or was cancelled) is ignored.
+
+    Parameters:
+        tool_call_id: Identifier of the call this result answers.
+        result: The function's result.
+    """
+
+    tool_call_id: str
+    result: Any
+
+
+@dataclass
 class STTMuteFrame(SystemFrame):
     """Frame to mute/unmute the Speech-to-Text service.
 
