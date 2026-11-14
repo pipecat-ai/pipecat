@@ -528,3 +528,212 @@ def test_compute_removals_records_actual_vs_announced_version():
     removals = drem.compute_removals(prev, current, "2.1.0", [])  # slipped past 2.0.0
     assert removals[0]["removed_in"] == "2.1.0"
     assert removals[0]["announced_removed_in"] == "2.0.0"
+
+
+# --- Relocations (moves/removals that were never deprecated) -------------------
+#
+# compute_removals only sees subjects deprecated in the previous release, so an
+# alpha feature moved outright is invisible to it. relocations.json is the
+# hand-maintained input for those; the generator merges it into removals.json.
+
+
+def _relocation(subject, **overrides):
+    rec = {
+        "subject": subject,
+        "module": "pipecat.old",
+        "kind": "class",
+        "deprecated_in": None,
+        "removed_in": "2.0.0",
+        "announced_removed_in": None,
+        "relation": "move",
+        "replacement": "pipecat.new.Thing",
+        "message": f"`{subject}` moved to `pipecat.new` in 2.0.0.",
+    }
+    rec.update(overrides)
+    return rec
+
+
+def test_relocations_registry_schema_is_valid():
+    """The committed relocations.json passes the same validation the generator applies."""
+    assert drem.load_relocations()
+
+
+def test_every_relocation_is_recorded_in_removals():
+    """removals.json is generated from relocations.json; a stale copy would drop a record."""
+    committed = {
+        r["subject"]: r
+        for r in json.loads(drem.REMOVALS_PATH.read_text(encoding="utf-8"))["removals"]
+    }
+    for rec in drem.load_relocations():
+        assert committed.get(rec["subject"]) == rec, (
+            f"{rec['subject']!r} missing or different in removals.json; "
+            "run scripts/deprecations/generate_removals.py"
+        )
+
+
+def test_compute_removals_merges_relocations():
+    removals = drem.compute_removals(None, _dep_registry(), "2.0.0", [], [_relocation("Moved")])
+    assert [r["subject"] for r in removals] == ["Moved"]
+    assert removals[0]["deprecated_in"] is None
+    assert removals[0]["replacement"] == "pipecat.new.Thing"
+
+
+def test_compute_removals_relocations_are_idempotent_and_do_not_override():
+    reloc = [_relocation("Moved")]
+    first = drem.compute_removals(None, _dep_registry(), "2.0.0", [], reloc)
+    assert drem.compute_removals(None, _dep_registry(), "2.0.0", first, reloc) == first
+    # A subject already recorded (e.g. detected as a deprecated-then-removed symbol)
+    # keeps its record; the relocation does not overwrite it.
+    existing = [_relocation("Moved", message="detected", deprecated_in="1.0.0")]
+    merged = drem.compute_removals(None, _dep_registry(), "2.0.0", existing, reloc)
+    assert [r["message"] for r in merged] == ["detected"]
+
+
+def test_compute_removals_edited_relocation_replaces_recorded_draft():
+    first = drem.compute_removals(None, _dep_registry(), "2.0.0", [], [_relocation("Moved")])
+    fixed = _relocation("Moved", replacement="pipecat.better.Thing", message="fixed by reviewer")
+    again = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [fixed])
+    assert again == [{k: fixed[k] for k in _REMOVAL_FIELDS}]
+
+
+def test_compute_removals_deleted_or_renamed_relocation_is_dropped():
+    first = drem.compute_removals(
+        None, _dep_registry(), "2.0.0", [], [_relocation("Moved"), _relocation("Gone")]
+    )
+    kept = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [_relocation("Moved")])
+    assert [r["subject"] for r in kept] == ["Moved"]
+    renamed = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [_relocation("Renamed")])
+    assert [r["subject"] for r in renamed] == ["Renamed"]
+
+
+def test_compute_removals_relocation_edit_keeps_detected_records():
+    detected = _relocation("Detected", deprecated_in="1.0.0", announced_removed_in="2.0.0")
+    first = drem.compute_removals(
+        None, _dep_registry(), "2.0.0", [detected], [_relocation("Moved")]
+    )
+    again = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [])
+    assert [r["subject"] for r in again] == ["Detected"]
+
+
+def test_compute_removals_relocations_drop_unknown_fields():
+    rec = _relocation("Moved")
+    rec["location"] = "pipecat/old.py:1"
+    removals = drem.compute_removals(None, _dep_registry(), "2.0.0", [], [rec])
+    assert set(removals[0]) == _REMOVAL_FIELDS
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r.pop("message"),  # missing field
+        lambda r: r.update(removed_in="2.0"),  # not X.Y.Z
+        lambda r: r.update(replacement=""),  # nothing to point at
+        lambda r: r.update(extra="x"),  # unexpected field
+    ],
+)
+def test_load_relocations_rejects_malformed_record(tmp_path, mutate):
+    rec = _relocation("Moved")
+    mutate(rec)
+    path = tmp_path / "relocations.json"
+    path.write_text(json.dumps({"relocations": [rec]}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        drem.load_relocations(path)
+
+
+def test_load_relocations_rejects_duplicate_subject(tmp_path):
+    path = tmp_path / "relocations.json"
+    path.write_text(
+        json.dumps({"relocations": [_relocation("Moved"), _relocation("Moved")]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        drem.load_relocations(path)
+
+
+def test_module_name_skips_private_modules():
+    assert drem._module_name("src/pipecat/processors/tone/reader/model.py") == (
+        "pipecat.processors.tone.reader.model"
+    )
+    assert drem._module_name("src/pipecat/processors/tone/__init__.py") == (
+        "pipecat.processors.tone"
+    )
+    assert drem._module_name("src/pipecat/processors/tone/_models.py") is None
+    assert drem._module_name("src/pipecat/_private/thing.py") is None
+
+
+def test_vanished_module_without_record_is_flagged():
+    prev = {"pipecat.a", "pipecat.old", "pipecat.old.sub"}
+    assert drem.unrecorded_vanished_modules(prev, {"pipecat.a"}, []) == [
+        "pipecat.old",
+        "pipecat.old.sub",
+    ]
+
+
+def test_vanished_module_is_accounted_for_by_a_package_record_or_module_field():
+    prev = {"pipecat.a", "pipecat.old", "pipecat.old.sub", "pipecat.gone"}
+    current = {"pipecat.a"}
+    records = [
+        _relocation("pipecat.old", module="pipecat.old", kind="module"),  # package + children
+        _relocation("Gone", module="pipecat.gone"),  # named by `module`
+    ]
+    assert drem.unrecorded_vanished_modules(prev, current, records) == []
+
+
+def test_modules_still_present_are_not_flagged():
+    modules = {"pipecat.a", "pipecat.b"}
+    assert drem.unrecorded_vanished_modules(modules, set(modules), []) == []
+
+
+# --- Drafting relocations automatically ---------------------------------------
+
+
+def test_public_classes_and_exported_names():
+    src = "from .a import Foo as Bar, Baz\n__all__ = ['Qux']\nclass Public: ...\nclass _Private: ...\n"
+    assert drem._public_classes(src) == ["Public"]
+    assert drem._exported_names(src) == {"Bar", "Baz", "Qux"}
+    assert drem._public_classes("def broken(") == []
+    assert drem._exported_names("def broken(") == set()
+
+
+def test_public_home_walks_up_to_the_shortest_reexporting_package():
+    reexports = {"pkg.a": {"Thing"}, "pkg.a.b": {"Thing"}, "pkg": set()}
+    assert drem._public_home("pkg.a.b.impl", "Thing", reexports) == "pkg.a"
+    assert drem._public_home("pkg.a.b.impl", "Other", reexports) == "pkg.a.b.impl"
+
+
+def test_draft_relocations_tracks_classes_by_name():
+    drafts = drem.draft_relocations(
+        vanished=["pkg.old", "pkg.old.impl"],
+        old_classes={"pkg.old": [], "pkg.old.impl": ["Moved", "Deleted", "Ambiguous"]},
+        homes={"Moved": ["pkg.new.impl"], "Ambiguous": ["pkg.x", "pkg.y"]},
+        reexports={"pkg.new": {"Moved"}},
+        version="2.0.0",
+        old_reexports={"pkg.old": {"Moved"}},
+    )
+    by = {d["subject"]: d for d in drafts}
+    assert set(by) == {"pkg.old", "Moved", "Deleted"}  # ambiguous is left for a human
+    assert by["Moved"]["module"] == "pkg.old"  # the public path users imported from
+    assert by["Moved"]["replacement"] == "pkg.new.Moved"  # re-exported home, not pkg.new.impl
+    assert (by["Deleted"]["relation"], by["Deleted"]["replacement"]) == ("none", "")
+    assert by["pkg.old"]["kind"] == "module" and by["pkg.old"]["replacement"] == "pkg.new"
+    assert all(d["removed_in"] == "2.0.0" and d["deprecated_in"] is None for d in drafts)
+
+
+def test_draft_relocations_one_module_record_per_package_root():
+    drafts = drem.draft_relocations(["pkg.old", "pkg.old.a", "pkg.old.b"], {}, {}, {}, "2.0.0")
+    assert [d["subject"] for d in drafts] == ["pkg.old"]
+    assert drafts[0]["relation"] == "none"
+
+
+def test_drafted_records_pass_validation_and_round_trip(tmp_path):
+    drafts = drem.draft_relocations(
+        ["pkg.old"], {"pkg.old": ["Moved", "Gone"]}, {"Moved": ["pkg.new"]}, {}, "2.0.0"
+    )
+    path = tmp_path / "relocations.json"
+    path.write_text(json.dumps({"_comment": "keep me", "relocations": []}), encoding="utf-8")
+    drem.write_relocations(drafts, path)
+    assert json.loads(path.read_text(encoding="utf-8"))["_comment"] == "keep me"
+    assert (
+        drem.load_relocations(path) == drafts
+    )  # a deletion (relation none) may have no replacement
+    assert drem.compute_removals(None, _dep_registry(), "2.0.0", [], drafts)

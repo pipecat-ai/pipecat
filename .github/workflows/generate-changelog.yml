@@ -106,9 +106,12 @@ jobs:
       # deprecations.json against the working tree and appends to removals.json,
       # which rides along in this same release PR. Needs the fetch-depth: 0
       # checkout above (tags + history). No-op on releases that remove nothing.
+      # --write-relocations also drafts relocations.json records for modules that
+      # were moved or removed without a deprecation (it regenerates removals.json
+      # in the same run); review those drafts in this release PR.
       - name: Update removals registry
         run: |
-          uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}"
+          uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}" --write-relocations
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -130,10 +133,11 @@ jobs:
             - ✅ Adds new release section to CHANGELOG.md
             - ✅ Removes processed changelog fragments
             - ✅ Updates removals.json with any symbols removed in this release
+            - ✅ Drafts relocations.json records for modules moved or removed without a deprecation
             - ✅ Ready to merge for release
 
             ### Next Steps
-            1. Review the changelog entries below
+            1. Review the changelog entries below, and any records drafted in `scripts/deprecations/relocations.json`
             2. Make any necessary edits to CHANGELOG.md if needed
             3. Merge this PR
             4. Continue with your release process
