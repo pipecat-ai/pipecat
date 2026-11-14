@@ -10,9 +10,11 @@ import base64
 import io
 import json
 import unittest
+import unittest.mock
 
 from PIL import Image
 
+import pipecat.evals.serializer as serializer_module
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.serializer import (
     EVAL_BOT_AUDIO_TYPE,
@@ -20,6 +22,8 @@ from pipecat.evals.serializer import (
     EVAL_CONFIGURE_MESSAGE_TYPE,
     EVAL_CONTEXT_MESSAGE_TYPE,
     EVAL_IMAGE_MESSAGE_TYPE,
+    MAX_BOT_AUDIO_MESSAGE_BYTES,
+    EvalBotAudioError,
     EvalClientSerializer,
     EvalConnectionFlags,
     EvalFunctionCallCancelFrame,
@@ -272,6 +276,84 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(frame, InputAudioRawFrame)
         self.assertEqual(frame.sample_rate, 16000)
+
+    async def test_bot_audio_at_8_and_48_khz_is_resampled(self):
+        for rate in (8000, 48000):
+            with self.subTest(rate=rate):
+                pcm = b"\x00\x00" * (rate // 50)  # 20 ms
+                # A stream resampler holds one rate, so a bot's rate is one per serializer.
+                frame = await EvalClientSerializer().deserialize(
+                    self._server(
+                        EVAL_BOT_AUDIO_TYPE,
+                        {"audio": base64.b64encode(pcm).decode("ascii"), "sampleRate": rate},
+                    )
+                )
+                self.assertEqual(frame.sample_rate, 16000)
+
+    async def test_bot_audio_is_refused_before_decoding_unless_it_is_within_bounds(self):
+        # A claimed 160 Hz turns a message of under 1 MiB into about 78 MB once resampled.
+        under_a_mebibyte = base64.b64encode(b"\x01\x00" * 390_000).decode("ascii")
+        over_the_bound = base64.b64encode(b"\x00" * (MAX_BOT_AUDIO_MESSAGE_BYTES + 2)).decode()
+        cases = [
+            {"audio": under_a_mebibyte, "sampleRate": 160},
+            {"audio": "AAAA", "sampleRate": 7999},
+            {"audio": "AAAA", "sampleRate": 48001},
+            {"audio": "AAAA", "sampleRate": 0},
+            {"audio": "AAAA"},
+            {"audio": "AAAA", "sampleRate": "16000"},
+            {"audio": "AAAA", "sampleRate": True},
+            {"audio": "AAAA", "sampleRate": 16000.0},
+            {"audio": ["AAAA"], "sampleRate": 16000},
+            {"audio": over_the_bound, "sampleRate": 16000},
+        ]
+
+        def never(*args, **kwargs):
+            raise AssertionError("decoded before it was checked")
+
+        with unittest.mock.patch.object(serializer_module.base64, "b64decode", never):
+            for data in cases:
+                with self.subTest(data={k: v if k != "audio" else len(v) for k, v in data.items()}):
+                    with self.assertRaises(EvalBotAudioError):
+                        await self.serializer.deserialize(self._server(EVAL_BOT_AUDIO_TYPE, data))
+
+    async def test_bot_audio_the_harness_cant_decode_is_refused_not_raised_as_another_error(self):
+        cases = [
+            {"audio": "abc", "sampleRate": 16000},  # bad padding
+            {"audio": "AA A=", "sampleRate": 16000},  # outside the alphabet
+            {"audio": "ÀÀÀÀ", "sampleRate": 16000},
+            {"audio": base64.b64encode(b"\x01").decode(), "sampleRate": 24000},  # half a sample
+        ]
+        for data in cases:
+            with self.subTest(data=data):
+                with self.assertRaises(EvalBotAudioError):
+                    await EvalClientSerializer().deserialize(
+                        self._server(EVAL_BOT_AUDIO_TYPE, data)
+                    )
+        for data in ([1], "x"):
+            with self.subTest(data=data):
+                with self.assertRaises(EvalBotAudioError):
+                    await self.serializer.deserialize(
+                        json.dumps(
+                            {"label": RTVI.MESSAGE_LABEL, "type": EVAL_BOT_AUDIO_TYPE, "data": data}
+                        )
+                    )
+
+    async def test_bot_audio_that_changes_its_rate_is_refused(self):
+        chunk = base64.b64encode(b"\x00\x00" * 480).decode()
+        await self.serializer.deserialize(
+            self._server(EVAL_BOT_AUDIO_TYPE, {"audio": chunk, "sampleRate": 24000})
+        )
+        with self.assertRaises(EvalBotAudioError):
+            await self.serializer.deserialize(
+                self._server(EVAL_BOT_AUDIO_TYPE, {"audio": chunk, "sampleRate": 22050})
+            )
+
+    async def test_bot_audio_at_the_message_bound_is_taken(self):
+        at_the_bound = base64.b64encode(b"\x00" * MAX_BOT_AUDIO_MESSAGE_BYTES).decode("ascii")
+        frame = await self.serializer.deserialize(
+            self._server(EVAL_BOT_AUDIO_TYPE, {"audio": at_the_bound, "sampleRate": 16000})
+        )
+        self.assertEqual(len(frame.audio), MAX_BOT_AUDIO_MESSAGE_BYTES)
 
     async def test_user_transcription_is_dropped(self):
         # user-input carries the same transcriptions; the base serializer would

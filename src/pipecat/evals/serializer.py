@@ -17,6 +17,7 @@ harness asks for them.
 
 import asyncio
 import base64
+import binascii
 import io
 import json
 from dataclasses import dataclass, field
@@ -93,6 +94,19 @@ EVAL_BOT_IMAGE_TYPE = "eval-bot-image"
 # it. 16 kHz is what Silero and the local STT models (Whisper/Moonshine) expect;
 # the harness configures its input transport at this rate to match.
 EVAL_STT_SAMPLE_RATE = 16000
+
+# The sample rates the harness takes the bot's audio at. The harness resamples
+# what the bot sends to EVAL_STT_SAMPLE_RATE at the rate the bot claims, so a
+# claim far below these would turn one small message into a very large one.
+MIN_BOT_AUDIO_SAMPLE_RATE = 8000
+MAX_BOT_AUDIO_SAMPLE_RATE = 48000
+
+# The most audio one ``eval-bot-audio`` message may carry, once resampled: 30 s.
+MAX_BOT_AUDIO_MESSAGE_BYTES = 30 * EVAL_STT_SAMPLE_RATE * 2
+
+
+class EvalBotAudioError(ValueError):
+    """The bot's audio is beyond what the harness takes, so the run can't continue."""
 
 
 class EvalConnectionFlags(BaseModel):
@@ -442,11 +456,40 @@ class EvalClientSerializer(RTVIClientSerializer):
             msg_type = message.get("type")
             if msg_type == EVAL_BOT_AUDIO_TYPE:
                 payload = message.get("data") or {}
-                audio = base64.b64decode(payload.get("audio", ""))
-                sample_rate = int(payload.get("sampleRate", 0))
-                if sample_rate and sample_rate != EVAL_STT_SAMPLE_RATE and audio:
-                    audio = await self._resample(audio, sample_rate)
-                    sample_rate = EVAL_STT_SAMPLE_RATE
+                if not isinstance(payload, dict):
+                    raise EvalBotAudioError("The bot sent audio without its data")
+                encoded = payload.get("audio", "")
+                sample_rate = payload.get("sampleRate")
+                if (
+                    type(sample_rate) is not int
+                    or not MIN_BOT_AUDIO_SAMPLE_RATE <= sample_rate <= MAX_BOT_AUDIO_SAMPLE_RATE
+                ):
+                    raise EvalBotAudioError(
+                        "The bot sent audio without a sample rate between "
+                        f"{MIN_BOT_AUDIO_SAMPLE_RATE} and {MAX_BOT_AUDIO_SAMPLE_RATE} Hz"
+                    )
+                if not isinstance(encoded, str):
+                    raise EvalBotAudioError("The bot sent audio that isn't base64 text")
+                # Checked before decoding: base64 decodes to 3 bytes for every 4.
+                decoded_bytes = len(encoded) * 3 // 4
+                if (
+                    decoded_bytes * EVAL_STT_SAMPLE_RATE // sample_rate
+                    > MAX_BOT_AUDIO_MESSAGE_BYTES
+                ):
+                    raise EvalBotAudioError(
+                        f"The bot sent an audio message over {MAX_BOT_AUDIO_MESSAGE_BYTES} bytes"
+                    )
+                try:
+                    audio = base64.b64decode(encoded, validate=True)
+                    if sample_rate != EVAL_STT_SAMPLE_RATE and audio:
+                        audio = await self._resample(audio, sample_rate)
+                        sample_rate = EVAL_STT_SAMPLE_RATE
+                except (binascii.Error, ValueError) as e:
+                    # Not base64, or audio the resampler can't take: not 16-bit
+                    # samples, or a rate other than the one the bot started at.
+                    raise EvalBotAudioError(
+                        f"The bot sent audio the harness can't decode: {e}"
+                    ) from None
                 return InputAudioRawFrame(
                     audio=audio,
                     sample_rate=sample_rate,

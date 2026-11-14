@@ -22,7 +22,11 @@ from pipecat.evals.client_transport import (
     EvalClientTransport,
     _RecorderTrack,
 )
-from pipecat.evals.serializer import EvalConnectionFlags, parse_eval_connect
+from pipecat.evals.serializer import (
+    EvalClientSerializer,
+    EvalConnectionFlags,
+    parse_eval_connect,
+)
 from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -197,6 +201,69 @@ class TestEvalHarnessInput(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(inp._bot_pcm), 0)
             self.assertEqual(recorder._bot._chunks, [])  # nothing of it was played
             self.assertIs(push.await_args_list[-1].args[0], interrupted)  # still reported
+
+
+class TestEvalHarnessInputBounds(unittest.IsolatedAsyncioTestCase):
+    """Bot input beyond what the harness takes is the harness's error, raised once."""
+
+    SR = 16000
+
+    def _input(self, recorder=None):
+        inp = EvalClientInputTransport(
+            None,
+            _fake_session(),
+            WebsocketClientParams(audio_in_enabled=True, serializer=EvalClientSerializer()),
+            recorder=recorder,
+        )
+        inp.push_error = AsyncMock()
+        return inp
+
+    async def test_audio_the_serializer_refuses_is_an_error_not_a_lost_connection(self):
+        inp = self._input()
+        message = json.dumps(
+            {
+                "label": RTVI.MESSAGE_LABEL,
+                "type": "eval-bot-audio",
+                "data": {"audio": "AAAA", "sampleRate": 160},
+            }
+        )
+        # Raising here would end the receive loop, which reads as the bot disconnecting.
+        await inp.on_message(None, message)
+        await inp.on_message(None, message)
+        inp.push_error.assert_awaited_once()
+        self.assertIn("sample rate", inp.push_error.await_args.args[0])
+
+    async def test_a_message_nested_too_deeply_to_read_is_an_error_not_a_lost_connection(self):
+        # The handshake check reads it as not bot-ready rather than raising.
+        self.assertFalse(EvalClientTransport._is_bot_ready("[" * 100_000 + "]" * 100_000))
+        inp = self._input()
+        await inp.on_message(None, "[" * 100_000 + "]" * 100_000)
+        inp.push_error.assert_awaited_once_with("The bot sent a message nested too deeply to read")
+
+    async def test_a_backlog_past_the_cap_is_refused_and_dropped(self):
+        recorder = EvalClientRecorder(self.SR)
+        inp = self._input(recorder)
+        second = b"\x01\x00" * self.SR
+        for _ in range(client_transport.MAX_BOT_AUDIO_BACKLOG_BYTES // len(second)):
+            await inp.push_audio_frame(
+                InputAudioRawFrame(audio=second, sample_rate=self.SR, num_channels=1)
+            )
+        self.assertEqual(len(inp._bot_pcm), client_transport.MAX_BOT_AUDIO_BACKLOG_BYTES)
+        inp.push_error.assert_not_awaited()
+
+        await inp.push_audio_frame(
+            InputAudioRawFrame(audio=b"\x01\x00", sample_rate=self.SR, num_channels=1)
+        )
+        inp.push_error.assert_awaited_once_with("The bot sent audio faster than it plays")
+        self.assertEqual(len(inp._bot_pcm), 0)
+        # The recording keeps none of what the harness never played.
+        self.assertEqual(recorder._bot._chunks, [])
+        # Nothing more is buffered, and the error isn't raised again.
+        await inp.push_audio_frame(
+            InputAudioRawFrame(audio=second, sample_rate=self.SR, num_channels=1)
+        )
+        self.assertEqual(len(inp._bot_pcm), 0)
+        inp.push_error.assert_awaited_once()
 
 
 class TestEvalClientTransportConnect(unittest.IsolatedAsyncioTestCase):

@@ -25,7 +25,12 @@ import wave
 from pathlib import Path
 
 from pipecat.audio.utils import create_file_resampler, mix_audio
-from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
+from pipecat.evals.serializer import (
+    EVAL_STT_SAMPLE_RATE,
+    EvalBotAudioError,
+    EvalConnectionFlags,
+    eval_connect_message,
+)
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -285,6 +290,12 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
             self._send_task = None
 
 
+# The most unplayed bot audio the harness holds: 60 s. The fill task
+# plays the backlog out in real time, so only a bot sending audio faster than
+# that builds one this long.
+MAX_BOT_AUDIO_BACKLOG_BYTES = 60 * EVAL_STT_SAMPLE_RATE * 2
+
+
 class EvalClientInputTransport(WebsocketClientInputTransport):
     """Feeds the bot's audio to the harness's VAD and STT as a continuous stream.
 
@@ -292,6 +303,11 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
     pauses. A gap reads as silence to a VAD, which would end the bot's turn
     mid-sentence, so the audio is buffered and re-emitted one 40 ms frame per
     tick, silence filling the gaps.
+
+    Input beyond what the harness takes ends the run as the harness's error,
+    not as the bot disconnecting: audio the serializer refuses
+    (:class:`EvalBotAudioError`), a backlog over
+    :data:`MAX_BOT_AUDIO_BACKLOG_BYTES`, or a message nested too deeply to read.
     """
 
     def __init__(self, *args, recorder: "EvalClientRecorder | None" = None, **kwargs):
@@ -300,6 +316,16 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
         self._bot_pcm = bytearray()
         self._fill_task = None
         self._recorder = recorder
+        self._refused = False
+
+    async def on_message(self, websocket, message):
+        """Handle a message from the bot, refusing input the harness doesn't take."""
+        try:
+            await super().on_message(websocket, message)
+        except EvalBotAudioError as e:
+            await self._refuse(str(e))
+        except RecursionError:
+            await self._refuse("The bot sent a message nested too deeply to read")
 
     async def start(self, frame: StartFrame):
         """Start the transport and, when audio is enabled, the gap-fill stream."""
@@ -332,11 +358,25 @@ class EvalClientInputTransport(WebsocketClientInputTransport):
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         """Buffer the bot's audio for the fill task."""
+        if self._refused:
+            return
+        if len(self._bot_pcm) + len(frame.audio) > MAX_BOT_AUDIO_BACKLOG_BYTES:
+            await self._refuse("The bot sent audio faster than it plays")
+            return
         # Record the raw bot audio here (gapless within a turn), not the gap-filled
         # frames the fill task emits: those underruns would stutter the recording.
         if self._recorder is not None:
             self._recorder.add_bot(frame.audio, frame.sample_rate)
         self._bot_pcm.extend(frame.audio)
+
+    async def _refuse(self, reason: str):
+        if self._refused:
+            return
+        self._refused = True
+        if self._recorder is not None:
+            self._recorder.drop_bot_tail(len(self._bot_pcm))
+        self._bot_pcm.clear()
+        await self.push_error(reason)
 
     async def _fill_task_handler(self):
         """Push one ~40ms frame every tick: buffered bot audio, or silence."""

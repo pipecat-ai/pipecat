@@ -1144,14 +1144,24 @@ class TestHarnessError(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic() - started, 1)
         self.assertEqual([(f.kind, f.reason) for f in failures], [("error", "TTS failed")])
 
-    async def test_dropping_the_queued_harness_error_keeps_the_run_failed(self):
-        # A send drops the bot's queued output, a queued harness_error with it.
+    async def test_dropping_the_bots_queued_output_keeps_the_run_failed(self):
+        # A send drops the bot's queued output; the harness's error isn't the bot's.
         s = _stream()
         s.harness_failed("STT failed")
         await s.append({"type": HARNESS_ERROR_EVENT, "text": "STT failed"})
         s.drop_pending_bot_output("before send")
         with self.assertRaises(EvalHarnessError):
             await s.next_event("llm_response", time.monotonic() + 5)
+
+    async def test_an_interruption_keeps_a_queued_harness_error_for_a_driver_waiting_on_any(self):
+        # The simulation driver waits on next_any, and the bot can interrupt itself.
+        s = _stream()
+        s.harness_failed("bot audio refused")
+        await s.append({"type": "llm_response", "text": "stale"})
+        await s.append({"type": HARNESS_ERROR_EVENT, "text": "bot audio refused"})
+        s.drop_pending_bot_output("on interruption")
+        event = await s.next_any(time.monotonic() + 1)
+        self.assertEqual(event["type"], HARNESS_ERROR_EVENT)
 
     async def test_a_send_after_wait_fails_at_once_as_an_error(self):
         send_after = EvalSendAfter(event="bot_started_speaking", delay_ms=0)
@@ -3136,6 +3146,38 @@ class TestBotUnavailableBeforeReady(unittest.IsolatedAsyncioTestCase):
                     [(f.kind, f.event_name) for f in result.failures], [(kind, event_name)]
                 )
                 self.assertIn(str(exception), result.failures[0].reason)
+
+    async def test_audio_beyond_the_harness_bounds_is_its_error_not_a_lost_bot(self):
+        async def resample_bomb(ws):
+            await ws.send(
+                json.dumps(
+                    {
+                        "label": "rtvi-ai",
+                        "type": "eval-bot-audio",
+                        "data": {"audio": "AAAA" * 1000, "sampleRate": 160},
+                    }
+                )
+            )
+            await ws.wait_closed()
+
+        result, elapsed = await self._run(resample_bomb, bot_ready_timeout_s=30.0)
+        self.assertLess(elapsed, 2)
+        self.assertEqual(
+            [(f.kind, f.event_name) for f in result.failures], [("error", "<harness>")]
+        )
+        self.assertIn("sample rate", result.failures[0].reason)
+
+    async def test_a_message_too_deeply_nested_to_read_is_the_harness_error_not_a_lost_bot(self):
+        async def nested(ws):
+            await ws.send("[" * 100_000 + "]" * 100_000)
+            await ws.wait_closed()
+
+        result, elapsed = await self._run(nested, bot_ready_timeout_s=30.0)
+        self.assertLess(elapsed, 2)
+        self.assertEqual(
+            [(f.kind, f.event_name) for f in result.failures], [("error", "<harness>")]
+        )
+        self.assertIn("nested too deeply", result.failures[0].reason)
 
     async def test_the_first_startup_failure_is_the_one_reported(self):
         # The voice fails as the run starts; the bot closes before bot-ready after.

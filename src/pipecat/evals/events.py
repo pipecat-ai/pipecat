@@ -417,8 +417,9 @@ class EvalEventStream:
 
         A queued ``user_transcription`` stays: a DTMF keypress reports its
         transcription just before the turn starts, and that is the turn's input,
-        not stale bot output. :attr:`events_seen` and :attr:`latest_event_times`
-        are left as they are.
+        not stale bot output. A queued ``harness_error`` stays too: it is the
+        harness's, and a driver that waits on the queue ends on it.
+        :attr:`events_seen` and :attr:`latest_event_times` are left as they are.
 
         Args:
             why: What prompted the drop, for the trace.
@@ -431,7 +432,7 @@ class EvalEventStream:
                 event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if event.get("type") == "user_transcription":
+            if event.get("type") in ("user_transcription", "harness_error"):
                 preserved.append(event)
             else:
                 dropped += 1

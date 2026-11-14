@@ -113,7 +113,8 @@ class RTVIClientTransport(WebsocketClientTransport):
         """Return True if ``message`` is an RTVI ``bot-ready`` message."""
         try:
             data = json.loads(message)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            # Not bot-ready: the input transport's serializer handles the message.
             return False
         return (
             isinstance(data, dict)
