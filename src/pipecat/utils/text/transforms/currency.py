@@ -42,6 +42,10 @@ _CURRENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A minus sign touching a currency amount, not a hyphen in a range like $10-$20
+# or a spaced dash separator like "Latte - $4.50".
+_NEGATIVE_CURRENCY_RE = re.compile(r"(?<![\w.,])[-−](?=[€£¥₹\$])")
+
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
     words = num2words(n, lang="en")
@@ -110,4 +114,5 @@ async def expand_currency(text: str, text_type: str | TextType) -> str:
         result = await expand_currency("Your balance is $42.50", "*")
         # "Your balance is forty-two dollars and fifty cents"
     """
+    text = _NEGATIVE_CURRENCY_RE.sub("minus ", text)
     return _CURRENCY_RE.sub(_keep_code_apart, text)
