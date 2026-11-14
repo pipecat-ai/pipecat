@@ -7,10 +7,12 @@
 """Tests for context summarization feature."""
 
 import asyncio
+import base64
+import struct
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMContextSummaryRequestFrame
+from pipecat.frames.frames import AudioRawFrame, LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
@@ -20,6 +22,13 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummaryConfig,
 )
 from tests.frame_processor_helpers import frame_processor_setup
+
+
+def _audio_message(seconds: int, sample_rate: int = 16000, num_channels: int = 1):
+    """Build an audio message with ``LLMContext.create_audio_message()``."""
+    audio = b"\x00" * (seconds * sample_rate * num_channels * 2)
+    frame = AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
+    return asyncio.run(LLMContext.create_audio_message(audio_frames=[frame]))
 
 
 class TestContextSummarizationMixin(unittest.TestCase):
@@ -59,6 +68,58 @@ class TestContextSummarizationMixin(unittest.TestCase):
         total = LLMContextSummarizationUtil.estimate_context_tokens(context)
         self.assertGreater(total, 30)  # At least overhead
         self.assertLess(total, 50)  # Not too much
+
+    def test_estimate_context_tokens_audio_by_duration(self):
+        """Test that audio is estimated from its duration."""
+        from pipecat.utils.context.llm_context_summarization import AUDIO_TOKENS_PER_SECOND
+
+        def estimate(message):
+            return LLMContextSummarizationUtil.estimate_context_tokens(LLMContext([message]))
+
+        # 10 of overhead and 3 for the "Audio follows" label, then the audio
+        self.assertEqual(estimate(_audio_message(10)), 13 + 10 * AUDIO_TOKENS_PER_SECOND)
+        self.assertEqual(
+            estimate(_audio_message(30)) - estimate(_audio_message(5)),
+            25 * AUDIO_TOKENS_PER_SECOND,
+        )
+        # Sample rate and channel count change the size, not the duration
+        self.assertEqual(estimate(_audio_message(10, 48000, 2)), estimate(_audio_message(10)))
+
+    def test_estimate_context_tokens_audio_byte_rate_from_wav_header(self):
+        """Test that the WAV header's byte rate is used whatever the format label says."""
+        from pipecat.utils.context.llm_context_summarization import AUDIO_TOKENS_PER_SECOND
+
+        # 10 s of 8 kHz mu-law, after an odd-sized chunk
+        info = b"LIST" + struct.pack("<I", 5) + b"INFO\x00\x00"
+        fmt = struct.pack("<4sIHHIIHH", b"fmt ", 16, 7, 1, 8000, 8000, 1, 8)
+        data = b"\x00" * 80000
+        body = b"WAVE" + info + fmt + b"data" + struct.pack("<I", len(data)) + data
+        wav = b"RIFF" + struct.pack("<I", len(body)) + body
+        input_audio = {"data": base64.b64encode(wav).decode(), "format": "mp3"}
+        message = {"role": "user", "content": [{"type": "input_audio", "input_audio": input_audio}]}
+
+        tokens = LLMContextSummarizationUtil.estimate_context_tokens(LLMContext([message]))
+
+        self.assertEqual(tokens, 10 + 10 * AUDIO_TOKENS_PER_SECOND)
+
+    def test_estimate_context_tokens_malformed_audio(self):
+        """Test that malformed audio parts cost only the message overhead and never raise."""
+        truncated_fmt = base64.b64encode(b"RIFF\x0c\x00\x00\x00WAVEfmt \x10\x00\x00\x00").decode()
+        fmt_zero_rate = struct.pack("<4sIHHIIHH", b"fmt ", 16, 1, 1, 0, 0, 2, 16)
+        riff_zero_rate = base64.b64encode(b"RIFF\x1c\x00\x00\x00WAVE" + fmt_zero_rate).decode()
+        for input_audio in (
+            None,
+            {"data": "éééé"},
+            {"data": truncated_fmt},
+            {"data": riff_zero_rate},
+        ):
+            with self.subTest(input_audio=input_audio):
+                message = {
+                    "role": "user",
+                    "content": [{"type": "input_audio", "input_audio": input_audio}],
+                }
+                tokens = LLMContextSummarizationUtil.estimate_context_tokens(LLMContext([message]))
+                self.assertEqual(tokens, 10)
 
     def test_get_messages_to_summarize_basic(self):
         """Test basic message extraction for summarization."""
