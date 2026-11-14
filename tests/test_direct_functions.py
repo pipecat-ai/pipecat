@@ -6,7 +6,11 @@
 
 import asyncio
 import unittest
-from typing import Any, TypedDict
+from dataclasses import dataclass, field
+from enum import Enum, IntEnum
+from typing import Any, Literal, TypedDict
+
+from pydantic import BaseModel, Field, ValidationError
 
 from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.services.llm_service import FunctionCallParams
@@ -243,6 +247,163 @@ class TestDirectFunction(unittest.TestCase):
         self.assertIs(called["params"], params)
         self.assertEqual(called["name"], "Alice")
         self.assertEqual(called["age"], 30)
+
+    def test_enum_and_literal_params_list_their_allowed_values(self):
+        class Unit(Enum):
+            CELSIUS = "celsius"
+            FAHRENHEIT = "fahrenheit"
+
+        class Priority(IntEnum):
+            LOW = 1
+            HIGH = 2
+
+        async def my_function(
+            params: FunctionCallParams,
+            unit: Unit,
+            priority: Priority,
+            mode: Literal["fast", "slow"],
+            mixed: Literal["auto", 0],
+            maybe_unit: Unit | None = None,
+        ):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        self.assertEqual(
+            func.properties,
+            {
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+                "priority": {"type": "integer", "enum": [1, 2]},
+                "mode": {"type": "string", "enum": ["fast", "slow"]},
+                "mixed": {"enum": ["auto", 0]},
+                "maybe_unit": {
+                    "anyOf": [
+                        {"type": "string", "enum": ["celsius", "fahrenheit"]},
+                        {"type": "null"},
+                    ]
+                },
+            },
+        )
+
+    def test_pydantic_and_dataclass_fields_with_defaults_are_optional(self):
+        class Address(BaseModel):
+            city: str
+            zip_code: str | None = None
+            country: str = Field(default="IN", alias="countryCode", description="ISO code")
+
+        @dataclass
+        class Window:
+            start: str
+            days: int = 1
+            tags: list[str] = field(default_factory=list)
+
+        async def my_function(params: FunctionCallParams, address: Address, window: Window):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        self.assertEqual(
+            func.properties,
+            {
+                "address": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"},
+                        "zip_code": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                        "countryCode": {"type": "string", "description": "ISO code"},
+                    },
+                    "required": ["city"],
+                },
+                "window": {
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "string"},
+                        "days": {"type": "integer"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["start"],
+                },
+            },
+        )
+
+    def test_fixed_length_tuple_allows_every_position(self):
+        async def my_function(
+            params: FunctionCallParams, pair: tuple[int, str], same: tuple[int, int]
+        ):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        self.assertEqual(
+            func.properties["pair"],
+            {
+                "type": "array",
+                "items": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+        )
+        self.assertEqual(
+            func.properties["same"],
+            {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+        )
+
+    def test_invoke_converts_args_to_declared_types(self):
+        class Unit(Enum):
+            CELSIUS = "celsius"
+
+        class Address(BaseModel):
+            city: str
+
+        @dataclass
+        class Window:
+            start: str
+            days: int = 1
+
+        called = {}
+
+        async def my_function(
+            params: Any,
+            unit: Unit,
+            address: Address,
+            windows: list[Window],
+            note: str,
+            raw: dict,
+            maybe: Address | None = None,
+        ):
+            called.update(
+                unit=unit, address=address, windows=windows, note=note, raw=raw, maybe=maybe
+            )
+
+        func = DirectFunctionWrapper(function=my_function)
+        raw = {"keep": "as is"}
+        asyncio.run(
+            func.invoke(
+                args={
+                    "unit": "celsius",
+                    "address": {"city": "Pune"},
+                    "windows": [{"start": "mon"}],
+                    "note": "hi",
+                    "raw": raw,
+                    "maybe": None,
+                },
+                params=None,
+            )
+        )
+        self.assertIs(called["unit"], Unit.CELSIUS)
+        self.assertEqual(called["address"], Address(city="Pune"))
+        self.assertEqual(called["windows"], [Window(start="mon", days=1)])
+        self.assertEqual(called["note"], "hi")
+        self.assertIs(called["raw"], raw)
+        self.assertIsNone(called["maybe"])
+
+    def test_invoke_rejects_args_that_dont_match_declared_type(self):
+        class Unit(Enum):
+            CELSIUS = "celsius"
+
+        async def my_function(params: Any, unit: Unit):
+            return unit
+
+        func = DirectFunctionWrapper(function=my_function)
+        with self.assertRaises(ValidationError):
+            asyncio.run(func.invoke(args={"unit": "kelvin"}, params=None))
 
 
 if __name__ == "__main__":

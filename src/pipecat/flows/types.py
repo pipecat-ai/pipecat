@@ -520,7 +520,7 @@ class FlowsDirectFunctionWrapper(BaseDirectFunctionWrapper):
         Returns:
             The result of the function call.
         """
-        return await self.function(flow_manager=flow_manager, **args)
+        return await self.function(flow_manager=flow_manager, **self._convert_arguments(args))
 
 
 def get_or_generate_node_name(node_config: NodeConfig) -> str:

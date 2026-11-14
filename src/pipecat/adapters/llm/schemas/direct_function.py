@@ -13,12 +13,15 @@ accompanying configurations (as FunctionSchemas or in provider-specific
 formats).
 """
 
+import dataclasses
+import enum
 import inspect
 import types
 from collections.abc import Awaitable, Callable, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
+    Literal,
     TypeAlias,
     Union,
     get_args,
@@ -27,6 +30,7 @@ from typing import (
 )
 
 import docstring_parser
+from pydantic import BaseModel, TypeAdapter
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 
@@ -135,7 +139,6 @@ class BaseDirectFunctionWrapper:
             self.function, docstring.params
         )
 
-    # TODO: maybe to better support things like enums, check if each type is a pydantic type and use its convert-to-jsonschema function
     def _get_parameters_as_jsonschema(
         self, func: Callable, docstring_params: list[docstring_parser.DocstringParam]
     ) -> tuple[dict[str, Any], list[str]]:
@@ -155,6 +158,9 @@ class BaseDirectFunctionWrapper:
         hints = get_type_hints(func)
         properties = {}
         required = []
+        # Adapters that turn JSON arguments back into the declared types (enums,
+        # Pydantic models, dataclasses) before the function is called.
+        self._argument_adapters: dict[str, TypeAdapter[Any]] = {}
 
         for name, param in sig.parameters.items():
             # Ignore 'self' parameter
@@ -171,6 +177,8 @@ class BaseDirectFunctionWrapper:
 
             # Convert type hint to JSON schema
             properties[name] = self._typehint_to_jsonschema(type_hint)
+            if _needs_conversion(type_hint):
+                self._argument_adapters[name] = TypeAdapter(type_hint)
 
             # Add whether the parameter is required
             # If the parameter has no default value, it's required
@@ -184,6 +192,32 @@ class BaseDirectFunctionWrapper:
 
         return properties, required
 
+    def _convert_arguments(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        """Convert JSON arguments from the LLM to the function's declared types.
+
+        Arguments declared as an ``Enum``, a Pydantic model or a dataclass (also
+        inside ``Optional``, lists and dicts) arrive as plain JSON values. They are
+        validated and converted, so the function receives the types it declares.
+        Other arguments are passed through unchanged.
+
+        Args:
+            args: Arguments from the LLM.
+
+        Returns:
+            The arguments to call the function with.
+
+        Raises:
+            pydantic.ValidationError: If an argument doesn't match its declared type.
+        """
+        return {
+            name: (
+                self._argument_adapters[name].validate_python(value)
+                if name in self._argument_adapters
+                else value
+            )
+            for name, value in args.items()
+        }
+
     def _typehint_to_jsonschema(self, type_hint: Any) -> dict[str, Any]:
         """Convert a Python type hint to a JSON Schema.
 
@@ -195,6 +229,13 @@ class BaseDirectFunctionWrapper:
         """
         if type_hint is None or type_hint is Any:
             return {}
+
+        # Handle enums and literals as a list of allowed values. Checked before the
+        # basic types, since a str or int enum is also a str or int subclass.
+        if isinstance(type_hint, type) and issubclass(type_hint, enum.Enum):
+            return _enum_schema([member.value for member in type_hint])
+        if get_origin(type_hint) is Literal:
+            return _enum_schema(list(get_args(type_hint)))
 
         # Handle basic types
         if type_hint is type(None):
@@ -220,6 +261,17 @@ class BaseDirectFunctionWrapper:
         if origin is Union or origin is types.UnionType:
             return {"anyOf": [self._typehint_to_jsonschema(arg) for arg in args]}
 
+        # Handle fixed-length tuples such as tuple[int, str]: every position must be
+        # allowed, not only the first one
+        if origin is tuple and args and args[-1] is not Ellipsis:
+            item_schemas: list[dict[str, Any]] = []
+            for arg in args:
+                item_schema = self._typehint_to_jsonschema(arg)
+                if item_schema not in item_schemas:
+                    item_schemas.append(item_schema)
+            items = item_schemas[0] if len(item_schemas) == 1 else {"anyOf": item_schemas}
+            return {"type": "array", "items": items, "minItems": len(args), "maxItems": len(args)}
+
         # Handle List, Tuple, Set with specific item types
         if origin in (list, tuple, set) and args:
             return {"type": "array", "items": self._typehint_to_jsonschema(args[0])}
@@ -228,6 +280,36 @@ class BaseDirectFunctionWrapper:
         if origin is dict and len(args) == 2:
             # For JSON Schema, keys must be strings
             return {"type": "object", "additionalProperties": self._typehint_to_jsonschema(args[1])}
+
+        # Handle Pydantic models: fields with defaults are optional, and fields
+        # are keyed by alias, which is what validation expects
+        if isinstance(type_hint, type) and issubclass(type_hint, BaseModel):
+            properties = {}
+            required = []
+            for field_name, field in type_hint.model_fields.items():
+                key = field.alias or field_name
+                properties[key] = self._typehint_to_jsonschema(field.annotation)
+                if field.description:
+                    properties[key]["description"] = field.description
+                if field.is_required():
+                    required.append(key)
+            return _object_schema(properties, required)
+
+        # Handle dataclasses: fields with a default or default factory are optional
+        if isinstance(type_hint, type) and dataclasses.is_dataclass(type_hint):
+            field_types = get_type_hints(type_hint)
+            properties = {}
+            required = []
+            for field in dataclasses.fields(type_hint):
+                if not field.init:
+                    continue
+                properties[field.name] = self._typehint_to_jsonschema(field_types[field.name])
+                if (
+                    field.default is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
+                ):
+                    required.append(field.name)
+            return _object_schema(properties, required)
 
         # Handle TypedDict
         if hasattr(type_hint, "__annotations__"):
@@ -253,6 +335,41 @@ class BaseDirectFunctionWrapper:
 
         # Default to any type if we can't determine the specific schema
         return {}
+
+
+_ENUM_VALUE_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
+
+
+def _enum_schema(values: list[Any]) -> dict[str, Any]:
+    """JSON schema for a fixed set of allowed values.
+
+    Adds the JSON type when every value has the same one, since some providers
+    require a type next to ``enum``.
+    """
+    schema: dict[str, Any] = {"enum": values}
+    value_types = {_ENUM_VALUE_TYPES.get(type(value)) for value in values}
+    if len(value_types) == 1 and None not in value_types:
+        schema = {"type": value_types.pop(), **schema}
+    return schema
+
+
+def _object_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    """JSON schema for an object with the given properties."""
+    schema: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _needs_conversion(type_hint: Any) -> bool:
+    """Whether a JSON value must be converted to match this type hint.
+
+    True for hints that are, or contain, an ``Enum``, a Pydantic model or a
+    dataclass, since JSON has no such values.
+    """
+    if isinstance(type_hint, type):
+        return issubclass(type_hint, (enum.Enum, BaseModel)) or dataclasses.is_dataclass(type_hint)
+    return any(_needs_conversion(arg) for arg in get_args(type_hint))
 
 
 class DirectFunctionWrapper(BaseDirectFunctionWrapper):
@@ -284,7 +401,7 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
         Returns:
             The result of the function call.
         """
-        return await self.function(params=params, **args)
+        return await self.function(params=params, **self._convert_arguments(args))
 
 
 def tool_options(
