@@ -764,6 +764,52 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             await transport.cancel(CancelFrame())
             logger.remove(handler_id)
 
+    async def test_interruption_discards_resampler_state_without_a_bot_turn(self):
+        """Raw audio that never reached playback leaves samples in the resampler
+        without ever setting the bot-speaking flag; an interruption must discard
+        them even though the bot-stopped handler returns early (issue #6806)."""
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+
+            # A short burst of 24 kHz raw audio (plain OutputAudioRawFrame: no
+            # TTS/speech wrapper) is buffered and partially resampled but too
+            # small to fill a chunk, so nothing is written and no bot turn
+            # starts.
+            pos = (8000).to_bytes(2, "little", signed=True) * 96
+            await transport.process_frame(
+                OutputAudioRawFrame(audio=pos, sample_rate=24000, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+            await asyncio.sleep(0.1)
+            already_written = len(transport.write_audio_frame.call_args_list)
+            self.assertEqual(len(transport.write_audio_frame.call_args_list), already_written)
+            self.assertFalse(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+
+            # The next speech is a negative constant at the same 24 kHz rate
+            # (the resampler keeps its rate pair across a reset): without the
+            # fix, the resampler's leftover +8000 samples ring through it --
+            # the issue measures a peak of 21755 on what should be silence.
+            negative = (-8000).to_bytes(2, "little", signed=True) * 4000
+            await transport.process_frame(
+                OutputAudioRawFrame(audio=negative, sample_rate=24000, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+            await asyncio.sleep(0.2)
+
+            after = b"".join(
+                call.args[0].audio
+                for call in transport.write_audio_frame.call_args_list[already_written:]
+            )
+            samples = np.frombuffer(after, dtype=np.int16)
+            self.assertGreater(len(samples), 0)
+            self.assertLess(int(samples.max()), 8000 // 4)
+        finally:
+            await transport.cancel(CancelFrame())
+
 
 class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):
     """The output filter runs on the audio the pipeline sends, before it is written."""
