@@ -97,15 +97,23 @@ def pronunciation_transform(
         )
 
     pattern = None
+    ipa_by_group: dict[str, str] = {}
     if phonemes:
         words = sorted(phonemes, key=len, reverse=True)
+        alternatives = []
+        for index, word in enumerate(words):
+            group = f"word_{index}"
+            alternatives.append(f"(?P<{group}>{re.escape(word)})")
+            ipa_by_group[group] = phonemes[word]
         pattern = re.compile(
-            r"(?<![\w-])(?:" + "|".join(re.escape(w) for w in words) + r")(?![\w-])",
+            r"(?<![\w-])(?:" + "|".join(alternatives) + r")(?![\w-])",
             re.IGNORECASE,
         )
 
     def _replace(match: re.Match) -> str:
         word = match.group(0)
-        return format_pronunciation(word, phonemes[word.lower()]) or word
+        group = match.lastgroup
+        assert group is not None
+        return format_pronunciation(word, ipa_by_group[group]) or word
 
     return PronunciationTransform(pattern, _replace)
