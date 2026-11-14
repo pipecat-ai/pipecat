@@ -171,17 +171,24 @@ class SoundfileMixer(BaseAudioMixer):
         # Sound currently playing.
         sound = self._sounds[self._current_sound]
 
-        # Go back to the beginning if we don't have enough data.
-        if self._sound_pos + chunk_size > len(sound):
-            if not self._loop:
-                return audio
-            self._sound_pos = 0
+        if not chunk_size or not len(sound):
+            return audio
 
-        start_pos = self._sound_pos
         end_pos = self._sound_pos + chunk_size
-        self._sound_pos = end_pos
-
-        sound_np = sound[start_pos:end_pos]
+        if end_pos <= len(sound):
+            sound_np = sound[self._sound_pos : end_pos]
+            self._sound_pos = end_pos
+        elif self._loop:
+            indices = (np.arange(chunk_size) + self._sound_pos) % len(sound)
+            sound_np = sound[indices]
+            self._sound_pos = end_pos % len(sound)
+        else:
+            remaining = len(sound) - self._sound_pos
+            if remaining <= 0:
+                return audio
+            sound_np = np.zeros(chunk_size, dtype=np.int16)
+            sound_np[:remaining] = sound[self._sound_pos :]
+            self._sound_pos = len(sound)
 
         mixed_audio = np.clip(audio_np + sound_np * self._volume, -32768, 32767).astype(np.int16)
 
