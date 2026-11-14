@@ -19,13 +19,15 @@ Removals are detected by diffing the **previous released tag's**
 that was present then and is gone now was removed in the release being prepared.
 Run during release-prep, **before the tag is cut**, with the release version::
 
-    uv run python scripts/deprecations/generate_removals.py --version 2.0.0
+    uv run python scripts/deprecations/generate_removals.py --version 2.0.0 --write-relocations
 
 Symbols moved or removed *without* a prior deprecation (e.g. alpha features) can't be
 detected this way. Record them in ``relocations.json`` (hand-maintained); they are merged
 into ``removals.json`` here. After writing, the script warns about any public module that
 existed in the previous release, is gone now, and has no record, so a silent move is
-caught at release-prep. ``--previous-tag`` overrides the tag diffed against.
+caught at release-prep. Pass ``--write-relocations`` at release-prep: one run drafts those
+records into ``relocations.json`` (review them) and writes ``removals.json``, so the script
+never needs a second run. ``--previous-tag`` overrides the tag diffed against.
 
 The file is cumulative — prior entries are never rewritten — and fully
 reconstructable from the tag history, so it is never primary data. The ``--version``
@@ -480,6 +482,25 @@ def main() -> int:
         return 1
 
     removals = compute_removals(prev_registry, current_registry, version, existing, relocations)
+
+    vanished: list[str] = []
+    drafts: list[dict] = []
+    added: list[dict] = []
+    if prev_tag:
+        vanished = unrecorded_vanished_modules(
+            modules_at_tag(prev_tag), modules_in_tree(), removals
+        )
+        if vanished:
+            drafts = suggest_relocations(prev_tag, vanished, version)
+            if args.write_relocations:
+                have = {r["subject"] for r in relocations}
+                added = [d for d in drafts if d["subject"] not in have]
+                write_relocations(relocations + added)
+                removals = compute_removals(
+                    prev_registry, current_registry, version, existing, relocations + added
+                )
+
+    # One write, after relocations are settled: a single run produces both files.
     REMOVALS_PATH.write_text(render(build_document(removals)), encoding="utf-8")
 
     new_count = len(removals) - len(existing)
@@ -494,39 +515,24 @@ def main() -> int:
         f"to {REMOVALS_PATH.relative_to(REPO_ROOT)}"
     )
 
-    if prev_tag:
-        vanished = unrecorded_vanished_modules(
-            modules_at_tag(prev_tag), modules_in_tree(), removals
+    if vanished and args.write_relocations:
+        print(
+            f"Drafted {len(added)} record(s) into {RELOCATIONS_PATH.name} for "
+            f"{len(vanished)} vanished module(s). REVIEW them (replacement and wording) "
+            "before merging."
         )
-        if vanished:
-            drafts = suggest_relocations(prev_tag, vanished, version)
-            if args.write_relocations:
-                have = {r["subject"] for r in relocations}
-                added = [d for d in drafts if d["subject"] not in have]
-                write_relocations(relocations + added)
-                removals = compute_removals(
-                    prev_registry, current_registry, version, existing, relocations + added
-                )
-                REMOVALS_PATH.write_text(render(build_document(removals)), encoding="utf-8")
-                print(
-                    f"Drafted {len(added)} record(s) into {RELOCATIONS_PATH.name} for "
-                    f"{len(vanished)} vanished module(s). REVIEW them (replacement and wording) "
-                    "before committing."
-                )
-            else:
-                print(
-                    f"WARNING: {len(vanished)} public module(s) present in {prev_tag} are gone "
-                    "with no removal record. Downstream tooling will report them as current.\n"
-                    "Record each in scripts/deprecations/relocations.json (moved or removed "
-                    "without a deprecation), or restore it. Re-run with --write-relocations to "
-                    "draft the records below:\n  " + "\n  ".join(vanished),
-                    file=sys.stderr,
-                )
-                for d in drafts:
-                    print(
-                        f"  draft: {d['subject']} -> {d['replacement'] or '(deleted)'}",
-                        file=sys.stderr,
-                    )
+    elif vanished:
+        print(
+            f"WARNING: {len(vanished)} public module(s) present in {prev_tag} are gone "
+            "with no removal record. Downstream tooling will report them as current.\n"
+            "Record each in scripts/deprecations/relocations.json (moved or removed "
+            "without a deprecation), or restore it. Re-run with --write-relocations, which "
+            "also regenerates removals.json, to draft the records below:\n  "
+            + "\n  ".join(vanished),
+            file=sys.stderr,
+        )
+        for d in drafts:
+            print(f"  draft: {d['subject']} -> {d['replacement'] or '(deleted)'}", file=sys.stderr)
     return 0
 
 
