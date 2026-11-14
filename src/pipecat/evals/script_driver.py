@@ -152,6 +152,8 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
 
         if turn.send_after is not None:
             failure = await self._await_send_after(turn.send_after, turn_idx)
+            if failure is None:
+                failure = await self._refuse_talk_over(turn, turn.send_after, turn_idx)
             if failure is not None:
                 return [failure]
         elif turn.user is not None or turn.dtmf is not None:
@@ -221,6 +223,26 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         except EvalHarnessError as e:
             return await self._send_after_failure(send_after, turn_idx, str(e), "error")
         return None
+
+    async def _refuse_talk_over(
+        self, turn: EvalScriptTurn, send_after: EvalSendAfter, turn_idx: int
+    ) -> EvalAssertionFailure | None:
+        """An error, without sending, when the turn would talk over a bot whose speech a streaming STT transcribes.
+
+        A streaming STT's transcripts carry no time of the audio they came
+        from, so what the bot was saying when the send talked over it could
+        pass for its reply (see :class:`~pipecat.evals.client._BotSpeechGate`).
+        """
+        stt = self._client.streaming_bot_stt
+        sends = turn.user is not None or turn.dtmf is not None
+        if stt is None or not sends or not self._stream.bot_speaking:
+            return None
+        reason = (
+            f"the turn talks over the bot, but {stt} streams the bot's speech, so what "
+            "the bot was saying can't be told from its reply; transcribe it with a "
+            "segmented STT, such as DeepgramSegmentedSTTService"
+        )
+        return await self._send_after_failure(send_after, turn_idx, reason, "error")
 
     async def _send_after_failure(
         self,

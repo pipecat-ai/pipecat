@@ -205,8 +205,9 @@ class _BotSpeechGate(FrameProcessor):
     says before it starts speaking again.
 
     Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    any other STT the gate keeps no account of segments and drops nothing, a
+    send waits only for the bot to stop speaking and its open turn to close,
+    and a scripted send that would talk over the bot fails as an error instead.
     """
 
     def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
@@ -564,6 +565,19 @@ class EvalClient:
     def has_user_tts(self) -> bool:
         """Whether text user turns are spoken to the bot rather than sent as text."""
         return self._user_tts is not None
+
+    @property
+    def streaming_bot_stt(self) -> str | None:
+        """The class name of the STT transcribing the bot's speech, when it is not segmented.
+
+        Only a :class:`SegmentedSTTService`'s transcripts can be traced to when
+        their audio began, which is what tells what the bot was saying when a
+        send talked over it from its reply (see :class:`_BotSpeechGate`).
+        ``None`` with a segmented STT, or with none.
+        """
+        if self._bot_stt is None or isinstance(self._bot_stt, SegmentedSTTService):
+            return None
+        return type(self._bot_stt).__name__
 
     @property
     def sends_user_audio(self) -> bool:

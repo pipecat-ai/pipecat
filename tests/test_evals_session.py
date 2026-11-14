@@ -88,6 +88,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -1072,6 +1073,91 @@ class TestHarnessError(unittest.IsolatedAsyncioTestCase):
 
         self.assertLess(time.monotonic() - started, 1)
         self.assertEqual((failure.kind, failure.reason), ("error", "TTS failed"))
+
+
+class _StreamingSTT(STTService):
+    async def run_stt(self, audio: bytes):
+        yield None
+
+
+class _SegmentedSTT(SegmentedSTTService):
+    async def run_stt(self, audio: bytes):
+        yield None
+
+
+class _TalkOverClient(_RepliesClient):
+    """A client whose bot's speech is transcribed by an STT of the given name, streaming or not."""
+
+    def __init__(self, stream: EvalEventStream, streaming_bot_stt: str | None):
+        super().__init__(stream, {"Seven.": [{"type": "llm_response", "text": "Seven it is."}]})
+        self.streaming_bot_stt = streaming_bot_stt
+        self.sent: list[str] = []
+
+    async def send_text(self, text: str):
+        self.sent.append(text)
+        await super().send_text(text)
+
+
+class TestTalkOverNeedsSegmentedSTT(unittest.IsolatedAsyncioTestCase):
+    """A send that talks over the bot needs its speech transcribed by a segmented STT."""
+
+    @staticmethod
+    async def _run(streaming_bot_stt: str | None, *, bot_speaking: bool):
+        stream = _stream()
+        await stream.append({"type": "bot_started_speaking"})
+        if bot_speaking:
+            stream.frame_to_event(BotStartedSpeakingFrame())
+        client = _TalkOverClient(stream, streaming_bot_stt)
+        turn = EvalScriptTurn(
+            user="Seven.",
+            send_after=EvalSendAfter(event="bot_started_speaking", delay_ms=0),
+            expect=[EvalExpectation(event="llm_response", within_ms=5000)],
+        )
+
+        async def on_progress(_):
+            pass
+
+        driver = EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[turn]),
+            default_timeout_ms=5000,
+            client=client,  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+        return await driver.run(), client.sent
+
+    async def test_talking_over_a_bot_a_streaming_stt_transcribes_is_an_error_and_sends_nothing(
+        self,
+    ):
+        failures, sent = await self._run("DeepgramSTTService", bot_speaking=True)
+
+        self.assertEqual([f.kind for f in failures], ["error"])
+        self.assertIn("DeepgramSTTService streams the bot's speech", failures[0].reason)
+        self.assertEqual(sent, [])
+
+    async def test_talking_over_a_bot_a_segmented_stt_transcribes_sends(self):
+        failures, sent = await self._run(None, bot_speaking=True)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(sent, ["Seven."])
+
+    async def test_a_send_after_the_bot_stopped_speaking_sends_whatever_the_stt(self):
+        failures, sent = await self._run("DeepgramSTTService", bot_speaking=False)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(sent, ["Seven."])
+
+    def test_the_client_names_the_bots_stt_only_when_it_is_not_segmented(self):
+        def client(bot_stt):
+            return EvalClient(
+                "ws://localhost:0", stream=_stream(), trace=EvalTrace(), bot_stt=bot_stt
+            )
+
+        self.assertEqual(client(_StreamingSTT()).streaming_bot_stt, "_StreamingSTT")
+        self.assertIsNone(client(_SegmentedSTT()).streaming_bot_stt)
+        self.assertIsNone(client(None).streaming_bot_stt)
 
 
 class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
