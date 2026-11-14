@@ -656,3 +656,58 @@ def test_vanished_module_is_accounted_for_by_a_package_record_or_module_field():
 def test_modules_still_present_are_not_flagged():
     modules = {"pipecat.a", "pipecat.b"}
     assert drem.unrecorded_vanished_modules(modules, set(modules), []) == []
+
+
+# --- Drafting relocations automatically ---------------------------------------
+
+
+def test_public_classes_and_exported_names():
+    src = "from .a import Foo as Bar, Baz\n__all__ = ['Qux']\nclass Public: ...\nclass _Private: ...\n"
+    assert drem._public_classes(src) == ["Public"]
+    assert drem._exported_names(src) == {"Bar", "Baz", "Qux"}
+    assert drem._public_classes("def broken(") == []
+    assert drem._exported_names("def broken(") == set()
+
+
+def test_public_home_walks_up_to_the_shortest_reexporting_package():
+    reexports = {"pkg.a": {"Thing"}, "pkg.a.b": {"Thing"}, "pkg": set()}
+    assert drem._public_home("pkg.a.b.impl", "Thing", reexports) == "pkg.a"
+    assert drem._public_home("pkg.a.b.impl", "Other", reexports) == "pkg.a.b.impl"
+
+
+def test_draft_relocations_tracks_classes_by_name():
+    drafts = drem.draft_relocations(
+        vanished=["pkg.old", "pkg.old.impl"],
+        old_classes={"pkg.old": [], "pkg.old.impl": ["Moved", "Deleted", "Ambiguous"]},
+        homes={"Moved": ["pkg.new.impl"], "Ambiguous": ["pkg.x", "pkg.y"]},
+        reexports={"pkg.new": {"Moved"}},
+        version="2.0.0",
+        old_reexports={"pkg.old": {"Moved"}},
+    )
+    by = {d["subject"]: d for d in drafts}
+    assert set(by) == {"pkg.old", "Moved", "Deleted"}  # ambiguous is left for a human
+    assert by["Moved"]["module"] == "pkg.old"  # the public path users imported from
+    assert by["Moved"]["replacement"] == "pkg.new.Moved"  # re-exported home, not pkg.new.impl
+    assert (by["Deleted"]["relation"], by["Deleted"]["replacement"]) == ("none", "")
+    assert by["pkg.old"]["kind"] == "module" and by["pkg.old"]["replacement"] == "pkg.new"
+    assert all(d["removed_in"] == "2.0.0" and d["deprecated_in"] is None for d in drafts)
+
+
+def test_draft_relocations_one_module_record_per_package_root():
+    drafts = drem.draft_relocations(["pkg.old", "pkg.old.a", "pkg.old.b"], {}, {}, {}, "2.0.0")
+    assert [d["subject"] for d in drafts] == ["pkg.old"]
+    assert drafts[0]["relation"] == "none"
+
+
+def test_drafted_records_pass_validation_and_round_trip(tmp_path):
+    drafts = drem.draft_relocations(
+        ["pkg.old"], {"pkg.old": ["Moved", "Gone"]}, {"Moved": ["pkg.new"]}, {}, "2.0.0"
+    )
+    path = tmp_path / "relocations.json"
+    path.write_text(json.dumps({"_comment": "keep me", "relocations": []}), encoding="utf-8")
+    drem.write_relocations(drafts, path)
+    assert json.loads(path.read_text(encoding="utf-8"))["_comment"] == "keep me"
+    assert (
+        drem.load_relocations(path) == drafts
+    )  # a deletion (relation none) may have no replacement
+    assert drem.compute_removals(None, _dep_registry(), "2.0.0", [], drafts)

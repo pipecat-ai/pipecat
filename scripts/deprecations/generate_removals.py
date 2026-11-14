@@ -36,10 +36,12 @@ is discovered automatically.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -107,8 +109,9 @@ def load_relocations(path: Path = RELOCATIONS_PATH) -> list[dict]:
             )
         if not _VERSION_RE.match(rec["removed_in"] or ""):
             raise ValueError(f"{path.name}: {subject!r} removed_in must be X.Y.Z")
-        if not rec["replacement"] or not rec["message"]:
-            raise ValueError(f"{path.name}: {subject!r} needs a replacement and a message")
+        # A plain deletion (relation "none") has nothing to point at.
+        if not rec["message"] or (not rec["replacement"] and rec["relation"] != "none"):
+            raise ValueError(f"{path.name}: {subject!r} needs a message and a replacement")
     return records
 
 
@@ -269,6 +272,171 @@ def unrecorded_vanished_modules(
     )
 
 
+def module_paths_at_tag(tag: str) -> dict[str, str]:
+    """Public module name -> repo-relative path under ``src/pipecat`` at ``tag``."""
+    proc = _git("ls-tree", "-r", "--name-only", tag, SOURCE_REL)
+    paths = {}
+    for path in proc.stdout.split():
+        name = _module_name(path) if path.endswith(".py") else None
+        if name:
+            paths[name] = path
+    return paths
+
+
+def _public_classes(source: str) -> list[str]:
+    """Top-level public class names defined in ``source`` (empty if it doesn't parse)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    return [n.name for n in tree.body if isinstance(n, ast.ClassDef) and not n.name.startswith("_")]
+
+
+def _exported_names(source: str) -> set[str]:
+    """Names a package ``__init__`` makes importable: re-imports plus ``__all__``."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            names |= {a.asname or a.name for a in node.names}
+        elif isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            if isinstance(node.value, (ast.List, ast.Tuple)):
+                names |= {
+                    e.value
+                    for e in node.value.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                }
+    return names
+
+
+def tree_index() -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+    """Index the working tree: class name -> defining modules, package -> exported names."""
+    homes: dict[str, list[str]] = defaultdict(list)
+    reexports: dict[str, set[str]] = {}
+    for path in sorted(SOURCE_ROOT.rglob("*.py")):
+        module = _module_name(path.relative_to(REPO_ROOT).as_posix())
+        if not module:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for cls in _public_classes(source):
+            homes[cls].append(module)
+        if path.name == "__init__.py":
+            reexports[module] = _exported_names(source)
+    return homes, reexports
+
+
+def _public_home(module: str, name: str, reexports: dict[str, set[str]]) -> str:
+    """Shortest package path that re-exports ``name`` (the import users actually write)."""
+    while "." in module:
+        parent = module.rsplit(".", 1)[0]
+        if name not in reexports.get(parent, set()):
+            break
+        module = parent
+    return module
+
+
+def draft_relocations(
+    vanished: list[str],
+    old_classes: dict[str, list[str]],
+    homes: dict[str, list[str]],
+    reexports: dict[str, set[str]],
+    version: str,
+    old_reexports: dict[str, set[str]] | None = None,
+) -> list[dict]:
+    """Draft ``relocations.json`` records for modules that vanished with no record.
+
+    Each public class that lived in a vanished module is looked up by name in the
+    current tree. Exactly one definition means it moved there; none means it was
+    deleted; several is ambiguous and is left for a human. One ``module`` record per
+    vanished package root covers every submodule path beneath it. Class names, not
+    file renames, are tracked: ``git`` rename detection misses heavily rewritten
+    files and mis-pairs unrelated ones.
+
+    ``old_reexports`` maps each vanished package to the names its ``__init__`` exported,
+    so a record names the public path users imported from, not the defining module.
+
+    These are drafts. A person confirms the replacement and wording in the release PR.
+    """
+    vanished_set = set(vanished)
+    base = {"deprecated_in": None, "removed_in": version, "announced_removed_in": None}
+    classes: list[dict] = []
+    seen: set[str] = set()
+    for module in sorted(vanished_set):
+        for cls in old_classes.get(module, []):
+            candidates = homes.get(cls, [])
+            if cls in seen or len(candidates) > 1:
+                continue
+            seen.add(cls)
+            old = _public_home(module, cls, old_reexports or {})
+            if candidates:
+                new = f"{_public_home(candidates[0], cls, reexports)}.{cls}"
+                relation, replacement = "move", new
+                message = (
+                    f"`{cls}` moved to `{new.rsplit('.', 1)[0]}` in {version}; the old "
+                    f"`{old}` path was removed without a deprecation period."
+                )
+            else:
+                relation, replacement = "none", ""
+                message = f"`{cls}` was removed in {version} without a deprecation period."
+            classes.append(
+                {"subject": cls, "module": old, "kind": "class", **base}
+                | {"relation": relation, "replacement": replacement, "message": message}
+            )
+
+    roots = [
+        m for m in sorted(vanished_set) if not any(m.startswith(o + ".") for o in vanished_set)
+    ]
+    modules = []
+    for root in roots:
+        dests = sorted(
+            {
+                c["replacement"].rsplit(".", 1)[0]
+                for c in classes
+                if c["replacement"] and (c["module"] == root or c["module"].startswith(root + "."))
+            }
+        )
+        message = f"`{root}` was removed in {version} without a deprecation period."
+        if dests:
+            message += " Its contents moved to " + ", ".join(f"`{d}`" for d in dests) + "."
+        modules.append(
+            {"subject": root, "module": root, "kind": "module", **base}
+            | {
+                "relation": "move" if dests else "none",
+                "replacement": ", ".join(dests),
+                "message": message,
+            }
+        )
+    return modules + classes
+
+
+def suggest_relocations(prev_tag: str, vanished: list[str], version: str) -> list[dict]:
+    """``draft_relocations`` fed from ``prev_tag`` and the working tree."""
+    paths = module_paths_at_tag(prev_tag)
+    old_classes: dict[str, list[str]] = {}
+    old_reexports: dict[str, set[str]] = {}
+    for module in vanished:
+        proc = _git("show", f"{prev_tag}:{paths[module]}")
+        source = proc.stdout if proc.returncode == 0 else ""
+        old_classes[module] = _public_classes(source)
+        if paths[module].endswith("__init__.py"):
+            old_reexports[module] = _exported_names(source)
+    homes, reexports = tree_index()
+    return draft_relocations(vanished, old_classes, homes, reexports, version, old_reexports)
+
+
+def write_relocations(records: list[dict], path: Path = RELOCATIONS_PATH) -> None:
+    """Write ``records`` into ``relocations.json``, keeping its envelope and comment."""
+    doc = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    doc.setdefault("schema_version", SCHEMA_VERSION)
+    doc["relocations"] = records
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -279,6 +447,12 @@ def main() -> int:
     parser.add_argument(
         "--previous-tag",
         help="Release tag to diff against (default: the highest vX.Y.Z tag with a registry).",
+    )
+    parser.add_argument(
+        "--write-relocations",
+        action="store_true",
+        help="Draft relocations.json records for modules that vanished with no record, "
+        "then regenerate removals.json. Review the drafts before committing.",
     )
     args = parser.parse_args()
 
@@ -325,13 +499,34 @@ def main() -> int:
             modules_at_tag(prev_tag), modules_in_tree(), removals
         )
         if vanished:
-            print(
-                f"WARNING: {len(vanished)} public module(s) present in {prev_tag} are gone "
-                "with no removal record. Downstream tooling will report them as current.\n"
-                "Record each in scripts/deprecations/relocations.json (moved or removed "
-                "without a deprecation), or restore it:\n  " + "\n  ".join(vanished),
-                file=sys.stderr,
-            )
+            drafts = suggest_relocations(prev_tag, vanished, version)
+            if args.write_relocations:
+                have = {r["subject"] for r in relocations}
+                added = [d for d in drafts if d["subject"] not in have]
+                write_relocations(relocations + added)
+                removals = compute_removals(
+                    prev_registry, current_registry, version, existing, relocations + added
+                )
+                REMOVALS_PATH.write_text(render(build_document(removals)), encoding="utf-8")
+                print(
+                    f"Drafted {len(added)} record(s) into {RELOCATIONS_PATH.name} for "
+                    f"{len(vanished)} vanished module(s). REVIEW them (replacement and wording) "
+                    "before committing."
+                )
+            else:
+                print(
+                    f"WARNING: {len(vanished)} public module(s) present in {prev_tag} are gone "
+                    "with no removal record. Downstream tooling will report them as current.\n"
+                    "Record each in scripts/deprecations/relocations.json (moved or removed "
+                    "without a deprecation), or restore it. Re-run with --write-relocations to "
+                    "draft the records below:\n  " + "\n  ".join(vanished),
+                    file=sys.stderr,
+                )
+                for d in drafts:
+                    print(
+                        f"  draft: {d['subject']} -> {d['replacement'] or '(deleted)'}",
+                        file=sys.stderr,
+                    )
     return 0
 
 

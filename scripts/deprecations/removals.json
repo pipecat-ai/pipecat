@@ -66,7 +66,7 @@
       "announced_removed_in": null,
       "relation": "move",
       "replacement": "pipecat.expressive.processors.tone_reader.PipecatToneReader",
-      "message": "`PipecatToneReader` moved to `pipecat.expressive.processors.tone_reader` in 1.16.0; the old `pipecat.processors.tone.reader` path was removed without a deprecation period (expressive conversation is alpha)."
+      "message": "`PipecatToneReader` moved to `pipecat.expressive.processors.tone_reader` in 1.16.0; the old `pipecat.processors.tone.reader` path was removed without a deprecation period."
     },
     {
       "subject": "PipecatToneReaderModel",
@@ -77,7 +77,7 @@
       "announced_removed_in": null,
       "relation": "move",
       "replacement": "pipecat.classifiers.tone.model.PipecatToneReaderModel",
-      "message": "`PipecatToneReaderModel` moved to `pipecat.classifiers.tone.model` in 1.16.0; the old `pipecat.processors.tone.reader` path was removed without a deprecation period (expressive conversation is alpha)."
+      "message": "`PipecatToneReaderModel` moved to `pipecat.classifiers.tone.model` in 1.16.0; the old `pipecat.processors.tone.reader.model` path was removed without a deprecation period."
     },
     {
       "subject": "PipecatToneTagger",
@@ -88,7 +88,18 @@
       "announced_removed_in": null,
       "relation": "move",
       "replacement": "pipecat.expressive.processors.tone_tagger.PipecatToneTagger",
-      "message": "`PipecatToneTagger` moved to `pipecat.expressive.processors.tone_tagger` in 1.16.0; `pipecat.processors.tone` was removed without a deprecation period (expressive conversation is alpha)."
+      "message": "`PipecatToneTagger` moved to `pipecat.expressive.processors.tone_tagger` in 1.16.0; the old `pipecat.processors.tone.tagger` path was removed without a deprecation period."
+    },
+    {
+      "subject": "PipecatToneTaggerModel",
+      "module": "pipecat.processors.tone.tagger.model",
+      "kind": "class",
+      "deprecated_in": null,
+      "removed_in": "1.16.0",
+      "announced_removed_in": null,
+      "relation": "move",
+      "replacement": "pipecat.expressive.processors.tone_tagger.model.PipecatToneTaggerModel",
+      "message": "`PipecatToneTaggerModel` moved to `pipecat.expressive.processors.tone_tagger.model` in 1.16.0; the old `pipecat.processors.tone.tagger.model` path was removed without a deprecation period."
     },
     {
       "subject": "pipecat.processors.tone",
@@ -98,8 +109,8 @@
       "removed_in": "1.16.0",
       "announced_removed_in": null,
       "relation": "move",
-      "replacement": "pipecat.expressive.processors.tone_reader, pipecat.expressive.processors.tone_tagger, pipecat.classifiers.tone.model",
-      "message": "`pipecat.processors.tone` was removed in 1.16.0 without a deprecation period (expressive conversation is alpha). Its contents moved to `pipecat.expressive.processors.tone_reader`, `pipecat.expressive.processors.tone_tagger` and `pipecat.classifiers.tone.model`."
+      "replacement": "pipecat.classifiers.tone.model, pipecat.expressive.processors.tone_reader, pipecat.expressive.processors.tone_tagger, pipecat.expressive.processors.tone_tagger.model",
+      "message": "`pipecat.processors.tone` was removed in 1.16.0 without a deprecation period. Its contents moved to `pipecat.classifiers.tone.model`, `pipecat.expressive.processors.tone_reader`, `pipecat.expressive.processors.tone_tagger`, `pipecat.expressive.processors.tone_tagger.model`."
     },
     {
       "subject": "AICFilter.create_vad_analyzer",
