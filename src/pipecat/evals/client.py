@@ -21,7 +21,7 @@ import mimetypes
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -173,13 +173,13 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
         try:
             async for frame in run_stt(audio):
                 if isinstance(frame, TranscriptionFrame):
+                    # Every field the frame was built with, so none is dropped.
                     frame = _BotSegmentTranscriptionFrame(
-                        text=frame.text,
-                        user_id=frame.user_id,
-                        timestamp=frame.timestamp,
-                        language=frame.language,
-                        result=frame.result,
-                        finalized=frame.finalized,
+                        **{
+                            f.name: getattr(frame, f.name)
+                            for f in fields(TranscriptionFrame)
+                            if f.init
+                        },
                         segment_started_at=started_at,
                     )
                 yield frame

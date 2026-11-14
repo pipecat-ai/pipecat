@@ -20,6 +20,7 @@ Two layers:
 
 import asyncio
 import base64
+import dataclasses
 import json
 import socket
 import tempfile
@@ -60,6 +61,7 @@ from pipecat.evals.scenario import (
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
 from pipecat.evals.tts import CachingTTSService
+from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -79,6 +81,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     TextType,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSSpeakFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
@@ -88,8 +91,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.ai_service import AIService
+from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
+from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -890,6 +896,62 @@ class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
         down, _ = await run_test(sink, frames_to_send=[_BotSegmentTranscribedFrame()])
         self.assertTrue(await stream.wait_bot_transcribed(0.01))
         self.assertFalse(any(isinstance(f, _BotSegmentTranscribedFrame) for f in down))
+
+
+class _TwoSpeakerSTT(SegmentedSTTService):
+    """A segmented STT whose every segment holds two diarized speaker runs."""
+
+    async def run_stt(self, audio: bytes):
+        yield TranscriptionFrame("Hi there.", "", "", speaker=TranscriptionSpeaker("0", 1))
+        yield TranscriptionFrame("Hello.", "", "", speaker=TranscriptionSpeaker("1", 2))
+
+
+class TestTagBotSegmentsKeepsSpeakers(unittest.IsolatedAsyncioTestCase):
+    """A tagged segment's speaker runs keep their speakers, so only the last is finalized."""
+
+    async def test_two_speaker_runs_keep_their_speakers_and_only_the_last_is_finalized(self):
+        stt = _TwoSpeakerSTT()
+        _tag_bot_segments(stt, deque([1.0]))
+        pushed: list = []
+
+        async def record(_self, frame, direction=None):
+            pushed.append(frame)
+
+        with patch.object(AIService, "push_frame", record):
+            await stt._push_segment_frames(b"audio")
+
+        runs = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+        self.assertEqual(
+            [(f.text, f.speaker.label if f.speaker else None, f.finalized) for f in runs],
+            [("Hi there.", "0", False), ("Hello.", "1", True)],
+        )
+
+    async def test_a_tagged_transcript_keeps_every_field_it_was_built_with(self):
+        original = TranscriptionFrame(
+            "Hi there.",
+            "bot",
+            "2026-11-14T00:00:00Z",
+            Language.EN,
+            result={"raw": True},
+            finalized=True,
+            speaker=TranscriptionSpeaker("0", 1),
+            perception=[PerceptionSignal("tone", labels=[("calm", 0.9)])],
+        )
+
+        class _OneFrameSTT(SegmentedSTTService):
+            async def run_stt(self, audio: bytes):
+                yield original
+
+        stt = _OneFrameSTT()
+        _tag_bot_segments(stt, deque([1.0]))
+        tagged = [f async for f in stt.run_stt(b"audio")][0]
+
+        self.assertIsInstance(tagged, _BotSegmentTranscriptionFrame)
+        self.assertEqual(tagged.segment_started_at, 1.0)
+        for f in dataclasses.fields(TranscriptionFrame):
+            if f.init:
+                with self.subTest(field=f.name):
+                    self.assertEqual(getattr(tagged, f.name), getattr(original, f.name))
 
 
 class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
