@@ -3435,6 +3435,17 @@
       "location": "pipecat/services/gradium/tts.py"
     },
     {
+      "subject": "GradiumTTSService.aggregate_sentences",
+      "module": "pipecat.services.gradium.tts",
+      "kind": "parameter",
+      "deprecated_in": "0.0.104",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "text_aggregation_mode",
+      "message": "Use ``text_aggregation_mode`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/services/gradium/tts.py"
+    },
+    {
       "subject": "GradiumTTSService.model",
       "module": "pipecat.services.gradium.tts",
       "kind": "parameter",
