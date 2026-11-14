@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,6 +26,8 @@ from pipecat.services.openai.responses.llm import (
     OpenAIResponsesLLMService,
 )
 from pipecat.services.openrouter.llm import OpenRouterLLMService
+from pipecat.utils.asyncio.task_manager import TaskManager
+from tests.frame_processor_helpers import frame_processor_setup
 
 
 def _mock_adapter() -> MagicMock:
@@ -378,6 +381,96 @@ async def test_aws_bedrock_run_inference_client_exception():
 
 
 @pytest.mark.asyncio
+async def test_aws_bedrock_shares_one_client_once_set_up():
+    """Test AWS Bedrock keeps nothing open before setup(), then shares one client."""
+    service = AWSBedrockLLMService(
+        aws_access_key="test", aws_secret_key="test", aws_region="us-east-1"
+    )
+    mock_adapter = _mock_adapter()
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=[{"role": "user", "content": [{"text": "Hi"}]}],
+        system=[],
+        tools=[],
+        tool_choice=None,
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_client = AsyncMock()
+    mock_client.converse.return_value = {"output": {"message": {"content": [{"text": "Hello"}]}}}
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+    with patch.object(
+        service._aws_session, "create_client", return_value=mock_context_manager
+    ) as create:
+        # Outside a pipeline nothing would close a kept client: one per request.
+        await service.run_inference(MagicMock(spec=LLMContext))
+        await service.run_inference(MagicMock(spec=LLMContext))
+        assert create.call_count == 2
+
+        await service.setup(frame_processor_setup(TaskManager()))
+        await service.run_inference(MagicMock(spec=LLMContext))
+        await service.run_inference(MagicMock(spec=LLMContext))
+        assert create.call_count == 3
+        assert create.call_args.kwargs["config"].connector_args["keepalive_timeout"] == 3600
+
+        await service.cleanup()
+        assert mock_context_manager.__aexit__.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_closes_an_interrupted_stream_and_keeps_the_client():
+    """Test AWS Bedrock closes a stream cut short and answers again on the same client."""
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
+    mock_adapter = _mock_adapter()
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=[{"role": "user", "content": [{"text": "Hi"}]}],
+        system=[],
+        tools=[],
+        tool_choice=None,
+    )
+    mock_adapter.get_messages_for_logging.return_value = []
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+    service.push_error = AsyncMock()
+    service._push_llm_text = AsyncMock()
+
+    interrupted = MagicMock()
+    interrupted.__aiter__.return_value = [
+        {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}}
+    ]
+    answered = MagicMock()
+    answered.__aiter__.return_value = [
+        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Hello"}}}
+    ]
+    mock_client = AsyncMock()
+    mock_client.converse_stream.side_effect = [{"stream": interrupted}, {"stream": answered}]
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+    with patch.object(
+        service._aws_session, "create_client", return_value=mock_context_manager
+    ) as create:
+        await service.setup(frame_processor_setup(TaskManager()))
+        # An interruption cancels the task while the first event is handled.
+        service.stop_ttfb_metrics = AsyncMock(side_effect=asyncio.CancelledError)
+        with pytest.raises(asyncio.CancelledError):
+            await service._process_context(MagicMock(spec=LLMContext))
+        interrupted.close.assert_called_once()
+
+        service.stop_ttfb_metrics = AsyncMock()
+        await service._process_context(MagicMock(spec=LLMContext))
+
+    service._push_llm_text.assert_awaited_once_with("Hello")
+    service.push_error.assert_not_called()
+    assert mock_client.converse_stream.await_count == 2
+    assert create.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_aws_bedrock_streaming_captures_all_tool_calls():
     """Test AWS Bedrock streaming captures every parallel tool call, not just the last."""
     service = AWSBedrockLLMService(
@@ -427,9 +520,8 @@ async def test_aws_bedrock_streaming_captures_all_tool_calls():
         {"messageStop": {"stopReason": "tool_use"}},
     ]
 
-    async def fake_stream():
-        for event in stream_events:
-            yield event
+    stream = MagicMock()
+    stream.__aiter__.return_value = stream_events
 
     mock_client = AsyncMock()
     mock_context_manager = AsyncMock()
@@ -441,7 +533,7 @@ async def test_aws_bedrock_streaming_captures_all_tool_calls():
 
     with (
         patch.object(service._aws_session, "create_client", return_value=mock_context_manager),
-        patch.object(service, "_create_converse_stream", return_value={"stream": fake_stream()}),
+        patch.object(service, "_create_converse_stream", return_value={"stream": stream}),
     ):
         await service._process_context(mock_context)
 
