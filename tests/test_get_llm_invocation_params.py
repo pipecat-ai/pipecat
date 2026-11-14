@@ -71,6 +71,7 @@ For BaseLLMAdapter helpers:
 """
 
 import base64
+import copy
 import subprocess
 import sys
 import unittest
@@ -3156,6 +3157,72 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase
         self.assertEqual(len(params["input"]), 2)
         self.assertEqual(params["input"][0], {"role": "user", "content": "Hello"})
         self.assertEqual(params["input"][1], {"role": "assistant", "content": "Hi there!"})
+
+    async def test_assistant_message_phase(self):
+        """Assistant text retains its phase when replayed as Responses input."""
+        for phase in ("commentary", "final_answer"):
+            for content in ("Let me check.", [{"type": "text", "text": "Let me check."}]):
+                with self.subTest(phase=phase, content=content):
+                    message = {"role": "assistant", "content": content, "phase": phase}
+                    original = copy.deepcopy(message)
+                    context = LLMContext(messages=[message])
+                    params = await self.adapter.get_llm_invocation_params(context)
+                    expected_content = (
+                        content
+                        if isinstance(content, str)
+                        else [{"type": "input_text", "text": "Let me check."}]
+                    )
+                    self.assertEqual(
+                        params["input"],
+                        [{"role": "assistant", "content": expected_content, "phase": phase}],
+                    )
+                    self.assertEqual(context.messages, [original])
+
+    async def test_assistant_null_phase(self):
+        """A null phase keeps the existing phase-less input representation."""
+        context = LLMContext(messages=[{"role": "assistant", "content": "Hello", "phase": None}])
+        params = await self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(params["input"], [{"role": "assistant", "content": "Hello"}])
+
+    async def test_assistant_phases_around_tool_call(self):
+        """Phases stay on separate assistant messages, not on tool items or user text."""
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Check the stock."},
+                {"role": "assistant", "content": "Checking.", "phase": "commentary"},
+                {
+                    "role": "assistant",
+                    "phase": "commentary",
+                    "tool_calls": [
+                        {
+                            "id": "call_stock",
+                            "type": "function",
+                            "function": {"name": "check_stock", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_stock", "content": "Available"},
+                {"role": "assistant", "content": "In stock.", "phase": "final_answer"},
+                {"role": "assistant", "content": "Anything else?"},
+            ]
+        )
+        params = await self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(
+            params["input"],
+            [
+                {"role": "user", "content": "Check the stock."},
+                {"role": "assistant", "content": "Checking.", "phase": "commentary"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_stock",
+                    "name": "check_stock",
+                    "arguments": "{}",
+                },
+                {"type": "function_call_output", "call_id": "call_stock", "output": "Available"},
+                {"role": "assistant", "content": "In stock.", "phase": "final_answer"},
+                {"role": "assistant", "content": "Anything else?"},
+            ],
+        )
 
     async def test_system_role_converted_to_developer(self):
         """System role messages are converted to developer role."""
