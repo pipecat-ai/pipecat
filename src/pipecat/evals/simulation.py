@@ -81,10 +81,14 @@ Fields:
     turns, ``duration`` the conversation's seconds from its first line to the
     hang-up, ``words`` the longest bot reply in words (each Chinese or Japanese
     character counts as one), and ``latency`` the slowest
-    reply in seconds: from the persona's send to the reply's first token in
-    text mode, from the bot noticing the persona stop to its first spoken
-    sentence in audio mode, which a failure's reason spells out, since the two
-    are not comparable. The per-reply measures bound every reply.
+    reply in seconds, each end following its own side's modality: from the
+    persona's send for text input, or the bot noticing the persona stop for
+    spoken input, to the reply's first token for a text judge, or the bot
+    starting to speak for an audio judge. A failure's reason spells out which,
+    since they are not comparable. For spoken input this leaves out the
+    bot's end-of-turn wait (its VAD ``stop_secs``, any smart-turn wait), so
+    it isn't voice-to-voice latency, which ``UserBotLatencyObserver`` reports
+    on the bot's side. The per-reply measures bound every reply.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and
