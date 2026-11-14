@@ -1119,18 +1119,31 @@ async def test_agent_text_drops_the_words_the_caller_never_heard(monkeypatch):
 @pytest.mark.asyncio
 async def test_agent_text_still_sends_speech_the_interruption_cannot_stop(monkeypatch):
     service, observer, websocket = _agent_text_service()
-    # Uninterruptible speech waits in `asyncio.sleep`, which the far-future pts
-    # would make a real wait; the interruption has to end it instead.
-    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    playback_due = asyncio.Event()
 
-    await observer.on_push_frame(
-        _pushed(_word("Transferring you now.", pts=10_000_000_000, interruptible=False))
-    )
-    await observer.on_push_frame(_pushed(InterruptionFrame()))
-    await _drain(service)
+    async def wait_until_playback(awaitable, timeout):
+        awaitable.close()
+        await playback_due.wait()
+        raise TimeoutError
 
-    # Uninterruptible audio keeps playing, so the caller hears these words.
-    assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == ["Transferring you now."]
+    monkeypatch.setattr(asyncio, "wait_for", wait_until_playback)
+
+    try:
+        await observer.on_push_frame(
+            _pushed(_word("Transferring you now.", pts=10_000_000_000, interruptible=False))
+        )
+        await _real_wait_for(_wait_for_agent_text_dequeue(service), timeout=1)
+        await observer.on_push_frame(_pushed(InterruptionFrame()))
+        assert _sent_payloads(websocket) == []
+
+        playback_due.set()
+        await _drain(service)
+
+        assert [json.loads(p)["text"] for p in _sent_payloads(websocket)] == [
+            "Transferring you now."
+        ]
+    finally:
+        await service._stop_agent_text_observer()
 
 
 @pytest.mark.asyncio
@@ -1150,13 +1163,20 @@ async def test_agent_text_closes_the_turn_on_an_interruption():
     ]
 
 
+async def _wait_for_agent_text_dequeue(service):
+    while not service._agent_text_words.empty():
+        await asyncio.sleep(0)
+
+
 @pytest.mark.asyncio
 async def test_agent_text_scheduled_words_are_dropped_at_teardown():
     service, observer, websocket = _agent_text_service()
 
     await observer.on_push_frame(_pushed(_word("Hello", pts=10_000_000_000)))
     assert service._agent_text_sender
+    await asyncio.wait_for(_wait_for_agent_text_dequeue(service), timeout=1)
     await service._stop_agent_text_observer()
+    await _drain(service)
 
     assert not service._agent_text_sender
     assert _sent_payloads(websocket) == []
@@ -1191,20 +1211,64 @@ async def test_agent_text_drops_the_words_timed_against_the_previous_connection(
     assert _sent_payloads(websocket) == []
 
 
+@pytest.mark.parametrize("interruptible", [False, True])
 @pytest.mark.asyncio
-async def test_agent_text_drops_even_uninterruptible_words_on_a_reconnect(monkeypatch):
+async def test_agent_text_drops_dequeued_words_on_a_reconnect(monkeypatch, interruptible):
     service, observer, websocket = _agent_text_service()
-    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    config_started = asyncio.Event()
+    finish_config = asyncio.Event()
 
-    # Uninterruptible speech ignores the turn ending, so only dropping the queue
-    # keeps it off a connection that never carried the audio it was timed for.
-    await observer.on_push_frame(
-        _pushed(_word("Transferring you now.", pts=10_000_000_000, interruptible=False))
+    async def wait_on_config(payload):
+        if "model" in json.loads(payload):
+            config_started.set()
+            await finish_config.wait()
+
+    replacement = _FakeWebsocket([], send_side_effect=wait_on_config)
+    replacement.ping = AsyncMock()
+    clock = SimpleNamespace(get_time=lambda: 0)
+    monkeypatch.setattr(service, "get_clock", lambda: clock)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return replacement
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
     )
-    service._drop_agent_text_words()
-    await _drain(service)
 
-    assert _sent_payloads(websocket) == []
+    try:
+        await observer.on_push_frame(
+            _pushed(_word("Old active", pts=60_000_000_000, interruptible=interruptible))
+        )
+        await asyncio.wait_for(_wait_for_agent_text_dequeue(service), timeout=1)
+        await observer.on_push_frame(
+            _pushed(_word("Old queued", pts=61_000_000_000, interruptible=False))
+        )
+
+        reconnect = asyncio.create_task(service._reconnect_websocket(1))
+        try:
+            await asyncio.wait_for(config_started.wait(), timeout=1)
+            clock.get_time = lambda: 62_000_000_000
+            await observer.on_push_frame(
+                _pushed(_word("While configuring", pts=62_000_000_000, interruptible=False))
+            )
+            await asyncio.sleep(0)
+        finally:
+            finish_config.set()
+            assert await asyncio.wait_for(reconnect, timeout=1)
+        assert websocket.closed
+
+        clock.get_time = lambda: 63_000_000_000
+        await observer.on_push_frame(_pushed(_word("New due", pts=63_000_000_000)))
+        await _drain(service)
+        await observer.on_push_frame(_pushed(BotStoppedSpeakingFrame()))
+
+        assert _sent_payloads(websocket) == []
+        assert [json.loads(payload) for payload in _sent_payloads(replacement)[1:]] == [
+            {"type": "agent_text", "text": "New due", "end_of_segment": False},
+            {"type": "agent_text", "text": "", "end_of_segment": True},
+        ]
+    finally:
+        await service._stop_agent_text_observer()
 
 
 @pytest.mark.asyncio
