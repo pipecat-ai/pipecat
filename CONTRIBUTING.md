@@ -6,35 +6,61 @@ We encourage community-maintained integrations! Please see our [Community Integr
 **Want to contribute to Pipecat core?**
 We welcome contributions of all kinds! Your help is appreciated. Follow these steps to get involved:
 
-1. **Fork this repository**: Start by forking the Pipecat Documentation repository to your GitHub account.
+1. **Start with an issue**: Find or open an issue describing the bug or change. For your first contribution, wait for a maintainer to accept it (see [Pull Request Requirements](#pull-request-requirements) below).
 
-2. **Clone the repository**: Clone your forked repository to your local machine.
+2. **Fork this repository**: Fork the Pipecat repository to your GitHub account.
+
+3. **Clone the repository**: Clone your forked repository to your local machine.
    ```bash
    git clone https://github.com/your-username/pipecat
    ```
-3. **Create a branch**: For your contribution, create a new branch.
+4. **Create a branch**: For your contribution, create a new branch.
    ```bash
    git checkout -b your-branch-name
    ```
-4. **Make your changes**: Edit or add files as necessary.
-5. **Add a changelog entry**: Create a changelog fragment file (see [Changelog Entries](#changelog-entries) below).
-6. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
-7. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
+5. **Make your changes**: Edit or add files as necessary.
+6. **Add a changelog entry**: Create a changelog fragment file (see [Changelog Entries](#changelog-entries) below).
+7. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
+8. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
 
 ```bash
 git commit -m "Description of your changes"
 ```
 
-8. **Push your changes**: Push your branch to your forked repository.
+9. **Push your changes**: Push your branch to your forked repository.
 
 ```bash
 git push origin your-branch-name
 ```
 
-9. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
-   > Important: Describe the changes you've made clearly!
+10. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo, and link the accepted issue in the description (for example, `Fixes #1234`).
+    > Important: Describe the changes you've made clearly!
 
 Our maintainers will review your PR, and once everything is good, your contributions will be merged!
+
+## Pull Request Requirements
+
+Every pull request from a first-time contributor must fix an **accepted issue**: an issue a maintainer has labeled `accepted`, `good first issue` or `help wanted`. Agreeing on the problem before anyone writes code keeps your work from being turned down after the fact, and keeps review time for changes the project needs.
+
+- **Bugs**: the issue needs a way for us to reproduce the bug in a running bot.
+- **Features and behavior changes**: the issue should describe the use case and the proposed change, so a maintainer can agree on the approach before you build it.
+- **Markdown-only changes** (READMEs, guides, this file) can be submitted without an issue. Typo fixes in code or docstrings need an issue like any other change.
+
+Pull requests that don't link an accepted issue are closed automatically, with a comment pointing here. Once the issue is accepted, reopen the PR or open a new one. A maintainer can also label the pull request itself `accepted` to keep it open.
+
+Once you have a pull request merged into Pipecat, you no longer need an accepted issue first. We still ask you to open one for larger changes, so the approach can be agreed before you build it.
+
+Contributors without write access can have up to 5 pull requests open at a time. We review contributions one at a time, and a batch of PRs opened at once doesn't get reviewed faster. Regular contributors can ask a maintainer to lift the limit.
+
+## AI-Assisted Contributions
+
+AI tools are welcome for issues and pull requests alike. What we require is a person who stands behind the contribution:
+
+- For an issue, you observed the behavior yourself.
+- For a pull request, you understand the change, you ran it, and you checked that it fixes the problem in the accepted issue.
+- You follow the review through. An agent can help with replies and changes, but you read and stand behind what it posts.
+
+Contributions submitted in bulk or by an automated agent without that involvement are closed without review. Repeat submissions of this kind may lead to being blocked from the repository.
 
 ## Filing Bug Reports
 
@@ -42,22 +68,13 @@ A good bug report is one a maintainer can act on. The single most useful thing y
 
 ### What we require
 
-- A minimal reproducible example (runnable code, not just prose). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
-- Confirmation that you reproduced the issue yourself on the latest Pipecat release (or `main`).
+- A minimal reproducible example (runnable code, not just prose). If you plan to submit a fix yourself, it needs to reproduce the bug in a running bot; see [Pull Request Requirements](#pull-request-requirements). If the bug truly can't be captured in code (for example, it only shows up on rare live calls), say so and include everything you have: logs, timestamps, session IDs, and your pipeline setup.
+- Confirmation that you reproduced the issue yourself on the latest Pipecat release (or `main`). This applies to reports written with AI tools too; see [AI-Assisted Contributions](#ai-assisted-contributions).
 
 ### What gets your report looked at faster
 
 - A failing [behavioral eval](src/pipecat/evals/) scenario that demonstrates the bug.
 - An audio recording, when the bug is audible (interruptions, latency, garbled audio, wrong turn-taking).
-
-### AI-assisted reports
-
-Using AI tools to help write a report is fine. Submitting AI output you haven't verified is not. If you file a report:
-
-- You must have observed the behavior yourself.
-- You must be able to personally answer follow-up questions about it.
-
-Reports that appear machine-generated and unverified may be closed with a single request for justification. Repeat submissions of unverified reports may lead to being blocked from the repository.
 
 ### Triage of incomplete reports
 
