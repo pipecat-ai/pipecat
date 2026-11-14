@@ -166,6 +166,10 @@ class LiveKitParams(TransportParams):
             pipeline that runs a single STT and VAD should only receive one of them.
             When False, the participants' audio is mixed into a single stream of
             ``InputAudioRawFrame``s.
+        audio_in_10ms_chunks: Duration of each incoming audio frame, in 10 ms chunks.
+            LiveKit delivers participant audio at the input sample rate in frames of
+            this size. Every frame crosses the whole pipeline, so smaller frames cost
+            more CPU.
         audio_out_queue_size_ms: Buffer size of the outgoing audio source, in milliseconds
             (LiveKit's default is 1000).
         video_out_max_bitrate: Maximum bitrate of the published video track, in bits
@@ -174,6 +178,7 @@ class LiveKitParams(TransportParams):
     """
 
     audio_in_user_tracks: bool = True
+    audio_in_10ms_chunks: int = 2
     audio_out_queue_size_ms: int = 1000
     video_out_max_bitrate: int | None = None
 
@@ -306,6 +311,7 @@ class LiveKitTransportClient:
         self._task_manager = setup.task_manager
         self._room = rtc.Room(loop=self._task_manager.get_event_loop())
 
+        self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or setup.audio_out_sample_rate
 
         # Set up room event handlers
@@ -771,7 +777,12 @@ class LiveKitTransportClient:
             self._audio_tracks[participant.identity] = track
             # Nothing reads ``_audio_queue`` without audio input.
             if self._params.audio_in_enabled:
-                audio_stream = rtc.AudioStream(track)
+                audio_stream = rtc.AudioStream(
+                    track,
+                    sample_rate=self._in_sample_rate,
+                    num_channels=self._params.audio_in_channels,
+                    frame_size_ms=self._params.audio_in_10ms_chunks * 10,
+                )
                 task = self._task_manager.create_task(
                     self._process_audio_stream(audio_stream, participant.identity),
                     f"{self}::_process_audio_stream",
@@ -1275,7 +1286,9 @@ class LiveKitInputTransport(BaseInputTransport):
         """Mix a participant's audio into the room's stream and push what is ready."""
         if not self._mixer:
             self._mixer = _ParticipantAudioMixer(
-                sample_rate=audio_frame.sample_rate, num_channels=audio_frame.num_channels
+                sample_rate=audio_frame.sample_rate,
+                num_channels=audio_frame.num_channels,
+                chunk_ms=self._params.audio_in_10ms_chunks * 10,
             )
         for chunk in self._mixer.add(participant_id, audio_frame.data.tobytes()):
             audio = await self._mixed_resampler.resample(
