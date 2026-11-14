@@ -83,6 +83,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system_instruction: str | None = None,
         ensure_last_message_is_user: bool = False,
         system_prompt_cache_ttl: AnthropicCacheTTL | None = None,
+        mid_conversation_system: bool = False,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
@@ -95,6 +96,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 when the converted message list ends with an assistant message.
                 Required by models without assistant-prefill support, which
                 reject requests ending with an assistant message.
+            mid_conversation_system: Whether the target model accepts
+                mid-conversation ``{"role": "system"}`` messages. When True,
+                later system/developer messages that follow a user message and
+                are last or followed by an assistant turn keep the system
+                role. When False, they are converted to user messages as
+                before. Callers should enable this only for models documented
+                to support the feature.
             system_prompt_cache_ttl: Lifetime of the system prompt's cache
                 entry when prompt caching is enabled. ``None`` uses Anthropic's
                 default of 5 minutes.
@@ -104,7 +112,9 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """
         await self.prepare_file_content(context)
         converted = self._from_universal_context_messages(
-            self.get_messages(context), system_instruction=system_instruction
+            self.get_messages(context),
+            system_instruction=system_instruction,
+            mid_conversation_system=mid_conversation_system,
         )
         if ensure_last_message_is_user:
             self._ensure_last_message_is_user(converted.messages)
@@ -185,6 +195,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         universal_context_messages: list[LLMContextMessage],
         *,
         system_instruction: str | None = None,
+        mid_conversation_system: bool = False,
     ) -> ConvertedMessages:
         system = ANTHROPIC_NOT_GIVEN
 
@@ -210,11 +221,33 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         except Exception as e:
             raise LLMContextConversionError(e) from e
 
-        # Convert any subsequent "system"/"developer"-role messages to "user"-role
-        # messages, as Anthropic doesn't support system or developer input messages.
-        for message in messages:
-            if message["role"] in ("system", "developer"):
-                message["role"] = "user"
+        # When the target model supports mid-conversation system messages,
+        # keep subsequent "system"/"developer"-role messages as Anthropic
+        # system messages where the API's placement rules allow it: supported
+        # models accept {"role": "system"} when it follows a user message and
+        # is last or followed by an assistant turn. Otherwise fall back to
+        # converting them to "user"-role messages, as before. Runs of
+        # consecutive system/developer messages are decided together so a
+        # kept run stays contiguous (the merge pass below then combines it
+        # into one message).
+        i = 0
+        while i < len(messages):
+            if messages[i]["role"] not in ("system", "developer"):
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(messages) and messages[j + 1]["role"] in ("system", "developer"):
+                j += 1
+            prev_role = messages[i - 1]["role"] if i > 0 else None
+            next_role = messages[j + 1]["role"] if j + 1 < len(messages) else None
+            keep_as_system = (
+                mid_conversation_system and prev_role == "user" and next_role in ("assistant", None)
+            )
+            for k in range(i, j + 1):
+                # "developer" maps to Anthropic's "system" role either way;
+                # the fallback keeps the historical "user" conversion.
+                messages[k]["role"] = "system" if keep_as_system else "user"
+            i = j + 1
 
         # Merge consecutive messages with the same role.
         i = 0
