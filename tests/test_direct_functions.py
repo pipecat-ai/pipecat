@@ -6,7 +6,11 @@
 
 import asyncio
 import unittest
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Literal, TypedDict
+
+from pydantic import BaseModel
 
 from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.services.llm_service import FunctionCallParams
@@ -243,6 +247,103 @@ class TestDirectFunction(unittest.TestCase):
         self.assertIs(called["params"], params)
         self.assertEqual(called["name"], "Alice")
         self.assertEqual(called["age"], 30)
+
+
+class Address(BaseModel):
+    city: str
+    zip_code: str | None = None
+
+
+@dataclass
+class Window:
+    start: str
+    days: int = 1
+
+
+class Unit(Enum):
+    C = "celsius"
+    F = "fahrenheit"
+
+
+class TestStructuredParams(unittest.TestCase):
+    """Models and dataclasses used as parameters keep their own field rules."""
+
+    def test_model_and_dataclass_fields_with_defaults_are_optional(self):
+        async def my_function(params: FunctionCallParams, addr: Address, window: Window):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+
+        # Both expose __annotations__, which used to make them look like
+        # TypedDicts and mark every field required.
+        self.assertEqual(func.properties["addr"]["required"], ["city"])
+        self.assertEqual(func.properties["window"]["required"], ["start"])
+        self.assertEqual(func.properties["window"]["properties"]["days"], {"type": "integer"})
+
+    def test_model_and_dataclass_params_are_required_arguments(self):
+        async def my_function(params: FunctionCallParams, addr: Address, window: Window):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        self.assertEqual(func.required, ["addr", "window"])
+
+    def test_invoke_converts_dicts_into_models_and_dataclasses(self):
+        called = {}
+
+        async def my_function(params: FunctionCallParams, addr: Address, window: Window):
+            called["addr"] = addr
+            called["window"] = window
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        asyncio.run(
+            func.invoke(args={"addr": {"city": "Pune"}, "window": {"start": "mon"}}, params=None)
+        )
+
+        self.assertEqual(called["addr"], Address(city="Pune"))
+        self.assertIsNone(called["addr"].zip_code)
+        # The default applies when the model leaves the field out.
+        self.assertEqual(called["window"], Window(start="mon"))
+
+    def test_invoke_converts_enum_and_literal_values(self):
+        called = {}
+
+        async def my_function(
+            params: FunctionCallParams, unit: Unit, mode: Literal["fast", "slow"]
+        ):
+            called["unit"] = unit
+            called["mode"] = mode
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        asyncio.run(func.invoke(args={"unit": "fahrenheit", "mode": "slow"}, params=None))
+
+        self.assertIs(called["unit"], Unit.F)
+        self.assertEqual(called["mode"], "slow")
+
+    def test_fixed_length_tuple_describes_each_item(self):
+        async def my_function(params: FunctionCallParams, pair: tuple[int, str]):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        # The first item's schema used to describe the whole array.
+        self.assertEqual(
+            func.properties["pair"],
+            {
+                "type": "array",
+                "prefixItems": [{"type": "integer"}, {"type": "string"}],
+                "minItems": 2,
+                "maxItems": 2,
+            },
+        )
+
+    def test_homogeneous_tuple_and_list_share_one_item_schema(self):
+        async def my_function(params: FunctionCallParams, pair: tuple[int, ...], tags: list[str]):
+            return {"status": "success"}, None
+
+        func = DirectFunctionWrapper(function=my_function)
+        self.assertEqual(func.properties["pair"], {"type": "array", "items": {"type": "integer"}})
+        self.assertEqual(func.properties["tags"], {"type": "array", "items": {"type": "string"}})
 
 
 if __name__ == "__main__":
