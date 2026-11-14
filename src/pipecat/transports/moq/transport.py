@@ -19,6 +19,7 @@ import asyncio
 import inspect
 import re
 import secrets
+import sys
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -446,9 +447,12 @@ class MOQParams(TransportParams):
             incoming MOQ sessions instead of dialing a relay.
         bind: Local UDP socket bind address. In serve mode it's the
             listen address (e.g. ``"[::]:4080"``), defaulting to
-            ``"[::]:<port>"`` from the constructor's port. In client mode
-            it's the source address to dial from; unset binds an
-            ephemeral port.
+            ``"[::]:<port>"`` from the constructor's port on POSIX (where
+            ``[::]`` is dual-stack) and to ``0.0.0.0:<port>`` on Windows,
+            where ``[::]`` binds IPv6-only (IPV6_V6ONLY defaults on and
+            moq-rs can't clear it) and IPv4 QUIC clients would get
+            ERR_CONNECTION_RESET. In client mode it's the source address
+            to dial from; unset binds an ephemeral port.
         serve_bind: Serve-mode listen address.
 
             .. deprecated:: 1.8.0
@@ -2318,7 +2322,28 @@ class MOQTransport(BaseTransport):
         )
         # Serve mode needs a concrete listen address; client mode passes
         # the optional local bind straight through (``None`` = ephemeral).
-        bind = params.bind or (f"[::]:{port}" if params.serve else None)
+        if params.bind:
+            bind = params.bind
+        elif params.serve:
+            # "[::]" is dual-stack on POSIX but IPv6-ONLY on Windows:
+            # IPV6_V6ONLY defaults on there and moq-rs exposes no way to
+            # clear it, so IPv4 QUIC clients (Chromium's WebTransport
+            # dial among them) get ERR_CONNECTION_RESET against a
+            # v6-only listener. Default to the IPv4 wildcard on Windows;
+            # pass bind="[::]:<port>" explicitly for IPv6-only serve.
+            bind = f"{'0.0.0.0' if sys.platform == 'win32' else '[::]'}:{port}"
+        else:
+            bind = None
+        if params.serve and sys.platform == "win32" and bind:
+            host = bind.rsplit(":", 1)[0].strip("[]")
+            if host == "::":
+                logger.warning(
+                    "MOQ: serve bind %s listens IPv6-only on Windows (IPV6_V6ONLY "
+                    "is on and cannot be cleared through moq-rs); IPv4 QUIC "
+                    "clients will fail to connect. Bind 0.0.0.0:<port> (or a "
+                    "specific IPv4 address) unless the callers are IPv6-only.",
+                    bind,
+                )
         self._client = MOQTransportClient(
             params=params,
             url=params.relay_url or f"https://{host}:{port}{path}",
