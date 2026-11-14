@@ -16,9 +16,11 @@ formats).
 import inspect
 import types
 from collections.abc import Awaitable, Callable, Mapping
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
+    Literal,
     TypeAlias,
     Union,
     get_args,
@@ -48,6 +50,21 @@ stricter ``Protocol`` form would reject) type-check when passed to public APIs.
 The precise contract — async, with a first parameter named ``params`` — is
 validated at runtime by ``DirectFunctionWrapper.validate_function``.
 """
+
+
+_PY_TO_JSON_TYPE = {str: "string", bool: "boolean", int: "integer", float: "number"}
+
+
+def _enum_schema(values: list[Any]) -> dict[str, Any]:
+    """Build a JSON Schema for a fixed set of values (Enum members or Literal args).
+
+    Adds a ``type`` only when every value maps to the same JSON scalar type.
+    """
+    schema: dict[str, Any] = {"enum": values}
+    json_types = {_PY_TO_JSON_TYPE.get(type(value)) for value in values}
+    if len(json_types) == 1 and None not in json_types:
+        schema["type"] = json_types.pop()
+    return schema
 
 
 class BaseDirectFunctionWrapper:
@@ -212,9 +229,18 @@ class BaseDirectFunctionWrapper:
         elif type_hint is list:
             return {"type": "array"}
 
+        # Handle Enum types. An Enum class carries __annotations__, so this must
+        # come before the generic object handling below.
+        if isinstance(type_hint, type) and issubclass(type_hint, Enum):
+            return _enum_schema([member.value for member in type_hint])
+
         # Get origin and arguments for complex types
         origin = get_origin(type_hint)
         args = get_args(type_hint)
+
+        # Handle Literal types
+        if origin is Literal:
+            return _enum_schema(list(args))
 
         # Handle Optional/Union types
         if origin is Union or origin is types.UnionType:
@@ -284,7 +310,17 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
         Returns:
             The result of the function call.
         """
-        return await self.function(params=params, **args)
+        hints = get_type_hints(self.function)
+        converted = dict(args)
+        for name, hint in hints.items():
+            if (
+                name in converted
+                and isinstance(hint, type)
+                and issubclass(hint, Enum)
+                and not isinstance(converted[name], hint)
+            ):
+                converted[name] = hint(converted[name])
+        return await self.function(params=params, **converted)
 
 
 def tool_options(
