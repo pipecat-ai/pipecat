@@ -1145,5 +1145,9 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             yield ErrorFrame(
                 error=f"{self} transcription error: {e.status} {e.message}", exception=e
             )
+        except TimeoutError as e:
+            # A connection timeout's str() is the request URL, query included,
+            # and the total timeout's is empty; the type says which one it was.
+            yield ErrorFrame(error=f"{self} transcription error: {type(e).__name__}", exception=e)
         except Exception as e:
             yield ErrorFrame(error=f"{self} transcription error: {e}", exception=e)
