@@ -853,18 +853,24 @@ class DeepgramSTTService(STTService):
 class DeepgramSegmentedSTTSettings(BaseDeepgramSTTSettings):
     """Settings for :class:`DeepgramSegmentedSTTService`.
 
-    Each setting is sent as the Deepgram query parameter of the same name, and
-    ``None`` leaves it out. Any other Deepgram pre-recorded query parameter can
-    be passed through ``extra``.
+    Each setting is sent as the Deepgram query parameter of the same name,
+    except ``diarize`` (see ``diarize_model``) and the local ``speaker_format``,
+    and ``None`` leaves it out. Any other Deepgram pre-recorded query parameter
+    can be passed through ``extra``.
 
     Parameters:
         detect_language: Detect the spoken language and transcribe in it,
             overriding ``language``. The detected language is reported on the
             transcript.
+        diarize_model: The diarization model ``diarize`` turns on: ``"latest"``
+            or a version such as ``"v2"``. Diarization is requested with this
+            parameter alone, since Deepgram's ``diarize`` parameter selects its
+            oldest model and is refused alongside ``diarize_model``.
         filler_words: Include filler words such as "uh" and "um".
     """
 
     detect_language: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize_model: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filler_words: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -932,6 +938,7 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             detect_entities=False,
             detect_language=False,
             diarize=False,
+            diarize_model="latest",
             dictation=False,
             filler_words=False,
             keyterm=None,
@@ -995,6 +1002,10 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             if f.name in self.Settings.LOCAL_FIELDS:
                 continue
             params[f.name] = getattr(self._settings, f.name)
+        diarize = params.pop("diarize")
+        diarize_model = params.pop("diarize_model")
+        if diarize:
+            params["diarize_model"] = diarize_model
         params["tag"] = self._tag
         params["mip_opt_out"] = self._mip_opt_out
         params.update(self._settings.extra)
@@ -1110,13 +1121,24 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             language = self._result_language(channels[0], alternative)
             await self._handle_transcription(text, True, language)
             logger.debug(f"Transcription: [{text}]")
-            yield TranscriptionFrame(
-                text,
-                self._user_id,
-                time_now_iso8601(),
-                language,
-                result=result,
-            )
+
+            words = None
+            if self._settings.diarize:
+                # Words carry punctuation only when punctuate or smart_format is on.
+                words = [
+                    (word.get("punctuated_word") or word.get("word", ""), word.get("speaker"))
+                    for word in alternative.get("words") or []
+                ]
+            timestamp = time_now_iso8601()
+            for speaker, run_text in self._diarized_runs(text, words):
+                yield TranscriptionFrame(
+                    run_text,
+                    self._user_id,
+                    timestamp,
+                    language,
+                    result=result,
+                    speaker=speaker,
+                )
         except aiohttp.ClientResponseError as e:
             # Its str() appends the request URL, whose query carries settings
             # such as keyterms; the message already names Deepgram's error.

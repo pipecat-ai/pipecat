@@ -12,9 +12,17 @@ import aiohttp
 import pytest
 from aiohttp import web
 
-from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    InputAudioRawFrame,
+    TranscriptionFrame,
+    TranscriptionSpeaker,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
 from pipecat.services.deepgram.stt import DeepgramSegmentedSTTService
 from pipecat.services.stt_latency import DEEPGRAM_SEGMENTED_TTFS_P99
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 
@@ -122,7 +130,6 @@ async def test_transcribe_posts_the_wav_segment_with_the_key(aiohttp_client):
         ("model", "nova-3-general"),
         ("language", "en"),
         ("detect_entities", "false"),
-        ("diarize", "false"),
         ("dictation", "false"),
         ("numerals", "false"),
         ("punctuate", "true"),
@@ -306,6 +313,166 @@ async def test_a_detected_language_pipecat_does_not_know_is_reported_as_is(aioht
     frames = await _run(aiohttp_client, _listen_app({}, body=body))
 
     assert frames[0].language == "xx"
+
+
+#
+# Diarization
+#
+
+
+def _diarized_result(transcript: str, words: list[dict]) -> dict:
+    body = _result(transcript)
+    body["results"]["channels"][0]["alternatives"][0]["words"] = words
+    return body
+
+
+TWO_SPEAKERS = _diarized_result(
+    "Hi there. Hello.",
+    [
+        {"word": "hi", "punctuated_word": "Hi", "speaker": 0},
+        {"word": "there", "punctuated_word": "there.", "speaker": 0},
+        {"word": "hello", "punctuated_word": "Hello.", "speaker": 1},
+    ],
+)
+
+
+def _names(captured: dict) -> list[str]:
+    return [name for name, _ in captured["query"]]
+
+
+@pytest.mark.asyncio
+async def test_diarization_is_requested_by_model_alone(aiohttp_client):
+    captured = {}
+    await _run(
+        aiohttp_client,
+        _listen_app(captured),
+        settings=DeepgramSegmentedSTTService.Settings(diarize=True),
+    )
+
+    # Deepgram refuses diarize alongside diarize_model.
+    assert ("diarize_model", "latest") in captured["query"]
+    assert "diarize" not in _names(captured)
+
+
+@pytest.mark.asyncio
+async def test_no_diarization_parameter_is_sent_when_diarization_is_off(aiohttp_client):
+    captured = {}
+    await _run(
+        aiohttp_client,
+        _listen_app(captured),
+        settings=DeepgramSegmentedSTTService.Settings(diarize_model="v2"),
+    )
+
+    assert not {"diarize", "diarize_model"} & set(_names(captured))
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_diarize_model_is_sent(aiohttp_client):
+    captured = {}
+    await _run(
+        aiohttp_client,
+        _listen_app(captured),
+        settings=DeepgramSegmentedSTTService.Settings(diarize=True, diarize_model="v2"),
+    )
+
+    assert [value for name, value in captured["query"] if name == "diarize_model"] == ["v2"]
+
+
+@pytest.mark.asyncio
+async def test_a_diarize_model_in_extra_is_the_one_sent(aiohttp_client):
+    captured = {}
+    await _run(
+        aiohttp_client,
+        _listen_app(captured),
+        settings=DeepgramSegmentedSTTService.Settings(diarize=True, extra={"diarize_model": "v1"}),
+    )
+
+    assert [value for name, value in captured["query"] if name == "diarize_model"] == ["v1"]
+
+
+@pytest.mark.asyncio
+async def test_a_diarized_result_yields_one_frame_per_speaker_run(aiohttp_client):
+    frames = await _run(
+        aiohttp_client,
+        _listen_app({}, body=TWO_SPEAKERS),
+        settings=DeepgramSegmentedSTTService.Settings(
+            diarize=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("0", 1), "0: Hi there."),
+        (TranscriptionSpeaker("1", 2), "1: Hello."),
+    ]
+    assert all(f.language == "en" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_unpunctuated_words_are_split_by_their_plain_text(aiohttp_client):
+    body = _diarized_result(
+        "hi there hello",
+        [
+            {"word": "hi", "speaker": 0},
+            {"word": "there", "speaker": 0},
+            {"word": "hello", "speaker": 1},
+        ],
+    )
+
+    frames = await _run(
+        aiohttp_client,
+        _listen_app({}, body=body),
+        settings=DeepgramSegmentedSTTService.Settings(diarize=True, punctuate=False),
+    )
+
+    assert [(f.speaker.label, f.text) for f in frames] == [("0", "hi there"), ("1", "hello")]
+
+
+@pytest.mark.asyncio
+async def test_words_without_speakers_yield_one_unlabelled_frame(aiohttp_client):
+    body = _diarized_result("Hi there.", [{"word": "hi"}, {"word": "there"}])
+
+    frames = await _run(
+        aiohttp_client,
+        _listen_app({}, body=body),
+        settings=DeepgramSegmentedSTTService.Settings(diarize=True),
+    )
+
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hi there.")]
+
+
+@pytest.mark.asyncio
+async def test_speakers_are_ignored_when_diarization_is_off(aiohttp_client):
+    frames = await _run(aiohttp_client, _listen_app({}, body=TWO_SPEAKERS))
+
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hi there. Hello.")]
+
+
+@pytest.mark.asyncio
+async def test_only_the_last_speaker_run_of_a_segment_is_finalized(aiohttp_client):
+    async with aiohttp.ClientSession() as session:
+        service = await _service(
+            aiohttp_client,
+            _listen_app({}, body=TWO_SPEAKERS),
+            session,
+            sample_rate=16000,
+            settings=DeepgramSegmentedSTTService.Settings(diarize=True),
+        )
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                InputAudioRawFrame(audio=bytes(3200), sample_rate=16000, num_channels=1),
+                VADUserStoppedSpeakingFrame(),
+            ],
+        )
+
+    transcripts = [f for f in received_down if isinstance(f, TranscriptionFrame)]
+    # A finalized transcript ends the user's turn, so it waits for every run.
+    assert [(f.text, f.finalized) for f in transcripts] == [
+        ("Hi there.", False),
+        ("Hello.", True),
+    ]
 
 
 #
