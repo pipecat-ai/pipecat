@@ -1132,6 +1132,32 @@ class TestMatchAbsent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(failure)
         self.assertIn("I repeat myself", failure.reason)
 
+    async def test_absent_ignores_the_rest_of_the_matched_reply_in_text_modality(self):
+        import time
+
+        s = _matcher()
+        # Same reply, text modality: the parser rewrites ``response`` to
+        # ``llm_response`` there, so the continuation check sees that spelling.
+        await s._stream.append({"type": "bot_started_speaking"})
+        s.last_match_text = "first sentence"
+        s._last_match_at = time.monotonic()
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "second sentence"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
+        self.assertIsNone(failure)
+
+    async def test_absent_fails_on_a_text_modality_reply_begun_after_the_match(self):
+        import time
+
+        s = _matcher()
+        s._last_match_at = time.monotonic()
+        await s._stream.append({"type": "bot_started_speaking"})
+        s._stream._queue.put_nowait({"type": "llm_response", "text": "I repeat myself"})
+        expectation = EvalExpectation(event="llm_response", absent=True)
+        failure = await s.match(expectation, time.monotonic(), 100, 0, 1)
+        self.assertIsNotNone(failure)
+        self.assertIn("I repeat myself", failure.reason)
+
     async def test_absent_ignores_other_event_types(self):
         import time
 

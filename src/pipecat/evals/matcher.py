@@ -27,6 +27,12 @@ from pipecat.evals.script import FUNCTION_CALL_EVENTS, EvalExpectation
 # speaking: the transcription of its last sentence lands after the stop.
 JUDGE_NO_GRACE_S = 2.0
 
+#: Reply events an ``absent:`` expectation can see as the rest of a reply an
+#: earlier expectation already matched. ``response`` is rewritten to
+#: ``llm_response`` in text modality (``script._resolve_response_events``),
+#: so the continuation check has to know both spellings.
+REPLY_EVENTS = ("response", "llm_response")
+
 
 def _call_matches(event: dict, name: str | None, args: dict | None) -> bool:
     """Whether a call event is the one a ``calls:`` entry names, with the arguments it gives."""
@@ -280,7 +286,11 @@ class ExpectationMatcher:
             except EvalBotEndedError:
                 self.last_match_text = f"no {expectation.event!r} before the bot ended the call"
                 return None
-            if expectation.event == "response" and not self._reply_began_after_last_match():
+            if (
+                expectation.event in REPLY_EVENTS
+                and self._last_match_at
+                and not self._reply_began_after_last_match()
+            ):
                 self._trace.log(
                     f"absent: the matched reply goes on, not a new one: "
                     f"{self._match_summary(event)!r}"
