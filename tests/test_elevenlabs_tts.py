@@ -593,16 +593,26 @@ async def test_wordless_alignment_still_advances_the_clock():
 
     await service._receive_messages()
 
-    assert [word for word, _ in reported] == ["Hi", "there!", "Bye"]
+    assert [word for word, *_ in reported] == ["Hi", "there!", "Bye"]
     # "Bye" starts after the 8 characters of the first chunk, the "!", and its space.
     assert reported[-1][1] == pytest.approx(0.8 + 0.1 + 0.1)
 
 
+def test_word_ends_run_to_the_end_of_the_following_space():
+    """A word ends where the space after it ends, even when it spans two chunks."""
+    first, partial, start = calculate_word_times(_chunk("Hi the"), 0.0, word_ends=True)
+    assert first == [("Hi", 0.0, pytest.approx(0.3))]
+
+    second, _, _ = calculate_word_times(_chunk("re "), 0.6, partial, start, word_ends=True)
+    # "re " starts 0.6s in; its space starts 0.2s later and lasts 0.1s.
+    assert second == [("there", pytest.approx(0.3), pytest.approx(0.9))]
+
+
 def test_pause_frame_processing_is_configurable():
-    """Holding frames per turn is the default; turning it off lets contexts overlap."""
-    assert _make_service()._pause_frame_processing is True
-    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=False)
-    assert service._pause_frame_processing is False
+    """Contexts overlap by default; turning the pause on holds frames per turn."""
+    assert _make_service()._pause_frame_processing is False
+    service = ElevenLabsTTSService(api_key="test-key", pause_frame_processing=True)
+    assert service._pause_frame_processing is True
 
 
 @pytest.mark.asyncio
@@ -614,7 +624,7 @@ async def test_interleaved_contexts_align_words_independently():
     reported = []
 
     async def _record(word_times, context_id, *args, **kwargs):
-        reported.extend((context_id, word, start) for word, start in word_times)
+        reported.extend((context_id, word, start) for word, start, *_ in word_times)
 
     service.add_word_timestamps = _record
     await service.create_audio_context("ctx-1")
@@ -653,7 +663,7 @@ async def test_interrupted_context_late_alignment_is_ignored():
     reported = []
 
     async def _record(word_times, context_id, *args, **kwargs):
-        reported.extend((context_id, word) for word, _ in word_times)
+        reported.extend((context_id, word) for word, *_ in word_times)
 
     service.add_word_timestamps = _record
     await service.create_audio_context("ctx-1")
@@ -764,7 +774,7 @@ async def test_http_word_timestamps_report_audio_tags_as_words():
     reported = []
 
     async def _record(word_times, *args, **kwargs):
-        reported.extend(word for word, _ in word_times)
+        reported.extend(word for word, *_ in word_times)
 
     service.add_word_timestamps = _record
     service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
@@ -790,7 +800,7 @@ async def test_http_audio_tag_ending_the_reply_is_reported_whole():
     reported = []
 
     async def _record(word_times, *args, **kwargs):
-        reported.extend(word for word, _ in word_times)
+        reported.extend(word for word, *_ in word_times)
 
     service.add_word_timestamps = _record
     service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
@@ -815,7 +825,7 @@ async def test_http_alignment_is_left_as_is_without_expressive_conversation():
     reported = []
 
     async def _record(word_times, *args, **kwargs):
-        reported.extend(word for word, _ in word_times)
+        reported.extend(word for word, *_ in word_times)
 
     service.add_word_timestamps = _record
 

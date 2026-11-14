@@ -69,3 +69,25 @@ def test_reply_last_pts_counts_only_the_replys_own_words():
 
     tracker.start_reply()
     assert tracker.reply_last_pts is None
+
+
+def test_timing_starts_where_the_words_before_end():
+    """The next context's words start after the last word's end, not its start."""
+    tracker = WordTimestampTracker()
+    tracker.start(10 * _SECOND)
+    tracker.last_pts = tracker.pts(1.0)
+    tracker.end_word(1.5)
+    tracker.reset()
+    tracker.start(10 * _SECOND + _SECOND // 5)
+
+    assert tracker.pts(0) == 11 * _SECOND + _SECOND // 2
+
+
+def test_timing_starts_now_once_the_words_before_have_ended():
+    """A context that starts after the words before it ended is timed from now."""
+    tracker = WordTimestampTracker()
+    tracker.start(10 * _SECOND)
+    tracker.end_word(1.5)
+    tracker.reset()
+
+    assert tracker.baseline(20 * _SECOND) == 20 * _SECOND
