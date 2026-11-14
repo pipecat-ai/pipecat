@@ -193,6 +193,7 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
             transport_name="test-transport",
         )
         client._task_manager = MagicMock()
+        client._in_sample_rate = 16000
 
         # Return a real (mockable) Task so the cleanup path can call ``.done()``
         # and ``.cancel()`` on it without blowing up.
@@ -240,6 +241,19 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         stream, task = client._audio_streams[participant.identity]
         self.assertIs(stream, mock_stream)
         self.assertIsNotNone(task)
+
+    async def test_audio_stream_reads_at_input_rate_and_frame_size(self):
+        """LiveKit resamples and sizes the frames, so each frame is pushed as-is."""
+        client = self._create_client()
+        client._params.audio_in_10ms_chunks = 4
+        track, pub, participant = self._audio_track()
+
+        with patch.object(rtc, "AudioStream") as audio_stream:
+            await client._async_on_track_subscribed(track, pub, participant)
+
+        audio_stream.assert_called_once_with(
+            track, sample_rate=16000, num_channels=1, frame_size_ms=40
+        )
 
     async def test_disabled_audio_input_does_not_start_queue_producer(self):
         client = self._create_client(audio_in_enabled=False)
