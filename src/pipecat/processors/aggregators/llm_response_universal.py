@@ -70,6 +70,7 @@ from pipecat.frames.frames import (
     ServiceMetadataFrame,
     StartFrame,
     STTMetadataFrame,
+    SystemFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
@@ -819,6 +820,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
 
+        self._process_queue_task: asyncio.Task | None = None
         # Whether the user speaking again voided the answer to words already in
         # the context. Without new words, the turn's next inference recovers it
         # like an empty user turn that interrupted the bot.
@@ -914,6 +916,9 @@ class LLMUserAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        if not isinstance(frame, SystemFrame):
+            self._process_queue_task = asyncio.current_task()
 
         if await self._maybe_mute_frame(frame):
             return
@@ -1554,9 +1559,18 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
         if params.enable_interruptions:
-            await self.broadcast_interruption()
+            await self._interrupt_for_user_turn()
 
         await self._call_event_handler("on_user_turn_started", strategy)
+
+    async def _interrupt_for_user_turn(self):
+        if asyncio.current_task() is self._process_queue_task:
+            # Frames queued behind the turn-opening frame arrived after it and belong to the turn.
+            logger.debug(f"{self}: broadcasting interruption, keeping queued frames")
+            await self.stop_all_metrics()
+            await self.broadcast_frame(InterruptionFrame)
+        else:
+            await self.broadcast_interruption()
 
     async def _on_user_turn_inference_triggered(
         self,
