@@ -7,11 +7,14 @@
 """Utilities for normalizing word-timestamp streams from TTS services."""
 
 import re
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 
 def merge_punct_tokens(
-    word_times: list[tuple[str, float]],
-) -> list[tuple[str, float]]:
+    word_times: list[tuple[str, _T]],
+) -> list[tuple[str, _T]]:
     """Merge punctuation/space-only tokens into the preceding word.
 
     Some TTS services (e.g. Inworld) emit spaces and punctuation as separate
@@ -39,7 +42,7 @@ def merge_punct_tokens(
         merge_punct_tokens([("questions", 1.0), (", ", 1.2), ("explain", 1.4)])
         # → [("questions,", 1.0), ("explain", 1.4)]
     """
-    merged: list[tuple[str, float]] = []
+    merged: list[tuple[str, _T]] = []
     for word, ts in word_times:
         stripped = re.sub(r"<[^>]+>", "", word)
         has_alnum = any(c.isalnum() for c in stripped)
