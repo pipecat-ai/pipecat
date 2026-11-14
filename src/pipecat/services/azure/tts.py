@@ -434,6 +434,11 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._current_context_id: str | None = None  # Track current context_id for word timestamps
         # An HD voice's style marker still being reported, across word boundaries.
         self._style_marker: str | None = None
+        # Track the in-flight synthesis so events from syntheses cancelled by an
+        # interruption can be dropped instead of reaching the queues (#6743).
+        self._active_result_id: str | None = None
+        self._cancelled_result_ids: set[str] = set()
+        self._synthesis_in_flight: bool = False
 
     def get_expression_adapter(self) -> BaseExpressionAdapter:
         """The adapter for the voice: style markers on HD voices, otherwise none.
@@ -486,6 +491,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         )
 
         # Set up event handlers
+        self._speech_synthesizer.synthesis_started.connect(self._handle_started)
         self._speech_synthesizer.synthesizing.connect(self._handle_synthesizing)
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
@@ -564,6 +570,9 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             evt: SpeechSynthesisWordBoundaryEventArgs from Azure Speech SDK
                 containing word text and audio offset timing.
         """
+        if self._is_cancelled_event(getattr(evt, "result_id", None)):
+            return
+
         # evt.text contains the word
         # evt.audio_offset contains timing in ticks (100-nanosecond units)
         # Convert ticks to seconds: divide by 10,000,000
@@ -716,12 +725,27 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
+    def _handle_started(self, evt):
+        """Track the result id of the synthesis in flight.
+
+        Args:
+            evt: Synthesis started event from the Azure Speech SDK.
+        """
+        if evt.result:
+            self._active_result_id = evt.result.result_id
+
+    def _is_cancelled_event(self, result_id: str | None) -> bool:
+        """Check whether an event belongs to a synthesis cancelled by an interruption."""
+        return result_id is not None and result_id in self._cancelled_result_ids
+
     def _handle_synthesizing(self, evt):
         """Handle audio chunks as they arrive.
 
         Args:
             evt: Synthesis event containing audio data.
         """
+        if evt.result and self._is_cancelled_event(evt.result.result_id):
+            return
         if evt.result and evt.result.audio_data:
             asyncio.run_coroutine_threadsafe(
                 self._audio_queue.put(evt.result.audio_data), self.get_event_loop()
@@ -733,6 +757,12 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         Args:
             evt: Completion event from Azure Speech SDK.
         """
+        if evt.result and self._is_cancelled_event(evt.result.result_id):
+            self._cancelled_result_ids.discard(evt.result.result_id)
+            return
+        if evt.result and evt.result.result_id == self._active_result_id:
+            self._active_result_id = None
+
         # Store duration for cumulative offset calculation
         if evt.result and evt.result.audio_duration:
             self._current_sentence_duration = evt.result.audio_duration.total_seconds()
@@ -759,8 +789,22 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             evt: Cancellation event.
         """
         reason = evt.result.cancellation_details.reason
+        result_id = evt.result.result_id if evt.result else None
+        if self._is_cancelled_event(result_id):
+            # The interruption already drained the queues and no run_tts awaits
+            # this synthesis, so its events must not reach them (#6743).
+            self._cancelled_result_ids.discard(result_id)
+            logger.debug(f"{self}: Dropping canceled event of interrupted synthesis")
+            return
+        if result_id == self._active_result_id:
+            self._active_result_id = None
         # User cancellation (from interruption) is expected, not an error
         if reason == CancellationReason.CancelledByUser:
+            if not self._synthesis_in_flight:
+                # Stale marker: no run_tts is awaiting audio, so an end-of-stream
+                # marker now would be consumed by the NEXT synthesis (#6743).
+                logger.debug(f"{self}: Ignoring stale cancellation with no synthesis in flight")
+                return
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
             asyncio.run_coroutine_threadsafe(self._audio_queue.put(None), self.get_event_loop())
         else:
@@ -806,6 +850,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         """
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
+
+        # Mark the in-flight synthesis as interrupted so its late SDK events
+        # (audio chunks, word boundaries, completion, the canceled end-of-stream
+        # marker) are dropped instead of reaching the drained queues (#6743).
+        if self._active_result_id is not None:
+            self._cancelled_result_ids.add(self._active_result_id)
+            self._active_result_id = None
 
         # Stop Azure synthesis to prevent more word boundaries from being added
         if self._speech_synthesizer:
@@ -868,25 +919,29 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
+                self._synthesis_in_flight = True
                 await self.start_tts_usage_metrics(text)
 
                 # Stream audio chunks as they arrive
 
-                while True:
-                    chunk = await self._audio_queue.get()
-                    if chunk is None:  # End of stream
-                        break
-                    if isinstance(chunk, Exception):  # Error from _handle_canceled
-                        yield ErrorFrame(error=str(chunk))
-                        break
+                try:
+                    while True:
+                        chunk = await self._audio_queue.get()
+                        if chunk is None:  # End of stream
+                            break
+                        if isinstance(chunk, Exception):  # Error from _handle_canceled
+                            yield ErrorFrame(error=str(chunk))
+                            break
 
-                    frame = TTSAudioRawFrame(
-                        audio=chunk,
-                        sample_rate=self.sample_rate,
-                        num_channels=1,
-                        context_id=context_id,
-                    )
-                    yield frame
+                        frame = TTSAudioRawFrame(
+                            audio=chunk,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                            context_id=context_id,
+                        )
+                        yield frame
+                finally:
+                    self._synthesis_in_flight = False
 
                 # Update cumulative offset for next sentence
                 # At 8kHz, Azure's audio_duration doesn't match word boundary offsets,
