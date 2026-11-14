@@ -120,6 +120,17 @@ UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = (
     SENTENCE_ENDING_PUNCTUATION - _LATIN_SENTENCE_ENDING_PUNCTUATION
 )
 
+# Thai has no sentence-ending punctuation: a sentence or clause ends with a space
+# before the next Thai word. This matches a Thai letter, vowel or tone mark followed
+# by whitespace and a consonant or leading vowel. ฯ (abbreviation) and ๆ (repetition)
+# are left out, since a space follows them inside a sentence too.
+_THAI_SENTENCE_END = re.compile(
+    r"[\u0e01-\u0e2e\u0e30-\u0e3a\u0e40-\u0e45\u0e47-\u0e4e](?=\s+[\u0e01-\u0e2e\u0e40-\u0e44])"
+)
+
+# A shorter Thai phrase, such as an item in a list, stays with the next one.
+_THAI_MIN_SENTENCE_LENGTH = 20
+
 StartEndTags = tuple[str, str]
 
 
@@ -142,12 +153,36 @@ def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
     return text
 
 
+def is_thai(char: str) -> bool:
+    """Check whether a character belongs to the Thai script.
+
+    Args:
+        char: A single character.
+
+    Returns:
+        True if the character is in the Thai Unicode block.
+    """
+    return "\u0e00" <= char <= "\u0e7f"
+
+
+def _match_thai_sentence_end(text: str) -> int:
+    """Return the end of the first Thai sentence long enough to speak on its own, or 0."""
+    for match in _THAI_SENTENCE_END.finditer(text):
+        if len(text[: match.end()].lstrip()) >= _THAI_MIN_SENTENCE_LENGTH:
+            return match.end()
+    return 0
+
+
 def match_endofsentence(text: str, *, language: str | None = None) -> int:
     """Find the position of the end of a sentence in the provided text.
 
     This function uses sentencex's sentence tokenizer to detect sentence boundaries
     in the input text, combined with punctuation verification to ensure that
     single tokens without proper sentence endings aren't considered complete sentences.
+
+    Thai has no sentence-ending punctuation, so a space between two Thai words
+    also ends a sentence, once the sentence before it is long enough to speak on
+    its own.
 
     Args:
         text: The input text in which to find the end of the sentence.
@@ -160,6 +195,11 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
 
     if not text:
         return 0
+
+    # Punctuation can still end a sentence before the first Thai boundary.
+    thai_end = _match_thai_sentence_end(text)
+    if thai_end:
+        text = text[:thai_end]
 
     # Sentencex splits after a list marker ("1. The" -> "1.", "The"). Blank the
     # marker with equal-width spaces so it stays with its item; boundary offsets
@@ -194,12 +234,12 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         for i, ch in enumerate(text):
             if ch in UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION:
                 return i + 1
-        return 0
+        return thai_end
 
     if len(sentences) > 1:
         return len(first_sentence)
 
-    return 0
+    return thai_end
 
 
 def parse_start_end_tags(

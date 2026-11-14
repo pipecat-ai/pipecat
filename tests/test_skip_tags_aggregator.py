@@ -100,6 +100,20 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.flush()
         self.assertEqual(result.text, "Done")
 
+    async def test_closed_tag_thai_spaces_not_split(self):
+        """A space between Thai words inside a closed tag is not a sentence boundary."""
+        await self.aggregator.reset()
+
+        text = "รหัสยืนยันของคุณคือ <spell>ก ข ค ง</spell> กรุณาจดไว้ด้วยนะคะ ขอบคุณค่ะ"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        self.assertEqual(
+            [r.text for r in results],
+            ["รหัสยืนยันของคุณคือ <spell>ก ข ค ง</spell> กรุณาจดไว้ด้วยนะคะ"],
+        )
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, "ขอบคุณค่ะ")
+
     async def test_tag_after_emitted_sentence_not_split(self):
         """A tag is still recognized after an earlier sentence has been emitted."""
         await self.aggregator.reset()
