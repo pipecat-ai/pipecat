@@ -7,11 +7,17 @@
 """Tests for STT usage metrics accounting and emission."""
 
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from pipecat.frames.frames import Frame, InputAudioRawFrame, MetricsFrame, STTMetadataFrame
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    MetricsFrame,
+    STTMetadataFrame,
+    TranscriptionFrame,
+)
 from pipecat.metrics.metrics import STTUsage, STTUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
@@ -204,3 +210,46 @@ async def test_traced_stt_accumulates_pending_usage_for_span():
 
     pending = service._stt_span_state["pending_usage"]
     assert pending.audio_seconds == pytest.approx(1.5)
+
+
+@pytest.mark.skipif(not HAS_OPENTELEMETRY, reason="opentelemetry not installed")
+@pytest.mark.asyncio
+async def test_traced_stt_records_committed_transcript_event(monkeypatch):
+    from pipecat.utils.tracing.service_decorators import traced_stt
+
+    class TracedFakeSTTService(FakeSTTService):
+        @traced_stt
+        async def traced_method(self):
+            pass
+
+    service = _make_service(TracedFakeSTTService)
+    service._tracing_enabled = True
+    service.stop_ttfb_metrics = AsyncMock()
+
+    span = Mock()
+    tracer = Mock()
+    tracer.start_span.return_value = span
+    monkeypatch.setattr(
+        "pipecat.utils.tracing.service_decorators.trace.get_tracer", lambda _: tracer
+    )
+
+    frame = TranscriptionFrame(
+        text="Turn left at the next street.",
+        user_id="caller-1",
+        timestamp="2026-11-06T12:00:00Z",
+        language="en",
+        finalized=True,
+    )
+    await service.push_frame(frame)
+
+    span.set_attribute.assert_any_call("transcript", frame.text)
+    span.add_event.assert_called_once_with(
+        "stt.transcript.committed",
+        attributes={
+            "transcript": frame.text,
+            "timestamp": frame.timestamp,
+            "language": "en",
+            "user_id": "caller-1",
+        },
+    )
+    span.end.assert_called_once()
