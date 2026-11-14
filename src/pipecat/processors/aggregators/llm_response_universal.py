@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    ControlFrame,
     EagerTranscriptionFrame,
     EndFrame,
     ExpressionMetadataFrame,
@@ -1796,6 +1797,15 @@ class LLMUserAggregator(LLMContextAggregator):
         return True
 
 
+@dataclass
+class _AssistantTurnInterruptedFrame(ControlFrame):
+    """Closes an interrupted assistant turn after the text queued ahead of it.
+
+    The assistant aggregator queues this to itself on an interruption, so the
+    words already played to the user are added to the turn before it closes.
+    """
+
+
 class LLMAssistantAggregator(LLMContextAggregator):
     """Assistant LLM aggregator that processes bot responses and function calls.
 
@@ -1906,6 +1916,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_push_owed: bool = False
 
         self._assistant_turn_start_timestamp = ""
+        # Set when an interruption cuts the open turn short, until the turn closes.
+        self._assistant_turn_interrupted = False
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
@@ -2011,6 +2023,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMAssistantPushAggregationFrame):
             await self._handle_push_aggregation()
+        elif isinstance(frame, _AssistantTurnInterruptedFrame):
+            await self._handle_assistant_turn_interrupted(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self._handle_tts_started(frame)
             await self.push_frame(frame, direction)
@@ -2221,6 +2235,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
+        # The output transport sends a BotStoppedSpeakingFrame right after the
+        # interruption, and it is handled before the turn closes. Drop the
+        # context push waiting for it: it belongs to the cancelled response.
+        self._push_context_on_bot_stopped_speaking = False
+
+        if not self._assistant_turn_start_timestamp:
+            await self.reset()
+            return
+
+        # InterruptionFrame is a system frame, so it jumps ahead of the text
+        # frames already waiting in our queue. The user already heard those
+        # words. Instead of closing the turn now, queue a frame behind them, so
+        # they are added to this turn before it closes.
+        self._assistant_turn_interrupted = True
+        await self.queue_frame(_AssistantTurnInterruptedFrame())
+
+    async def _handle_assistant_turn_interrupted(self, frame: _AssistantTurnInterruptedFrame):
+        # The turn's own end frame may have been waiting in the queue too, and
+        # already closed it.
+        if not self._assistant_turn_interrupted:
+            return
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
 
@@ -2790,6 +2825,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_stopped(self, *, interrupted: bool = False):
         if not self._assistant_turn_start_timestamp:
             return
+
+        # Whichever frame closes it, a turn cut short by an interruption is
+        # reported as interrupted.
+        interrupted = interrupted or self._assistant_turn_interrupted
+        self._assistant_turn_interrupted = False
 
         aggregation = await self.push_aggregation()
         if aggregation:
