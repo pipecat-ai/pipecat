@@ -637,8 +637,19 @@ class BaseOutputTransport(FrameProcessor):
             # Let's send a bot stopped speaking if we have to. The bot keeps
             # speaking while there's uninterruptible audio still to play (after
             # the reset, everything left in the queue is uninterruptible).
-            if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
+            bot_continues = bool(
+                self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)
+            )
+            if not bot_continues:
                 await self._bot_stopped_speaking()
+                # Any resampler state left over from the interrupted audio is
+                # abandoned too. The bot-stopped handler resets it, but only
+                # when the bot had started speaking at all: audio that never
+                # reached playback never sets that flag, so without this the
+                # stale samples would be prepended to the next speech run
+                # (issue #6806).
+                if self._resampler:
+                    await self._resampler.reset()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
             """Handle incoming audio frames by buffering and chunking.
