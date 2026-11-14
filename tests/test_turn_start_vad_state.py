@@ -28,6 +28,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.frames.frames import (
     FilterControlFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMContextFrame,
     StartFrame,
     STTMetadataFrame,
@@ -377,6 +378,177 @@ class TestTurnStartVADState(unittest.IsolatedAsyncioTestCase):
             [m["content"] for m in context.messages if m.get("role") == "user"],
             ["This is a normal audible sentence.", "Okay."],
         )
+
+    async def _run_words_after_vad_stop(self, turn_analyzer: BaseSmartTurn) -> dict[str, Any]:
+        """The first word reaches the STT only after VAD has already stopped.
+
+        This is common for a short first fragment: VAD stops 0.2 s after the
+        word, before the transcription service sends its first interim. The turn
+        then starts from the interim, after the analyzer has already decided.
+        The user goes on after a pause.
+        """
+        stop_strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer)
+        finalized_at = []
+        process_frame = stop_strategy.process_frame
+
+        async def timestamped_process_frame(frame):
+            if isinstance(frame, TranscriptionFrame) and frame.finalized:
+                finalized_at.append(time.monotonic())
+            return await process_frame(frame)
+
+        stop_strategy.process_frame = timestamped_process_frame
+
+        context = LLMContext()
+        aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                vad_analyzer=EnergyVADAnalyzer(
+                    params=VADParams(confidence=0.7, start_secs=0.1, stop_secs=0.2, min_volume=0.0)
+                ),
+                user_turn_strategies=UserTurnStrategies(
+                    start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=True)],
+                    stop=[stop_strategy],
+                ),
+                user_turn_stop_timeout=600.0,
+            ),
+        )
+        transport = ReadyInputTransport(
+            TransportParams(audio_in_enabled=True, audio_in_filter=PassthroughFilter())
+        )
+
+        llm_calls = []
+        push_context_frame = aggregator.push_context_frame
+
+        async def timestamped_push_context_frame(*args, **kwargs):
+            llm_calls.append(time.monotonic())
+            return await push_context_frame(*args, **kwargs)
+
+        aggregator.push_context_frame = timestamped_push_context_frame
+
+        frames_to_send: list = [
+            STTMetadataFrame(service_name="DailyTransport", ttfs_p99_latency=DEEPGRAM_TTFS_P99),
+            *_speech_audio(0.5),
+            SleepFrame(0.1),
+            # VAD stops here, and the analyzer gives its verdict.
+            *_silent_audio(0.4),
+            SleepFrame(DRAIN_SECS),
+            InterimTranscriptionFrame("Alexa", "participant", time_now_iso8601()),
+            SleepFrame(0.1),
+            _transcript("Alexa"),
+            # A pause much longer than the STT budget.
+            SleepFrame(1.0),
+            *_speech_audio(0.5),
+            SleepFrame(0.1),
+            _transcript("set a reminder for three."),
+            SleepFrame(0.1),
+            # The silence goes in two runs, so the VAD stop is handled before
+            # the analyzer counts the rest of it toward its silence limit.
+            *_silent_audio(0.4),
+            SleepFrame(DRAIN_SECS),
+            *_silent_audio(3.3),
+            SleepFrame(DRAIN_SECS),
+        ]
+        await run_test(
+            Pipeline([transport, aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+            send_end_frame=True,
+        )
+        return {
+            "llm_calls": llm_calls,
+            "finalized_at": finalized_at,
+            "user_messages": [m["content"] for m in context.messages if m.get("role") == "user"],
+        }
+
+    async def test_incomplete_verdict_before_the_turn_start_holds_the_turn(self):
+        """An "incomplete" verdict reached before a transcript-driven turn start still counts.
+
+        Without it, the strategy saw no VAD stop in the turn and treated the
+        turn as complete, so the first word became a turn of its own.
+        """
+        result = await self._run_words_after_vad_stop(
+            StubSmartTurn(params=SmartTurnParams(stop_secs=3.0))
+        )
+
+        self.assertEqual(len(result["llm_calls"]), 1)
+        self.assertEqual(len(result["user_messages"]), 1)
+        self.assertIn("Alexa", result["user_messages"][0])
+        self.assertIn("set a reminder for three.", result["user_messages"][0])
+
+    async def test_complete_verdict_before_the_turn_start_ends_the_turn_promptly(self):
+        """A "complete" verdict reached before the turn start ends the turn on the transcript."""
+        result = await self._run_words_after_vad_stop(
+            CompletingSmartTurn(params=SmartTurnParams(stop_secs=3.0))
+        )
+
+        self.assertGreaterEqual(len(result["llm_calls"]), 1)
+        self.assertEqual(result["user_messages"][0], "Alexa")
+        # The finalized transcript releases the turn at once. Without the verdict, the
+        # transcript fallback would wait out the STT budget first (150 ms here).
+        self.assertLess(result["llm_calls"][0] - result["finalized_at"][0], 0.05)
+
+    async def test_an_old_vad_stop_does_not_hold_a_turn_vad_missed(self):
+        """A VAD stop from earlier speech does not decide a turn that VAD never heard.
+
+        VAD hears a cough, and the analyzer calls it incomplete. No transcript
+        follows, so no turn starts. Later a quiet "Okay." reaches the STT but not
+        VAD. That turn must still end on the STT budget, not wait for the
+        cough's verdict.
+        """
+        context = LLMContext()
+        aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                vad_analyzer=EnergyVADAnalyzer(
+                    params=VADParams(confidence=0.7, start_secs=0.1, stop_secs=0.2, min_volume=0.0)
+                ),
+                user_turn_strategies=UserTurnStrategies(
+                    start=[MinWordsUserTurnStartStrategy(min_words=1, use_interim=True)],
+                    stop=[
+                        TurnAnalyzerUserTurnStopStrategy(
+                            turn_analyzer=StubSmartTurn(params=SmartTurnParams(stop_secs=3.0))
+                        )
+                    ],
+                ),
+                user_turn_stop_timeout=WATCHDOG_TIMEOUT,
+            ),
+        )
+        transport = ReadyInputTransport(
+            TransportParams(audio_in_enabled=True, audio_in_filter=PassthroughFilter())
+        )
+
+        llm_calls = []
+        push_context_frame = aggregator.push_context_frame
+
+        async def timestamped_push_context_frame(*args, **kwargs):
+            llm_calls.append(time.monotonic())
+            return await push_context_frame(*args, **kwargs)
+
+        aggregator.push_context_frame = timestamped_push_context_frame
+
+        frames_to_send: list = [
+            STTMetadataFrame(service_name="DailyTransport", ttfs_p99_latency=DEEPGRAM_TTFS_P99),
+            # The cough: VAD reports a start and a stop.
+            *_speech_audio(0.3),
+            SleepFrame(0.1),
+            *_silent_audio(0.4),
+            SleepFrame(1.5),
+            _transcript("Okay."),
+            SleepFrame(WATCHDOG_TIMEOUT + 1.0),
+        ]
+
+        start = time.monotonic()
+        await run_test(
+            Pipeline([transport, aggregator]),
+            frames_to_send=frames_to_send,
+            expected_down_frames=None,
+            send_end_frame=True,
+        )
+
+        self.assertEqual(len(llm_calls), 1)
+        # The transcript is sent about 2 s in. The turn ends on the STT budget,
+        # well before the stop watchdog would end it.
+        self.assertLess(llm_calls[0] - start, 2.0 + WATCHDOG_TIMEOUT - 0.5)
 
 
 if __name__ == "__main__":

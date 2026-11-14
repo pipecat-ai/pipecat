@@ -29,6 +29,11 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
+# How long after a VAD stop a transcript may start the turn and still inherit the
+# turn analyzer's verdict on that speech. Final transcripts usually arrive well
+# within a second of the VAD stop.
+LATE_TURN_START_SECS = 1.0
+
 
 class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     """User turn stop strategy that uses a turn detection model to determine if the user is done speaking.
@@ -83,6 +88,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_complete = False
         self._vad_user_speaking = False
         self._vad_stopped: bool = False  # Whether VAD reported a stop this turn
+        self._vad_stop_time: float = 0.0  # Wall-clock time of the last VAD stop
         self._transcript_finalized = False
         self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
@@ -97,7 +103,29 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._wait_for_transcript = value
 
     async def handle_user_turn_started(self):
-        """Ready the strategy to detect the end of the turn now starting."""
+        """Ready the strategy to detect the end of the turn now starting.
+
+        A turn that starts from a transcript can start after VAD has already
+        stopped, because the STT often sends the first words of a short
+        utterance after the VAD stop. The analyzer has then already given its
+        verdict on the speech that starts this turn, so the verdict and the VAD
+        stop are kept. Without them, the transcript fallback would treat the
+        turn as complete.
+
+        The verdict is kept only if VAD stopped less than
+        ``LATE_TURN_START_SECS`` ago. An older VAD stop belongs to earlier
+        speech that started no turn, such as a cough, and a turn VAD never
+        heard must still end on the STT budget. Text from before the turn is
+        dropped either way.
+        """
+        if (
+            self._vad_stopped
+            and not self._vad_user_speaking
+            and time.time() - self._vad_stop_time < LATE_TURN_START_SECS
+        ):
+            self._text = ""
+            self._transcript_finalized = False
+            return
         await self._reset()
 
     async def handle_user_turn_stopped(self):
@@ -221,6 +249,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
         self._vad_stopped = True
+        self._vad_stop_time = frame.timestamp
 
         # The STT p99 budget is measured from when the user actually stopped
         # speaking, which VAD only reports stop_secs later. Anchoring the
