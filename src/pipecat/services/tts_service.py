@@ -654,6 +654,7 @@ class TTSService(AIService):
         await super().cancel(frame)
         # Prompt stop of audio production. cleanup() repeats this idempotently.
         await self._stop_audio_context_task()
+        await self._report_streamed_text_usage()
 
     async def cleanup(self):
         """Release TTS resources at teardown."""
@@ -1433,8 +1434,7 @@ class TTSService(AIService):
         # Log accumulated streamed text and emit aggregated usage metric.
         if self._streamed_text:
             logger.debug(f"{self}: Generating TTS [{self._streamed_text}]")
-            await super().start_tts_usage_metrics(self._streamed_text)
-            self._streamed_text = ""
+        await self._report_streamed_text_usage()
 
         # Reset aggregator state
         self._sent_non_whitespace_in_context = False
@@ -1539,7 +1539,7 @@ class TTSService(AIService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Reset the turn and drop interruptible audio contexts."""
         self._sent_non_whitespace_in_context = False
-        self._streamed_text = ""
+        await self._report_streamed_text_usage()
         self._text_aggregation_metrics_started = False
 
         await self._text_aggregator.handle_interruption()
@@ -1668,6 +1668,15 @@ class TTSService(AIService):
     def _is_streaming_tokens(self) -> bool:
         """Whether the service is streaming tokens directly without sentence aggregation."""
         return self._text_aggregation_mode == TextAggregationMode.TOKEN
+
+    async def _report_streamed_text_usage(self):
+        """Report the usage of the text streamed since the last report."""
+        # Cleared before the await: an interruption or cancel handled while the
+        # push is suspended must not report the same text again.
+        streamed_text = self._streamed_text
+        self._streamed_text = ""
+        if streamed_text:
+            await super().start_tts_usage_metrics(streamed_text)
 
     async def _handle_text(self, frame: TextFrame):
         """Aggregate LLM text and speak each aggregation."""
