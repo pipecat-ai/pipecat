@@ -92,7 +92,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_service import AIService
-from pipecat.services.stt_service import SegmentedSTTService
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
@@ -834,17 +834,6 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         down, _ = await self._run(gate, [plain])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["untagged"])
 
-    async def test_with_an_unsegmented_stt_the_gate_keeps_no_account_of_segments(self):
-        stream = _stream(bot_audio=True)
-        gate = _BotSpeechGate(stream, EvalTrace(), None)
-        await self._run(
-            gate,
-            [VADUserStartedSpeakingFrame(), VADUserStoppedSpeakingFrame()],
-            direction=FrameDirection.UPSTREAM,
-        )
-        # Nothing awaits a transcription that will never be paired with a segment.
-        self.assertTrue(await stream.wait_bot_transcribed(0.01))
-
     async def test_the_gate_records_when_each_segment_began_as_it_ends(self):
         starts: deque[float] = deque()
         stream = _stream(bot_audio=True)
@@ -898,12 +887,52 @@ class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(isinstance(f, _BotSegmentTranscribedFrame) for f in down))
 
 
+class _StreamingSTT(STTService):
+    async def run_stt(self, audio: bytes):
+        yield None
+
+
+def _streaming_stt_factory(config: dict) -> STTService:
+    """A ``judge.transcription`` factory that returns a streaming STT."""
+    return _StreamingSTT()
+
+
 class _TwoSpeakerSTT(SegmentedSTTService):
     """A segmented STT whose every segment holds two diarized speaker runs."""
 
     async def run_stt(self, audio: bytes):
         yield TranscriptionFrame("Hi there.", "", "", speaker=TranscriptionSpeaker("0", 1))
         yield TranscriptionFrame("Hello.", "", "", speaker=TranscriptionSpeaker("1", 2))
+
+
+class TestBotSTTMustBeSegmented(unittest.TestCase):
+    """The bot's speech is transcribed by a segmented STT or not at all."""
+
+    def _client(self, bot_stt):
+        return EvalClient("ws://localhost:0", stream=_stream(), trace=EvalTrace(), bot_stt=bot_stt)
+
+    def test_a_streaming_stt_is_refused_by_name(self):
+        with self.assertRaisesRegex(ValueError, "_StreamingSTT is not one"):
+            self._client(_StreamingSTT())
+
+    def test_a_segmented_stt_or_none_is_accepted(self):
+        self._client(_TwoSpeakerSTT())
+        self._client(None)
+
+    def test_a_transcription_factory_returning_a_streaming_stt_is_refused(self):
+        scenario = EvalScriptScenario(
+            name="t",
+            turns=[EvalScriptTurn(user="hi", expect=[EvalExpectation(event="response")])],
+            bot_audio=True,
+            transcriber={"factory": f"{__name__}._streaming_stt_factory"},
+        )
+        with self.assertRaisesRegex(ValueError, "_StreamingSTT is not one"):
+            EvalSession.from_scenario(scenario, "ws://localhost:0")
+
+    def test_a_session_given_a_streaming_stt_is_refused_before_it_runs(self):
+        scenario = EvalScriptScenario(name="t", turns=[], bot_audio=True)
+        with self.assertRaises(ValueError):
+            EvalSession.from_scenario(scenario, "ws://localhost:0", bot_stt=_StreamingSTT())
 
 
 class TestTagBotSegmentsKeepsSpeakers(unittest.IsolatedAsyncioTestCase):
