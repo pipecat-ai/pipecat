@@ -331,10 +331,12 @@ class PatternPairAggregator(SimpleTextAggregator):
 
             # Update the last processed position to prevent re-processing patterns
             # This tracks where in the buffer we've already called handlers, so we
-            # only trigger handlers once when a pattern completes
-            self._last_processed_position = len(self._text)
-
+            # only trigger handlers once when a pattern completes. It's measured
+            # in the processed buffer: a removed pattern shortens it, and a stale,
+            # longer position would mark a pattern completing on the next
+            # character as already processed.
             self._text = processed_text
+            self._last_processed_position = len(self._text)
 
             if len(patterns) > 0:
                 if len(patterns) > 1:
