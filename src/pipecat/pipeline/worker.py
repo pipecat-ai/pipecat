@@ -914,9 +914,14 @@ class PipelineWorker(BaseWorker):
                 logger.debug(f"Pipeline worker {self} got cancelled from outside...")
                 # We have been cancelled from outside, let's just cancel everything.
                 await self._cancel()
-                # Wait again for pipeline to finish. This time we have really
-                # cancelled, so it should really finish.
-                await self._wait_for_pipeline_finished()
+                # Wait for the push task to push the CancelFrame and finish the
+                # pipeline. If it was cancelled too (asyncio.run() cancels every
+                # task left when it exits), nothing finished the pipeline, so it
+                # is only cleaned up.
+                if self._process_push_task:
+                    await asyncio.wait([self._process_push_task])
+                if not self._finished_event.is_set():
+                    await self._cleanup(cleanup_pipeline=True)
                 # Re-raise in case there's more cleanup to do.
                 raise
         finally:
