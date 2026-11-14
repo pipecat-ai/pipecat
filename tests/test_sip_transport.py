@@ -504,6 +504,19 @@ async def test_write_audio_frame_resamples_to_call_rate():
 
 
 @pytest.mark.asyncio
+async def test_write_audio_frame_upmixes_mono_to_call_channels():
+    transport, connection = make_transport()
+    output = SIPOutputTransport(transport, connection, transport._params)
+    connection.audio_info = Mock(return_value=tx_info(tx_sample_rate=48000, tx_channels=2))
+    connection.write_audio = Mock(side_effect=len)
+
+    frame = OutputAudioRawFrame(audio=b"\x02\x00\x04\x00", sample_rate=48000, num_channels=1)
+    await output.write_audio_frame(frame)
+
+    connection.write_audio.assert_called_once_with(b"\x02\x00\x02\x00\x04\x00\x04\x00")
+
+
+@pytest.mark.asyncio
 async def test_write_audio_frame_without_ready_call_returns_false():
     transport, connection = make_transport()
     output = SIPOutputTransport(transport, connection, transport._params)
@@ -690,7 +703,7 @@ async def test_receive_audio_pushes_input_frames():
     input_transport._streaming = True
     input_transport._sample_rate = 8000  # pipeline rate == call rate: no resampling
     input_transport.push_audio_frame = AsyncMock()
-    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000))
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000, rx_channels=1))
     pcm = b"\x01\x00" * 160  # 20 ms at 8 kHz
     # One poll with audio, one empty poll, then cancellation — which
     # must escape the reader untouched.
@@ -715,7 +728,7 @@ async def test_receive_audio_resamples_to_pipeline_rate():
     input_transport._streaming = True
     input_transport._sample_rate = 16000  # call is 8 kHz: upsample
     input_transport.push_audio_frame = AsyncMock()
-    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000))
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000, rx_channels=1))
     pcm = b"\x01\x00" * 160
     connection.read_audio = Mock(side_effect=[pcm, pcm, asyncio.CancelledError()])
 
@@ -729,6 +742,27 @@ async def test_receive_audio_resamples_to_pipeline_rate():
 
 
 @pytest.mark.asyncio
+async def test_receive_audio_downmixes_interleaved_channels():
+    from pipecat.transports.sip.transport import SIPInputTransport
+
+    transport, connection = make_transport()
+    input_transport = SIPInputTransport(transport, connection, transport._params)
+    input_transport._streaming = True
+    input_transport._sample_rate = 48000  # pipeline rate == call rate: no resampling
+    input_transport.push_audio_frame = AsyncMock()
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=48000, rx_channels=2))
+    pcm = b"\x02\x00\x04\x00\x06\x00\x08\x00"  # two interleaved L/R frames
+    connection.read_audio = Mock(side_effect=[pcm, asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await input_transport._receive_audio()
+
+    connection.read_audio.assert_called_with(7680)  # 40 ms of 48 kHz stereo
+    frame = input_transport.push_audio_frame.await_args.args[0]
+    assert frame.audio == b"\x03\x00\x07\x00"
+
+
+@pytest.mark.asyncio
 async def test_receive_audio_surfaces_unexpected_errors():
     from pipecat.transports.sip.transport import SIPInputTransport
 
@@ -736,7 +770,7 @@ async def test_receive_audio_surfaces_unexpected_errors():
     input_transport = SIPInputTransport(transport, connection, transport._params)
     input_transport._streaming = True
     input_transport.push_error = AsyncMock()
-    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000))
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=8000, rx_channels=1))
     connection.read_audio = Mock(side_effect=RuntimeError("runtime is dead"))
 
     await input_transport._receive_audio()
