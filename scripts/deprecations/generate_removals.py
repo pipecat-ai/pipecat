@@ -135,12 +135,18 @@ def compute_removals(
     A subject the current registry still records members of (``X`` when
     ``X.member`` is present) was re-recorded at a finer granularity, not removed.
 
-    ``relocations`` are hand-maintained records for symbols that were never
-    deprecated (see ``load_relocations``). They are added like detected removals,
-    skipping any subject already recorded, so repeated runs stay idempotent.
+    ``relocations`` are records for symbols that were never deprecated (see
+    ``load_relocations``). ``relocations.json`` is authoritative for them: a
+    detected removal always carries ``deprecated_in`` (it comes from a registry
+    record), so an ``existing`` record without one can only have come from a
+    relocation and is rebuilt from ``relocations`` on every run. Editing or
+    deleting a drafted record therefore reaches ``removals.json``. A subject
+    detected as deprecated-then-removed keeps its detected record; the relocation
+    does not override it. Repeated runs stay idempotent.
     """
     prev = subjects_of(prev_registry) if prev_registry else {}
     current = set(subjects_of(current_registry))
+    existing = [r for r in existing if r.get("deprecated_in") is not None]
     known = {r["subject"] for r in existing}
 
     removals = list(existing)

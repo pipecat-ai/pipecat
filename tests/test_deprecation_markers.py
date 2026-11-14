@@ -584,9 +584,35 @@ def test_compute_removals_relocations_are_idempotent_and_do_not_override():
     assert drem.compute_removals(None, _dep_registry(), "2.0.0", first, reloc) == first
     # A subject already recorded (e.g. detected as a deprecated-then-removed symbol)
     # keeps its record; the relocation does not overwrite it.
-    existing = [_relocation("Moved", message="detected")]
+    existing = [_relocation("Moved", message="detected", deprecated_in="1.0.0")]
     merged = drem.compute_removals(None, _dep_registry(), "2.0.0", existing, reloc)
     assert [r["message"] for r in merged] == ["detected"]
+
+
+def test_compute_removals_edited_relocation_replaces_recorded_draft():
+    first = drem.compute_removals(None, _dep_registry(), "2.0.0", [], [_relocation("Moved")])
+    fixed = _relocation("Moved", replacement="pipecat.better.Thing", message="fixed by reviewer")
+    again = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [fixed])
+    assert again == [{k: fixed[k] for k in _REMOVAL_FIELDS}]
+
+
+def test_compute_removals_deleted_or_renamed_relocation_is_dropped():
+    first = drem.compute_removals(
+        None, _dep_registry(), "2.0.0", [], [_relocation("Moved"), _relocation("Gone")]
+    )
+    kept = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [_relocation("Moved")])
+    assert [r["subject"] for r in kept] == ["Moved"]
+    renamed = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [_relocation("Renamed")])
+    assert [r["subject"] for r in renamed] == ["Renamed"]
+
+
+def test_compute_removals_relocation_edit_keeps_detected_records():
+    detected = _relocation("Detected", deprecated_in="1.0.0", announced_removed_in="2.0.0")
+    first = drem.compute_removals(
+        None, _dep_registry(), "2.0.0", [detected], [_relocation("Moved")]
+    )
+    again = drem.compute_removals(None, _dep_registry(), "2.0.0", first, [])
+    assert [r["subject"] for r in again] == ["Detected"]
 
 
 def test_compute_removals_relocations_drop_unknown_fields():
