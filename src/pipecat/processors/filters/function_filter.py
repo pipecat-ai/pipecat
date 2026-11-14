@@ -12,7 +12,15 @@ allowing for flexible frame filtering logic in processing pipelines.
 
 from collections.abc import Awaitable, Callable
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    StartFrame,
+    StopFrame,
+    SystemFrame,
+    WorkerFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 FilterType = Callable[[Frame], Awaitable[bool]]
@@ -22,8 +30,10 @@ class FunctionFilter(FrameProcessor):
     """A frame processor that filters frames using a custom function.
 
     This processor allows frames to pass through based on the result of a
-    user-provided filter function. System and end frames always pass through
-    regardless of the filter result.
+    user-provided filter function. System frames (unless
+    ``filter_system_frames`` is set), lifecycle frames and the frames asking
+    the worker to end or stop always pass through regardless of the filter
+    result.
     """
 
     def __init__(
@@ -60,8 +70,9 @@ class FunctionFilter(FrameProcessor):
         if self._direction and direction != self._direction:
             return True
 
-        # Always passthrough lifecycle frames
-        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+        # Always passthrough lifecycle frames, and the frames asking the
+        # worker to end or stop
+        if isinstance(frame, (StartFrame, EndFrame, StopFrame, CancelFrame, WorkerFrame)):
             return True
 
         # If not filtering system frames, passthrough all other system frames
