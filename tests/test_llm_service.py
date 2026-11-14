@@ -1520,3 +1520,45 @@ class TestToolHandlerErrorClassification(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("call_some_api", errors[0].error)
         self.assertEqual(errors[0].category, ErrorCategory.APPLICATION)
+
+
+class TestFunctionCallGroups(unittest.IsolatedAsyncioTestCase):
+    """Calls run under one ``group_id`` are one group: the aggregator runs the LLM once, after the
+    last of them completes. A realtime service that gets one response's calls one at a time passes
+    the same id for each."""
+
+    async def _group_ids(self, service: MockLLMService, *group_ids: str | None) -> list:
+        recorded = []
+
+        async def record(runner_items):
+            recorded.extend(runner_item.group_id for runner_item in runner_items)
+
+        service._run_parallel_function_calls = record
+        service._call_event_handler = AsyncMock()
+        service.broadcast_frame = AsyncMock()
+        for index, group_id in enumerate(group_ids):
+            call = FunctionCallFromLLM(
+                function_name="weather",
+                tool_call_id=f"call_{index}",
+                arguments={},
+                context=LLMContext(),
+            )
+            await service.run_function_calls([call], group_id=group_id)
+        return recorded
+
+    async def test_calls_run_under_one_group_id_share_it(self):
+        group_ids = await self._group_ids(MockLLMService(), "resp_1", "resp_1")
+
+        self.assertEqual(group_ids, ["resp_1", "resp_1"])
+
+    async def test_calls_run_without_a_group_id_get_a_group_each(self):
+        first, second = await self._group_ids(MockLLMService(), None, None)
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first, second)
+
+    async def test_a_group_id_is_ignored_when_parallel_tools_are_not_grouped(self):
+        group_ids = await self._group_ids(MockLLMService(group_parallel_tools=False), "resp_1")
+
+        self.assertEqual(group_ids, [None])
