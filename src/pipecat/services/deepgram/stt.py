@@ -1020,6 +1020,14 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
     async def _transcribe(self, audio: bytes) -> dict:
         """POST an audio segment to the pre-recorded API and return the result.
 
+        A request that fails on a dropped connection is sent once more.
+        Deepgram closes an idle connection after about 5 s, so a request sent
+        on a pooled connection as it closes can fail. aiohttp retries such a
+        request itself only for idempotent methods (RFC 9112, section 9.3.1),
+        which excludes POST; repeating this POST only transcribes the segment
+        again, so it is retried here the same way. A failure to connect at all
+        is not retried.
+
         Args:
             audio: Audio bytes in WAV format.
 
@@ -1029,6 +1037,16 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
         Raises:
             aiohttp.ClientResponseError: If the API returns a non-200 status.
         """
+        try:
+            return await self._post_segment(audio)
+        except aiohttp.ClientConnectorError:
+            raise
+        except (aiohttp.ServerDisconnectedError, aiohttp.ClientOSError) as e:
+            logger.debug(f"{self}: connection dropped ({e}), retrying the segment")
+            return await self._post_segment(audio)
+
+    async def _post_segment(self, audio: bytes) -> dict:
+        """Send one request for an audio segment and return the decoded result."""
         headers = {"Authorization": f"Token {self._api_key}", "Content-Type": "audio/wav"}
         async with self._session.post(
             f"{self._base_url}/v1/listen",

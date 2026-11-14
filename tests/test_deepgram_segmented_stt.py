@@ -648,3 +648,62 @@ async def test_a_cancelled_request_leaves_the_session_usable(aiohttp_client):
 
     assert result == _result()
     assert requests == 2
+
+
+def _dropping_app(drops: int) -> tuple[web.Application, list[int]]:
+    """An app that drops the connection, without answering, for its first ``drops`` requests."""
+    requests: list[int] = []
+
+    async def handler(request):
+        requests.append(len(requests) + 1)
+        await request.read()
+        if len(requests) <= drops:
+            # As Deepgram closes an idle keep-alive connection a request was sent on.
+            request.transport.close()
+        return web.json_response(_result())
+
+    app = web.Application()
+    app.router.add_post("/v1/listen", handler)
+    return app, requests
+
+
+@pytest.mark.asyncio
+async def test_a_request_on_a_dropped_connection_is_sent_again(aiohttp_client):
+    app, requests = _dropping_app(drops=1)
+
+    frames = await _run(aiohttp_client, app)
+
+    assert [f.text for f in frames if isinstance(f, TranscriptionFrame)] == ["Hello there."]
+    assert not any(isinstance(f, ErrorFrame) for f in frames)
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_request_dropped_twice_is_reported(aiohttp_client):
+    app, requests = _dropping_app(drops=2)
+
+    frames = await _run(aiohttp_client, app)
+
+    errors = [f for f in frames if isinstance(f, ErrorFrame)]
+    assert len(errors) == 1 and "Server disconnected" in errors[0].error
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failure_to_connect_is_not_retried():
+    connects = 0
+
+    class _RefusingConnector(aiohttp.TCPConnector):
+        async def _create_connection(self, req, traces, timeout):
+            nonlocal connects
+            connects += 1
+            raise aiohttp.ClientConnectorError(req.connection_key, OSError("refused"))
+
+    async with aiohttp.ClientSession(connector=_RefusingConnector()) as session:
+        service = DeepgramSegmentedSTTService(
+            api_key="test-key", aiohttp_session=session, base_url="http://deepgram.invalid"
+        )
+        frames = [frame async for frame in service.run_stt(WAV)]
+
+    assert len([f for f in frames if isinstance(f, ErrorFrame)]) == 1
+    assert connects == 1
