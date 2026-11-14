@@ -34,8 +34,9 @@ What a factory must return: the judge's and the persona's LLM must be
 OpenAI-compatible, a ``BaseOpenAILLMService`` subclass; the user's TTS must
 be a local or HTTP service, since the cache around it drives ``run_tts``
 directly and a WebSocket-streaming one yields nothing there; the bot's STT
-can be any pipeline STT. Provider imports stay inside the functions, so
-importing this module is cheap.
+must be a ``SegmentedSTTService``, such as ``DeepgramSegmentedSTTService``,
+since only its transcripts can be traced to when their audio began. Provider
+imports stay inside the functions, so importing this module is cheap.
 """
 
 import importlib
@@ -89,8 +90,9 @@ def stt_service_from_config(config: dict | None) -> STTService:
     """Build the STT that transcribes the bot's audio, from a ``judge.transcription:`` mapping.
 
     A ``factory`` (a dotted path to a callable taking the config) builds it;
-    otherwise the ``service`` name picks one, ``moonshine`` by default. Any
-    pipeline STT works; the pipeline sets its sample rate.
+    otherwise the ``service`` name picks one, ``moonshine`` by default. A
+    factory must return a ``SegmentedSTTService``, as the built-in ones are;
+    the pipeline sets its sample rate.
 
     Args:
         config: The ``transcription`` mapping, or ``None`` for the Moonshine default.
@@ -116,7 +118,8 @@ def stt_service_from_config(config: dict | None) -> STTService:
 
     raise ValueError(
         f"Unknown STT service: {name!r}. Known: moonshine, whisper. "
-        "For any other, set transcription.factory to a 'module.func' returning an STTService."
+        "For any other, set transcription.factory to a 'module.func' returning a "
+        "SegmentedSTTService, such as DeepgramSegmentedSTTService."
     )
 
 

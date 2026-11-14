@@ -309,7 +309,8 @@ Top-level optional fields:
             # explainer: an LLM block giving the reasons behind the verdicts
             # (see pipecat.evals.judge)
           transcription:           # required when modality is audio
-            service: moonshine     # STT for the bot's audio (or whisper, or a factory)
+            service: moonshine     # STT for the bot's audio (or whisper, or a factory
+                                   # returning a SegmentedSTTService)
             model: small-streaming # optional
             language: en           # optional; the language the bot speaks
             padding_secs: 0        # optional; silence padded around the

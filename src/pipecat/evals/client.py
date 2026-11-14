@@ -21,7 +21,7 @@ import mimetypes
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -173,13 +173,13 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
         try:
             async for frame in run_stt(audio):
                 if isinstance(frame, TranscriptionFrame):
+                    # Every field the frame was built with, so none is dropped.
                     frame = _BotSegmentTranscriptionFrame(
-                        text=frame.text,
-                        user_id=frame.user_id,
-                        timestamp=frame.timestamp,
-                        language=frame.language,
-                        result=frame.result,
-                        finalized=frame.finalized,
+                        **{
+                            f.name: getattr(frame, f.name)
+                            for f in fields(TranscriptionFrame)
+                            if f.init
+                        },
                         segment_started_at=started_at,
                     )
                 yield frame
@@ -204,19 +204,18 @@ class _BotSpeechGate(FrameProcessor):
     folded into it. A turn that sends nothing drops the same way what the bot
     says before it starts speaking again.
 
-    Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    Both need a segmented STT, which transcribes one segment at a time, so the
+    client accepts no other.
     """
 
-    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
+    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float]"):
         """Initialize the gate.
 
         Args:
             stream: The event stream, for when the user's input was sent.
             trace: The run's trace, for what the gate drops.
             starts: Where the start of each ended segment goes, for the STT's
-                tagging; ``None`` with an STT that is not segmented.
+                tagging.
         """
         super().__init__()
         self._stream = stream
@@ -226,9 +225,7 @@ class _BotSpeechGate(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._starts is None:
-            pass
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
             self._stream.bot_segment_started()
@@ -521,13 +518,26 @@ class EvalClient:
             trace: The run's trace.
             user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
                 synthesizes spoken user turns, or ``None`` for text mode.
-            bot_stt: The ``STTService`` that transcribes the bot's audio into
-                the ``response`` event, or ``None`` when unused.
+            bot_stt: The :class:`SegmentedSTTService` that transcribes the bot's
+                audio into the ``response`` event, or ``None`` when unused.
             persona: A simulation's :class:`~pipecat.evals.persona.EvalPersona`,
                 whose LLM rides in the pipeline and whose context the
                 aggregators keep up to date with both sides of the conversation;
                 ``None`` for a scripted scenario.
+
+        Raises:
+            ValueError: If ``bot_stt`` is not a :class:`SegmentedSTTService`.
         """
+        # Only a segmented STT's transcripts can be traced to when their audio
+        # began, which is how _BotSpeechGate tells the speech the user talked
+        # over from the bot's reply.
+        if bot_stt is not None and not isinstance(bot_stt, SegmentedSTTService):
+            raise ValueError(
+                f"The bot's speech must be transcribed by a SegmentedSTTService, and "
+                f"{type(bot_stt).__name__} is not one. Use the built-in moonshine or whisper, "
+                "or have judge.transcription's factory return a SegmentedSTTService, such as "
+                "DeepgramSegmentedSTTService, or pass one as bot_stt."
+            )
         self._bot_url = bot_url
         self._stream = stream
         self._trace = trace
@@ -974,10 +984,8 @@ class EvalClient:
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
-            starts: deque[float] | None = None
-            if isinstance(bot_stt, SegmentedSTTService):
-                starts = deque()
-                _tag_bot_segments(bot_stt, starts)
+            starts: deque[float] = deque()
+            _tag_bot_segments(bot_stt, starts)
             self._bot_turns = self._bot_turn_aggregator(context)
             inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
 
