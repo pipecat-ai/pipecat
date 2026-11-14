@@ -11,27 +11,30 @@ import inspect
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
+import aiohttp
 from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
-from pipecat.services.stt_service import STTService
+from pipecat.services.stt_latency import DEEPGRAM_SEGMENTED_TTFS_P99, DEEPGRAM_TTFS_P99
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 try:
     from deepgram import AsyncDeepgramClient
@@ -177,6 +180,10 @@ class LiveOptions:
 @dataclass
 class BaseDeepgramSTTSettings(STTSettings):
     """Settings both Deepgram speech-to-text APIs accept, streaming and pre-recorded.
+
+    The base of :class:`DeepgramSTTSettings` and
+    :class:`DeepgramSegmentedSTTSettings`, which add the settings only their
+    own API accepts.
 
     ``model`` and ``language`` are inherited from ``STTSettings`` /
     ``ServiceSettings``.  Additional Deepgram request params may
@@ -840,3 +847,281 @@ class DeepgramSTTService(STTService):
                 self.request_finalize()
                 await self._connection.send_finalize(ListenV1Finalize(type="Finalize"))
                 logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+
+
+@dataclass
+class DeepgramSegmentedSTTSettings(BaseDeepgramSTTSettings):
+    """Settings for :class:`DeepgramSegmentedSTTService`.
+
+    Each setting is sent as the Deepgram query parameter of the same name, and
+    ``None`` leaves it out. Any other Deepgram pre-recorded query parameter can
+    be passed through ``extra``.
+
+    Parameters:
+        detect_language: Detect the spoken language and transcribe in it,
+            overriding ``language``. The detected language is reported on the
+            transcript.
+        filler_words: Include filler words such as "uh" and "um".
+    """
+
+    detect_language: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    filler_words: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+def _query_values(value: Any) -> list[str]:
+    """Encode a setting as query parameter values.
+
+    A list becomes one value per item, sent as a repeated parameter, and a
+    bool is spelled the way Deepgram expects (``true``/``false``).
+    """
+    items = value if isinstance(value, list) else [value]
+    return [str(item).lower() if isinstance(item, bool) else str(item) for item in items]
+
+
+class DeepgramSegmentedSTTService(SegmentedSTTService):
+    """Deepgram speech-to-text service using the pre-recorded API.
+
+    Transcribes each speech segment with one request to Deepgram's
+    pre-recorded API (``POST /v1/listen``) instead of streaming audio over a
+    WebSocket. It inherits from :class:`SegmentedSTTService`, which uses VAD
+    events to buffer each utterance and calls :meth:`run_stt` once per segment
+    with the audio as a WAV container. Transcripts are final only; there are
+    no interim results.
+
+    Settings are read for every request, so an update applies from the next
+    segment.
+    """
+
+    Settings = DeepgramSegmentedSTTSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        aiohttp_session: aiohttp.ClientSession,
+        base_url: str = "https://api.deepgram.com",
+        sample_rate: int | None = None,
+        tag: str | list[str] | None = None,
+        mip_opt_out: bool | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = DEEPGRAM_SEGMENTED_TTFS_P99,
+        **kwargs,
+    ):
+        """Initialize the Deepgram segmented STT service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            aiohttp_session: aiohttp ClientSession for HTTP requests.
+            base_url: Base URL for the Deepgram API. Override for a regional
+                endpoint (e.g. ``https://api.eu.deepgram.com``) or a
+                self-hosted deployment.
+            sample_rate: Audio sample rate in Hz. If not provided, uses the
+                pipeline's rate.
+            tag: Custom billing tag (str or list of str).
+            mip_opt_out: Opt out of Deepgram's Model Improvement Program.
+            settings: Runtime-updatable settings.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in
+                seconds. Override for your deployment. See
+                https://github.com/pipecat-ai/stt-benchmark
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
+        default_settings = self.Settings(
+            model="nova-3-general",
+            language=Language.EN,
+            detect_entities=False,
+            detect_language=False,
+            diarize=False,
+            dictation=False,
+            filler_words=False,
+            keyterm=None,
+            keywords=None,
+            language_hint=None,
+            numerals=False,
+            profanity_filter=None,
+            punctuate=True,
+            redact=None,
+            replace=None,
+            search=None,
+            smart_format=False,
+            version=None,
+            speaker_format=None,
+        )
+        if settings is not None:
+            # Sync the delta first: on a delta, an unset field is NOT_GIVEN, so a
+            # matching extra key can still be promoted.
+            settings = settings.copy()
+            settings._sync_extra_to_fields()
+            default_settings.apply_update(settings)
+        default_settings._sync_extra_to_fields()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._session = aiohttp_session
+        self._base_url = base_url.rstrip("/")
+        self._tag = tag
+        self._mip_opt_out = mip_opt_out
+
+    def can_generate_metrics(self) -> bool:
+        """Whether this service generates processing metrics.
+
+        Returns:
+            True. Each segment is a discrete request, so its duration is
+            measured and reported.
+        """
+        return True
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, promoting extra keys that name a setting."""
+        if isinstance(delta, self.Settings):
+            delta = delta.copy()
+            delta._sync_extra_to_fields()
+        changed = await super()._update_settings(delta)
+        self._settings._sync_extra_to_fields()
+        return changed
+
+    def _query_params(self) -> list[tuple[str, str]]:
+        """Build the request's query parameters from the current settings."""
+        params: dict[str, Any] = {}
+        for f in fields(self._settings):
+            if f.name == "extra" or f.name.startswith("_"):
+                continue
+            if f.name in self.Settings.LOCAL_FIELDS:
+                continue
+            params[f.name] = getattr(self._settings, f.name)
+        params["tag"] = self._tag
+        params["mip_opt_out"] = self._mip_opt_out
+        params.update(self._settings.extra)
+
+        return [
+            (name, encoded)
+            for name, value in params.items()
+            if is_given(value) and value is not None
+            for encoded in _query_values(value)
+        ]
+
+    async def _transcribe(self, audio: bytes) -> dict:
+        """POST an audio segment to the pre-recorded API and return the result.
+
+        Args:
+            audio: Audio bytes in WAV format.
+
+        Returns:
+            The decoded JSON transcription result.
+
+        Raises:
+            aiohttp.ClientResponseError: If the API returns a non-200 status.
+        """
+        headers = {"Authorization": f"Token {self._api_key}", "Content-Type": "audio/wav"}
+        async with self._session.post(
+            f"{self._base_url}/v1/listen",
+            params=self._query_params(),
+            data=audio,
+            headers=headers,
+        ) as response:
+            if response.status != 200:
+                # The status rides on the exception so the framework can
+                # classify the failure: a rejected key or setting leaves the
+                # service unusable, a rate limit or a server error does not.
+                raise aiohttp.ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=await self._error_detail(response),
+                )
+            return await response.json()
+
+    async def _error_detail(self, response: aiohttp.ClientResponse) -> str:
+        """Build a readable message from a non-200 response.
+
+        Deepgram reports errors as ``{"err_code", "err_msg", "request_id"}``;
+        any other body is returned as is.
+        """
+        try:
+            body = await response.json(content_type=None)
+        except Exception:
+            body = None
+        if isinstance(body, dict) and (body.get("err_code") or body.get("err_msg")):
+            detail = " - ".join(
+                part for part in (body.get("err_code"), body.get("err_msg")) if part
+            )
+            if body.get("request_id"):
+                detail += f" (request_id: {body['request_id']})"
+            return detail
+        return await response.text()
+
+    def _result_language(self, channel: dict, alternative: dict) -> Language | None:
+        """The language of a result: the one Deepgram detected, else the setting.
+
+        A code that isn't a :class:`Language` (and the setting, which holds
+        Deepgram's code) is returned as the raw string; Language is a StrEnum,
+        so downstream handles either.
+        """
+        detected = channel.get("detected_language") or next(
+            iter(alternative.get("languages") or []), None
+        )
+        if not detected:
+            return cast("Language | None", assert_given(self._settings.language))
+        try:
+            return Language(detected)
+        except ValueError:
+            return cast("Language", detected)
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Transcribe an audio segment using Deepgram's pre-recorded API.
+
+        Args:
+            audio: Audio bytes in WAV format (already converted by the base
+                class).
+
+        Yields:
+            Frame: A TranscriptionFrame with the transcribed text, or an
+            ErrorFrame on failure. Only non-empty transcriptions are yielded.
+        """
+        try:
+            await self.start_processing_metrics()
+            result = await self._transcribe(audio)
+            await self.stop_processing_metrics()
+
+            # Audio with no samples comes back with no channels at all.
+            channels = result.get("results", {}).get("channels") or []
+            alternatives = channels[0].get("alternatives") or [] if channels else []
+            if not alternatives:
+                return
+
+            alternative = alternatives[0]
+            text = (alternative.get("transcript") or "").strip()
+            if not text:
+                return
+
+            language = self._result_language(channels[0], alternative)
+            await self._handle_transcription(text, True, language)
+            logger.debug(f"Transcription: [{text}]")
+            yield TranscriptionFrame(
+                text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=result,
+            )
+        except aiohttp.ClientResponseError as e:
+            # Its str() appends the request URL, whose query carries settings
+            # such as keyterms; the message already names Deepgram's error.
+            yield ErrorFrame(
+                error=f"{self} transcription error: {e.status} {e.message}", exception=e
+            )
+        except Exception as e:
+            yield ErrorFrame(error=f"{self} transcription error: {e}", exception=e)
