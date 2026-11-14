@@ -7,8 +7,9 @@
 """Ordered sequencer for AggregatedTextFrame slots through TTS processing."""
 
 import re
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from loguru import logger
 
@@ -184,6 +185,9 @@ class _AggregatedFrameSlot:
     occupies a slot in the sequencer. Skipped frames wait at their position and are
     emitted downstream only after all preceding spoken slots are complete, preserving
     correct context ordering.
+
+    ``metadata`` holds the application annotations every frame built for the slot
+    carries (see :meth:`AggregatedFrameSequencer.register_spoken`).
     """
 
     frame: AggregatedTextFrame
@@ -193,6 +197,7 @@ class _AggregatedFrameSlot:
     transport_destination: str | None = None
     complete: bool = False
     includes_inter_frame_spaces: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -229,12 +234,15 @@ class _StreamingContext:
         text_type: The text type of a promoted sentence: ``SENTENCE`` for
             streamed tokens, or the type the context's text was given with, such
             as a ``TTSSpeakFrame``'s.
+        metadata: The application annotations of the tokens in the pending
+            sentence, which the promoted sentence and its words carry.
     """
 
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
     build_tracker: bool
     text_type: TextType | str = TextType.SENTENCE
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AggregatedFrameSequencer:
@@ -319,6 +327,7 @@ class AggregatedFrameSequencer:
         includes_inter_frame_spaces: bool = False,
         *,
         language: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> list[Frame]:
         """Register a spoken AggregatedTextFrame slot.
 
@@ -354,6 +363,12 @@ class AggregatedFrameSequencer:
                 do not inject extra spaces between consecutive frames. Not used on the
                 streaming path — there, CJK spacing is driven solely by
                 :meth:`process_word`'s per-call flag.
+            metadata: Application annotations for this text, added to the
+                ``metadata`` of every frame built for it: its word and progress
+                frames, and when streaming, the promoted sentence. When streaming,
+                a token whose annotations differ from those of the pending
+                sentence ends that sentence first, so a sentence never mixes
+                text from different sources.
 
         Returns:
             Frames unblocked by this call (a promoted sentence and/or buffered words
@@ -374,19 +389,30 @@ class AggregatedFrameSequencer:
                 else None,
                 append_to_context,
                 includes_inter_frame_spaces,
+                metadata,
             )
             return []
 
-        if context_id not in self._streaming_contexts:
-            self._streaming_contexts[context_id] = _StreamingContext(
+        metadata = dict(metadata or {})
+        frames: list[Frame] = []
+        sc = self._streaming_contexts.get(context_id)
+        if sc is None:
+            sc = _StreamingContext(
                 _ParallelSentenceAggregator(language),
                 append_to_context,
                 build_tracker,
                 TextType.SENTENCE if frame.text_type == TextType.TOKEN else frame.text_type,
+                metadata,
             )
-        sc = self._streaming_contexts[context_id]
+            self._streaming_contexts[context_id] = sc
+        elif sc.metadata != metadata:
+            # Text from another source ends the pending sentence.
+            agg = await sc.aggregator.flush()
+            if agg:
+                frames.extend(self._promote(agg, context_id, sc))
+            sc.aggregator = _ParallelSentenceAggregator(language)
+            sc.metadata = metadata
         sc.aggregator.set_language(language)
-        frames: list[Frame] = []
         async for agg in sc.aggregator.aggregate(
             tts_text, frame.raw_text or frame.text, frame.text
         ):
@@ -580,6 +606,7 @@ class AggregatedFrameSequencer:
                     raw_text=raw_text,
                     suppress_in_context=suppress,
                     includes_inter_frame_spaces=slot_ifs,
+                    metadata=active.metadata if active else None,
                 )
             )
 
@@ -721,6 +748,7 @@ class AggregatedFrameSequencer:
                                 segment_id=slot.frame.id,
                                 raw_text=raw_remaining,
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
+                                metadata=slot.metadata,
                             )
                         )
                         # That frame carries the rest of the text, so the progress view
@@ -761,6 +789,7 @@ class AggregatedFrameSequencer:
         tracker: WordCompletionTracker | None,
         append_to_context: bool,
         includes_inter_frame_spaces: bool,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         """Append a real, immediately-registered spoken slot.
 
@@ -775,6 +804,7 @@ class AggregatedFrameSequencer:
                 spoken=True,
                 tracker=tracker,
                 includes_inter_frame_spaces=includes_inter_frame_spaces,
+                metadata=dict(metadata or {}),
             )
         )
 
@@ -842,6 +872,7 @@ class AggregatedFrameSequencer:
         frame.context_id = context_id
         frame.will_be_spoken = True
         frame.append_to_context = False
+        frame.metadata.update(sc.metadata)
         tracker = (
             WordCompletionTracker(
                 agg.tts_text,
@@ -852,7 +883,9 @@ class AggregatedFrameSequencer:
             if sc.build_tracker
             else None
         )
-        self._append_spoken_slot(frame, context_id, tracker, sc.append_to_context, False)
+        self._append_spoken_slot(
+            frame, context_id, tracker, sc.append_to_context, False, sc.metadata
+        )
         frames: list[Frame] = [frame] if agg.user_facing_text.strip() else []
 
         if not sc.build_tracker:
@@ -867,6 +900,7 @@ class AggregatedFrameSequencer:
             word_frame.context_id = context_id
             word_frame.will_be_spoken = True
             word_frame.append_to_context = sc.append_to_context
+            word_frame.metadata.update(sc.metadata)
             frames.append(word_frame)
             frames.extend(self.complete_spoken_slot())
 
@@ -952,6 +986,7 @@ class AggregatedFrameSequencer:
             remaining_text=slot.tracker.get_remaining_user_facing_text(strip=False),
         )
         frame.pts = pts
+        frame.metadata.update(slot.metadata)
         return frame
 
     def _build_word_frame(
@@ -963,6 +998,7 @@ class AggregatedFrameSequencer:
         raw_text: str | None = None,
         suppress_in_context: bool = False,
         includes_inter_frame_spaces: bool = False,
+        metadata: Mapping[str, Any] | None = None,
     ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
         frame = TTSTextFrame(text, text_type=TextType.WORD, segment_id=segment_id)
@@ -978,4 +1014,6 @@ class AggregatedFrameSequencer:
             )
         frame.raw_text = raw_text
         frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+        if metadata:
+            frame.metadata.update(metadata)
         return frame

@@ -225,6 +225,8 @@ class TTSService(AIService):
         settings: TTSSettings | None = None,
         # if True, the context ID is reused within an LLM turn
         reuse_context_id_within_turn: bool = True,
+        # Frame.metadata keys carried from incoming text to the frames built from it.
+        text_metadata_keys: Sequence[str] | None = None,
         **kwargs,
     ):
         """Initialize the TTS service.
@@ -297,6 +299,15 @@ class TTSService(AIService):
             settings: The runtime-updatable settings for the TTS service.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
                 same turn.
+            text_metadata_keys: Keys of :attr:`~pipecat.frames.frames.Frame.metadata`
+                the service carries from the text it receives (``LLMTextFrame``,
+                ``AggregatedTextFrame`` and ``TTSSpeakFrame``) to the frames it builds
+                from that text: the aggregated sentences and the ``TTSTextFrame``,
+                ``AggregatedTextProgressFrame`` frames that report it as spoken. Lets an
+                application tie spoken text back to its source, such as a message ID.
+                Text whose values for these keys differ never shares a sentence: the
+                sentence being aggregated ends where they change. Values are shared,
+                not copied. None of the metadata is carried by default.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(
@@ -390,6 +401,11 @@ class TTSService(AIService):
             )
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: str | None = transport_destination
+        self._text_metadata_keys: tuple[str, ...] = tuple(text_metadata_keys or ())
+        # The text_metadata_keys entries of the text each aggregator holds, None
+        # when it holds none.
+        self._text_metadata: dict[str, Any] | None = None
+        self._skipped_text_metadata: dict[str, Any] | None = None
 
         # Ordered sequence of every AggregatedTextFrame slot that passes through
         # _handle_aggregated_text (both spoken and skipped). Skipped frames are held here
@@ -1407,10 +1423,12 @@ class TTSService(AIService):
         """Speak the turn's remaining text and complete the turn."""
         # Flush any remaining text (including text waiting for lookahead)
         remaining = await self._text_aggregator.flush()
+        metadata = self._text_metadata
+        self._text_metadata = None
         # Stop the aggregation metric (no-op if already stopped on first sentence).
         await self.stop_text_aggregation_metrics()
         if remaining:
-            await self._handle_aggregated_text(self._aggregated_text_frame(remaining))
+            await self._handle_aggregated_text(self._aggregated_text_frame(remaining, metadata))
         if self._expression_formatter:
             self._expression_formatter.reset()
 
@@ -1453,21 +1471,31 @@ class TTSService(AIService):
 
     async def _handle_skipped_llm_text(self, frame: LLMTextFrame):
         """Queue each sentence of LLM text that isn't spoken."""
+        metadata = self._selected_metadata(frame)
+        if self._skipped_text_metadata is not None and metadata != self._skipped_text_metadata:
+            remaining = await self._skipped_text_aggregator.flush()
+            if remaining:
+                await self._queue_skipped_llm_text(remaining, self._skipped_text_metadata)
+        self._skipped_text_metadata = metadata
         async for aggregate in self._skipped_text_aggregator.aggregate(frame.text):
-            await self._queue_skipped_llm_text(aggregate)
+            await self._queue_skipped_llm_text(aggregate, metadata)
 
     async def _handle_skipped_llm_response_end(self, frame: LLMFullResponseEndFrame):
         """Queue the rest of a reply that isn't spoken, then the end of the reply."""
         remaining = await self._skipped_text_aggregator.flush()
+        metadata = self._skipped_text_metadata
+        self._skipped_text_metadata = None
         if remaining:
-            await self._queue_skipped_llm_text(remaining)
+            await self._queue_skipped_llm_text(remaining, metadata)
         await self._audio_context_manager.put_frame(frame)
 
-    async def _queue_skipped_llm_text(self, aggregation: Aggregation):
+    async def _queue_skipped_llm_text(
+        self, aggregation: Aggregation, metadata: Mapping[str, Any] | None
+    ):
         """Queue a sentence of LLM text that isn't spoken, as the bot's output."""
         if not aggregation.text.strip():
             return
-        frame = self._aggregated_text_frame(aggregation)
+        frame = self._aggregated_text_frame(aggregation, metadata)
         frame.skip_tts = True
         frame.transport_destination = self._transport_destination
         await self._audio_context_manager.put_frame(frame)
@@ -1493,6 +1521,7 @@ class TTSService(AIService):
         await self.on_turn_context_created(speak_context_id)
         text_frame = AggregatedTextFrame(frame.text, frame.text_type, raw_text=frame.text)
         text_frame.interruptible = frame.interruptible
+        text_frame.metadata.update(self._selected_metadata(frame))
         if self._expression_formatter and frame.text_type in _EXPRESSIVE_TEXT_TYPES:
             # Text of its own, apart from any response it is spoken in the middle of.
             self._expression_formatter.restate_delivery()
@@ -1544,6 +1573,8 @@ class TTSService(AIService):
 
         await self._text_aggregator.handle_interruption()
         await self._skipped_text_aggregator.handle_interruption()
+        self._text_metadata = None
+        self._skipped_text_metadata = None
         if self._expression_formatter:
             self._expression_formatter.reset()
         for filter in self._text_filters:
@@ -1671,18 +1702,41 @@ class TTSService(AIService):
 
     async def _handle_text(self, frame: TextFrame):
         """Aggregate LLM text and speak each aggregation."""
+        metadata = self._selected_metadata(frame)
+        if self._text_metadata is not None and metadata != self._text_metadata:
+            # Text from another source ends the text aggregated so far, so each
+            # aggregation carries the metadata of a single source.
+            remaining = await self._text_aggregator.flush()
+            if remaining:
+                await self._speak_aggregation(remaining, self._text_metadata)
+        self._text_metadata = metadata
         async for aggregate in self._text_aggregator.aggregate(frame.text):
-            if aggregate.type != TextType.TOKEN:
-                # Stop the aggregation metric on the first sentence only.
-                await self.stop_text_aggregation_metrics()
-            await self._handle_aggregated_text(self._aggregated_text_frame(aggregate))
+            await self._speak_aggregation(aggregate, metadata)
 
-    def _aggregated_text_frame(self, aggregation: Aggregation) -> AggregatedTextFrame:
+    async def _speak_aggregation(self, aggregation: Aggregation, metadata: Mapping[str, Any]):
+        """Speak one aggregation of LLM text."""
+        if aggregation.type != TextType.TOKEN:
+            # Stop the aggregation metric on the first sentence only.
+            await self.stop_text_aggregation_metrics()
+        await self._handle_aggregated_text(self._aggregated_text_frame(aggregation, metadata))
+
+    def _aggregated_text_frame(
+        self, aggregation: Aggregation, metadata: Mapping[str, Any] | None = None
+    ) -> AggregatedTextFrame:
         """Build the frame for an aggregation, keeping a pattern's delimiters in its raw text."""
         raw_text = (
             aggregation.full_match if isinstance(aggregation, PatternMatch) else aggregation.text
         )
-        return AggregatedTextFrame(aggregation.text, aggregation.type, raw_text=raw_text)
+        frame = AggregatedTextFrame(aggregation.text, aggregation.type, raw_text=raw_text)
+        if metadata:
+            frame.metadata.update(metadata)
+        return frame
+
+    def _selected_metadata(self, frame: Frame) -> dict[str, Any]:
+        """The frame's metadata entries named in ``text_metadata_keys``."""
+        return {
+            key: frame.metadata[key] for key in self._text_metadata_keys if key in frame.metadata
+        }
 
     async def _handle_aggregated_text(
         self, src_frame: AggregatedTextFrame, context_id: str | None = None
@@ -1723,6 +1777,7 @@ class TTSService(AIService):
             raw_text=text,
         )
         frame.interruptible = src_frame.interruptible
+        frame.metadata.update(self._selected_metadata(src_frame))
         await self._speak_text(frame, self._trim_text(frame.text) or "", context_id, segments)
 
     async def _push_skipped_text(self, frame: AggregatedTextFrame, context_id: str):
@@ -1947,6 +2002,7 @@ class TTSService(AIService):
                 append_to_context=self._tts_contexts[context_id].append_to_context,
                 build_tracker=not self._push_text_frames,
                 language=self.text_aggregation_language,
+                metadata=self._selected_metadata(src_frame),
             ),
             context_id,
         )
@@ -2020,6 +2076,7 @@ class TTSService(AIService):
         frame.will_be_spoken = True
         frame.context_id = context_id
         frame.append_to_context = append_to_context
+        frame.metadata.update(self._selected_metadata(src_frame))
         # Appending to the audio context, so it preserves the ordering. A unit that
         # is only tags may come before anything is spoken, with no audio context.
         if self.audio_context_available(context_id):
