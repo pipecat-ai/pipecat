@@ -44,6 +44,7 @@ from pipecat.services.sarvam.stt import (
     SarvamRealtimeSTTService,
     SarvamRealtimeSTTSettings,
     SarvamSTTService,
+    _error_event_category,
 )
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
@@ -658,7 +659,7 @@ async def test_nonfatal_error_emits_raw_payload(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed_errors = []
 
-    async def fake_push_error(error_msg, exception=None, fatal=False):
+    async def fake_push_error(error_msg, exception=None, fatal=False, **_kwargs):
         pushed_errors.append((error_msg, exception, fatal))
 
     monkeypatch.setattr(service, "push_error", fake_push_error)
@@ -689,7 +690,7 @@ async def test_sarvam_error_reaches_rtvi_client(monkeypatch):
     async def capture_transport_message(message, **_kwargs):
         client_messages.append(message)
 
-    async def deliver_error(error_msg, exception=None, fatal=False):
+    async def deliver_error(error_msg, exception=None, fatal=False, **_kwargs):
         await rtvi._send_error_frame(
             ErrorFrame(error=error_msg, exception=exception, fatal=fatal, processor=service)
         )
@@ -1233,7 +1234,7 @@ async def test_sarvam_error_is_reported_without_reconnect(monkeypatch):
     try_reconnect = AsyncMock(return_value=False)
     pushed_errors = []
 
-    async def fake_push_error(error_msg, exception=None, fatal=False):
+    async def fake_push_error(error_msg, exception=None, fatal=False, **_kwargs):
         pushed_errors.append((error_msg, exception, fatal))
 
     monkeypatch.setattr(
@@ -1344,6 +1345,10 @@ class _FakeSarvamRealtime:
     unconfirmed: int | None = 0
     # Close every connection as Sarvam does for a rejected parameter.
     reject_settings: bool = False
+    # Answer every connection with this error event, then close it with
+    # `error_close_code`, as Sarvam does when it refuses a connection.
+    error_event: dict | None = None
+    error_close_code: int = 1003
     handshakes: int = 0
     audio_per_connection: list[int] = field(default_factory=list)
 
@@ -1358,6 +1363,10 @@ class _FakeSarvamRealtime:
         self.audio_per_connection.append(0)
         if self.reject_settings:
             await websocket.close(4000, "Invalid model")
+            return
+        if self.error_event is not None:
+            await websocket.send(json.dumps(self.error_event))
+            await websocket.close(self.error_close_code, self.error_event["message"])
             return
         if self.unconfirmed is not None and index >= self.unconfirmed:
             await websocket.send(_SESSION_BEGIN)
@@ -1530,6 +1539,78 @@ async def test_rejected_settings_are_not_retried():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,status_code,close_code,category",
+    [
+        ("invalid_subscription_key", 401, 1003, ErrorCategory.AUTHENTICATION),
+        ("beta_access_required", 403, 4000, ErrorCategory.AUTHORIZATION),
+        ("invalid_model", 400, 4000, ErrorCategory.INVALID_REQUEST),
+    ],
+)
+async def test_permanent_error_event_is_not_retried(code, status_code, close_code, category):
+    """A refused key, model or account fails the same way on every reconnect."""
+    server = _FakeSarvamRealtime(
+        error_event={
+            "event": "error",
+            "code": code,
+            "message": "refused",
+            "is_fatal": True,
+            "status_code": status_code,
+        },
+        error_close_code=close_code,
+    )
+
+    service, _, up = await _run_fake_sarvam(server, seconds=0.5)
+
+    assert server.handshakes == 1
+    assert not service.is_usable
+    errors = [f for f in up if isinstance(f, ErrorFrame)]
+    assert len(errors) == 1
+    assert errors[0].category == category
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,status_code,category",
+    [
+        ("rate_limit_exceeded", 429, ErrorCategory.RATE_LIMIT),
+        ("quota_exceeded", 402, ErrorCategory.QUOTA),
+    ],
+)
+async def test_transient_error_event_is_retried(code, status_code, category):
+    """Sarvam closes a rate limit and exhausted credits with the same 1003 as a bad key."""
+    server = _FakeSarvamRealtime(
+        error_event={
+            "event": "error",
+            "code": code,
+            "message": "try later",
+            "is_fatal": True,
+            "status_code": status_code,
+        }
+    )
+
+    _, _, up = await _run_fake_sarvam(server, seconds=0.5)
+
+    assert server.handshakes > 1
+    errors = [f for f in up if isinstance(f, ErrorFrame)]
+    assert errors[0].category == category
+
+
+@pytest.mark.parametrize(
+    "message,category",
+    [
+        ({"code": "invalid_subscription_key"}, ErrorCategory.AUTHENTICATION),
+        ({"code": "invalid_subscription_key", "status_code": 401}, ErrorCategory.AUTHENTICATION),
+        ({"code": "model_unavailable", "status_code": 503}, ErrorCategory.SERVER),
+        ({"code": "session_time_limit_exceeded", "status_code": 408}, None),
+        ({"code": "transcriber_error", "is_fatal": False}, None),
+    ],
+)
+def test_error_event_category(message, category):
+    assert _error_event_category({"event": "error", **message}) == category
+
+
+@pytest.mark.asyncio
 async def test_connected_fires_once_the_session_begins():
     service = SarvamRealtimeSTTService(api_key="test-key")
     events = []
@@ -1628,7 +1709,7 @@ async def test_error_preserves_raw_payload(monkeypatch):
     service = SarvamRealtimeSTTService(api_key="test-key")
     pushed_errors = []
 
-    async def fake_push_error(error_msg, exception=None, fatal=False):
+    async def fake_push_error(error_msg, exception=None, fatal=False, **_kwargs):
         pushed_errors.append((error_msg, exception, fatal))
 
     monkeypatch.setattr(service, "push_error", fake_push_error)
