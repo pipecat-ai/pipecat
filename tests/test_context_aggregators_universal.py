@@ -1758,8 +1758,35 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=[],
         )
-        assert context.messages[-1]["content"] == "CANCELLED"
+        assert context.messages[-1]["content"] == async_tool_messages.INTERRUPTED_TOOL_RESULT
         assert not aggregator.has_function_calls_in_progress
+
+    async def test_function_call_cancel_result_says_outcome_unknown(self):
+        """A cancelled sync call's result doesn't imply the action didn't happen."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="book_flight",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallCancelFrame(function_name="book_flight", tool_call_id="1"),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+        )
+        message = context.messages[-1]
+        assert message["role"] == "tool"
+        assert message["tool_call_id"] == "1"
+        assert message["content"] != "CANCELLED"
+        assert "interrupted" in message["content"]
+        assert "may already have taken effect" in message["content"]
+        assert "unknown" in message["content"]
 
     async def test_fast_async_function_call_settles_in_place(self):
         """An async call whose result lands before anything else settles like a sync one."""

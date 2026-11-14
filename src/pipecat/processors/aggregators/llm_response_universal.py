@@ -2452,7 +2452,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # whether or not the conversation moved on, since the notice says the
         # call did not complete and asks for the user to be told.
         if function_call.cancel_on_interruption:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
+            self._update_function_call_result(
+                frame.function_name,
+                frame.tool_call_id,
+                async_tool_messages.INTERRUPTED_TOOL_RESULT,
+            )
         else:
             self._context.add_message(
                 async_tool_messages.build_cancelled_message(frame.tool_call_id)
