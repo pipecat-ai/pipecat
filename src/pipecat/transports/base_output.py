@@ -470,8 +470,11 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
 
             # Resamples incoming audio to the output sample rate, created when
-            # audio first arrives at another rate.
+            # audio first arrives at another rate. Its filter holds back the
+            # end of the audio it was last fed, which came from frames with
+            # this ``interruptible`` flag.
             self._resampler: BaseAudioResampler | None = None
+            self._resampler_uninterruptible = False
 
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
@@ -619,8 +622,11 @@ class BaseOutputTransport(FrameProcessor):
             # the background audio (made worse by telephony serializers that
             # clear the playout buffer on interruptions).
             self._audio_queue.reset()
-            # The same goes for the audio still waiting to fill a chunk.
+            # The same goes for the audio still waiting to fill a chunk, and
+            # for the end of interruptible audio still inside the resampler.
             self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
+            if self._resampler and not self._resampler_uninterruptible:
+                await self._resampler.reset()
 
             # Likewise, keep the clock task running but drain its interruptible
             # frames, and cancel it if it's waiting to push one.
@@ -649,15 +655,17 @@ class BaseOutputTransport(FrameProcessor):
             if not self._params.audio_out_enabled:
                 return
 
+            uninterruptible = not frame.interruptible
+
             # We might need to resample if incoming audio doesn't match the
             # transport sample rate.
             resampled = frame.audio
             if frame.sample_rate != self._sample_rate:
-                resampled = await self._resample(frame)
+                resampled = await self._resample(frame, uninterruptible=uninterruptible)
 
             cls = type(frame)
             self._audio_buffer_cls = cls
-            self._buffer_audio(resampled, uninterruptible=not frame.interruptible)
+            self._buffer_audio(resampled, uninterruptible=uninterruptible)
             while self._buffered_audio_bytes >= self._audio_chunk_size:
                 audio, uninterruptible = self._take_audio_chunk()
                 chunk = cls(audio, sample_rate=self._sample_rate, num_channels=frame.num_channels)
@@ -776,10 +784,8 @@ class BaseOutputTransport(FrameProcessor):
             relative to whatever is queued after it (e.g. a TTSStoppedFrame).
             """
             # The resampler holds the tail of the audio it was fed, which
-            # belongs at the end of this speech run, with the last run's flag.
-            tail = await self._resampler.flush() if self._resampler else b""
-            last_uninterruptible = self._audio_runs[-1][1] if self._audio_runs else False
-            self._buffer_audio(tail, uninterruptible=last_uninterruptible)
+            # belongs at the end of this speech run.
+            await self._buffer_resampler_tail()
 
             if not self._audio_runs:
                 return
@@ -795,8 +801,13 @@ class BaseOutputTransport(FrameProcessor):
                 padding = bytes(self._audio_chunk_size - len(audio))
                 await self._enqueue_audio_chunk(audio + padding, uninterruptible)
 
-        async def _resample(self, frame: OutputAudioRawFrame) -> bytes:
-            """Resample the frame's audio to the output sample rate."""
+        async def _resample(self, frame: OutputAudioRawFrame, *, uninterruptible: bool) -> bytes:
+            """Resample the frame's audio to the output sample rate.
+
+            Audio held in the resampler from frames with the other
+            ``interruptible`` flag is flushed into the buffer first, so it
+            keeps its own flag rather than taking this frame's.
+            """
             if not self._resampler:
                 destination = f" [{self._destination}]" if self._destination else ""
                 logger.debug(
@@ -804,7 +815,17 @@ class BaseOutputTransport(FrameProcessor):
                     f"{frame.sample_rate} Hz to {self._sample_rate} Hz"
                 )
                 self._resampler = create_stream_resampler()
+            elif uninterruptible != self._resampler_uninterruptible:
+                await self._buffer_resampler_tail()
+            self._resampler_uninterruptible = uninterruptible
             return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)
+
+        async def _buffer_resampler_tail(self):
+            """Move the audio held in the resampler into the buffer, with its flag."""
+            if not self._resampler:
+                return
+            tail = await self._resampler.flush()
+            self._buffer_audio(tail, uninterruptible=self._resampler_uninterruptible)
 
         @property
         def _buffered_audio_bytes(self) -> int:
