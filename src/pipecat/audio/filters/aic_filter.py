@@ -331,9 +331,6 @@ class AICFilter(BaseAudioFilter):
 
         Args:
             sample_rate: The sample rate of the input transport in Hz.
-
-        Returns:
-            None
         """
         self._sample_rate = sample_rate
 
@@ -399,11 +396,7 @@ class AICFilter(BaseAudioFilter):
         )
 
     async def stop(self):
-        """Terminate the AIC sessions and release the models when stopping.
-
-        Returns:
-            None
-        """
+        """Terminate the AIC sessions and release the models when stopping."""
         # Terminate independently so one failure doesn't strand the other session.
         if self._processor is not None:
             try:
@@ -426,9 +419,6 @@ class AICFilter(BaseAudioFilter):
 
         Args:
             frame: The control frame containing filter commands.
-
-        Returns:
-            None
         """
         if isinstance(frame, FilterEnableFrame):
             self._bypass = not frame.enable
