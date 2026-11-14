@@ -1,0 +1,1 @@
+- Fixed periodic incoming video sampling dropping frames after the system clock moves backward or passing frames early after it moves forward.
