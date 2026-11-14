@@ -513,6 +513,53 @@ async def test_an_error_does_not_carry_the_request_settings(aiohttp_client):
     assert "Jane+Doe" in str(frames[0].exception.request_info.url)
 
 
+@pytest.fixture
+def hanging_connect(monkeypatch):
+    """Make every TCP connect hang, so a request times out without leaving the host."""
+
+    async def start_connection(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(aiohttp.connector.aiohappyeyeballs, "start_connection", start_connection)
+
+
+async def _run_timed_out(timeout: aiohttp.ClientTimeout) -> tuple[ErrorFrame, str]:
+    """Transcribe one segment against a connect that hangs past ``timeout``.
+
+    Returns the error yielded and the name of the service that yielded it.
+    """
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        service = DeepgramSegmentedSTTService(
+            api_key="test-key",
+            aiohttp_session=session,
+            # An IP address, so nothing is resolved before the connect.
+            base_url="http://127.0.0.1:9",
+            settings=DeepgramSegmentedSTTService.Settings(
+                keyterm=["Jane Doe"], replace=["foo:bar"]
+            ),
+        )
+        frames = [frame async for frame in service.run_stt(WAV)]
+    assert len(frames) == 1
+    return frames[0], str(service)
+
+
+@pytest.mark.asyncio
+async def test_a_connection_timeout_does_not_carry_the_request_settings(hanging_connect):
+    error, service = await _run_timed_out(aiohttp.ClientTimeout(sock_connect=0.3))
+
+    assert error.error == f"{service} transcription error: ConnectionTimeoutError"
+    # The exception's own text is the URL it was connecting to, query and all.
+    assert "Jane+Doe" in str(error.exception)
+
+
+@pytest.mark.asyncio
+async def test_a_total_timeout_is_reported_by_its_type(hanging_connect):
+    error, service = await _run_timed_out(aiohttp.ClientTimeout(total=0.3))
+
+    assert error.error == f"{service} transcription error: TimeoutError"
+    assert str(error.exception) == ""
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status, category",
