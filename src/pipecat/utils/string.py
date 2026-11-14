@@ -363,9 +363,11 @@ def compile_phrase_pattern(phrase: str) -> re.Pattern:
     """Compile a case-insensitive pattern that finds a spoken phrase in text.
 
     The words of the phrase may be separated by any amount of whitespace
-    (including none). The match must start and end on a word boundary, except
-    next to characters of scripts written without spaces (Chinese, Japanese,
-    Thai), where speech-to-text output has no boundaries between words.
+    (including none). No word character may come right before or after the
+    match, except next to characters of scripts written without spaces
+    (Chinese, Japanese, Thai), where speech-to-text output has no boundaries
+    between words. The phrase itself may start or end with a character that is
+    not a word character, such as the vowel sign that ends "नमस्ते".
 
     Args:
         phrase: The phrase to find, for example "hey pipecat" or "小助手".
@@ -374,7 +376,9 @@ def compile_phrase_pattern(phrase: str) -> re.Pattern:
         The compiled pattern.
     """
     words = phrase.split()
+    if not words:
+        return re.compile(r"\b\b", re.IGNORECASE)
     body = r"\s*".join(re.escape(word) for word in words)
-    start = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"\b"
-    end = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"\b"
+    start = "" if _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"(?<!\w)"
+    end = "" if _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"(?!\w)"
     return re.compile(start + body + end, re.IGNORECASE)
