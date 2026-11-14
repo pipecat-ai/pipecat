@@ -228,6 +228,18 @@ class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
         )
         assert received_down[-1].text == "Phrase 1"
 
+    async def test_wake_phrase_ending_in_vowel_sign(self):
+        wake_filter = WakeCheckFilter(wake_phrases=["नमस्ते"])
+        frames_to_send = [
+            TranscriptionFrame(user_id="test", text="नमस्ते, आज मौसम कैसा है?", timestamp=""),
+        ]
+        received_down, _ = await run_test(
+            wake_filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[TranscriptionFrame],
+        )
+        self.assertEqual(received_down[0].text, "नमस्ते, आज मौसम कैसा है?")
+
 
 if __name__ == "__main__":
     unittest.main()
