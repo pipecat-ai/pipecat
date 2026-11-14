@@ -391,6 +391,24 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.text, "Hello")
 
+    async def test_pattern_closing_right_after_a_removed_pattern(self):
+        """A pattern whose one-character end delimiter directly follows a removed
+        pattern is still matched: its handler runs and it is removed.
+        """
+        note_handler = AsyncMock()
+        self.aggregator.add_pattern(type="note", start_pattern="[", end_pattern="]")
+        self.aggregator.on_pattern_match("note", note_handler)
+
+        text = "Hello [aside <test>x</test>] there."
+        results = [result async for result in self.aggregator.aggregate(text)]
+        self.assertEqual(len(results), 0)
+
+        note_handler.assert_called_once()
+        self.assertEqual(note_handler.call_args[0][0].text, "aside")
+
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, "Hello  there.")
+
 
 class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
