@@ -88,7 +88,9 @@ Fields:
     since they are not comparable. For spoken input this leaves out the
     bot's end-of-turn wait (its VAD ``stop_secs``, any smart-turn wait), so
     it isn't voice-to-voice latency, which ``UserBotLatencyObserver`` reports
-    on the bot's side. The per-reply measures bound every reply.
+    on the bot's side. A turn still unanswered when the run ends
+    by silence or its time limit counts with its wait up to the end. The
+    per-reply measures bound every reply.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and

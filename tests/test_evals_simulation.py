@@ -1036,6 +1036,55 @@ class TestReplyLatency(unittest.IsolatedAsyncioTestCase):
             (0.5, "slowest reply 0.50 s from the persona stopping to the first token"),
         )
 
+    async def _run_ending_with_an_unanswered_turn(self, bot_audio: bool, *, hang_up: bool):
+        """A reply in 0.05 s, then a turn the bot answers only with a function call."""
+        metric = EvalSimulationMetric("latency", measure="latency", max_value=0.3)
+        simulation = _simulation(bot_audio=bot_audio, max_silence_s=0.4, metrics=[metric])
+        driver, stream, llm, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+        reply = (
+            {"type": "bot_started_speaking"}
+            if bot_audio
+            else {"type": "llm_response", "text": "Sure."}
+        )
+
+        async def conversation():
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "A table for two?"})
+            await asyncio.sleep(0.05)
+            await stream.append(reply)
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "At seven."})
+            await stream.append({"type": "llm_response", "text": ""})
+            if hang_up:
+                await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        return result, {m.name: m for m in result.metrics}["latency"]
+
+    async def test_a_turn_unanswered_when_the_run_falls_silent_counts_its_wait(self):
+        for bot_audio in (False, True):
+            with self.subTest(bot_audio=bot_audio):
+                result, latency = await self._run_ending_with_an_unanswered_turn(
+                    bot_audio, hang_up=False
+                )
+                self.assertEqual(result.ended_by, "silence")
+                # The caller waited out the silence window, well over the bound.
+                self.assertGreaterEqual(latency.value, 0.4)
+                self.assertFalse(latency.passed)
+                self.assertIn(
+                    "the last turn unanswered when the run ended by silence", latency.reason
+                )
+                self.assertFalse(result.passed)
+
+    async def test_a_turn_left_when_the_persona_hangs_up_is_not_counted(self):
+        result, latency = await self._run_ending_with_an_unanswered_turn(False, hang_up=True)
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertLess(latency.value, 0.3)
+        self.assertTrue(latency.passed)
+
 
 class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
     """A persona that hangs up on its own last line leaves the bot its reply to it."""
