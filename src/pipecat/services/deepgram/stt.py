@@ -175,29 +175,25 @@ class LiveOptions:
 
 
 @dataclass
-class DeepgramSTTSettings(STTSettings):
-    """Settings for DeepgramSTTService.
+class BaseDeepgramSTTSettings(STTSettings):
+    """Settings both Deepgram speech-to-text APIs accept, streaming and pre-recorded.
 
     ``model`` and ``language`` are inherited from ``STTSettings`` /
-    ``ServiceSettings``.  Additional Deepgram connection params may
+    ``ServiceSettings``.  Additional Deepgram request params may
     be passed in through ``extra`` (also inherited).
 
     Parameters:
         detect_entities: Enable named entity detection.
         diarize: Enable speaker diarization. Each contiguous speaker run of a
             final result is emitted as its own frame with Deepgram's speaker number
-            (``"0"``, ``"1"``, ...) as ``speaker.label``. Interim results are not
-            labelled.
+            (``"0"``, ``"1"``, ...) as ``speaker.label``.
         dictation: Enable dictation mode (converts commands to punctuation).
-        endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
-        interim_results: Whether to emit interim transcriptions.
         keyterm: Keyterms to boost (str or list of str).
         keywords: Keywords to boost (str or list of str).
         language_hint: BCP-47 language tag, or list of tags, biasing language
             detection on Nova-3 multilingual. Deepgram ignores it unless the
             request sets ``model="nova-3"`` and ``language="multi"``, and
-            rejects a tag the multilingual model does not cover. Requires
-            deepgram-sdk 7.15.0 or later.
+            rejects a tag the multilingual model does not cover.
         numerals: Convert spoken numbers to numerals.
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
@@ -205,7 +201,6 @@ class DeepgramSTTSettings(STTSettings):
         replace: Word replacement rules (str or list).
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
-        utterance_end_ms: Silence duration in ms before an utterance-end event.
         version: Model version to transcribe with, e.g. a dated standard-model
             version such as ``"2021-03-17.0"`` or a custom model's version id.
             ``None`` omits the parameter, leaving Deepgram on ``"latest"``.
@@ -219,8 +214,6 @@ class DeepgramSTTSettings(STTSettings):
     detect_entities: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     dictation: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    endpointing: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keywords: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hint: str | list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -231,7 +224,6 @@ class DeepgramSTTSettings(STTSettings):
     replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     version: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
@@ -266,6 +258,24 @@ class DeepgramSTTSettings(STTSettings):
                     setattr(self, key, self.extra[key])
                 # Always remove from extra to avoid ambiguity
                 del self.extra[key]
+
+
+@dataclass
+class DeepgramSTTSettings(BaseDeepgramSTTSettings):
+    """Settings for DeepgramSTTService.
+
+    ``language_hint`` requires deepgram-sdk 7.15.0 or later.
+
+    Parameters:
+        endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
+        interim_results: Whether to emit interim transcriptions. Interim
+            results are not split by speaker.
+        utterance_end_ms: Silence duration in ms before an utterance-end event.
+    """
+
+    endpointing: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    utterance_end_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _derive_deepgram_urls(base_url: str) -> tuple[str, str]:
