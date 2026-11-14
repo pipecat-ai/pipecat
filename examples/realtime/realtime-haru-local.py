@@ -108,6 +108,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
+            # Haru works at 24 kHz. The default input rate is 16 kHz, which
+            # would hand the model upsampled audio with nothing above 8 kHz.
+            audio_in_sample_rate=24000,
+            audio_out_sample_rate=24000,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
