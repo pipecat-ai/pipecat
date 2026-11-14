@@ -466,7 +466,10 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
 
     Args:
         text: SDP text to clean up.
-        pattern: Pattern to match for candidate filtering.
+        pattern: Host address whose candidates are kept. It must appear in the
+            candidate as a whole field: matched as a regex, the dots in
+            ``192.168.1.1`` would match any character, and the address would
+            also match ``192.168.1.10``.
 
     Returns:
         Cleaned SDP text with filtered ICE candidates.
@@ -476,7 +479,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     lines = text.splitlines()
     for line in lines:
         if re.search("a=candidate", line):
-            if re.search(pattern, line) and not re.search("raddr", line):
+            if pattern in line.split() and not re.search("raddr", line):
                 result.append(line)
         else:
             result.append(line)
