@@ -10,11 +10,16 @@ import copy
 from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
+from openai.types.chat import ChatCompletionToolChoiceOptionParam
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
+from openai.types.responses.response_create_params import ToolChoice
 
 from pipecat.adapters.llm.base_llm_adapter import BaseLLMAdapter, LLMContextConversionError
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.adapters.llm.services.open_ai_adapter import openai_from_llm_context_tools
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    openai_from_llm_context_tool_choice,
+    openai_from_llm_context_tools,
+)
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -25,10 +30,11 @@ from pipecat.processors.aggregators.llm_context import (
 class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
-    # `input` and `tools` are always populated by `get_llm_invocation_params`;
+    # `input`, `tools` and `tool_choice` are always populated by `get_llm_invocation_params`;
     # `instructions` is only set when a system instruction is present.
     input: Required[list[ResponseInputItemParam]]
     tools: Required[list[ToolParam] | OpenAINotGiven]
+    tool_choice: Required[ToolChoice | OpenAINotGiven]
     instructions: str
 
 
@@ -86,6 +92,9 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             "input": input_items,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": openai_from_llm_context_tools(self.from_standard_tools(context.tools)),
+            "tool_choice": self._to_tool_choice(
+                openai_from_llm_context_tool_choice(context.tool_choice)
+            ),
         }
 
         if system_instruction:
@@ -358,3 +367,27 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                 # shape, so it should work once support is enabled.
                 result.append(part)
         return result
+
+    @staticmethod
+    def _to_tool_choice(
+        tool_choice: ChatCompletionToolChoiceOptionParam | OpenAINotGiven,
+    ) -> ToolChoice | OpenAINotGiven:
+        """Convert a context tool choice to the Responses API shape.
+
+        The context stores the Chat Completions form, which nests an object
+        choice's fields under its type (``{"type": "function", "function":
+        {"name": …}}``); the Responses API takes them flat (``{"type":
+        "function", "name": …}``), as it does each tool an ``allowed_tools``
+        choice lists.
+        """
+        if isinstance(tool_choice, dict):
+            kind = tool_choice.get("type")
+            nested = tool_choice.get(kind)
+            if isinstance(nested, dict):
+                flat: dict[str, Any] = {"type": kind, **nested}
+                if kind == "allowed_tools":
+                    flat["tools"] = [
+                        OpenAIResponsesLLMAdapter._to_tool_choice(tool) for tool in flat["tools"]
+                    ]
+                return cast(ToolChoice, flat)
+        return cast("ToolChoice | OpenAINotGiven", tool_choice)
