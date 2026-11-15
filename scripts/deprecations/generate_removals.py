@@ -19,20 +19,22 @@ Removals are detected by diffing the **previous released tag's**
 that was present then and is gone now was removed in the release being prepared.
 Run during release-prep, **before the tag is cut**, with the release version::
 
-    uv run python scripts/deprecations/generate_removals.py --version 2.0.0 --write-relocations
+    uv run python scripts/deprecations/generate_removals.py --version 2.0.0 --draft-removals
 
 Symbols moved or removed *without* a prior deprecation (e.g. alpha features) can't be
-detected this way. Record them in ``relocations.json`` (hand-maintained); they are merged
-into ``removals.json`` here. After writing, the script warns about any public module that
-existed in the previous release, is gone now, and has no record, so a silent move is
-caught at release-prep. Pass ``--write-relocations`` at release-prep: one run drafts those
-records into ``relocations.json`` (review them) and writes ``removals.json``, so the script
-never needs a second run. ``--previous-tag`` overrides the tag diffed against.
+detected this way. After writing, the script warns about any public module that existed
+in the previous release, is gone now, and has no record, so a silent move is caught at
+release-prep. Pass ``--draft-removals`` at release-prep and one run also drafts those
+records straight into ``removals.json`` with ``deprecated_in: null``. The file is
+therefore not purely generated: a person reviews and fixes the ``deprecated_in: null``
+records in the release PR. Edits survive a rerun, because the script only drafts records
+for vanished modules that have no record yet. ``--previous-tag`` overrides the tag
+diffed against.
 
-The file is cumulative — prior entries are never rewritten — and fully
-reconstructable from the tag history, so it is never primary data. The ``--version``
-value is the release being prepared (the workflow supplies it); the previous tag
-is discovered automatically.
+The file is cumulative — prior entries are never rewritten. Detected records are
+reconstructable from the tag history; reviewed drafts are not, so the committed file is
+the record. The ``--version`` value is the release being prepared (the workflow supplies
+it); the previous tag is discovered automatically.
 """
 
 from __future__ import annotations
@@ -49,8 +51,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().parent / "deprecations.json"
 REMOVALS_PATH = Path(__file__).resolve().parent / "removals.json"
-# Hand-maintained moves/removals that were never deprecated first (see load_relocations).
-RELOCATIONS_PATH = Path(__file__).resolve().parent / "relocations.json"
 SOURCE_ROOT = REPO_ROOT / "src" / "pipecat"
 # Repo-relative, POSIX-style, for `git ls-tree` against a tag.
 SOURCE_REL = "src/pipecat"
@@ -72,57 +72,11 @@ def subjects_of(registry: dict) -> dict[str, dict]:
     return {r["subject"]: r for r in registry.get("deprecations", []) if r.get("subject")}
 
 
-_REMOVAL_FIELDS = (
-    "subject",
-    "module",
-    "kind",
-    "deprecated_in",
-    "removed_in",
-    "announced_removed_in",
-    "relation",
-    "replacement",
-    "message",
-)
-
-
-def load_relocations(path: Path = RELOCATIONS_PATH) -> list[dict]:
-    """Hand-maintained removal records for symbols that were never deprecated first.
-
-    ``compute_removals`` only sees subjects that were deprecated in the previous
-    release, so an alpha feature moved or deleted outright (no deprecation period)
-    is invisible to it. Record those in ``relocations.json``; they are merged into
-    ``removals.json`` so downstream tooling reads a single removal history.
-
-    Returns ``[]`` if the file doesn't exist. Raises ``ValueError`` on a malformed
-    record, so a typo fails release-prep instead of silently dropping the entry.
-    """
-    if not path.exists():
-        return []
-    records = json.loads(path.read_text(encoding="utf-8")).get("relocations", [])
-    seen: set[str] = set()
-    for rec in records:
-        subject = rec.get("subject")
-        if not subject or subject in seen:
-            raise ValueError(f"{path.name}: missing or duplicate subject {subject!r}")
-        seen.add(subject)
-        if set(rec) != set(_REMOVAL_FIELDS):
-            raise ValueError(
-                f"{path.name}: {subject!r} must have exactly the fields {_REMOVAL_FIELDS}"
-            )
-        if not _VERSION_RE.match(rec["removed_in"] or ""):
-            raise ValueError(f"{path.name}: {subject!r} removed_in must be X.Y.Z")
-        # A plain deletion (relation "none") has nothing to point at.
-        if not rec["message"] or (not rec["replacement"] and rec["relation"] != "none"):
-            raise ValueError(f"{path.name}: {subject!r} needs a message and a replacement")
-    return records
-
-
 def compute_removals(
     prev_registry: dict | None,
     current_registry: dict,
     version: str,
     existing: list[dict],
-    relocations: list[dict] | None = None,
 ) -> list[dict]:
     """Return the updated, cumulative list of removal records.
 
@@ -135,18 +89,11 @@ def compute_removals(
     A subject the current registry still records members of (``X`` when
     ``X.member`` is present) was re-recorded at a finer granularity, not removed.
 
-    ``relocations`` are records for symbols that were never deprecated (see
-    ``load_relocations``). ``relocations.json`` is authoritative for them: a
-    detected removal always carries ``deprecated_in`` (it comes from a registry
-    record), so an ``existing`` record without one can only have come from a
-    relocation and is rebuilt from ``relocations`` on every run. Editing or
-    deleting a drafted record therefore reaches ``removals.json``. A subject
-    detected as deprecated-then-removed keeps its detected record; the relocation
-    does not override it. Repeated runs stay idempotent.
+    ``existing`` includes reviewed drafts (``deprecated_in`` null, see
+    ``draft_removals``); they are kept as written, so a hand edit survives a rerun.
     """
     prev = subjects_of(prev_registry) if prev_registry else {}
     current = set(subjects_of(current_registry))
-    existing = [r for r in existing if r.get("deprecated_in") is not None]
     known = {r["subject"] for r in existing}
 
     removals = list(existing)
@@ -168,24 +115,34 @@ def compute_removals(
                 "message": rec.get("message"),
             }
         )
+    return _sorted(removals)
+
+
+def _sorted(removals: list[dict]) -> list[dict]:
+    """Group by the release a symbol was removed in, then by name — deterministic
+    output for clean diffs, regardless of dict iteration order."""
+    return sorted(removals, key=lambda r: (r.get("removed_in") or "", r["subject"]))
+
+
+def add_drafts(removals: list[dict], drafts: list[dict]) -> list[dict]:
+    """``removals`` plus the ``drafts`` whose subject has no record yet.
+
+    An existing record always wins, so a reviewer's edit to a draft is never overwritten.
+    """
     recorded = {r["subject"] for r in removals}
-    for rec in relocations or []:
-        if rec["subject"] not in recorded:
-            removals.append({k: rec[k] for k in _REMOVAL_FIELDS})
-            recorded.add(rec["subject"])
-    # Group by the release a symbol was removed in, then by name — deterministic
-    # output for clean diffs, regardless of dict iteration order.
-    removals.sort(key=lambda r: (r.get("removed_in") or "", r["subject"]))
-    return removals
+    return _sorted(removals + [d for d in drafts if d["subject"] not in recorded])
 
 
 def build_document(removals: list[dict]) -> dict:
     """Wrap removal records in the registry document envelope."""
     return {
         "_comment": (
-            "AUTO-GENERATED by scripts/deprecations/generate_removals.py at release-prep. "
-            "Cumulative and reconstructable from tag history plus relocations.json. DO NOT EDIT BY HAND; "
-            "record never-deprecated moves in relocations.json instead."
+            "Written by scripts/deprecations/generate_removals.py at release-prep. "
+            "Cumulative; prior entries are never rewritten. Records with a deprecated_in "
+            "version are detected from tag history, so do not edit them. Records with "
+            "deprecated_in null are drafts for modules moved or removed without a "
+            "deprecation: review and fix them by hand in the release PR. A rerun never "
+            "overwrites an existing record."
         ),
         "schema_version": SCHEMA_VERSION,
         "removals": removals,
@@ -348,7 +305,7 @@ def _public_home(module: str, name: str, reexports: dict[str, set[str]]) -> str:
     return module
 
 
-def draft_relocations(
+def draft_removals(
     vanished: list[str],
     old_classes: dict[str, list[str]],
     homes: dict[str, list[str]],
@@ -356,7 +313,7 @@ def draft_relocations(
     version: str,
     old_reexports: dict[str, set[str]] | None = None,
 ) -> list[dict]:
-    """Draft ``relocations.json`` records for modules that vanished with no record.
+    """Draft ``removals.json`` records for modules that vanished with no record.
 
     Each public class that lived in a vanished module is looked up by name in the
     current tree. Exactly one definition means it moved there; none means it was
@@ -422,8 +379,8 @@ def draft_relocations(
     return modules + classes
 
 
-def suggest_relocations(prev_tag: str, vanished: list[str], version: str) -> list[dict]:
-    """``draft_relocations`` fed from ``prev_tag`` and the working tree."""
+def suggest_removals(prev_tag: str, vanished: list[str], version: str) -> list[dict]:
+    """``draft_removals`` fed from ``prev_tag`` and the working tree."""
     paths = module_paths_at_tag(prev_tag)
     old_classes: dict[str, list[str]] = {}
     old_reexports: dict[str, set[str]] = {}
@@ -434,15 +391,7 @@ def suggest_relocations(prev_tag: str, vanished: list[str], version: str) -> lis
         if paths[module].endswith("__init__.py"):
             old_reexports[module] = _exported_names(source)
     homes, reexports = tree_index()
-    return draft_relocations(vanished, old_classes, homes, reexports, version, old_reexports)
-
-
-def write_relocations(records: list[dict], path: Path = RELOCATIONS_PATH) -> None:
-    """Write ``records`` into ``relocations.json``, keeping its envelope and comment."""
-    doc = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    doc.setdefault("schema_version", SCHEMA_VERSION)
-    doc["relocations"] = records
-    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return draft_removals(vanished, old_classes, homes, reexports, version, old_reexports)
 
 
 def main() -> int:
@@ -457,10 +406,10 @@ def main() -> int:
         help="Release tag to diff against (default: the highest vX.Y.Z tag with a registry).",
     )
     parser.add_argument(
-        "--write-relocations",
+        "--draft-removals",
         action="store_true",
-        help="Draft relocations.json records for modules that vanished with no record, "
-        "then regenerate removals.json. Review the drafts before committing.",
+        help="Also draft removals.json records (deprecated_in null) for modules that "
+        "vanished with no record. Review the drafts before committing.",
     )
     args = parser.parse_args()
 
@@ -481,32 +430,22 @@ def main() -> int:
     prev_registry = registry_at_tag(prev_tag) if prev_tag else None
     existing = load_existing_removals()
 
-    try:
-        relocations = load_relocations()
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-    removals = compute_removals(prev_registry, current_registry, version, existing, relocations)
+    removals = compute_removals(prev_registry, current_registry, version, existing)
 
     vanished: list[str] = []
     drafts: list[dict] = []
-    added: list[dict] = []
+    drafted = 0
     if prev_tag:
         vanished = unrecorded_vanished_modules(
             modules_at_tag(prev_tag), modules_in_tree(), removals
         )
         if vanished:
-            drafts = suggest_relocations(prev_tag, vanished, version)
-            if args.write_relocations:
-                have = {r["subject"] for r in relocations}
-                added = [d for d in drafts if d["subject"] not in have]
-                write_relocations(relocations + added)
-                removals = compute_removals(
-                    prev_registry, current_registry, version, existing, relocations + added
-                )
+            drafts = suggest_removals(prev_tag, vanished, version)
+            if args.draft_removals:
+                before = len(removals)
+                removals = add_drafts(removals, drafts)
+                drafted = len(removals) - before
 
-    # One write, after relocations are settled: a single run produces both files.
     REMOVALS_PATH.write_text(render(build_document(removals)), encoding="utf-8")
 
     new_count = len(removals) - len(existing)
@@ -521,9 +460,9 @@ def main() -> int:
         f"to {REMOVALS_PATH.relative_to(REPO_ROOT)}"
     )
 
-    if vanished and args.write_relocations:
+    if vanished and args.draft_removals:
         print(
-            f"Drafted {len(added)} record(s) into {RELOCATIONS_PATH.name} for "
+            f"Drafted {drafted} record(s) with deprecated_in null for "
             f"{len(vanished)} vanished module(s). REVIEW them (replacement and wording) "
             "before merging."
         )
@@ -531,10 +470,9 @@ def main() -> int:
         print(
             f"WARNING: {len(vanished)} public module(s) present in {prev_tag} are gone "
             "with no removal record. Downstream tooling will report them as current.\n"
-            "Record each in scripts/deprecations/relocations.json (moved or removed "
-            "without a deprecation), or restore it. Re-run with --write-relocations, which "
-            "also regenerates removals.json, to draft the records below:\n  "
-            + "\n  ".join(vanished),
+            "Record each in scripts/deprecations/removals.json (moved or removed "
+            "without a deprecation), or restore it. Re-run with --draft-removals to "
+            "draft the records below:\n  " + "\n  ".join(vanished),
             file=sys.stderr,
         )
         for d in drafts:
