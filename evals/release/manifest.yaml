@@ -190,6 +190,8 @@ suite:
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-openai.py
     scenarios: [scripted/weather_function_call_audio]
+  - bot: realtime/realtime-rime.py
+    scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-ultravox-async-tool.py
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-zoom-ai.py
