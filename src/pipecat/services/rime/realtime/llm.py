@@ -15,7 +15,6 @@ from collections import OrderedDict, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass, field, fields, replace
 from typing import Any, Literal
-from uuid import uuid4
 
 import numpy as np
 from loguru import logger
@@ -59,6 +58,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
@@ -129,11 +129,14 @@ class _Operation:
     delta: LLMSettings | None = None
     run_llm: bool = False
     audio_response: bool = True
-    # The messages come from an LLMMessagesAppendFrame.
-    appended: bool = False
-    # The reply answers earlier appends and is skipped if none since the last
+    tool: Tool | None = None
+    tool_output: str = ""
+    tool_final: bool = False
+    # The write is content a reply can answer: appended messages or a tool update.
+    answerable: bool = False
+    # The reply answers earlier content and is skipped if none since the last
     # reply was written.
-    answers_append: bool = False
+    answers_content: bool = False
 
 
 class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
@@ -151,6 +154,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
     a replacement with ``run_llm=True`` after the opening starts no reply. Use
     ``LLMMessagesAppendFrame(run_llm=True)`` to ask for one. Rejected provider
     writes do not roll back the local context.
+
+    Tool results reach Prism as they are produced. An intermediate result is a
+    history message beside the call, which stays open until its final result
+    is submitted. Prism answers results when the assistant aggregator asks for
+    a response, continuing the tool round when it is still current. Prism
+    mentions an async call's result that arrives after its round closed only
+    when asked, so the service asks for a reply that reports it.
 
     Playback positions are estimates and completion receipts are not sent.
     Speech hints do not change output volume.
@@ -246,8 +256,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._tool_choice = "auto"
         self._reply_owed = False
         self._owed_audio_response = True
-        self._appends_unwritten = 0
-        self._append_written = False
+        self._writes_unwritten = 0
+        self._content_written = False
+        # Calls whose final results were written since the last reply.
+        self._owed_calls: list[Tool] = []
         self._early_appends: list[list] = []
         self._interruption_epoch = 0
         self._reply_epoch = 0
@@ -281,6 +293,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._transcripts: dict[str, str] = {}
         self._reply_lock = asyncio.Lock()
         self._reply_audio_response = True
+        # The requested reply reports a late tool result and survives interruptions.
+        self._reply_reports = False
         # Audio outputs in the order the transport plays them; the first is playing.
         self._playing: deque[_Output] = deque()
         for event in ("on_session_updated", "on_rime_event"):
@@ -317,7 +331,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
 
     @property
     def accepts_intermediate_function_call_results(self) -> bool:
-        """Record progress without executing the application tool again."""
+        """Intermediate results reach Prism as history messages beside the open call.
+
+        Prism keeps one result per call, so only the final result answers it.
+        """
         return True
 
     def can_generate_metrics(self) -> bool:
@@ -468,9 +485,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     self._early_appends.append(frame.messages)
                 else:
                     await self._enqueue(
-                        _Operation(append=copy.deepcopy(frame.messages), appended=True)
+                        _Operation(append=copy.deepcopy(frame.messages), answerable=True)
                     )
-                    self._appends_unwritten += 1
+                    self._writes_unwritten += 1
                     self._reply_owed = True
                     # Output settings apply to the reply as of the append.
                     self._owed_audio_response = not self._skip_tts
@@ -514,7 +531,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 self._interruption_epoch += 1
                 # The assistant aggregator drops a held reply request on interruption.
                 self._reply_owed = False
-                self._append_written = False
+                self._content_written = False
+                self._settle_owed_calls()
                 playing = self._playing[0] if self._playing else None
                 self._playing.clear()
                 self._spawn_request(self._interrupt(playing))
@@ -545,9 +563,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             run_llm = True
             audio_response = not self._skip_tts
         else:
-            # Appended messages are already in Prism. A context frame travelling
-            # upstream comes from the assistant aggregator, asking for a reply
-            # to them.
+            # Appended messages and tool results are already in Prism. A context
+            # frame travelling upstream comes from the assistant aggregator,
+            # asking for a reply to them.
             append = None
             run_llm = direction == FrameDirection.UPSTREAM and self._reply_owed
             audio_response = self._owed_audio_response
@@ -560,14 +578,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 tool_choice=frame.context.tool_choice,
                 run_llm=run_llm,
                 audio_response=audio_response,
-                answers_append=run_llm and not initial,
+                answers_content=run_llm and not initial,
             )
         )
 
     async def _control_loop(self) -> None:
         while True:
             operation = await self._controls.get()
-            unwritten = operation.appended
+            unwritten = operation.answerable
             try:
                 await self._ready.wait()
                 if self._closing or not self.is_usable:
@@ -576,33 +594,90 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     if operation.tool_choice not in ("auto", "none", None):
                         raise ValueError("Prism supports automatic or disabled tool selection")
                     self._tool_choice = operation.tool_choice or "auto"
-                if operation.append:
+                if operation.append or operation.tool is not None:
                     try:
-                        await self._ledger.append(operation.append)
+                        if operation.tool is not None:
+                            await self._write_tool_update(
+                                operation.tool, operation.tool_output, final=operation.tool_final
+                            )
+                        elif operation.append:
+                            await self._ledger.append(operation.append)
                     finally:
                         if unwritten:
                             unwritten = False
-                            self._appends_unwritten -= 1
-                    if operation.appended:
-                        self._append_written = True
+                            self._writes_unwritten -= 1
+                    if operation.answerable:
+                        self._content_written = True
                 if is_given(operation.tools) and operation.tools != self._settings.tools:
                     await self._settings_operation(self.Settings(tools=operation.tools))
                 if operation.delta is not None:
                     await self._settings_operation(operation.delta)
-                if operation.run_llm and (not operation.answers_append or self._append_written):
-                    if operation.answers_append:
-                        self._append_written = False
+                if operation.run_llm and (not operation.answers_content or self._content_written):
+                    parent = tool_call = None
+                    if operation.answers_content:
+                        self._content_written = False
+                        target = self._tool_reply_target()
+                        if target is None:
+                            continue
+                        parent, tool_call = target
                     self._spawn_request(
                         self._reply(
-                            operation.audio_response, disable_tools=self._tool_choice == "none"
+                            operation.audio_response,
+                            parent=parent,
+                            tool_call=tool_call,
+                            disable_tools=self._tool_choice == "none",
                         )
                     )
             except Exception as error:
                 await self._operation_error(error)
             finally:
                 if unwritten:
-                    self._appends_unwritten -= 1
+                    self._writes_unwritten -= 1
                 self._controls.task_done()
+
+    def _tool_reply_target(self) -> tuple[r.ResponseRef | None, r.ToolCallRef | None] | None:
+        """Choose how a reply answers tool results written since the last one.
+
+        Returns the tool round to continue and the call to report, or None when
+        a requested continuation already covers them.
+        """
+        calls = list(self._owed_calls)
+        if not calls:
+            return None, None
+        latest = calls[-1].event.call
+        response = self._responses.get(latest.response_id)
+        if response is not None:
+            # The reply holds the reference while it reports the call.
+            response.operations += 1
+        self._settle_owed_calls()
+        if response is None or response.stopped:
+            return None, latest
+        if response.continuing and all(
+            tool.event.call.response_id == latest.response_id for tool in calls
+        ):
+            # Prism's continuation waits for every result in the round.
+            response.operations -= 1
+            self._conversation.release(response)
+            return None
+        open_calls = any(
+            not tool.submitted
+            for tool in self._calls.values()
+            if tool.event.call.response_id == latest.response_id
+        )
+        if response.continued or open_calls:
+            return None, latest
+        response.continued = True
+        response.continuing = True
+        return response.ref, latest
+
+    def _settle_owed_calls(self) -> None:
+        """Release the references held for results that need no reply of their own."""
+        calls, self._owed_calls = self._owed_calls, []
+        for tool in calls:
+            response = self._responses.get(tool.event.call.response_id)
+            if response is not None:
+                response.operations -= 1
+                self._conversation.release(response)
 
     def _spawn_request(self, coroutine: Coroutine[Any, Any, None]) -> None:
         if self._closing or not self.is_usable:
@@ -634,15 +709,42 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         disable_tools: bool = False,
         parent: r.ResponseRef | None = None,
     ) -> None:
+        try:
+            await self._locked_reply(
+                audio_response,
+                tool_call=tool_call,
+                instruction=instruction,
+                disable_tools=disable_tools,
+                parent=parent,
+            )
+        finally:
+            held = parent or tool_call
+            response = self._responses.get(held.response_id) if held else None
+            if response is not None:
+                response.continuing = False
+                response.operations -= 1
+                self._conversation.release(response)
+
+    async def _locked_reply(
+        self,
+        audio_response: bool,
+        *,
+        tool_call: r.ToolCallRef | None,
+        instruction: str | None,
+        disable_tools: bool,
+        parent: r.ResponseRef | None,
+        report: bool = False,
+    ) -> None:
         epoch = self._interruption_epoch
         async with self._reply_lock:
-            if epoch != self._interruption_epoch:
+            if epoch != self._interruption_epoch and not report:
                 return
             if self._playback:
                 await self._playback.settle()
-            if epoch != self._interruption_epoch:
+            if epoch != self._interruption_epoch and not report:
                 return
             self._reply_epoch = epoch
+            self._reply_reports = report
             self._reply_audio_response = audio_response
             await self.start_ttfb_metrics()
             if not disable_tools:
@@ -861,11 +963,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             await self.push_error(str(payload.error), exception=r.RimeRealtimeError(payload.error))
         elif isinstance(payload, r.ResponseStarted):
             response = self._conversation.start(self._sdk, payload)
-            # A response that starts while an append is being written may not
+            self._supersede_open_calls(payload.response.response_id)
+            # A response that starts while content is being written may not
             # take it in, so the reply stays owed.
-            if not self._appends_unwritten:
+            if not self._writes_unwritten:
                 self._reply_owed = False
-                self._append_written = False
+                self._content_written = False
+                self._settle_owed_calls()
             if self._request_pending and payload.cause in ("proactive", "tools"):
                 if self._admitted_response is not None:
                     raise RuntimeError("Prism created multiple responses for one request")
@@ -875,7 +979,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 self._playback.start(payload.response)
             if payload.cause == "proactive":
                 response.audio_response = self._reply_audio_response
-                response.stopped = self._reply_epoch != self._interruption_epoch
+                response.stopped = (
+                    not self._reply_reports and self._reply_epoch != self._interruption_epoch
+                )
             if payload.parent:
                 parent = self._responses.get(payload.parent.response_id)
                 response.stopped = parent is not None and parent.stopped
@@ -992,6 +1098,16 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             error = r.RimeRealtimeError(payload.error)
             if payload.error.scope == "session":
                 await self._fail(error)
+            elif payload.error.code == "tool_result_timeout" and any(
+                tool is not None and not tool.final
+                for tool in map(self._calls.get, payload.error.call_ids)
+            ):
+                # The application tool is still running. Prism records its
+                # result when it arrives, and a reply can still report it.
+                for tool in map(self._calls.get, payload.error.call_ids):
+                    if tool is not None:
+                        tool.superseded = True
+                logger.debug(f"{self}: {error}")
             else:
                 await self.push_error(str(error), exception=error)
 
@@ -1027,7 +1143,11 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             )
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Submit tool updates once while aggregators retain application records."""
+        """Write each tool result to Prism as it is produced.
+
+        The frames travel on to the assistant aggregator, which records them in
+        the context and decides when Prism should reply.
+        """
         if (
             direction == FrameDirection.DOWNSTREAM
             and isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame))
@@ -1041,107 +1161,119 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     or frame.properties.is_final
                 )
                 tool.final = final
-                result = (
-                    (
-                        json.dumps(frame.result, ensure_ascii=False)
-                        if frame.result is not None
-                        else "COMPLETED"
+                tool.report = final and self._reports_late_result(tool, frame)
+                await self._enqueue(
+                    _Operation(
+                        tool=tool,
+                        tool_output=self._tool_output(tool, frame, final=final),
+                        tool_final=final,
+                        answerable=not tool.report,
                     )
-                    if isinstance(frame, FunctionCallResultFrame)
-                    else "CANCELLED"
                 )
-                run_llm = frame.run_llm
-                if (
-                    isinstance(frame, FunctionCallResultFrame)
-                    and frame.properties
-                    and frame.properties.run_llm is not None
-                ):
-                    run_llm = frame.properties.run_llm
-                # The default result path runs once all sibling provider outputs arrive.
-                if run_llm is None:
-                    run_llm = (
-                        isinstance(frame, FunctionCallResultFrame) and frame.result is not None
+                if not tool.report:
+                    self._writes_unwritten += 1
+                    self._reply_owed = True
+                    response = self._responses.get(tool.event.call.response_id)
+                    self._owed_audio_response = (
+                        response.audio_response if response is not None else not self._skip_tts
                     )
-                self._spawn_request(
-                    self._tool_result(tool, result, final=final, run_llm=bool(run_llm))
-                )
-            frame = copy.copy(frame)
-            frame.run_llm = False
-            if isinstance(frame, FunctionCallResultFrame) and frame.properties:
-                frame.properties = replace(frame.properties, run_llm=False)
         await super().push_frame(frame, direction)
 
-    async def _tool_result(self, tool: Tool, output: str, *, final: bool, run_llm: bool) -> None:
-        call = tool.event
-        response = self._responses[call.call.response_id]
-        response.operations += 1
+    def _tool_output(
+        self, tool: Tool, frame: FunctionCallResultFrame | FunctionCallCancelFrame, *, final: bool
+    ) -> str:
+        if isinstance(frame, FunctionCallCancelFrame):
+            return "CANCELLED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
+        if final:
+            return result
+        message = async_tool_messages.build_intermediate_result_message(
+            tool.event.call.call_id, result
+        )
+        return str(message.get("content", ""))
+
+    def _reports_late_result(
+        self, tool: Tool, frame: FunctionCallResultFrame | FunctionCallCancelFrame
+    ) -> bool:
+        """Whether an async call's final result needs a reply of its own.
+
+        A round closes when a later reply starts or Prism's result deadline
+        passes. Prism keeps a result that arrives after that in its history but
+        mentions it only when asked, and the assistant aggregator drops the
+        reply it holds for the result when the user interrupts.
+        """
+        if not isinstance(frame, FunctionCallResultFrame) or frame.result is None:
+            return False
+        run_llm = frame.run_llm
+        if frame.properties and frame.properties.run_llm is not None:
+            run_llm = frame.properties.run_llm
+        entry = self._functions.get(tool.event.name) or self._functions.get(None)
+        if run_llm is False or entry is None or entry.cancel_on_interruption:
+            return False
+        response = self._responses.get(tool.event.call.response_id)
+        return tool.superseded or response is None or response.stopped
+
+    def _supersede_open_calls(self, response_id: str) -> None:
+        for tool in self._calls.values():
+            if not tool.final and tool.event.call.response_id != response_id:
+                tool.superseded = True
+
+    async def _write_tool_update(self, tool: Tool, output: str, *, final: bool) -> None:
+        call = tool.event.call
+        if not final:
+            # Prism keeps one result per call, so progress goes in beside the open call.
+            await self._ledger.append([{"role": "developer", "content": output}])
+            return
         try:
-            async with tool.lock:
-                if not tool.submitted:
-                    async with self._ledger.lock:
-                        await self._sdk.submit_tool_result(call.call, output)
-                        tool.submitted = True
-                else:
-                    progress_id = "progress_" + uuid4().hex[:23]
-                    await self._ledger.append(
-                        [
-                            {
-                                "role": "assistant",
-                                "tool_calls": [
-                                    {
-                                        "id": progress_id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": call.name,
-                                            "arguments": json.dumps(call.arguments),
-                                        },
-                                    }
-                                ],
-                            },
-                            {"role": "tool", "tool_call_id": progress_id, "content": output},
-                        ]
-                    )
-                    # The original SDK call refers to its immutable first output.
-                    response.report_instruction = (
-                        "Continue according to the agent's instructions using the latest tool "
-                        f"results in the conversation, including tool call {progress_id}. "
-                        "Reply or call a tool as appropriate."
-                    )
-                if final:
-                    response.calls.discard(call.call.call_id)
-                response.reply_owed |= run_llm
-            await response.done.wait()
-            siblings = [
-                value
-                for value in self._calls.values()
-                if value.event.call.response_id == response.ref.response_id
-            ]
-            if response.reply_owed and all(value.submitted for value in siblings):
-                response.reply_owed = False
-                parent = (
-                    response.ref
-                    if not response.continued
-                    and not response.stopped
-                    and response.report_instruction is None
-                    else None
-                )
-                response.continued = True
-                await self._reply(
-                    response.audio_response,
-                    parent=parent,
-                    tool_call=call.call if response.report_instruction is None else None,
-                    instruction=response.report_instruction,
-                    disable_tools=self._tool_choice == "none",
-                )
+            async with self._ledger.lock:
+                await self._sdk.submit_tool_result(call, output)
         except Exception as error:
-            if final and not tool.submitted:
-                await self._fail(error)
+            # An unsettled call leaves the conversation in an unknown state.
+            await self._fail(error)
             raise
+        tool.submitted = True
+        response = self._responses.get(call.response_id)
+        if response is not None:
+            response.calls.discard(call.call_id)
+            # A reply that reports the call needs the response reference.
+            response.operations += 1
+        if tool.report:
+            self._spawn_request(self._report_late_result(tool))
+        else:
+            self._owed_calls.append(tool)
+
+    async def _report_late_result(self, tool: Tool) -> None:
+        call = tool.event.call
+        response = self._responses.get(call.response_id)
+        audio_response = response.audio_response if response is not None else not self._skip_tts
+        try:
+            for attempt in range(2):
+                try:
+                    await self._locked_reply(
+                        audio_response,
+                        tool_call=call,
+                        instruction=None,
+                        disable_tools=self._tool_choice == "none",
+                        parent=None,
+                        report=True,
+                    )
+                    return
+                except (r.RimeRealtimeError, r.RealtimeAdmissionTimeout) as error:
+                    # The caller's speech, or a reply that stays busy, can push
+                    # the report aside. It waits for Prism to be idle again.
+                    if attempt or (
+                        isinstance(error, r.RimeRealtimeError) and error.fault.scope == "session"
+                    ):
+                        raise
+                    logger.debug(f"{self}: requesting the tool result report again: {error}")
         finally:
-            if final:
-                response.calls.discard(call.call.call_id)
-            response.operations -= 1
-            self._conversation.release(response)
+            if response is not None:
+                response.operations -= 1
+                self._conversation.release(response)
 
     async def _operation_error(self, error: Exception) -> None:
         if isinstance(error, PrismHistoryUpdateError) and error.recoverable:

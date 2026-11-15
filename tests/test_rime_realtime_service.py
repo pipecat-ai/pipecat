@@ -1007,7 +1007,7 @@ async def test_late_transcript_is_flushed_before_the_assistant_record():
 
 
 @pytest.mark.asyncio
-async def test_silent_progress_then_final_result_continues():
+async def test_silent_progress_keeps_the_call_open_until_the_final_result():
     from pipecat.frames.frames import FunctionCallResultProperties
 
     async def lookup(params):
@@ -1037,13 +1037,261 @@ async def test_silent_progress_then_final_result_continues():
             arguments="{}",
         )
         await peer.end(response)
-        await answer(peer, await peer.next())
-        await until(lambda: len(sent(peer, "conversation.item.create")) == 3)
-        assert not any(isinstance(f, ErrorFrame) for f in upstream)
+        continuation = await peer.next()
+        assert continuation["response"]["metadata"]["prism_cause"] == "tool_continuation"
+        await answer(peer, continuation)
         creates = sent(peer, "conversation.item.create")
-        assert creates[0]["item"]["output"] == '"Working"'
-        assert creates[1]["item"]["type"] == "function_call"
-        assert creates[2]["item"]["output"] == '"Done"'
+        assert [event["item"]["type"] for event in creates] == ["message", "function_call_output"]
+        progress = json.loads(creates[0]["item"]["text"])
+        assert creates[0]["item"]["role"] == "system"
+        assert (progress["tool_call_id"], progress["status"]) == ("call-1", "running")
+        assert progress["result"] == '"Working"'
+        assert (creates[1]["item"]["call_id"], creates[1]["item"]["output"]) == ("call-1", '"Done"')
+        assert len(sent(peer, "response.create")) == 2
+        assert not any(isinstance(f, ErrorFrame) for f in upstream)
+        assert service.is_usable
+
+
+async def emit_call(peer, response, call_id="call-1", name="lookup"):
+    await peer.emit(
+        "response.function_call_arguments.done",
+        response_id=response,
+        item_id=f"item-{call_id}",
+        output_index=0,
+        call_id=call_id,
+        name=name,
+        arguments="{}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_result_waits_for_the_bot_to_stop_speaking():
+    finished = asyncio.Event()
+
+    async def lookup(params):
+        await finished.wait()
+        await params.result_callback({"status": "paid"})
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        context,
+        output,
+        _,
+        downstream,
+    ):
+        release = hold_audio(output)
+        try:
+            parent = await peer.start()
+            await peer.message(parent, text="Checking", samples=2400)
+            await emit_call(peer, parent)
+            await peer.end(parent)
+            await until(lambda: any(isinstance(f, BotStartedSpeakingFrame) for f in downstream))
+            finished.set()
+            await until(lambda: len(sent(peer, "conversation.item.create")) == 1)
+            await asyncio.sleep(0.1)
+            assert len(sent(peer, "response.create")) == 1
+            release.set()
+            continuation = await peer.next()
+            assert continuation["response"]["metadata"]["prism_cause"] == "tool_continuation"
+            await answer(peer, continuation)
+            assert service.is_usable
+        finally:
+            finished.set()
+            release.set()
+
+
+@pytest.mark.asyncio
+async def test_tool_result_frames_keep_their_reply_policy():
+    from pipecat.frames.frames import FunctionCallResultFrame, FunctionCallResultProperties
+
+    async def lookup(params):
+        await params.result_callback(
+            {"status": "paid"}, properties=FunctionCallResultProperties(run_llm=False)
+        )
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        context,
+        _,
+        __,
+        downstream,
+    ):
+        parent = await peer.start()
+        await emit_call(peer, parent)
+        await peer.end(parent)
+        await until(lambda: any(isinstance(f, FunctionCallResultFrame) for f in downstream))
+        result = next(f for f in downstream if isinstance(f, FunctionCallResultFrame))
+        assert result.properties.run_llm is False
+        await asyncio.sleep(0.05)
+        assert len(sent(peer, "response.create")) == 1
+        assert service._responses[parent].hold is not None
+        # A later response, such as the user's next turn, takes the result in.
+        turn = await peer.start()
+        await peer.end(turn)
+        await until(lambda: service._responses[parent].hold is None)
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("running", [True, False])
+async def test_tool_result_deadline_is_quiet_while_the_tool_runs(running):
+    finished = asyncio.Event()
+
+    async def lookup(params):
+        await finished.wait()
+        await params.result_callback({"status": "paid"})
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        _,
+        __,
+        upstream,
+        ___,
+    ):
+        service.register_function("lookup", lookup, cancel_on_interruption=False)
+        parent = await peer.start()
+        await emit_call(peer, parent)
+        await peer.end(parent)
+        await until(lambda: "call-1" in service._calls)
+        if not running:
+            finished.set()
+            await until(lambda: service._calls["call-1"].submitted)
+        await peer.emit(
+            "error",
+            error={
+                "code": "tool_result_timeout",
+                "message": "tool results did not arrive in time",
+                "scope": "tool_roundtrip",
+                "owner": {"kind": "response", "response_id": parent, "call_ids": ["call-1"]},
+            },
+        )
+        await asyncio.sleep(0.05)
+        errors = [f for f in upstream if isinstance(f, ErrorFrame)]
+        assert bool(errors) is not running
+        if running:
+            finished.set()
+            request = await peer.next()
+            await answer(peer, request)
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("moved_on", [False, True])
+async def test_async_result_after_its_round_closed_is_reported(moved_on):
+    finished = asyncio.Event()
+
+    async def lookup(params):
+        await finished.wait()
+        await params.result_callback({"status": "paid"})
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        *_,
+    ):
+        service.register_function("lookup", lookup, cancel_on_interruption=False)
+        parent = await peer.start()
+        await emit_call(peer, parent)
+        await peer.end(parent)
+        await until(lambda: "call-1" in service._calls)
+        if moved_on:
+            turn = await peer.start()
+            await peer.end(turn)
+            await until(lambda: turn in service._responses)
+        finished.set()
+        request = await peer.next()
+        outputs = sent(peer, "conversation.item.create")
+        assert [event["item"]["output"] for event in outputs] == ['{"status": "paid"}']
+        if moved_on:
+            assert request["response"]["metadata"]["prism_cause"] == "proactive"
+            assert request["response"]["prism_call_id"] == "call-1"
+        else:
+            assert request["response"]["metadata"]["prism_cause"] == "tool_continuation"
+        await answer(peer, request)
+        await asyncio.sleep(0.1)
+        assert len(sent(peer, "response.create")) == 2
+        assert service.is_usable
+
+
+async def late_result(peer, service, finished):
+    """Close a running async call's round with a later turn, then finish the call."""
+    parent = await peer.start()
+    await emit_call(peer, parent)
+    await peer.end(parent)
+    await until(lambda: "call-1" in service._calls)
+    turn = await peer.start()
+    await peer.end(turn)
+    await until(lambda: turn in service._responses)
+    finished.set()
+
+
+@pytest.mark.asyncio
+async def test_late_result_report_survives_an_interruption():
+    finished = asyncio.Event()
+
+    async def lookup(params):
+        await finished.wait()
+        await params.result_callback({"status": "paid"})
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        context,
+        *_,
+    ):
+        service.register_function("lookup", lookup, cancel_on_interruption=False)
+        peer.gates["response.create"] = asyncio.Event()
+        await late_result(peer, service, finished)
+        await until(lambda: bool(service._requests))
+        await worker.queue_frame(InterruptionFrame())
+        await asyncio.sleep(0.05)
+        peer.gates["response.create"].set()
+        request = await peer.next()
+        assert request["response"]["prism_call_id"] == "call-1"
+        report = await peer.start(request)
+        await peer.message(report, text="It is paid")
+        await peer.end(report)
+        # An interrupted reply would be stopped, and its words left out of the context.
+        await until(
+            lambda: {"role": "assistant", "content": "It is paid"} in context.get_messages()
+        )
+        assert not service._responses[report].stopped
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_refused_late_result_report_is_requested_once_more():
+    finished = asyncio.Event()
+
+    async def lookup(params):
+        await finished.wait()
+        await params.result_callback({"status": "paid"})
+
+    async with conversation(settings=RimeRealtimeLLMService.Settings(tools=[lookup])) as (
+        peer,
+        service,
+        worker,
+        _,
+        __,
+        upstream,
+        ___,
+    ):
+        service.register_function("lookup", lookup, cancel_on_interruption=False)
+        peer.refuse["response.create"] = "nudge_superseded"
+        await late_result(peer, service, finished)
+        await until(lambda: len(sent(peer, "response.create")) == 3)
+        retry = sent(peer, "response.create")[-1]
+        assert retry["response"]["prism_call_id"] == "call-1"
+        await answer(peer, retry)
+        assert not any(isinstance(f, ErrorFrame) for f in upstream)
         assert service.is_usable
 
 

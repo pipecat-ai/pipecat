@@ -7,6 +7,7 @@
 """Prism SDK-main workflows through the public pipeline and real SDK wire protocol."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -272,7 +273,7 @@ async def test_usage_once_for_terminal_response_with_raw_diagnostics(status):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("final_run", [True, False])
 @pytest.mark.parametrize("progress_run", [True, False])
-async def test_spoken_progress_then_final_respects_reply_policy(final_run, progress_run):
+async def test_progress_then_final_respects_reply_policy(final_run, progress_run):
     release = asyncio.Event()
     calls = []
 
@@ -299,8 +300,10 @@ async def test_spoken_progress_then_final_respects_reply_policy(final_run, progr
         parent = await peer.start()
         await call(peer, parent)
         await peer.end(parent)
+        await until(lambda: len(sent(peer, "conversation.item.create")) == 1)
+        progress = sent(peer, "conversation.item.create")[0]["item"]
+        assert (progress["type"], progress["role"]) == ("message", "system")
         if not progress_run:
-            await until(lambda: len(sent(peer, "conversation.item.create")) == 1)
             await worker.queue_frame(
                 LLMMessagesAppendFrame(
                     messages=[{"role": "user", "content": "Answer while the lookup runs"}],
@@ -309,19 +312,24 @@ async def test_spoken_progress_then_final_respects_reply_policy(final_run, progr
             )
         await answer(peer, text="Progress recorded")
         release.set()
-        writes = 3 if progress_run else 4
+        writes = 2 if progress_run else 3
         await until(lambda: len(sent(peer, "conversation.item.create")) == writes)
+        final = sent(peer, "conversation.item.create")[-1]["item"]
+        assert (final["type"], final["call_id"]) == ("function_call_output", "lookup-1")
         if final_run:
+            # The progress reply superseded the tool round, so the result is reported.
             request = await peer.next()
-            assert "prism_call_id" not in request["response"]
-            progress_call = peer.history[-2]["call_id"]
-            assert progress_call in request["response"]["prism_instruction"]
+            assert request["response"]["prism_call_id"] == "lookup-1"
             await answer(peer, request, text="Final recorded")
             await until(
                 lambda: any(m.get("content") == "Final recorded" for m in context.get_messages())
             )
+            # The report answers the result; the aggregator's request adds no reply.
+            await asyncio.sleep(0.1)
+            assert len(sent(peer, "response.create")) == 3
         else:
             await until(lambda: any("Finished" in str(m) for m in context.get_messages()))
+            await asyncio.sleep(0.05)
             assert len(sent(peer, "response.create")) == 2
         assert calls == [True]
         # A later context frame does not write the async final a second time.

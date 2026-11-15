@@ -99,21 +99,24 @@ class Response:
     audio_response: bool = True
     done: asyncio.Event = field(default_factory=asyncio.Event)
     continued: bool = False
+    # A continuation is requested and has not started yet.
+    continuing: bool = False
     tools_disabled: bool = False
     hold: r.ResponseHold | None = None
     operations: int = 0
-    reply_owed: bool = False
-    report_instruction: str | None = None
 
 
 @dataclass
 class Tool:
-    """One application call with ordered progress and final submissions."""
+    """One application call, open until its final result is submitted."""
 
     event: r.ToolCall
     submitted: bool = False
     final: bool = False
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # A later reply, or Prism's result deadline, closed the call's round.
+    superseded: bool = False
+    # Prism mentions the result of a closed round only when asked to report it.
+    report: bool = False
 
 
 class Conversation:
