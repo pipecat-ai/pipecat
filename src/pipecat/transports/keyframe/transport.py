@@ -107,7 +107,7 @@ class KeyframeEmotion(StrEnum):
 KEYFRAME_DELIVERY_EMOTIONS: dict[str, KeyframeEmotion] = {
     **{emotion.value: emotion for emotion in KeyframeEmotion},
     ExpressionDelivery.CALM: KeyframeEmotion.NEUTRAL,
-    ExpressionDelivery.CURIOUS: KeyframeEmotion.NEUTRAL,
+    ExpressionDelivery.CURIOUS: KeyframeEmotion.CONFUSED,
     ExpressionDelivery.CONFIDENT: KeyframeEmotion.NEUTRAL,
     ExpressionDelivery.WARM: KeyframeEmotion.HAPPY,
     ExpressionDelivery.GRATEFUL: KeyframeEmotion.HAPPY,

@@ -430,6 +430,7 @@ def test_every_keyframe_emotion_converts_from_its_own_name():
     "delivery, emotion",
     [
         ([ExpressionDelivery.WARM], KeyframeEmotion.HAPPY),
+        ([ExpressionDelivery.CURIOUS], KeyframeEmotion.CONFUSED),
         ([ExpressionDelivery.SYMPATHETIC, EMPHASIS_DELIVERY], KeyframeEmotion.CONCERNED),
         ([ExpressionDelivery.SLOW, ExpressionDelivery.EXCITED], KeyframeEmotion.EXCITED),
         ([ExpressionDelivery.NOSTALGIC], KeyframeEmotion.NEUTRAL),  # no emotion for it
