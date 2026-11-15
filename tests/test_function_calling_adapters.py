@@ -493,6 +493,22 @@ class TestFunctionAdapters(unittest.TestCase):
         ]
         assert AWSBedrockLLMAdapter().to_provider_tools_format(self.tools_def) == expected
 
+    def test_bedrock_adapter_omits_empty_description(self):
+        """Test AWS Bedrock adapter leaving out an empty or missing description."""
+        tools_def = ToolsSchema(
+            standard_tools=[
+                FunctionSchema(name="empty", description="", properties={}, required=[]),
+                # MCPClient passes None for a tool without a description.
+                FunctionSchema(name="missing", description=None, properties={}, required=[]),
+            ]
+        )
+        input_schema = {"json": {"type": "object", "properties": {}, "required": []}}
+        expected = [
+            {"toolSpec": {"name": "empty", "inputSchema": input_schema}},
+            {"toolSpec": {"name": "missing", "inputSchema": input_schema}},
+        ]
+        assert AWSBedrockLLMAdapter().to_provider_tools_format(tools_def) == expected
+
 
 if __name__ == "__main__":
     unittest.main()
