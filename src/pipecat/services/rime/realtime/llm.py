@@ -97,6 +97,13 @@ class RimeRealtimeSettings(LLMSettings):
         tool_fillers: SDK fillers keyed by the resulting tool names.
         truncation: Future model history capacity policy.
         response_metadata: Labels applied through a separate SDK operation.
+        speed: Speech speed from 0.85 to 1.3. ``None`` uses the server default.
+        interrupt_min_words: Words, from 1 to 10, the user says over a reply
+            before Prism interrupts it. ``None`` uses the server default.
+        interrupt_phrases: Phrases that interrupt a reply regardless of
+            ``interrupt_min_words``. An empty list clears them.
+        acknowledgment_phrases: Phrases, such as "uh huh", that do not
+            interrupt a reply. An empty list clears them.
     """
 
     tools: Any = field(default_factory=lambda: NOT_GIVEN)
@@ -105,6 +112,13 @@ class RimeRealtimeSettings(LLMSettings):
     tool_fillers: dict[str, r.PrismFiller] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     truncation: r.Truncation | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     response_metadata: dict[str, str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interrupt_min_words: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interrupt_phrases: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    acknowledgment_phrases: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+_INTERRUPTION_RULES = ("interrupt_min_words", "interrupt_phrases", "acknowledgment_phrases")
 
 
 @dataclass
@@ -175,7 +189,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             client: Optional caller-owned SDK client.
             endpoint: Optional SDK-validated Prism WebSocket endpoint.
             settings: Initial settings and advertised tools.
-            turn_detection: Opening-only SDK server turn timing settings.
+            turn_detection: SDK server turn settings for the opening, such as
+                eagerness and the end-of-turn silence floor. Its interruption
+                rules may instead be given in ``settings``, which can also
+                change them later.
             timeouts: SDK connection, readiness, and acknowledgment limits.
             request_id: Requested provider correlation ID.
             startup: Bounded connection retry policy.
@@ -203,9 +220,21 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             tool_fillers={},
             truncation=None,
             response_metadata=None,
+            speed=None,
+            interrupt_min_words=None,
+            interrupt_phrases=None,
+            acknowledgment_phrases=None,
         )
         if settings is not None:
             store.apply_update(copy.deepcopy(settings))
+        if turn_detection is not None:
+            for name in _INTERRUPTION_RULES:
+                value = getattr(turn_detection, name)
+                if value is None:
+                    continue
+                if getattr(store, name) is not None:
+                    raise ValueError(f"Set {name} in turn_detection or settings, not both")
+                setattr(store, name, list(value) if isinstance(value, tuple) else value)
         self._validate_settings(store)
         super().__init__(settings=store, **kwargs)
         if playback not in ("estimated", "discard"):
@@ -316,6 +345,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             "tool_fillers",
             "truncation",
             "response_metadata",
+            "speed",
+            *_INTERRUPTION_RULES,
             "filter_incomplete_user_turns",
             "use_provider_thinking_default",
         }
@@ -330,6 +361,24 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             raise ValueError("Prism instructions must be a string")
         if not isinstance(settings.interrupt_on_speech, bool):
             raise ValueError("interrupt_on_speech must be a boolean")
+        speed = settings.speed
+        if speed is not None and (
+            isinstance(speed, bool)
+            or not isinstance(speed, (int, float))
+            or not 0.85 <= speed <= 1.3
+        ):
+            raise ValueError("Prism speed must be a number from 0.85 to 1.3")
+        self._interruption_rules(settings, _INTERRUPTION_RULES)
+
+    @staticmethod
+    def _interruption_rules(settings: Settings, names) -> r.TurnDetectionUpdate:
+        rules = {name: getattr(settings, name) for name in names}
+        try:
+            return r.TurnDetectionUpdate(
+                **{name: value for name, value in rules.items() if value is not None}
+            )
+        except RimeInputError as error:
+            raise ValueError(str(error)) from None
 
     def _sdk_tools(self, settings: Settings) -> list[r.ToolDefinition]:
         tools = self._adapter.tools(settings.tools)
@@ -353,6 +402,17 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         if self._connection_task is None:
             self._connection_task = self.create_task(self._open())
 
+    def _opening_turn_detection(self) -> r.TurnDetection | None:
+        rules = self._interruption_rules(self._settings, _INTERRUPTION_RULES)
+        given = {
+            name: getattr(rules, name)
+            for name in _INTERRUPTION_RULES
+            if getattr(rules, name) is not None
+        }
+        if not given:
+            return self._turn_detection
+        return replace(self._turn_detection or r.TurnDetection(), **given)
+
     async def _open(self) -> None:
         try:
             if self._client is None:
@@ -366,7 +426,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 voice=assert_given(self._settings.voice),
                 tools=self._sdk_tools(self._settings),
                 interrupt_on_speech=assert_given(self._settings.interrupt_on_speech),
-                turn_detection=self._turn_detection,
+                turn_detection=self._opening_turn_detection(),
+                speed=assert_given(self._settings.speed),
                 timeouts=self._timeouts,
                 request_id=self._request_id,
                 response_metadata=assert_given(self._settings.response_metadata),
@@ -670,6 +731,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             ("voice", "voice"),
             ("interrupt_on_speech", "interrupt_on_speech"),
             ("truncation", "truncation"),
+            ("speed", "speed"),
+            *((name, name) for name in _INTERRUPTION_RULES),
         ):
             if field_name in supplied:
                 value = getattr(proposal, field_name)
@@ -678,6 +741,11 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 update[sdk_name] = value
         if "tools" in supplied or "tool_fillers" in supplied:
             update["tools"] = tools
+        rules = [name for name in _INTERRUPTION_RULES if name in update]
+        if rules:
+            update["turn_detection"] = self._interruption_rules(proposal, rules)
+            for name in rules:
+                del update[name]
         if update:
             await self._sdk.update(**update)
             metadata = self._settings.response_metadata
@@ -771,11 +839,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         elif isinstance(payload, (r.TranscriptDelta, r.TranscriptFinal)):
             final = isinstance(payload, r.TranscriptFinal)
-            text = (
-                payload.text
-                if final
-                else self._transcripts.get(payload.item_id, "") + payload.delta
-            )
+            if final:
+                text = payload.text
+            elif payload.transcript is not None:
+                # A full transcript replaces the partial text, revisions included.
+                text = payload.transcript
+            else:
+                text = self._transcripts.get(payload.item_id, "") + payload.delta
             if len(text) > 65536 or len(self._transcripts) >= 128:
                 raise RuntimeError("Prism transcript retention limit exceeded")
             if final:

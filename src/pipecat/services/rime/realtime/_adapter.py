@@ -16,15 +16,13 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.utils.types import is_given
 
 
-def _text(value: Any, *, history_message: bool = True) -> str:
+def _text(value: Any) -> str:
     if not isinstance(value, str):
         if not isinstance(value, list) or any(
             not isinstance(part, dict) or part.get("type") != "text" for part in value
         ):
             raise ValueError("Prism history supports text content only")
         value = "".join(part["text"] for part in value)
-    if history_message and len(value) > 4000:
-        raise ValueError("Prism history messages must contain at most 4000 characters")
     value.encode("utf-8")
     return value
 
@@ -72,7 +70,7 @@ def history_items(messages: list) -> list[r.HistoryItem]:
             result.append(
                 r.HistoryFunctionResult(
                     call_id=message["tool_call_id"],
-                    output=_text(message["content"], history_message=False),
+                    output=_text(message["content"]),
                 )
             )
         else:

@@ -89,7 +89,14 @@ class Peer:
                 await self.emit("prism.typed_input.ready")
             return
         if kind == "session.update":
+            # Prism merges partial turn settings into the current ones.
+            turn = {
+                **self.settings.get("turn_detection", {}),
+                **event["session"].get("turn_detection", {}),
+            }
             self.settings.update(event["session"])
+            if turn:
+                self.settings["turn_detection"] = turn
             self.revision += 1
             await self.emit(
                 "session.updated",

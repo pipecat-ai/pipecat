@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     ErrorFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMMessagesAppendFrame,
@@ -438,6 +439,113 @@ async def test_settings_tools_fillers_truncation_and_metadata_update():
         await worker.queue_frame(LLMSetToolsFrame(tools=[]))
         await until(lambda: peer.settings["tools"] == [])
         assert not context.tools
+
+
+@pytest.mark.asyncio
+async def test_speed_and_interruption_rules_open_and_update():
+    settings = RimeRealtimeLLMService.Settings(
+        speed=1.1, interrupt_min_words=2, acknowledgment_phrases=["uh huh"]
+    )
+    async with conversation(settings=settings) as (peer, service, worker, *_):
+        opening = sent(peer, "session.update")[0]["session"]
+        assert opening["speed"] == 1.1
+        assert opening["turn_detection"]["interrupt_min_words"] == 2
+        assert opening["turn_detection"]["acknowledgment_phrases"] == ["uh huh"]
+        assert "interrupt_phrases" not in opening["turn_detection"]
+
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(
+                delta=service.Settings(speed=0.9, interrupt_phrases=["stop", "wait"])
+            )
+        )
+        await until(lambda: service._settings.speed == 0.9)
+        update = sent(peer, "session.update")[-1]["session"]
+        assert update["speed"] == 0.9
+        assert update["turn_detection"] == {"interrupt_phrases": ["stop", "wait"]}
+        assert service._settings.interrupt_phrases == ["stop", "wait"]
+        assert service._settings.interrupt_min_words == 2
+        detection = service.session_info.turn_detection
+        assert detection.interrupt_min_words == 2
+        assert detection.interrupt_phrases == ("stop", "wait")
+        assert detection.acknowledgment_phrases == ("uh huh",)
+
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(acknowledgment_phrases=[]))
+        )
+        await until(lambda: service._settings.acknowledgment_phrases == [])
+        assert sent(peer, "session.update")[-1]["session"]["turn_detection"] == {
+            "acknowledgment_phrases": []
+        }
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_opening_turn_detection_rules_join_the_settings():
+    turn_detection = r.TurnDetection(eagerness="low", interrupt_min_words=3)
+    async with conversation(turn_detection=turn_detection) as (peer, service, *_):
+        opening = sent(peer, "session.update")[0]["session"]["turn_detection"]
+        assert opening["eagerness"] == "low"
+        assert opening["interrupt_min_words"] == 3
+        assert service._settings.interrupt_min_words == 3
+
+
+def test_interruption_rule_set_twice_is_rejected():
+    with pytest.raises(ValueError, match="interrupt_min_words"):
+        RimeRealtimeLLMService(
+            turn_detection=r.TurnDetection(interrupt_min_words=3),
+            settings=RimeRealtimeLLMService.Settings(interrupt_min_words=2),
+        )
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"speed": 2.0},
+        {"speed": True},
+        {"interrupt_min_words": 0},
+        {"interrupt_phrases": "stop"},
+        {"acknowledgment_phrases": [1]},
+    ],
+)
+def test_invalid_speed_and_interruption_rules_are_rejected(settings):
+    with pytest.raises(ValueError):
+        RimeRealtimeLLMService(settings=RimeRealtimeLLMService.Settings(**settings))
+
+
+@pytest.mark.asyncio
+async def test_invalid_interruption_rule_update_is_rejected_without_a_write():
+    async with conversation() as (peer, service, worker, _, __, upstream, ___):
+        updates = len(sent(peer, "session.update"))
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(interrupt_min_words=11))
+        )
+        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
+        assert len(sent(peer, "session.update")) == updates
+        assert service._settings.interrupt_min_words is None
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_full_partial_transcripts_replace_earlier_partials():
+    async with conversation() as (peer, service, worker, context, output, upstream, downstream):
+        event = "conversation.item.input_audio_transcription.delta"
+        await peer.emit(event, item_id="speech-1", delta="Wether")
+        await peer.emit(event, item_id="speech-1", delta=" in", transcript="Weather in")
+        await peer.emit(event, item_id="speech-1", delta=" Paris")
+        await until(
+            lambda: len([f for f in downstream if isinstance(f, InterimTranscriptionFrame)]) == 3
+        )
+        texts = [f.text for f in downstream if isinstance(f, InterimTranscriptionFrame)]
+        assert texts == ["Wether", "Weather in", "Weather in Paris"]
+
+
+@pytest.mark.asyncio
+async def test_long_history_message_is_left_to_prism():
+    text = "word " * 1200
+    context = LLMContext([{"role": "user", "content": text}])
+    async with conversation(context=context) as (peer, service, *_):
+        assert created_texts(peer) == [text]
+        assert service.is_usable
 
 
 @pytest.mark.asyncio
