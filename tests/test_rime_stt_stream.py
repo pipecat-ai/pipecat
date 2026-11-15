@@ -16,6 +16,7 @@ pytest.importorskip("rimelabs_sdk")
 
 from rimelabs_sdk import (
     RimeAuthenticationError,
+    RimeBillingError,
     RimeInputError,
     RimePermissionError,
     RimeResourceLimitError,
@@ -157,6 +158,7 @@ async def test_final_is_not_finalized_once_the_user_speaks_again(client):
     [
         (RimeAuthenticationError, ErrorCategory.AUTHENTICATION, False),
         (RimePermissionError, ErrorCategory.AUTHORIZATION, False),
+        (RimeBillingError, ErrorCategory.QUOTA, True),
         (RimeInputError, ErrorCategory.INVALID_REQUEST, False),
         (RimeTimeoutError, ErrorCategory.CONNECTIVITY, True),
         (RimeUnavailableError, ErrorCategory.CONNECTIVITY, True),

@@ -6500,8 +6500,8 @@ requires-dist = [
     { name = "resampy", marker = "extra == 'resampy'", specifier = "~=0.4.3" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0,<14" },
     { name = "rime-api", marker = "extra == 'rime'", specifier = "~=0.4.0" },
-    { name = "rimelabs-sdk", marker = "extra == 'rime'", specifier = "==0.1.0a29" },
-    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a29,<0.2" },
+    { name = "rimelabs-sdk", marker = "extra == 'rime'", specifier = "==0.1.0a31" },
+    { name = "rimelabs-sdk", marker = "extra == 'rime-realtime'", specifier = ">=0.1.0a31,<0.2" },
     { name = "ruff", marker = "extra == 'cli'", specifier = ">=0.12.1,<1" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "sentencex", specifier = "==1.0.34" },
@@ -8423,7 +8423,7 @@ wheels = [
 
 [[package]]
 name = "rimelabs-sdk"
-version = "0.1.0a29"
+version = "0.1.0a31"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
@@ -8432,9 +8432,9 @@ dependencies = [
     { name = "rime-api" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/c3/8f3d9ef51a88af4eed8486d1cacc883633a1212936d0689a633effedcf67/rimelabs_sdk-0.1.0a29.tar.gz", hash = "sha256:d7c3b3af429e598b2743a842623de25f740db0b23d914c7c98600e713abfd2e1", size = 243865, upload-time = "2026-11-03T19:12:13.088Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/09/1c72d7206a513286600e55dd1af6309f9ce63913520c458fded369f3e64b/rimelabs_sdk-0.1.0a31.tar.gz", hash = "sha256:cb3c5ce7c3f0297e7d39e6cf04a59f28a464fba97f1921392d099513c1b29b91", size = 256962, upload-time = "2026-11-13T07:51:29.406Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/b6/dc92855616eba08397f8b1c33c3ec658c7e7b0bbdd21454c8511b08dc849/rimelabs_sdk-0.1.0a29-py3-none-any.whl", hash = "sha256:05aa3bc074ab4ec1cf32a5a42eb1e118bb3294299c625a5b08870cdd42f886bd", size = 78733, upload-time = "2026-11-03T19:12:11.827Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/13/2b230c3dee3cc9943be6fe18c457e4723ce28ad614b64c46605c3540fefd/rimelabs_sdk-0.1.0a31-py3-none-any.whl", hash = "sha256:81a55999cdb0193228f2d41b19cacdf6be9b0a42d18cfd61b466251847fc398a", size = 84814, upload-time = "2026-11-13T07:51:28.116Z" },
 ]
 
 [[package]]
