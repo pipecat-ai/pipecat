@@ -3655,6 +3655,17 @@
       "location": "pipecat/services/hume/tts.py"
     },
     {
+      "subject": "InceptionLLMService",
+      "module": "pipecat.services.inception.llm",
+      "kind": "class",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "none",
+      "replacement": null,
+      "message": "`InceptionLLMService` is deprecated since 1.17.0 and will be removed in 2.0.0. No replacement. Inception stops serving the Mercury API after December 28, 2026.",
+      "location": "pipecat/services/inception/llm.py"
+    },
+    {
       "subject": "InworldHttpTTSService.InputParams",
       "module": "pipecat.services.inworld.tts",
       "kind": "class",
