@@ -460,6 +460,17 @@ class TestProcessWordForcesComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word_frames[0].text, "World")
         self.assertEqual(word_frames[0].context_id, "ctx1")
 
+    async def test_word_for_next_slot_records_a_mark_once(self):
+        """The force-completed slot leaves out a mark its last word already recorded."""
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("A-B-C."), "ctx1", "A-B-C.", True)
+        await seq.register_spoken(_spoken_frame(" Thanks."), "ctx1", " Thanks.", True)
+        seq.process_word("A", pts=10, context_id="ctx1")  # records "A-"
+
+        result = seq.process_word("Thanks.", pts=50, context_id="ctx1")
+        word_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(word_frames[0].raw_text, "B-C.")
+
 
 # ---------------------------------------------------------------------------
 # force_complete
@@ -548,6 +559,27 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertEqual(tts_frames[0].text, "1111")
         self.assertEqual(tts_frames[0].raw_text, "1111</card>")
+
+    async def test_records_original_text_when_a_transform_added_tags(self):
+        """Tags a text transform put in the TTS text stay out of raw_text."""
+        seq = _seq()
+        tts_text = 'A<break time="300ms"/>B<break time="300ms"/>C.'
+        await seq.register_spoken(_spoken_frame("A-B-C."), "ctx1", tts_text, True)
+        seq.process_word("A", pts=10, context_id="ctx1")  # "B" and "C." never arrive
+
+        result = seq.force_complete("ctx1", last_word_pts=20)
+        [frame] = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(frame.raw_text, "A-B-C.")
+
+    async def test_records_a_mark_once(self):
+        """A mark the last spoken word recorded stays out of raw_text."""
+        seq = _seq()
+        await seq.register_spoken(_spoken_frame("A-B-C."), "ctx1", "A-B-C.", True)
+        seq.process_word("A", pts=10, context_id="ctx1")  # records "A-"
+
+        result = seq.force_complete("ctx1", last_word_pts=20)
+        [frame] = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(frame.raw_text, "B-C.")
 
     async def test_discards_corrupt_raw_remaining(self):
         """raw_remaining is discarded when it does not contain remaining_text."""
@@ -1494,6 +1526,17 @@ class TestVoiceFormattingTransforms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(wf), 1)
         # Remaining tts_text starts with "dollars," (the unexpanded portion)
         self.assertIn("dollars,", wf[0].text)
+        self.assertEqual(wf[0].raw_text, "$5, due on 3/15. Call us at 555-1234.")
+
+    async def test_word_for_next_slot_mid_transform_records_original_text(self):
+        """A word for the next slot force-completes this one with the original text."""
+        seq, _ = await self._setup()
+        await seq.register_spoken(_spoken_frame(" Thanks."), "ctx1", " Thanks.", True)
+        self._advance(seq, "Your", "balance", "is", "five")
+        result = seq.process_word("Thanks.", pts=50, context_id="ctx1")
+        wf = self._word_frames(result)
+        self.assertEqual(wf[0].raw_text, "$5, due on 3/15. Call us at 555-1234.")
+        self.assertTrue(wf[0].append_to_context)
 
     async def test_force_complete_after_transform_emits_remaining_unchanged_text(self):
         """force_complete after the transform emits remaining tts_text correctly."""

@@ -52,7 +52,8 @@ complete = tracker.add_word_and_check_complete("4111")
 | `get_accumulated_user_facing_text()` | `_build_progress_frame` | `accumulated_text` → the spoken part of the segment text (what a UI highlights) |
 | `get_remaining_user_facing_text(strip=False)` | `_build_progress_frame` | `remaining_text` → the unspoken part of the segment text (what a UI leaves plain) |
 | `get_remaining_tts_text()` | `force_complete` | Text of the catch-up frame when a provider goes silent |
-| `get_remaining_llm_text()` | `force_complete` | `raw_text` of that catch-up frame |
+| `get_remaining_llm_text()` | `force_complete` | Must hold the words left for that frame to get a `raw_text` |
+| `get_unattributed_llm_text()` | `force_complete` | `raw_text` of that catch-up frame, leaving out a mark an earlier word already recorded |
 
 So a single `process_word` call reads six of these to build one `TTSTextFrame` plus one
 `AggregatedTextProgressFrame` — see [RTVI integration](./rtvi-integration.md).
