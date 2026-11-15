@@ -62,6 +62,7 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transports.daily.transport import (
     DailyInputTransportMessageFrame,
     DailyOutputTransportMessageUrgentFrame,
+    DailyTransportClient,
 )
 from pipecat.transports.keyframe.api import KeyframeApi
 from pipecat.transports.keyframe.protocol import SAMPLE_RATE
@@ -106,6 +107,9 @@ class FakeClient:
 
     async def join(self):
         pass
+
+    async def leave(self):
+        self.stopped = True
 
     async def stop(self):
         self.stopped = True
@@ -706,7 +710,9 @@ async def test_the_emotion_still_changes_on_its_word_after_an_interruption():
 #
 
 
-def _client() -> KeyframeTransportClient:
+def _client(monkeypatch) -> KeyframeTransportClient:
+    monkeypatch.setattr(DailyTransportClient, "_daily_initialized", True)
+    monkeypatch.setattr("pipecat.transports.daily.transport.CallClient", MagicMock())
     client = KeyframeTransportClient(
         bot_name="Pipecat",
         callbacks=MagicMock(),
@@ -719,13 +725,12 @@ def _client() -> KeyframeTransportClient:
         room_url="https://example.daily.co/room",
         avatar_participant_name="keyframe-avatar",
     )
-    client._daily_transport_client = MagicMock()
-    client._daily_transport_client.send_message = AsyncMock()
+    client.send_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
     return client
 
 
 def _sent(client: KeyframeTransportClient) -> list[tuple[dict, str | None]]:
-    frames = [call.args[0] for call in client._daily_transport_client.send_message.call_args_list]
+    frames = [call.args[0] for call in client.send_message.call_args_list]  # type: ignore[attr-defined]
     assert all(isinstance(f, DailyOutputTransportMessageUrgentFrame) for f in frames)
     return [(f.message, f.participant_id) for f in frames]
 
@@ -734,34 +739,34 @@ HELLO = {"kfl": 2, "type": "hello", "protocol": "2"}
 
 
 @pytest.mark.asyncio
-async def test_messages_are_held_until_the_avatar_says_hello_then_sent_to_it_alone():
-    client = _client()
+async def test_messages_are_held_until_the_avatar_says_hello_then_sent_to_it_alone(monkeypatch):
+    client = _client(monkeypatch)
 
     await client.send_to_avatar({"n": 1})
     await client.avatar_joined("avatar-id")
     await client.send_to_avatar({"n": 2})
     assert _sent(client) == []
 
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
     await client.send_to_avatar({"n": 3})
 
     assert _sent(client) == [({"n": n}, "avatar-id") for n in (1, 2, 3)]
 
 
 @pytest.mark.asyncio
-async def test_a_message_sent_while_held_ones_go_out_follows_them():
+async def test_a_message_sent_while_held_ones_go_out_follows_them(monkeypatch):
     """Sending takes time, and the bot goes on speaking while the held messages are sent."""
-    client = _client()
+    client = _client(monkeypatch)
 
     async def slow_send(frame):
         await asyncio.sleep(0.01)
 
-    client._daily_transport_client.send_message = AsyncMock(side_effect=slow_send)
+    client.send_message = AsyncMock(side_effect=slow_send)  # type: ignore[method-assign]
     await client.avatar_joined("avatar-id")
     for n in (1, 2, 3):
         await client.send_to_avatar({"n": n})
 
-    hello = asyncio.create_task(client._on_app_message(HELLO, "avatar-id"))
+    hello = asyncio.create_task(client.handle_avatar_message(HELLO, "avatar-id"))
     await asyncio.sleep(0.015)  # the second held message is on its way
     await client.send_to_avatar({"n": 4})
     await hello
@@ -771,28 +776,28 @@ async def test_a_message_sent_while_held_ones_go_out_follows_them():
 
 
 @pytest.mark.asyncio
-async def test_held_messages_are_not_sent_to_the_room_if_the_avatar_leaves_meanwhile():
-    client = _client()
+async def test_held_messages_are_not_sent_to_the_room_if_the_avatar_leaves_meanwhile(monkeypatch):
+    client = _client(monkeypatch)
 
     async def leave_after_first(frame):
         client.avatar_left()
 
-    client._daily_transport_client.send_message = AsyncMock(side_effect=leave_after_first)
+    client.send_message = AsyncMock(side_effect=leave_after_first)  # type: ignore[method-assign]
     await client.avatar_joined("avatar-id")
     for n in (1, 2):
         await client.send_to_avatar({"n": n})
 
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
 
     assert _sent(client) == [({"n": 1}, "avatar-id")]
 
 
 @pytest.mark.asyncio
-async def test_a_hello_that_arrives_before_the_avatars_participant_is_known_counts():
-    client = _client()
+async def test_a_hello_that_arrives_before_the_avatars_participant_is_known_counts(monkeypatch):
+    client = _client(monkeypatch)
     await client.send_to_avatar({"n": 1})
 
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
     assert _sent(client) == []
     await client.avatar_joined("avatar-id")
 
@@ -800,24 +805,24 @@ async def test_a_hello_that_arrives_before_the_avatars_participant_is_known_coun
 
 
 @pytest.mark.asyncio
-async def test_another_participants_hello_does_not_release_the_avatars_messages():
-    client = _client()
+async def test_another_participants_hello_does_not_release_the_avatars_messages(monkeypatch):
+    client = _client(monkeypatch)
     await client.avatar_joined("avatar-id")
     await client.send_to_avatar({"n": 1})
 
-    await client._on_app_message(HELLO, "someone-else")
+    await client.handle_avatar_message(HELLO, "someone-else")
 
     assert _sent(client) == []
 
 
 @pytest.mark.asyncio
-async def test_an_interrupt_discards_held_messages_and_is_sent_only_to_a_ready_avatar():
-    client = _client()
+async def test_an_interrupt_discards_held_messages_and_is_sent_only_to_a_ready_avatar(monkeypatch):
+    client = _client(monkeypatch)
     await client.avatar_joined("avatar-id")
     await client.send_to_avatar({"n": 1})
 
     await client.send_interrupt_message()
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
     assert _sent(client) == []
 
     await client.send_interrupt_message()
@@ -825,31 +830,31 @@ async def test_an_interrupt_discards_held_messages_and_is_sent_only_to_a_ready_a
 
 
 @pytest.mark.asyncio
-async def test_only_the_avatars_report_of_a_turn_played_to_its_end_is_passed_on():
-    client = _client()
+async def test_only_the_avatars_report_of_a_turn_played_to_its_end_is_passed_on(monkeypatch):
+    client = _client(monkeypatch)
     client.on_playback_finished = AsyncMock()
     await client.avatar_joined("avatar-id")
     finished = {"kfl": 2, "type": "playback_finished", "turn": "t1", "interrupted": False}
 
-    await client._on_app_message(finished, "someone-else")
-    await client._on_app_message({**finished, "interrupted": True}, "avatar-id")
-    await client._on_app_message({**finished, "turn": None}, "avatar-id")
-    await client._on_app_message({**finished, "kfl": 1}, "avatar-id")
+    await client.handle_avatar_message(finished, "someone-else")
+    await client.handle_avatar_message({**finished, "interrupted": True}, "avatar-id")
+    await client.handle_avatar_message({**finished, "turn": None}, "avatar-id")
+    await client.handle_avatar_message({**finished, "kfl": 1}, "avatar-id")
     client.on_playback_finished.assert_not_awaited()
 
-    await client._on_app_message(finished, "avatar-id")
+    await client.handle_avatar_message(finished, "avatar-id")
     client.on_playback_finished.assert_awaited_once_with("t1")
 
 
 @pytest.mark.asyncio
 async def test_the_oldest_held_messages_are_dropped_past_the_limit(monkeypatch):
     monkeypatch.setattr(keyframe, "MAX_PENDING_MESSAGES", 2)
-    client = _client()
+    client = _client(monkeypatch)
     await client.avatar_joined("avatar-id")
 
     for n in (1, 2, 3):
         await client.send_to_avatar({"n": n})
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
 
     assert _sent(client) == [({"n": 2}, "avatar-id"), ({"n": 3}, "avatar-id")]
 
@@ -903,7 +908,9 @@ async def test_a_session_in_the_callers_room_sends_the_room_and_the_avatars_toke
 
 
 @pytest.mark.asyncio
-async def test_the_bot_joins_a_room_keyframe_created_with_the_token_it_was_given():
+async def test_the_bot_joins_a_room_keyframe_created_with_the_token_it_was_given(monkeypatch):
+    monkeypatch.setattr(DailyTransportClient, "_daily_initialized", True)
+    monkeypatch.setattr("pipecat.transports.daily.transport.CallClient", MagicMock())
     http = _FakeHttp(
         {
             "reservation_id": "r1",
@@ -940,7 +947,9 @@ async def test_the_bot_joins_a_room_keyframe_created_with_the_token_it_was_given
 
 
 @pytest.mark.asyncio
-async def test_the_bot_joins_the_callers_room_with_the_callers_token():
+async def test_the_bot_joins_the_callers_room_with_the_callers_token(monkeypatch):
+    monkeypatch.setattr(DailyTransportClient, "_daily_initialized", True)
+    monkeypatch.setattr("pipecat.transports.daily.transport.CallClient", MagicMock())
     http = _FakeHttp(
         {
             "reservation_id": "r1",
@@ -995,34 +1004,36 @@ def test_a_session_request_names_one_persona_and_tokens_only_with_a_room(request
         KeyframeNewSessionRequest(**request_fields)
 
 
-def _transport() -> KeyframeTransport:
+def _transport(monkeypatch) -> KeyframeTransport:
+    monkeypatch.setattr(DailyTransportClient, "_daily_initialized", True)
+    monkeypatch.setattr("pipecat.transports.daily.transport.CallClient", MagicMock())
     transport = KeyframeTransport(
         bot_name="Pipecat",
         session=MagicMock(),
         api_key="test-key",
         session_request=KeyframeNewSessionRequest(persona_slug="public:cosmo_persona-2.0-live"),
     )
-    transport._client._session = KeyframeSession(
+    transport._kfl_client._session = KeyframeSession(
         reservation_id="r1",
         room_url="https://example.daily.co/room",
         avatar_participant_name="keyframe-avatar",
     )
-    daily = MagicMock()
-    daily.send_message = AsyncMock()
-    daily.update_subscriptions = AsyncMock()
-    transport._client._daily_transport_client = daily
+    transport._kfl_client.send_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    transport._kfl_client.update_subscriptions = AsyncMock(return_value=None)  # type: ignore[method-assign]
     transport._call_event_handler = AsyncMock()
     return transport
 
 
 @pytest.mark.asyncio
-async def test_the_avatar_is_the_participant_with_its_user_name_and_its_microphone_is_ignored():
-    transport = _transport()
+async def test_the_avatar_is_the_participant_with_its_user_name_and_its_microphone_is_ignored(
+    monkeypatch,
+):
+    transport = _transport(monkeypatch)
     avatar = {"id": "avatar-id", "info": {"userName": "keyframe-avatar"}}
 
     await transport._on_participant_joined(avatar)
 
-    transport._client._daily_transport_client.update_subscriptions.assert_awaited_once_with(
+    transport._kfl_client.update_subscriptions.assert_awaited_once_with(  # type: ignore[attr-defined]
         participant_settings={"avatar-id": {"media": {"microphone": "unsubscribed"}}},
         profile_settings=None,
     )
@@ -1033,18 +1044,20 @@ async def test_the_avatar_is_the_participant_with_its_user_name_and_its_micropho
 
 
 @pytest.mark.asyncio
-async def test_in_a_room_keyframe_created_the_avatar_is_known_by_its_user_id_not_its_name():
+async def test_in_a_room_keyframe_created_the_avatar_is_known_by_its_user_id_not_its_name(
+    monkeypatch,
+):
     """A participant can change its user name in the room, but not its token's user ID."""
-    transport = _transport()
-    transport._client._session = KeyframeSession(
+    transport = _transport(monkeypatch)
+    transport._kfl_client._session = KeyframeSession(
         reservation_id="r1",
         room_url="https://keyframe.daily.co/made",
         avatar_participant_name="keyframe-avatar",
         avatar_participant_id="avatar-user",
     )
-    transport._input = MagicMock()
-    transport._input.start_capturing_audio = AsyncMock()
-    transport._input.push_frame = AsyncMock()
+    inp = transport.input()
+    inp.capture_participant_audio = AsyncMock()  # type: ignore[method-assign]
+    inp.push_frame = AsyncMock()  # type: ignore[method-assign]
     impostor = {"id": "user-id", "info": {"userName": "keyframe-avatar", "userId": "someone"}}
     avatar = {"id": "avatar-id", "info": {"userName": "Renamed", "userId": "avatar-user"}}
 
@@ -1052,38 +1065,42 @@ async def test_in_a_room_keyframe_created_the_avatar_is_known_by_its_user_id_not
     await transport._on_participant_joined(avatar)
 
     assert [call.args for call in transport._call_event_handler.await_args_list] == [
+        ("on_first_participant_joined", impostor),
+        ("on_participant_joined", impostor),
         ("on_client_connected", impostor),
         ("on_avatar_connected", avatar),
     ]
-    assert transport._client._avatar_id == "avatar-id"
+    assert transport._kfl_client._avatar_id == "avatar-id"
 
 
 @pytest.mark.asyncio
-async def test_any_other_participant_is_a_client_whose_audio_is_captured():
-    transport = _transport()
-    transport._input = MagicMock()
-    transport._input.start_capturing_audio = AsyncMock()
-    transport._input.push_frame = AsyncMock()
+async def test_any_other_participant_is_a_client_whose_audio_is_captured(monkeypatch):
+    transport = _transport(monkeypatch)
+    inp = transport.input()
+    inp.capture_participant_audio = AsyncMock()  # type: ignore[method-assign]
+    inp.push_frame = AsyncMock()  # type: ignore[method-assign]
     user = {"id": "user-id", "info": {"userName": "Ada"}}
 
     await transport._on_participant_joined(user)
 
-    transport._call_event_handler.assert_awaited_once_with("on_client_connected", user)
-    transport._input.start_capturing_audio.assert_awaited_once_with(user)
-    pushed = transport._input.push_frame.await_args_list
+    transport._call_event_handler.assert_any_await("on_client_connected", user)
+    inp.capture_participant_audio.assert_awaited_once_with(  # type: ignore[attr-defined]
+        "user-id", "microphone", transport._kfl_client.in_sample_rate
+    )
+    pushed = inp.push_frame.await_args_list  # type: ignore[attr-defined]
     assert len(pushed) == 1 and isinstance(pushed[0].args[0], ClientConnectedFrame)
-    transport._client._daily_transport_client.update_subscriptions.assert_not_awaited()
+    transport._kfl_client.update_subscriptions.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
-async def test_set_emotion_changes_the_avatars_emotion_right_away():
-    transport = _transport()
-    await transport._client.avatar_joined("avatar-id")
-    await transport._client._on_app_message(HELLO, "avatar-id")
+async def test_set_emotion_changes_the_avatars_emotion_right_away(monkeypatch):
+    transport = _transport(monkeypatch)
+    await transport._kfl_client.avatar_joined("avatar-id")
+    await transport._kfl_client.handle_avatar_message(HELLO, "avatar-id")
 
     await transport.set_emotion("skeptical")
 
-    assert _sent(transport._client) == [
+    assert _sent(transport._kfl_client) == [
         ({"kfl": 2, "type": "emotion_now", "emotion": "skeptical"}, "avatar-id")
     ]
     with pytest.raises(ValueError):
@@ -1097,42 +1114,52 @@ def test_frames_the_transport_queues_for_itself_are_not_pushed_on():
 
 
 @pytest.mark.asyncio
-async def test_client_app_messages_are_forwarded_into_the_pipeline_while_avatar_ones_are_not():
+async def test_client_app_messages_are_forwarded_into_the_pipeline_while_avatar_ones_are_not(
+    monkeypatch,
+):
     """RTVI ``client-ready`` and other client app messages reach downstream processors."""
-    transport = _transport()
+    transport = _transport(monkeypatch)
     inp = transport.input()
-    inp.broadcast_frame = AsyncMock()
-    await transport._client.avatar_joined("avatar-id")
+    inp.broadcast_frame = AsyncMock()  # type: ignore[method-assign]
+    await transport._kfl_client.avatar_joined("avatar-id")
 
     rtvi = {"label": "rtvi-ai", "type": "client-ready", "id": "1"}
-    await transport._client._on_app_message(rtvi, "user-id")
-    await transport._client._on_app_message({"other": 1}, "avatar-id")
-    await transport._client._on_app_message(HELLO, "avatar-id")
+    await transport._on_app_message(rtvi, "user-id")
+    await transport._on_app_message({"other": 1}, "avatar-id")
+    await transport._on_app_message(HELLO, "avatar-id")
 
-    inp.broadcast_frame.assert_awaited_once_with(
+    inp.broadcast_frame.assert_awaited_once_with(  # type: ignore[attr-defined]
         DailyInputTransportMessageFrame, message=rtvi, participant_id="user-id"
     )
     transport._call_event_handler.assert_awaited_once_with("on_app_message", rtvi, "user-id")
 
 
 @pytest.mark.asyncio
-async def test_bot_joined_and_daily_errors_push_standard_frames():
-    transport = _transport()
+async def test_bot_joined_and_daily_errors_push_standard_frames(monkeypatch):
+    transport = _transport(monkeypatch)
     inp = transport.input()
-    inp.push_frame = AsyncMock()
-    inp.push_error = AsyncMock()
+    inp.push_frame = AsyncMock()  # type: ignore[method-assign]
+    inp.push_error = AsyncMock()  # type: ignore[method-assign]
 
-    await transport._client._on_joined({"local": {}})
-    pushed = inp.push_frame.await_args_list
+    await transport._on_joined({"local": {}})
+    pushed = inp.push_frame.await_args_list  # type: ignore[attr-defined]
     assert len(pushed) == 1 and isinstance(pushed[0].args[0], BotConnectedFrame)
 
-    await transport._client._on_error("ice failed")
-    inp.push_error.assert_awaited_once_with(error_msg="ice failed")
-    transport._call_event_handler.assert_awaited_once_with("on_error", "ice failed")
+    await transport._on_error("ice failed")
+    inp.push_error.assert_awaited_once_with(error_msg="ice failed")  # type: ignore[attr-defined]
+    assert [call.args for call in transport._call_event_handler.await_args_list] == [
+        ("on_joined", {"local": {}}),
+        ("on_connected", {"local": {}}),
+        ("on_error", "ice failed"),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_input_and_output_keep_their_configured_names_and_emit_user_attributed_audio():
+async def test_input_and_output_keep_their_configured_names_and_emit_user_attributed_audio(
+    monkeypatch,
+):
+    monkeypatch.setattr(DailyTransportClient, "_daily_initialized", True)
+    monkeypatch.setattr("pipecat.transports.daily.transport.CallClient", MagicMock())
     transport = KeyframeTransport(
         bot_name="Pipecat",
         session=MagicMock(),
@@ -1146,18 +1173,17 @@ async def test_input_and_output_keep_their_configured_names_and_emit_user_attrib
     out = transport.output()
     assert inp.name == "kfl-in" and out.name == "kfl-out"
 
-    transport._client.capture_participant_audio = AsyncMock()
-    user = {"id": "user-42", "info": {"userName": "Ada"}}
-    await inp.start_capturing_audio(user)  # pyright: ignore[reportAttributeAccessIssue]
-    transport._client.capture_participant_audio.assert_not_awaited()
+    transport._kfl_client.capture_participant_audio = AsyncMock()  # type: ignore[method-assign]
+    await inp.capture_participant_audio("user-42", "microphone", 16000)
+    transport._kfl_client.capture_participant_audio.assert_not_awaited()  # type: ignore[attr-defined]
 
-    await inp._start_audio_in_streaming()  # pyright: ignore[reportAttributeAccessIssue]
-    transport._client.capture_participant_audio.assert_awaited_once()
+    await inp._start_audio_in_streaming()
+    transport._kfl_client.capture_participant_audio.assert_awaited_once()  # type: ignore[attr-defined]
 
     pushed: list[Frame] = []
-    inp.push_audio_frame = AsyncMock(side_effect=pushed.append)  # pyright: ignore[reportAttributeAccessIssue]
+    inp.push_audio_frame = AsyncMock(side_effect=pushed.append)  # type: ignore[method-assign]
     fake_audio = MagicMock(audio_frames=b"\x01\x02" * 160, sample_rate=16000, num_channels=1)
-    await inp._on_participant_audio_data("user-42", fake_audio, "microphone")  # pyright: ignore[reportAttributeAccessIssue]
+    await inp._on_participant_audio_data("user-42", fake_audio, "microphone")
     assert len(pushed) == 1 and isinstance(pushed[0], UserAudioRawFrame)
     assert pushed[0].user_id == "user-42"
 
@@ -1168,9 +1194,9 @@ async def test_stop_waits_until_held_bot_stopped_speaking_frame_is_pushed():
     events: list[str] = []
 
     class _OrderClient(FakeClient):
-        async def stop(self):
+        async def leave(self):
             events.append("client.stop")
-            await super().stop()
+            await super().leave()
 
     client = _OrderClient(finish_after=None)
     transport = KeyframeOutputTransport(client, KeyframeParams())  # pyright: ignore[reportArgumentType]
@@ -1241,7 +1267,7 @@ async def test_dropping_a_held_stop_cancels_its_wait_task():
 async def test_overflowing_pending_drops_a_whole_oldest_turn(monkeypatch):
     """Dropping a whole turn keeps the next turn's seq=0 intact."""
     monkeypatch.setattr(keyframe, "MAX_PENDING_MESSAGES", 3)
-    client = _client()
+    client = _client(monkeypatch)
     await client.avatar_joined("avatar-id")
 
     await client.send_to_avatar(
@@ -1253,7 +1279,7 @@ async def test_overflowing_pending_drops_a_whole_oldest_turn(monkeypatch):
     )
     # Next message overflows limit=3 -> drops all of t1, leaving t2 intact from seq=0.
     await client.send_to_avatar({"type": "audio", "turn": "t2", "seq": 1, "data": "", "done": True})
-    await client._on_app_message(HELLO, "avatar-id")
+    await client.handle_avatar_message(HELLO, "avatar-id")
 
     sent_turns = [(m["turn"], m["seq"]) for m, _ in _sent(client)]
     assert sent_turns == [("t2", 0), ("t2", 1)]
