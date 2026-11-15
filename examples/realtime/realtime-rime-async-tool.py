@@ -15,7 +15,6 @@ Prism shares the final result when it arrives.
 
 import asyncio
 import os
-import random
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -57,7 +56,7 @@ async def get_current_weather(params: FunctionCallParams, location: str, format:
     # Simulate a long-running API call so we can demonstrate that the
     # conversation continues while the tool is in flight.
     await asyncio.sleep(10)
-    temperature = random.randint(60, 85) if format == "fahrenheit" else random.randint(15, 30)
+    temperature = 75 if format == "fahrenheit" else 24
     await params.result_callback(
         {
             "conditions": "nice",
