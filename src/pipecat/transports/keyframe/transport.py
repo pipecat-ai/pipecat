@@ -32,14 +32,15 @@ from pipecat.expressive.expression import (
 )
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
+    BotConnectedFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    ClientConnectedFrame,
     ControlFrame,
     EndFrame,
     Frame,
-    InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -47,6 +48,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSTextFrame,
+    UserAudioRawFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -55,12 +57,14 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import (
     DailyCallbacks,
+    DailyInputTransportMessageFrame,
     DailyOutputTransportMessageUrgentFrame,
     DailyParams,
     DailyTransportClient,
 )
 from pipecat.transports.keyframe.api import KeyframeApi
 from pipecat.transports.keyframe.protocol import (
+    PROTOCOL_VERSION,
     SAMPLE_RATE,
     audio_message,
     audio_record,
@@ -79,6 +83,9 @@ PLAYBACK_GRACE_SECS = 5.0
 BOT_SPEAKING_PERIOD_SECS = 0.2
 # Messages held for an avatar that is not ready yet (a minute of audio).
 MAX_PENDING_MESSAGES = 1500
+# Fastest rate (times real playback) at which outbound audio app messages are
+# sent to Daily, keeping long TTS bursts well inside Daily's reliable envelope.
+MAX_SEND_SPEED = 10.0
 
 
 class KeyframeEmotion(StrEnum):
@@ -90,9 +97,12 @@ class KeyframeEmotion(StrEnum):
     ANGRY = "angry"
     SURPRISED = "surprised"
     CONCERNED = "concerned"
+    THOUGHTFUL = "thoughtful"
     CONFUSED = "confused"
+    EMBARRASSED = "embarrassed"
     DISGUSTED = "disgusted"
     EXCITED = "excited"
+    BORED = "bored"
     SCARED = "scared"
     SKEPTICAL = "skeptical"
 
@@ -114,6 +124,7 @@ KEYFRAME_DELIVERY_EMOTIONS: dict[str, KeyframeEmotion] = {
     ExpressionDelivery.FEARFUL: KeyframeEmotion.SCARED,
     ExpressionDelivery.DOUBTFUL: KeyframeEmotion.SKEPTICAL,
     ExpressionDelivery.UNCERTAIN: KeyframeEmotion.CONFUSED,
+    ExpressionDelivery.CONTEMPLATIVE: KeyframeEmotion.THOUGHTFUL,
 }
 
 
@@ -233,11 +244,17 @@ class KeyframeCallbacks(BaseModel):
 
     Parameters:
         on_session_created: Called when the Keyframe session has been created.
+        on_joined: Called when the bot has joined the Daily room.
+        on_error: Called when Daily reports an error.
+        on_app_message: Called when a non-avatar participant sends an app message.
         on_participant_joined: Called when a participant joins the conversation.
         on_participant_left: Called when a participant leaves the conversation.
     """
 
     on_session_created: Callable[[KeyframeSession], Awaitable[None]]
+    on_joined: Callable[[Mapping[str, Any]], Awaitable[None]] | None = None
+    on_error: Callable[[str], Awaitable[None]] | None = None
+    on_app_message: Callable[[Any, str], Awaitable[None]] | None = None
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
 
@@ -308,8 +325,18 @@ class KeyframeTransportClient:
         self._pending: deque[dict[str, Any]] = deque()
         self._pending_dropped = False
         self._sending_pending = False
-        # Called with a turn's name when the avatar reports it played to its end.
+        self._next_send_at = 0.0
+        # Called with a turn's name when the avatar starts or finishes playing it.
+        self.on_playback_started: Callable[[str], Awaitable[None]] | None = None
         self.on_playback_finished: Callable[[str], Awaitable[None]] | None = None
+        # Called when any held turns begin flushing to a newly ready avatar.
+        self.on_avatar_ready: Callable[[], None] | None = None
+
+    def _check_protocol(self, reported: Any) -> None:
+        if reported is not None and str(reported) != str(PROTOCOL_VERSION):
+            logger.warning(
+                f"Keyframe avatar reported protocol {reported!r}, expected {PROTOCOL_VERSION!r}"
+            )
 
     async def _initialize(self) -> KeyframeSession:
         """Create the Keyframe session."""
@@ -323,6 +350,7 @@ class KeyframeTransportClient:
             source_participant_id=request.daily_user_id,
             api_url=request.api_url,
         )
+        self._check_protocol(response.get("protocol"))
         return KeyframeSession(
             reservation_id=response["reservation_id"],
             model=response.get("model_id"),
@@ -350,7 +378,7 @@ class KeyframeTransportClient:
                 on_joined=self._on_joined,
                 on_left=self._on_left,
                 on_before_leave=partial(self._on_handle_callback, "on_before_leave"),
-                on_error=partial(self._on_handle_callback, "on_error"),
+                on_error=self._on_error,
                 on_app_message=self._on_app_message,
                 on_call_state_updated=partial(self._on_handle_callback, "on_call_state_updated"),
                 on_client_connected=partial(self._on_handle_callback, "on_client_connected"),
@@ -410,10 +438,18 @@ class KeyframeTransportClient:
     async def _on_joined(self, data):
         """Handle joined event."""
         logger.debug("KeyframeTransportClient joined!")
+        if self._callbacks.on_joined:
+            await self._callbacks.on_joined(data)
 
     async def _on_left(self):
         """Handle left event."""
         logger.debug("KeyframeTransportClient left!")
+
+    async def _on_error(self, error: str):
+        """Handle Daily error events."""
+        logger.error(f"KeyframeTransportClient Daily error: {error}")
+        if self._callbacks.on_error:
+            await self._callbacks.on_error(error)
 
     async def _on_handle_callback(self, event_name, *args, **kwargs):
         """Handle generic callback events."""
@@ -550,24 +586,41 @@ class KeyframeTransportClient:
     def _avatar_ready(self) -> bool:
         return self._avatar_id is not None and self._avatar_id in self._ready_ids
 
-    async def send_to_avatar(self, message: dict[str, Any]):
+    def _drop_oldest_pending(self) -> None:
+        """Drop the oldest whole turn from ``_pending`` (or one message if unturned).
+
+        Dropping whole turns avoids stripping ``seq=0`` out from under an open
+        turn, which would force the avatar to stall waiting for the missing
+        leading chunks.
+        """
+        if not self._pending:
+            return
+        first = self._pending.popleft()
+        turn = first.get("turn") if first.get("type") == "audio" else None
+        if turn is not None:
+            while self._pending and self._pending[0].get("turn") == turn:
+                if self._pending.popleft().get("done"):
+                    break
+        if not self._pending_dropped:
+            self._pending_dropped = True
+            logger.warning(
+                "The Keyframe avatar is not ready; dropping the oldest messages held for it"
+            )
+
+    async def send_to_avatar(self, message: dict[str, Any], *, audio_secs: float = 0.0):
         """Send an app message to the avatar, holding it until the avatar is ready.
 
         Args:
             message: The message payload.
+            audio_secs: Duration of audio carried by this message, for burst pacing.
         """
         # Behind any held messages, which are still being sent: the avatar
         # expects a turn's messages in order.
         if self._avatar_ready and not self._pending:
-            await self._send_now(message)
+            await self._send_now(message, audio_secs=audio_secs)
             return
         if len(self._pending) >= MAX_PENDING_MESSAGES:
-            self._pending.popleft()
-            if not self._pending_dropped:
-                self._pending_dropped = True
-                logger.warning(
-                    "The Keyframe avatar is not ready; dropping the oldest messages held for it"
-                )
+            self._drop_oldest_pending()
         self._pending.append(message)
         await self._send_pending()
 
@@ -575,10 +628,17 @@ class KeyframeTransportClient:
         """Send an interrupt message to the avatar, discarding any held messages."""
         logger.debug("Sending interrupt message")
         self._pending.clear()
+        self._next_send_at = 0.0
         if self._avatar_ready:
             await self._send_now(interrupt_message())
 
-    async def _send_now(self, message: dict[str, Any]):
+    async def _send_now(self, message: dict[str, Any], *, audio_secs: float = 0.0):
+        if audio_secs > 0 and MAX_SEND_SPEED > 0:
+            now = time.monotonic()
+            if self._next_send_at > now:
+                await asyncio.sleep(self._next_send_at - now)
+                now = time.monotonic()
+            self._next_send_at = max(now, self._next_send_at) + audio_secs / MAX_SEND_SPEED
         # Addressed to the avatar, so other participants don't receive the audio.
         await self.send_message(
             DailyOutputTransportMessageUrgentFrame(message=message, participant_id=self._avatar_id)
@@ -591,24 +651,41 @@ class KeyframeTransportClient:
         self._sending_pending = True
         try:
             self._pending_dropped = False
+            if self.on_avatar_ready:
+                self.on_avatar_ready()
+            chunk_secs = (
+                self._params.audio_out_10ms_chunks * 0.01
+                if self._params.audio_out_10ms_chunks
+                else 0.0
+            )
             # Stops if the avatar leaves, so nothing held is sent to the room.
             while self._pending and self._avatar_ready:
-                await self._send_now(self._pending.popleft())
+                msg = self._pending.popleft()
+                secs = chunk_secs if msg.get("type") == "audio" and msg.get("data") else 0.0
+                await self._send_now(msg, audio_secs=secs)
         finally:
             self._sending_pending = False
 
     async def _on_app_message(self, message: Any, sender: str):
-        """Handle app messages from the avatar."""
+        """Handle app messages from the avatar and forward client messages."""
         kind = message_type(message)
         if kind == "hello":
+            self._check_protocol(message.get("protocol"))
             # The hello can arrive before the avatar's participant is known.
             self._ready_ids.add(sender)
             await self._send_pending()
+        elif kind == "playback_started" and sender == self._avatar_id:
+            turn = message.get("turn")
+            if isinstance(turn, str) and self.on_playback_started:
+                await self.on_playback_started(turn)
         elif kind == "playback_finished" and sender == self._avatar_id:
             turn = message.get("turn")
             if isinstance(turn, str) and not message.get("interrupted"):
                 if self.on_playback_finished:
                     await self.on_playback_finished(turn)
+        elif kind is None and sender != self._avatar_id:
+            if self._callbacks.on_app_message:
+                await self._callbacks.on_app_message(message, sender)
 
 
 class KeyframeInputTransport(BaseInputTransport):
@@ -634,6 +711,8 @@ class KeyframeInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
+        self._streaming_started = False
+        self._pending_participants: list[Mapping[str, Any]] = []
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the input transport.
@@ -658,6 +737,8 @@ class KeyframeInputTransport(BaseInputTransport):
         """
         await super().start(frame)
         await self.set_transport_ready(frame)
+        if self._params.audio_in_stream_on_start:
+            await self._start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport.
@@ -677,21 +758,43 @@ class KeyframeInputTransport(BaseInputTransport):
         await super().cancel(frame)
         await self._client.stop()
 
+    async def _start_audio_in_streaming(self):
+        """Start capturing audio for participants that joined before streaming started."""
+        if not self._params.audio_in_enabled or self._streaming_started:
+            return
+        self._streaming_started = True
+        pending, self._pending_participants = self._pending_participants, []
+        for participant in pending:
+            await self._capture_participant(participant)
+
+    async def push_app_message(self, message: Any, sender: str):
+        """Broadcast a client app message (e.g. RTVI ``client-ready``) into the pipeline."""
+        await self.broadcast_frame(
+            DailyInputTransportMessageFrame, message=message, participant_id=sender
+        )
+
     async def start_capturing_audio(self, participant):
-        """Start capturing audio from a participant.
+        """Start capturing audio from a participant, or queue until streaming starts.
 
         Args:
             participant: The participant to capture audio from.
         """
-        if self._params.audio_in_enabled:
-            logger.debug(
-                f"KeyframeTransportClient start capturing audio for participant {participant['id']}"
-            )
-            await self._client.capture_participant_audio(
-                participant_id=participant["id"],
-                callback=self._on_participant_audio_data,
-                sample_rate=self._client.in_sample_rate,
-            )
+        if not self._params.audio_in_enabled:
+            return
+        if not self._streaming_started:
+            self._pending_participants.append(participant)
+            return
+        await self._capture_participant(participant)
+
+    async def _capture_participant(self, participant: Mapping[str, Any]):
+        logger.debug(
+            f"KeyframeTransportClient start capturing audio for participant {participant['id']}"
+        )
+        await self._client.capture_participant_audio(
+            participant_id=participant["id"],
+            callback=self._on_participant_audio_data,
+            sample_rate=self._client.in_sample_rate,
+        )
 
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
@@ -703,7 +806,8 @@ class KeyframeInputTransport(BaseInputTransport):
             audio: The audio data from the participant.
             audio_source: The source of the audio (e.g., microphone).
         """
-        frame = InputAudioRawFrame(
+        frame = UserAudioRawFrame(
+            user_id=participant_id,
             audio=audio.audio_frames,
             sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
@@ -752,6 +856,7 @@ class _Turn:
     # BotStoppedSpeakingFrames held until the avatar has played the turn.
     held: list[tuple[Frame, FrameDirection]] = field(default_factory=list)
     wait_task: asyncio.Task | None = None
+    finished: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class KeyframeOutputTransport(BaseOutputTransport):
@@ -784,7 +889,9 @@ class KeyframeOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
+        self._client.on_playback_started = self._on_playback_started
         self._client.on_playback_finished = self._on_playback_finished
+        self._client.on_avatar_ready = self._on_avatar_ready
 
         # The turn being sent, and the turns sent that the avatar is still playing.
         self._turn_count = 0
@@ -866,9 +973,9 @@ class KeyframeOutputTransport(BaseOutputTransport):
         """
         await super().stop(frame)
         await self._end_turn()
-        waits = [turn.wait_task for turn in self._playing.values() if turn.wait_task]
+        waits = [turn.finished.wait() for turn in list(self._playing.values())]
         if waits:
-            await asyncio.gather(*waits, return_exceptions=True)
+            await asyncio.gather(*waits)
         await self._client.stop()
 
     async def cancel(self, frame: CancelFrame):
@@ -928,9 +1035,9 @@ class KeyframeOutputTransport(BaseOutputTransport):
             frame, direction
         ):
             return
-        if isinstance(frame, BotStartedSpeakingFrame) and self._drop_held_bot_stopped_speaking(
-            direction
-        ):
+        if isinstance(
+            frame, BotStartedSpeakingFrame
+        ) and await self._drop_held_bot_stopped_speaking(direction):
             return
         await super().push_frame(frame, direction)
 
@@ -952,7 +1059,10 @@ class KeyframeOutputTransport(BaseOutputTransport):
             turn = self._turn = _Turn(f"t{self._turn_count}")
         records = b"".join(self._cues) + audio_record(frame.audio)
         self._cues.clear()
-        await self._client.send_to_avatar(audio_message(turn.name, turn.seq, records))
+        await self._client.send_to_avatar(
+            audio_message(turn.name, turn.seq, records),
+            audio_secs=frame.num_frames / SAMPLE_RATE,
+        )
         turn.seq += 1
         turn.samples += frame.num_frames
         return True
@@ -1039,6 +1149,33 @@ class KeyframeOutputTransport(BaseOutputTransport):
                 await self.cancel_task(task)
             for frame, direction in turn.held:
                 await super().push_frame(frame, direction)
+            turn.held.clear()
+            turn.finished.set()
+
+    def _on_avatar_ready(self) -> None:
+        """Refresh playback deadlines when held turns begin flushing to a newly ready avatar."""
+        now = time.monotonic()
+        if self._turn is not None:
+            self._turn.started_at = max(self._turn.started_at, now)
+        cursor = now
+        for turn in self._playing.values():
+            cursor = max(cursor, turn.started_at) + turn.samples / SAMPLE_RATE
+            turn.plays_until = max(turn.plays_until, cursor)
+        if self._playing:
+            self._plays_until = max(self._plays_until, cursor)
+
+    async def _on_playback_started(self, name: str):
+        """Anchor a turn's fallback deadline once the avatar actually starts playing it."""
+        turn = self._playing.get(name)
+        if turn is None:
+            return
+        started_until = time.monotonic() + turn.samples / SAMPLE_RATE
+        if started_until > turn.plays_until:
+            delta = started_until - turn.plays_until
+            for candidate in list(self._playing.values()):
+                if candidate.plays_until >= turn.plays_until:
+                    candidate.plays_until += delta
+            self._plays_until = max(self._plays_until, turn.plays_until)
 
     async def _end_turn(self):
         """Mark the turn being sent as done and start waiting for its playback."""
@@ -1060,8 +1197,7 @@ class KeyframeOutputTransport(BaseOutputTransport):
 
     async def _wait_for_playback(self, turn: _Turn):
         """Push the frames held for a turn if the avatar never reports its playback."""
-        deadline = turn.plays_until + PLAYBACK_GRACE_SECS
-        while (remaining := deadline - time.monotonic()) > 0:
+        while (remaining := (turn.plays_until + PLAYBACK_GRACE_SECS) - time.monotonic()) > 0:
             await asyncio.sleep(min(BOT_SPEAKING_PERIOD_SECS, remaining))
             if turn.held:
                 await self.broadcast_frame(BotSpeakingFrame)
@@ -1083,8 +1219,11 @@ class KeyframeOutputTransport(BaseOutputTransport):
         """Push the BotStoppedSpeakingFrames held for a turn."""
         self._playing.pop(turn.name, None)
         held, turn.held = turn.held, []
-        for frame, direction in held:
-            await super().push_frame(frame, direction)
+        try:
+            for frame, direction in held:
+                await super().push_frame(frame, direction)
+        finally:
+            turn.finished.set()
 
     async def _cancel_playback_waits(self):
         """Stop waiting for playback reports. Idempotent."""
@@ -1093,6 +1232,7 @@ class KeyframeOutputTransport(BaseOutputTransport):
             if turn.wait_task:
                 task, turn.wait_task = turn.wait_task, None
                 await self.cancel_task(task)
+            turn.finished.set()
 
     async def _hold_bot_stopped_speaking(
         self, frame: BotStoppedSpeakingFrame, direction: FrameDirection
@@ -1116,7 +1256,7 @@ class KeyframeOutputTransport(BaseOutputTransport):
                 return True
         return False
 
-    def _drop_held_bot_stopped_speaking(self, direction: FrameDirection) -> bool:
+    async def _drop_held_bot_stopped_speaking(self, direction: FrameDirection) -> bool:
         """Drop a held BotStoppedSpeakingFrame when the bot starts speaking again.
 
         Returns:
@@ -1124,10 +1264,16 @@ class KeyframeOutputTransport(BaseOutputTransport):
             BotStartedSpeakingFrame is then dropped too, since the stop it
             follows was never pushed.
         """
-        for turn in self._playing.values():
+        for turn in list(self._playing.values()):
             for held in turn.held:
                 if held[1] == direction:
                     turn.held.remove(held)
+                    if not turn.held:
+                        self._playing.pop(turn.name, None)
+                        if turn.wait_task:
+                            task, turn.wait_task = turn.wait_task, None
+                            await self.cancel_task(task)
+                        turn.finished.set()
                     return True
         return False
 
@@ -1184,6 +1330,9 @@ class KeyframeTransport(BaseTransport):
 
         callbacks = KeyframeCallbacks(
             on_session_created=self._on_session_created,
+            on_joined=self._on_joined,
+            on_error=self._on_error,
+            on_app_message=self._on_client_app_message,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
@@ -1201,6 +1350,8 @@ class KeyframeTransport(BaseTransport):
         # Register supported handlers. The user will only be able to register
         # these handlers.
         self._register_event_handler("on_session_created")
+        self._register_event_handler("on_app_message")
+        self._register_event_handler("on_error")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_avatar_connected")
@@ -1229,6 +1380,25 @@ class KeyframeTransport(BaseTransport):
     async def _on_session_created(self, session: KeyframeSession):
         """Handle session created events."""
         await self._call_event_handler("on_session_created", session)
+
+    async def _on_joined(self, data: Mapping[str, Any]):
+        """Push ``BotConnectedFrame`` once the bot joins the Daily room."""
+        processor = self._input or self._output
+        if processor:
+            await processor.push_frame(BotConnectedFrame())
+
+    async def _on_error(self, error: str):
+        """Forward Daily errors into the pipeline."""
+        await self._call_event_handler("on_error", error)
+        processor = self._input or self._output
+        if processor:
+            await processor.push_error(error_msg=error)
+
+    async def _on_client_app_message(self, message: Any, sender: str):
+        """Forward non-avatar app messages (such as RTVI ``client-ready``) into the pipeline."""
+        if self._input:
+            await self._input.push_app_message(message, sender)
+        await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""
@@ -1272,7 +1442,9 @@ class KeyframeTransport(BaseTransport):
             The Keyframe input transport instance.
         """
         if not self._input:
-            self._input = KeyframeInputTransport(client=self._client, params=self._params)
+            self._input = KeyframeInputTransport(
+                client=self._client, params=self._params, name=self._input_name
+            )
         return self._input
 
     def output(self) -> FrameProcessor:
@@ -1282,7 +1454,9 @@ class KeyframeTransport(BaseTransport):
             The Keyframe output transport instance.
         """
         if not self._output:
-            self._output = KeyframeOutputTransport(client=self._client, params=self._params)
+            self._output = KeyframeOutputTransport(
+                client=self._client, params=self._params, name=self._output_name
+            )
         return self._output
 
     async def _on_avatar_connected(self, participant: Any):
@@ -1296,6 +1470,8 @@ class KeyframeTransport(BaseTransport):
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, participant: Any):
         """Handle client disconnected events."""

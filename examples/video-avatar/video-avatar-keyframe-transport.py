@@ -110,10 +110,13 @@ async def main():
                     delivery=[
                         *CORE_DELIVERY,
                         ExpressionDelivery.ANGRY,
+                        ExpressionDelivery.BORED,
                         ExpressionDelivery.CONFUSED,
                         ExpressionDelivery.DISGUSTED,
+                        ExpressionDelivery.EMBARRASSED,
                         ExpressionDelivery.SCARED,
                         ExpressionDelivery.SKEPTICAL,
+                        ExpressionDelivery.THOUGHTFUL,
                     ]
                 ),
             ),

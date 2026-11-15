@@ -24,6 +24,7 @@ class KeyframeApi:
     """
 
     KEYFRAME_URL = "https://api.keyframelabs.com"
+    REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30.0)
 
     def __init__(self, api_key: str, session: aiohttp.ClientSession):
         """Initialize the KeyframeApi client.
@@ -90,7 +91,9 @@ class KeyframeApi:
 
         url = f"{api_url or self.KEYFRAME_URL}/v1/sessions/plugins/daily"
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
-        async with self._session.post(url, headers=headers, json=payload) as r:
+        async with self._session.post(
+            url, headers=headers, json=payload, timeout=self.REQUEST_TIMEOUT
+        ) as r:
             if not r.ok:
                 # The body says why: the plan, the persona's model, or the room.
                 logger.error(f"Keyframe refused the session ({r.status}): {await r.text()}")

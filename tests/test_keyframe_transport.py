@@ -33,26 +33,36 @@ from pipecat.expressive.expression import (
 )
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 from pipecat.frames.frames import (
+    BotConnectedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ClientConnectedFrame,
+    EndFrame,
+    ErrorFrame,
     Frame,
+    InputTransportStartAudioStreamingFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    StartFrame,
     TextFrame,
     TextType,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserAudioRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.transports.daily.transport import DailyOutputTransportMessageUrgentFrame
+from pipecat.transports.daily.transport import (
+    DailyInputTransportMessageFrame,
+    DailyOutputTransportMessageUrgentFrame,
+)
 from pipecat.transports.keyframe.api import KeyframeApi
 from pipecat.transports.keyframe.protocol import SAMPLE_RATE
 from pipecat.transports.keyframe.transport import (
@@ -82,7 +92,10 @@ class FakeClient:
 
     def __init__(self, finish_after: float | None = None):
         self.sent: list[dict[str, Any]] = []
+        self.on_playback_started = None
         self.on_playback_finished = None
+        self.on_avatar_ready = None
+        self.stopped = False
         self._finish_after = finish_after
 
     async def setup(self, setup):
@@ -95,12 +108,12 @@ class FakeClient:
         pass
 
     async def stop(self):
-        pass
+        self.stopped = True
 
     async def send_message(self, frame):
         pass
 
-    async def send_to_avatar(self, message: dict[str, Any]):
+    async def send_to_avatar(self, message: dict[str, Any], *, audio_secs: float = 0.0):
         self.sent.append(message)
         if message.get("done") and self._finish_after is not None:
             asyncio.get_running_loop().call_later(
@@ -852,11 +865,14 @@ class _FakeHttp:
     def __init__(self, response: dict[str, Any]):
         self.response = response
         self.posts: list[tuple[str, dict, dict]] = []
+        self.timeouts: list[Any] = []
 
     @asynccontextmanager
-    async def post(self, url, headers=None, json=None):
+    async def post(self, url, headers=None, json=None, timeout=None):
         self.posts.append((url, headers, json))
+        self.timeouts.append(timeout)
         reply = MagicMock()
+        reply.ok = True
         reply.json = AsyncMock(return_value=self.response)
         yield reply
 
@@ -1028,6 +1044,7 @@ async def test_in_a_room_keyframe_created_the_avatar_is_known_by_its_user_id_not
     )
     transport._input = MagicMock()
     transport._input.start_capturing_audio = AsyncMock()
+    transport._input.push_frame = AsyncMock()
     impostor = {"id": "user-id", "info": {"userName": "keyframe-avatar", "userId": "someone"}}
     avatar = {"id": "avatar-id", "info": {"userName": "Renamed", "userId": "avatar-user"}}
 
@@ -1046,12 +1063,15 @@ async def test_any_other_participant_is_a_client_whose_audio_is_captured():
     transport = _transport()
     transport._input = MagicMock()
     transport._input.start_capturing_audio = AsyncMock()
+    transport._input.push_frame = AsyncMock()
     user = {"id": "user-id", "info": {"userName": "Ada"}}
 
     await transport._on_participant_joined(user)
 
     transport._call_event_handler.assert_awaited_once_with("on_client_connected", user)
     transport._input.start_capturing_audio.assert_awaited_once_with(user)
+    pushed = transport._input.push_frame.await_args_list
+    assert len(pushed) == 1 and isinstance(pushed[0].args[0], ClientConnectedFrame)
     transport._client._daily_transport_client.update_subscriptions.assert_not_awaited()
 
 
@@ -1074,3 +1094,187 @@ def test_frames_the_transport_queues_for_itself_are_not_pushed_on():
     """They order emotion cues with the audio, and mean nothing past the transport."""
     assert issubclass(keyframe._ContextStartFrame, Frame)
     assert issubclass(keyframe._EmotionCueFrame, Frame)
+
+
+@pytest.mark.asyncio
+async def test_client_app_messages_are_forwarded_into_the_pipeline_while_avatar_ones_are_not():
+    """RTVI ``client-ready`` and other client app messages reach downstream processors."""
+    transport = _transport()
+    inp = transport.input()
+    inp.broadcast_frame = AsyncMock()
+    await transport._client.avatar_joined("avatar-id")
+
+    rtvi = {"label": "rtvi-ai", "type": "client-ready", "id": "1"}
+    await transport._client._on_app_message(rtvi, "user-id")
+    await transport._client._on_app_message({"other": 1}, "avatar-id")
+    await transport._client._on_app_message(HELLO, "avatar-id")
+
+    inp.broadcast_frame.assert_awaited_once_with(
+        DailyInputTransportMessageFrame, message=rtvi, participant_id="user-id"
+    )
+    transport._call_event_handler.assert_awaited_once_with("on_app_message", rtvi, "user-id")
+
+
+@pytest.mark.asyncio
+async def test_bot_joined_and_daily_errors_push_standard_frames():
+    transport = _transport()
+    inp = transport.input()
+    inp.push_frame = AsyncMock()
+    inp.push_error = AsyncMock()
+
+    await transport._client._on_joined({"local": {}})
+    pushed = inp.push_frame.await_args_list
+    assert len(pushed) == 1 and isinstance(pushed[0].args[0], BotConnectedFrame)
+
+    await transport._client._on_error("ice failed")
+    inp.push_error.assert_awaited_once_with(error_msg="ice failed")
+    transport._call_event_handler.assert_awaited_once_with("on_error", "ice failed")
+
+
+@pytest.mark.asyncio
+async def test_input_and_output_keep_their_configured_names_and_emit_user_attributed_audio():
+    transport = KeyframeTransport(
+        bot_name="Pipecat",
+        session=MagicMock(),
+        api_key="test-key",
+        session_request=KeyframeNewSessionRequest(persona_slug="public:cosmo_persona-2.0-live"),
+        params=KeyframeParams(audio_in_stream_on_start=False),
+        input_name="kfl-in",
+        output_name="kfl-out",
+    )
+    inp = transport.input()
+    out = transport.output()
+    assert inp.name == "kfl-in" and out.name == "kfl-out"
+
+    transport._client.capture_participant_audio = AsyncMock()
+    user = {"id": "user-42", "info": {"userName": "Ada"}}
+    await inp.start_capturing_audio(user)  # pyright: ignore[reportAttributeAccessIssue]
+    transport._client.capture_participant_audio.assert_not_awaited()
+
+    await inp._start_audio_in_streaming()  # pyright: ignore[reportAttributeAccessIssue]
+    transport._client.capture_participant_audio.assert_awaited_once()
+
+    pushed: list[Frame] = []
+    inp.push_audio_frame = AsyncMock(side_effect=pushed.append)  # pyright: ignore[reportAttributeAccessIssue]
+    fake_audio = MagicMock(audio_frames=b"\x01\x02" * 160, sample_rate=16000, num_channels=1)
+    await inp._on_participant_audio_data("user-42", fake_audio, "microphone")  # pyright: ignore[reportAttributeAccessIssue]
+    assert len(pushed) == 1 and isinstance(pushed[0], UserAudioRawFrame)
+    assert pushed[0].user_id == "user-42"
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_until_held_bot_stopped_speaking_frame_is_pushed():
+    """When playback_finished arrives during stop(), BotStoppedSpeakingFrame is pushed before client.stop()."""
+    events: list[str] = []
+
+    class _OrderClient(FakeClient):
+        async def stop(self):
+            events.append("client.stop")
+            await super().stop()
+
+    client = _OrderClient(finish_after=None)
+    transport = KeyframeOutputTransport(client, KeyframeParams())  # pyright: ignore[reportArgumentType]
+
+    orig_push = KeyframeOutputTransport.push_frame
+
+    async def tracked_push(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
+        if isinstance(frame, BotStoppedSpeakingFrame) and direction == FrameDirection.DOWNSTREAM:
+            await asyncio.sleep(0.03)
+            events.append("pushed.stop")
+        await orig_push(self, frame, direction)
+
+    transport.push_frame = tracked_push.__get__(transport, KeyframeOutputTransport)  # type: ignore[method-assign]
+
+    async def report_soon():
+        while not transport._playing:
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.02)
+        await transport._on_playback_finished("t1")
+
+    reporter = asyncio.create_task(report_soon())
+    await run_test(
+        transport,
+        frames_to_send=[
+            TTSStartedFrame(context_id="c1"),
+            _speech(0.3),
+            TTSStoppedFrame(context_id="c1"),
+        ],
+    )
+    await reporter
+
+    assert events.index("pushed.stop") < events.index("client.stop")
+
+
+@pytest.mark.asyncio
+async def test_dropping_a_held_stop_cancels_its_wait_task():
+    """Back-to-back turns do not leave an empty turn's 5 s grace timer running."""
+    transport, client = _output(finish_after=None)
+
+    async def finish_second():
+        while "t2" not in transport._playing:
+            await asyncio.sleep(0.005)
+        # t1's held frames were dropped when t2 started; t1 should already be gone.
+        assert "t1" not in transport._playing
+        await transport._on_playback_finished("t2")
+
+    finisher = asyncio.create_task(finish_second())
+    started = time.monotonic()
+    await run_test(
+        transport,
+        frames_to_send=[
+            TTSStartedFrame(context_id="c1"),
+            _speech(0.3, context_id="c1"),
+            TTSStoppedFrame(context_id="c1"),
+            SleepFrame(0.05),
+            TTSStartedFrame(context_id="c2"),
+            _speech(0.3, context_id="c2"),
+            TTSStoppedFrame(context_id="c2"),
+        ],
+    )
+    await finisher
+    assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.asyncio
+async def test_overflowing_pending_drops_a_whole_oldest_turn(monkeypatch):
+    """Dropping a whole turn keeps the next turn's seq=0 intact."""
+    monkeypatch.setattr(keyframe, "MAX_PENDING_MESSAGES", 3)
+    client = _client()
+    await client.avatar_joined("avatar-id")
+
+    await client.send_to_avatar(
+        {"type": "audio", "turn": "t1", "seq": 0, "data": "a", "done": False}
+    )
+    await client.send_to_avatar({"type": "audio", "turn": "t1", "seq": 1, "data": "", "done": True})
+    await client.send_to_avatar(
+        {"type": "audio", "turn": "t2", "seq": 0, "data": "b", "done": False}
+    )
+    # Next message overflows limit=3 -> drops all of t1, leaving t2 intact from seq=0.
+    await client.send_to_avatar({"type": "audio", "turn": "t2", "seq": 1, "data": "", "done": True})
+    await client._on_app_message(HELLO, "avatar-id")
+
+    sent_turns = [(m["turn"], m["seq"]) for m, _ in _sent(client)]
+    assert sent_turns == [("t2", 0), ("t2", 1)]
+
+
+@pytest.mark.asyncio
+async def test_all_fourteen_emotions_are_supported():
+    assert len(KeyframeEmotion) == 14
+    for name in ("bored", "embarrassed", "thoughtful"):
+        assert keyframe._delivery_emotion([name]) == KeyframeEmotion(name)
+    assert (
+        keyframe._delivery_emotion([ExpressionDelivery.CONTEMPLATIVE]) == KeyframeEmotion.THOUGHTFUL
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_session_uses_a_bounded_request_timeout():
+    http = _FakeHttp({"reservation_id": "r1"})
+    await KeyframeApi("test-key", http).create_session(  # pyright: ignore[reportArgumentType]
+        source_participant_name="Pipecat",
+        persona_slug="public:cosmo_persona-2.0-live",
+    )
+    assert http.timeouts == [KeyframeApi.REQUEST_TIMEOUT]
+    assert KeyframeApi.REQUEST_TIMEOUT.total == 30.0
