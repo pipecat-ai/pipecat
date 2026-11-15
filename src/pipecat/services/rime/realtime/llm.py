@@ -29,6 +29,7 @@ except ModuleNotFoundError as error:
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -37,13 +38,12 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InputImageRawFrame,
-    InputTextRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMRunFrame,
+    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
@@ -52,7 +52,6 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     StartFrame,
-    SystemFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -61,21 +60,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMAssistantAggregatorParams,
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.rime.realtime._adapter import RimeRealtimeLLMAdapter
-from pipecat.services.rime.realtime._aggregators import (
-    RimeContextAggregatorPair,
-    RimeReplyFrame,
-    _RimeContextFrame,
-    _RimeOutputStoppedFrame,
-)
 from pipecat.services.rime.realtime._conversation import (
     Conversation,
     RimeStartupParams,
@@ -120,33 +108,30 @@ class RimeRealtimeSettings(LLMSettings):
 
 
 @dataclass
-class RimeInputAudioClearFrame(SystemFrame):
-    """Discard microphone input queued before this frame and clear Prism input."""
-
-    interruptible: bool = field(default=False, init=False)
-
-
-@dataclass
 class _Operation:
-    messages: list | None = None
-    append_messages: list | None = None
+    append: list | None = None
     tools: Any = NOT_GIVEN
     tool_choice: Any = NOT_GIVEN
     delta: LLMSettings | None = None
     run_llm: bool = False
     audio_response: bool = True
-    instruction: str | None = None
-    response_metadata: dict[str, str] | None = None
-    text: str | None = None
-    shared: bool = False
+    # The reply answers earlier appends and is skipped if the latest one failed.
+    answers_append: bool = False
 
 
 class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
-    """One Prism conversation using Rime context aggregators and standard transports.
+    """One Prism conversation using standard context aggregators and transports.
 
-    Text input is imported into history before requesting a reply. Aggregators
-    own the local conversation record; rejected provider edits do not roll it
-    back. Playback positions are estimates and completion receipts are not sent.
+    Use it with :class:`~pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair`.
+    The first context frame opens the conversation with the context's messages
+    and starts a reply. Messages from an
+    :class:`~pipecat.frames.frames.LLMMessagesAppendFrame` are added to Prism
+    history as they arrive; with ``run_llm=True``, Prism replies when the
+    assistant aggregator asks for a response. Prism history is append-only:
+    replacing or transforming context messages mid-conversation does not
+    change it. Rejected provider writes do not roll back the local context.
+
+    Playback positions are estimates and completion receipts are not sent.
     Speech hints do not change output volume.
 
     Use one instance per conversation. An injected client remains caller-owned.
@@ -223,8 +208,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._playback: DiscardPlayback | None = None
         self._conversation = Conversation()
         self._tool_choice = "auto"
-        self._input_epoch = 0
-        self._pending_text: str | None = None
+        self._reply_owed = False
+        self._owed_audio_response = True
+        self._append_failed = False
         self._interruption_epoch = 0
         self._reply_epoch = 0
         self._response_seen = asyncio.Event()
@@ -243,9 +229,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._converted_input_rate: int | None = None
         self._input_resampler = create_stream_resampler(clear_after_secs=None)
         self._controls: asyncio.Queue[_Operation] = asyncio.Queue(max_pending_operations)
-        self._audio: asyncio.Queue[tuple[int, InputAudioRawFrame | RimeInputAudioClearFrame]] = (
-            asyncio.Queue(max_pending_operations)
-        )
+        self._audio: asyncio.Queue[InputAudioRawFrame] = asyncio.Queue(max_pending_operations)
         self._ready = asyncio.Event()
         self._closing = False
         self._failure: Exception | None = None
@@ -259,8 +243,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._transcripts: dict[str, str] = {}
         self._reply_lock = asyncio.Lock()
         self._reply_audio_response = True
-        self._instruction_items: OrderedDict[str, tuple[str, bool]] = OrderedDict()
-        self._instruction_lock = asyncio.Lock()
         self._latest_audio_output: _Output | None = None
         for event in ("on_session_updated", "on_rime_event"):
             self._register_event_handler(event)
@@ -310,56 +292,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             is_realtime_service=True,
             user_turn_strategies=ExternalUserTurnStrategies(),
         )
-
-    def create_context_aggregator(
-        self,
-        context: LLMContext,
-        *,
-        user_params: LLMUserAggregatorParams | None = None,
-        assistant_params: LLMAssistantAggregatorParams | None = None,
-    ) -> LLMContextAggregatorPair:
-        """Create the aggregator pair required for this Prism conversation.
-
-        Speech transcripts update local context without requesting a second
-        reply. Application message frames preserve append or replace intent.
-
-        Args:
-            context: Shared conversation record.
-            user_params: Standard user aggregator configuration.
-            assistant_params: Standard assistant aggregator configuration.
-
-        Returns:
-            User and assistant aggregators for the pipeline.
-        """
-        return RimeContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )
-
-    async def get_history(self) -> tuple[r.HistoryItem, ...]:
-        """Read completed server history without changing local context."""
-        if self._connection_task is None:
-            raise RuntimeError("Prism conversation is not open")
-        await self._ready.wait()
-        if not self.is_usable or self._closing:
-            raise RuntimeError("Prism conversation is not usable")
-        return await self._sdk.get_history()
-
-    async def delete_instruction_item(self, item_id: str) -> None:
-        """Remove an observed saved instruction after its reply ends."""
-        if self._connection_task is None:
-            raise RuntimeError("Prism conversation is not open")
-        await self._ready.wait()
-        if not self.is_usable or self._closing:
-            raise RuntimeError("Prism conversation is not usable")
-        async with self._instruction_lock:
-            state = self._instruction_items.get(item_id)
-            if state is None:
-                raise RimeInputError("Unknown saved Prism instruction item")
-            if not state[1]:
-                raise RimeInputError("Cannot delete a saved instruction before its reply ends")
-            await self._sdk.delete_item(item_id)
-            if self._instruction_items.get(item_id) == state:
-                del self._instruction_items[item_id]
 
     def _service_tools(self):
         return self._settings.tools
@@ -457,70 +389,19 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             else:
                 await super().process_frame(frame, direction)
             if isinstance(frame, LLMContextFrame):
-                initial = self._context is None
-                self._bind_context(frame.context)
-                messages = None
-                append_messages = None
-                if initial or not isinstance(frame, _RimeContextFrame):
-                    messages = copy.deepcopy(frame.context.get_messages())
-                elif frame.history_update is not None:
-                    if frame.history_update.append:
-                        append_messages = frame.history_update.messages
-                    else:
-                        messages = frame.history_update.messages
-                await self._enqueue(
-                    _Operation(
-                        messages=messages,
-                        text=frame.text if isinstance(frame, _RimeContextFrame) else None,
-                        shared=not initial and not isinstance(frame, _RimeContextFrame),
-                        append_messages=append_messages,
-                        tools=frame.context.tools,
-                        tool_choice=frame.context.tool_choice,
-                        run_llm=True,
-                        audio_response=not self._skip_tts,
-                        instruction=(
-                            frame.instruction if isinstance(frame, _RimeContextFrame) else None
-                        ),
-                        response_metadata=(
-                            dict(frame.response_metadata)
-                            if isinstance(frame, _RimeContextFrame)
-                            and frame.response_metadata is not None
-                            else None
-                        ),
-                    )
-                )
-            elif isinstance(frame, InputTextRawFrame):
-                self._bind_context(self._context if self._context is not None else LLMContext())
-                await self._enqueue(_Operation(text=frame.text, run_llm=True))
+                await self._handle_context(frame, direction)
+            elif isinstance(frame, LLMMessagesAppendFrame):
+                # Before the conversation opens, the assistant aggregator records
+                # these messages in the context that opens it.
+                if self._context is not None:
+                    await self._enqueue(_Operation(append=copy.deepcopy(frame.messages)))
+                    self._reply_owed = True
+                    # Output settings apply to the reply as of the append.
+                    self._owed_audio_response = not self._skip_tts
+                await self.push_frame(frame, direction)
             elif isinstance(frame, LLMSetToolChoiceFrame):
                 await self._enqueue(_Operation(tool_choice=frame.tool_choice))
                 await self.push_frame(frame, direction)
-            elif isinstance(frame, RimeInputAudioClearFrame):
-                self._input_epoch += 1
-                while not self._audio.empty():
-                    _, queued = self._audio.get_nowait()
-                    if isinstance(queued, InputAudioRawFrame):
-                        self._pending_audio_bytes -= len(queued.audio)
-                    self._audio.task_done()
-                self._audio.put_nowait((self._input_epoch, frame))
-            elif isinstance(frame, LLMRunFrame):
-                self._bind_context(self._context if self._context is not None else LLMContext())
-                await self._enqueue(
-                    _Operation(
-                        run_llm=True,
-                        audio_response=not self._skip_tts,
-                        text=frame.text if isinstance(frame, RimeReplyFrame) else None,
-                        instruction=frame.instruction
-                        if isinstance(frame, RimeReplyFrame)
-                        else None,
-                        response_metadata=(
-                            dict(frame.response_metadata)
-                            if isinstance(frame, RimeReplyFrame)
-                            and frame.response_metadata is not None
-                            else None
-                        ),
-                    )
-                )
             elif isinstance(frame, LLMUpdateSettingsFrame):
                 if frame.service is not None and frame.service is not self:
                     await self.push_frame(frame, direction)
@@ -542,15 +423,15 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                         self._pending_audio_bytes -= len(frame.audio)
                         await self._fail(RuntimeError("Prism microphone buffer limit exceeded"))
                     else:
-                        self._audio.put_nowait((self._input_epoch, frame))
+                        self._audio.put_nowait(frame)
                 await self.push_frame(frame, direction)
-            elif isinstance(frame, _RimeOutputStoppedFrame):
-                if (
-                    direction == FrameDirection.UPSTREAM
-                    and self._latest_audio_output is not None
-                    and self._latest_audio_output.context_id == frame.context_id
-                ):
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                # The frame names no output. An output still streaming is newer
+                # than the speech that stopped, so it stays the one to truncate.
+                output = self._latest_audio_output
+                if output is not None and output.closed:
                     self._latest_audio_output = None
+                await self.push_frame(frame, direction)
             elif isinstance(frame, InterruptionFrame):
                 self._interruption_epoch += 1
                 self._spawn_request(self._interrupt())
@@ -561,6 +442,34 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 await self.push_frame(frame, direction)
         except Exception as error:
             await self._operation_error(error)
+
+    async def _handle_context(self, frame: LLMContextFrame, direction: FrameDirection) -> None:
+        initial = self._context is None
+        self._bind_context(frame.context)
+        if initial:
+            # The opening context becomes the conversation's history.
+            append = copy.deepcopy(frame.context.get_messages())
+            run_llm = True
+            audio_response = not self._skip_tts
+        else:
+            # Appended messages are already in Prism. A context frame travelling
+            # upstream comes from the assistant aggregator, asking for a reply
+            # to them.
+            append = None
+            run_llm = direction == FrameDirection.UPSTREAM and self._reply_owed
+            audio_response = self._owed_audio_response
+        if run_llm and not initial:
+            self._reply_owed = False
+        await self._enqueue(
+            _Operation(
+                append=append,
+                tools=frame.context.tools,
+                tool_choice=frame.context.tool_choice,
+                run_llm=run_llm,
+                audio_response=audio_response,
+                answers_append=run_llm and not initial,
+            )
+        )
 
     async def _control_loop(self) -> None:
         while True:
@@ -573,22 +482,18 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     if operation.tool_choice not in ("auto", "none", None):
                         raise ValueError("Prism supports automatic or disabled tool selection")
                     self._tool_choice = operation.tool_choice or "auto"
-                if operation.messages is not None:
-                    await self._ledger.sync(operation.messages, shared=operation.shared)
-                if operation.append_messages is not None:
-                    await self._ledger.edit(operation.append_messages, append=True)
+                if operation.append:
+                    self._append_failed = True
+                    await self._ledger.append(operation.append)
+                    self._append_failed = False
                 if is_given(operation.tools) and operation.tools != self._settings.tools:
                     await self._settings_operation(self.Settings(tools=operation.tools))
                 if operation.delta is not None:
                     await self._settings_operation(operation.delta)
-                if operation.run_llm:
+                if operation.run_llm and not (operation.answers_append and self._append_failed):
                     self._spawn_request(
                         self._reply(
-                            operation.audio_response,
-                            instruction=operation.instruction,
-                            metadata=operation.response_metadata,
-                            text=operation.text,
-                            disable_tools=self._tool_choice == "none",
+                            operation.audio_response, disable_tools=self._tool_choice == "none"
                         )
                     )
             except Exception as error:
@@ -623,8 +528,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         *,
         tool_call: r.ToolCallRef | None = None,
         instruction: str | None = None,
-        metadata: dict[str, str] | None = None,
-        text: str | None = None,
         disable_tools: bool = False,
         parent: r.ResponseRef | None = None,
     ) -> None:
@@ -640,16 +543,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             self._reply_audio_response = audio_response
             await self.start_ttfb_metrics()
             if not disable_tools:
-                await self._request_reply(tool_call, instruction, metadata, text, parent)
+                await self._request_reply(tool_call, instruction, parent)
                 return
             async with self._conversation.settings_lock:
                 self._conversation.suppressing_tools = True
                 try:
                     info = await self._sdk.update(tools=[])
                     self._conversation.suppress(info)
-                    task = self.create_task(
-                        self._request_reply(tool_call, instruction, metadata, text, parent)
-                    )
+                    task = self.create_task(self._request_reply(tool_call, instruction, parent))
                     try:
                         await asyncio.shield(task)
                     except asyncio.CancelledError:
@@ -670,13 +571,11 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self,
         tool_call: r.ToolCallRef | None,
         instruction: str | None,
-        metadata: dict[str, str] | None,
-        text: str | None,
         parent: r.ResponseRef | None,
     ) -> r.ResponseRef:
         self._request_pending = True
         try:
-            return await self._create_reply(tool_call, instruction, metadata, text, parent)
+            return await self._create_reply(tool_call, instruction, parent)
         finally:
             self._request_pending = False
             if self._admitted_response is not None:
@@ -688,20 +587,11 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self,
         tool_call: r.ToolCallRef | None,
         instruction: str | None,
-        metadata: dict[str, str] | None,
-        text: str | None,
         parent: r.ResponseRef | None,
     ) -> r.ResponseRef:
-        if text is not None:
-            self._pending_text = text
-            try:
-                ref = await self._sdk.send_text(text, metadata=metadata)
-                return await self._created_reply(ref)
-            finally:
-                self._pending_text = None
         if parent is not None:
             try:
-                ref = await self._sdk.continue_reply(parent, metadata=metadata)
+                ref = await self._sdk.continue_reply(parent)
                 return await self._created_reply(ref)
             except (RimeInputError, r.RimeRealtimeError) as error:
                 if isinstance(error, r.RimeRealtimeError) and (
@@ -711,9 +601,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     raise
         if tool_call is not None and instruction is None:
             instruction = "Continue according to the agent's instructions using this tool result. Reply or call a tool as appropriate."
-        ref = await self._sdk.request_reply(
-            instruction=instruction, tool_call=tool_call, metadata=metadata
-        )
+        ref = await self._sdk.request_reply(instruction=instruction, tool_call=tool_call)
         return await self._created_reply(ref)
 
     async def _created_reply(self, ref: r.ResponseRef) -> r.ResponseRef:
@@ -766,17 +654,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
 
     async def _audio_loop(self) -> None:
         while True:
-            epoch, frame = await self._audio.get()
+            frame = await self._audio.get()
             try:
                 await self._ready.wait()
                 if not self.is_usable or self._closing:
-                    continue
-                if isinstance(frame, RimeInputAudioClearFrame):
-                    self._input_resampler = create_stream_resampler(clear_after_secs=None)
-                    self._converted_input_rate = None
-                    await self._sdk.clear_audio()
-                    continue
-                if epoch != self._input_epoch:
                     continue
                 audio, sample_rate, channels = frame.audio, frame.sample_rate, frame.num_channels
                 if (
@@ -808,8 +689,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     sample_rate = 16000
                 size = 192000 - 192000 % (channels * 2)
                 for offset in range(0, len(audio), size):
-                    if epoch != self._input_epoch:
-                        break
                     await self._sdk.send_audio(
                         r.AudioChunk(
                             data=audio[offset : offset + size],
@@ -821,8 +700,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             except Exception as error:
                 await self._fail(error)
             finally:
-                if isinstance(frame, InputAudioRawFrame):
-                    self._pending_audio_bytes -= len(frame.audio)
+                self._pending_audio_bytes -= len(frame.audio)
                 self._audio.task_done()
 
     async def _event_loop(self) -> None:
@@ -836,7 +714,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         except Exception as error:
             if not self._closing:
                 if self._history is not None and self._history.lock.locked():
-                    uncertain = PrismHistoryUpdateError("uncertain", None)
+                    uncertain = PrismHistoryUpdateError("uncertain")
                     uncertain.__cause__ = error
                     error = uncertain
                 await self._fail(error)
@@ -845,13 +723,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         payload = event.payload
         await self._call_event_handler("on_rime_event", event)
         if isinstance(payload, r.SpeechStarted):
-            self._ledger.reserve_input(payload.item_id)
             await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         elif isinstance(payload, r.SpeechStopped):
             await self.start_ttfb_metrics()
             await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
-        elif isinstance(payload, r.InputCommitted):
-            self._ledger.reserve_input(payload.item_id)
         elif isinstance(payload, (r.TranscriptDelta, r.TranscriptFinal)):
             final = isinstance(payload, r.TranscriptFinal)
             text = (
@@ -863,7 +738,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 raise RuntimeError("Prism transcript retention limit exceeded")
             if final:
                 self._transcripts.pop(payload.item_id, None)
-                self._ledger.transcript(payload.item_id, text)
             else:
                 self._transcripts[payload.item_id] = text
             cls = TranscriptionFrame if final else InterimTranscriptionFrame
@@ -875,14 +749,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             await self.push_error(str(payload.error), exception=r.RimeRealtimeError(payload.error))
         elif isinstance(payload, r.ResponseStarted):
             response = self._conversation.start(self._sdk, payload)
-            if self._request_pending and payload.cause in ("proactive", "text", "tools"):
+            if self._request_pending and payload.cause in ("proactive", "tools"):
                 if self._admitted_response is not None:
                     raise RuntimeError("Prism created multiple responses for one request")
                 response.operations += 1
                 self._admitted_response = response
             if self._playback:
                 self._playback.start(payload.response)
-            if payload.cause in ("proactive", "text"):
+            if payload.cause == "proactive":
                 response.audio_response = self._reply_audio_response
                 response.stopped = self._reply_epoch != self._interruption_epoch
             if payload.parent:
@@ -892,25 +766,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     response.audio_response = parent.audio_response
             if self._playback_mode == "discard":
                 response.audio_response = False
-            if payload.instruction_item_id is not None:
-                self._instruction_items.pop(payload.instruction_item_id, None)
-                if len(self._instruction_items) >= 128:
-                    self._instruction_items.popitem(last=False)
-                self._instruction_items[payload.instruction_item_id] = (
-                    payload.response.response_id,
-                    False,
-                )
-            self._ledger.response_epoch += 1
-            self._ledger.active_responses.add(payload.response.response_id)
-            self._ledger.active_inputs.update(response.input_ids)
-            for item_id in response.input_ids:
-                self._ledger.reserve_input(item_id)
-            if payload.cause == "text" and self._pending_text is not None:
-                if len(response.input_ids) != 1:
-                    raise RuntimeError("Prism typed response requires one input identity")
-                self._ledger.transcript(response.input_ids[0], self._pending_text)
-                if self._context is not None:
-                    self._context.add_message({"role": "user", "content": self._pending_text})
             self._response_seen.set()
             started = LLMFullResponseStartFrame()
             started.metadata["rime"] = {
@@ -951,11 +806,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 await self.push_frame(text)
             elif isinstance(payload, r.TextDone):
                 output.text = payload.text
-                if output.text and not output.recorded:
-                    self._ledger.add_live(
-                        {"role": "assistant", "content": output.text}, [output.ref.item_id]
-                    )
-                    output.recorded = True
                 await self.push_frame(TTSTextFrame(payload.text, text_type=TextType.SENTENCE))
             elif isinstance(payload, r.AudioDelta):
                 if response.audio_response:
@@ -991,23 +841,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 raise RuntimeError("Prism emitted a tool call during a tool-disabled reply")
             self._calls[payload.call.call_id] = Tool(payload)
             response.calls.add(payload.call.call_id)
-            self._ledger.pending_calls.add(payload.call.call_id)
-            self._ledger.add_live(
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": payload.call.call_id,
-                            "type": "function",
-                            "function": {
-                                "name": payload.name,
-                                "arguments": json.dumps(payload.arguments, ensure_ascii=False),
-                            },
-                        }
-                    ],
-                },
-                [payload.item_id],
-            )
             await self.run_function_calls(
                 [
                     FunctionCallFromLLM(
@@ -1021,19 +854,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         elif isinstance(payload, r.ResponseEnded):
             response = self._responses[payload.response.response_id]
             response.ended = True
-            if response.instruction_item_id is not None:
-                state = self._instruction_items.get(response.instruction_item_id)
-                if state is not None and state[0] == payload.response.response_id:
-                    self._instruction_items[response.instruction_item_id] = (state[0], True)
             response.done.set()
-            self._ledger.active_responses.discard(payload.response.response_id)
-            self._ledger.active_inputs.difference_update(response.input_ids)
             for output in response.outputs.values():
                 await self._end_output(output)
-                if output.text and not output.recorded:
-                    self._ledger.add_live(
-                        {"role": "assistant", "content": output.text}, [output.ref.item_id]
-                    )
             if payload.usage is not None:
                 await self.start_llm_usage_metrics(
                     LLMTokenUsage(
@@ -1047,8 +870,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 self._spawn_request(self._playback.settle())
             self._conversation.release(response)
             await self.push_frame(LLMFullResponseEndFrame())
-        elif isinstance(payload, r.ItemTruncated):
-            self._ledger.truncate(payload)
         elif isinstance(payload, r.FaultEvent) and payload.error.request_id is None:
             error = r.RimeRealtimeError(payload.error)
             if payload.error.scope == "session":
@@ -1143,13 +964,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     async with self._ledger.lock:
                         await self._sdk.submit_tool_result(call.call, output)
                         tool.submitted = True
-                        self._ledger.add_live(
-                            {"role": "tool", "tool_call_id": call.call.call_id, "content": output},
-                            [],
-                        )
                 else:
                     progress_id = "progress_" + uuid4().hex[:23]
-                    await self._ledger.edit(
+                    await self._ledger.append(
                         [
                             {
                                 "role": "assistant",
@@ -1165,10 +982,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                                 ],
                             },
                             {"role": "tool", "tool_call_id": progress_id, "content": output},
-                        ],
-                        append=True,
+                        ]
                     )
-                    self._ledger.tool_variant(call.call.call_id, output)
                     # The original SDK call refers to its immutable first output.
                     response.report_instruction = (
                         "Continue according to the agent's instructions using the latest tool "
@@ -1176,7 +991,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                         "Reply or call a tool as appropriate."
                     )
                 if final:
-                    self._ledger.pending_calls.discard(call.call.call_id)
                     response.calls.discard(call.call.call_id)
                 response.reply_owed |= run_llm
             await response.done.wait()
@@ -1208,7 +1022,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             raise
         finally:
             if final:
-                self._ledger.pending_calls.discard(call.call.call_id)
                 response.calls.discard(call.call.call_id)
             response.operations -= 1
             self._conversation.release(response)

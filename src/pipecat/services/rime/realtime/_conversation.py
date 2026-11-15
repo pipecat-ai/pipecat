@@ -84,7 +84,6 @@ class Output:
     audio_ms: float = 0
     started_at: float | None = None
     closed: bool = False
-    recorded: bool = False
 
 
 @dataclass
@@ -92,7 +91,6 @@ class Response:
     """Response state retained until its operations release ownership."""
 
     ref: r.ResponseRef
-    instruction_item_id: str | None = None
     outputs: dict[str, Output] = field(default_factory=dict)
     calls: set[str] = field(default_factory=set)
     input_ids: tuple[str, ...] = ()
@@ -139,7 +137,6 @@ class Conversation:
             raise RimeResourceLimitError("Prism response tool policy expired")
         response = Response(
             event.response,
-            instruction_item_id=event.instruction_item_id,
             input_ids=event.input_item_ids,
             hold=sdk.hold_response(event.response),
             tools_disabled=(

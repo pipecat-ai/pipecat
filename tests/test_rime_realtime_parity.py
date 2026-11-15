@@ -19,11 +19,9 @@ from pipecat.frames.frames import (
     ErrorFrame,
     FunctionCallResultProperties,
     InputAudioRawFrame,
-    InputTextRawFrame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
-    LLMMessagesUpdateFrame,
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
@@ -33,12 +31,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.rime.realtime.llm import (
-    RimeInputAudioClearFrame,
-    RimeRealtimeLLMService,
-    RimeReplyFrame,
-    RimeStartupParams,
-)
+from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService, RimeStartupParams
 from pipecat.tests.utils import SleepFrame, run_test
 from tests.rime_realtime_peer import Peer, conversation, until
 from tests.test_rime_realtime_service import answer, sent
@@ -57,75 +50,20 @@ async def call(peer, response, *, call_id="lookup-1", name="lookup"):
 
 
 @pytest.mark.asyncio
-async def test_native_text_identity_order_and_next_turn():
-    async with conversation() as (peer, service, worker, context, _, upstream, downstream):
-        await worker.queue_frame(InputTextRawFrame(text="Remember invoice 314"))
-        request = await peer.next()
-        assert request["response"]["prism_input_text"] == "Remember invoice 314"
-        response = await answer(peer, request, text="Invoice 314")
-        await until(lambda: len(context.get_messages()) == 2)
-        assert context.get_messages() == [
-            {"role": "user", "content": "Remember invoice 314"},
-            {"role": "assistant", "content": "Invoice 314"},
-        ]
-        start = next(
-            f
-            for f in downstream
-            if isinstance(f, LLMFullResponseStartFrame)
-            and f.metadata["rime"]["response_id"] == response
-        )
-        assert len(start.metadata["rime"]["input_item_ids"]) == 1
-        assert not sent(peer, "conversation.item.create")
-        await worker.queue_frame(LLMRunFrame())
-        await answer(peer)
-        assert len(sent(peer, "response.create")) == 3
-        assert not sent(peer, "conversation.item.create")
-        assert not any(isinstance(f, ErrorFrame) for f in upstream)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("text", ["", " ", "x" * 4001])
-async def test_invalid_native_text_has_no_provider_or_context_mutation(text):
-    async with conversation() as (peer, service, worker, context, _, upstream, __):
-        await worker.queue_frame(InputTextRawFrame(text=text))
-        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
-        assert context.get_messages() == []
-        assert len(sent(peer, "response.create")) == 1
-        assert service.is_usable
-
-
-@pytest.mark.asyncio
-async def test_native_refusal_stops_dependent_reply_and_allows_next_turn():
+async def test_refused_reply_allows_next_turn():
     async with conversation() as (peer, service, worker, context, _, upstream, __):
         peer.refuse["response.create"] = "invalid_request"
-        await worker.queue_frame(InputTextRawFrame(text="Rejected"))
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Refused"}], run_llm=True)
+        )
         await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
-        assert context.get_messages() == []
         assert service.is_usable
-        await worker.queue_frame(InputTextRawFrame(text="Accepted"))
-        await answer(peer)
-        await until(lambda: len(context.get_messages()) == 2)
-        assert context.get_messages()[0]["content"] == "Accepted"
-
-
-@pytest.mark.asyncio
-async def test_reduced_shared_view_preserves_provider_items():
-    context = LLMContext(
-        [{"role": "user", "content": "Keep first"}, {"role": "assistant", "content": "Keep second"}]
-    )
-    async with conversation(context=context) as (peer, service, worker, context, *_):
-        context.set_messages([{"role": "user", "content": "New department"}])
-        await worker.queue_frame(LLMContextFrame(context))
-        await answer(peer)
-        assert [item["text"] for item in peer.history] == [
-            "Keep first",
-            "Keep second",
-            "New department",
-        ]
-        assert not sent(peer, "conversation.item.delete")
-        await worker.queue_frame(LLMMessagesUpdateFrame(messages=[], run_llm=True))
-        await answer(peer)
-        assert len(sent(peer, "conversation.item.delete")) >= 3
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Accepted"}], run_llm=True)
+        )
+        await answer(peer, text="Answered")
+        await until(lambda: {"role": "assistant", "content": "Answered"} in context.get_messages())
+        assert [item["text"] for item in peer.history] == ["Refused", "Accepted"]
 
 
 @pytest.mark.asyncio
@@ -152,8 +90,7 @@ async def test_prompt_clear_and_filler_survives_tool_handoff():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("native", [False, True])
-async def test_tool_suppression_acknowledges_then_restores(native):
+async def test_tool_suppression_acknowledges_then_restores():
     calls = []
 
     async def lookup(params):
@@ -170,7 +107,9 @@ async def test_tool_suppression_acknowledges_then_restores(native):
         await worker.queue_frames(
             [
                 LLMSetToolChoiceFrame(tool_choice="none"),
-                RimeReplyFrame(text="Hello") if native else LLMRunFrame(),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Hello"}], run_llm=True
+                ),
             ]
         )
         await until(lambda: len(sent(peer, "session.update")) == 2)
@@ -205,41 +144,12 @@ async def test_discard_receipt_orders_next_admission_and_suppresses_speech_audio
         await until(
             lambda: any(f.text == "Discarded speech" for f in downstream if hasattr(f, "text"))
         )
-        await worker.queue_frame(InputTextRawFrame(text="Next"))
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Next"}], run_llm=True)
+        )
         await answer(peer)
         await until(lambda: len(sent(peer, "prism.playback.drained")) == 3)
         assert not output.writes
-        assert service.is_usable
-
-
-@pytest.mark.asyncio
-async def test_clear_audio_orders_new_audio_after_clear():
-    async with conversation() as (peer, service, worker, *_):
-        await worker.queue_frames(
-            [
-                InputAudioRawFrame(b"\x01\x00" * 500, 44100, 1),
-                RimeInputAudioClearFrame(),
-                InputAudioRawFrame(b"\x02\x00" * 500, 16000, 1),
-            ]
-        )
-        await until(
-            lambda: (
-                sent(peer, "input_audio_buffer.clear") and sent(peer, "input_audio_buffer.append")
-            )
-        )
-        import base64
-
-        clear = next(
-            i for i, e in enumerate(peer.events) if e["type"] == "input_audio_buffer.clear"
-        )
-        after = [e for e in peer.events[clear + 1 :] if e["type"] == "input_audio_buffer.append"]
-        await until(
-            lambda: bool(
-                [e for e in peer.events[clear + 1 :] if e["type"] == "input_audio_buffer.append"]
-            )
-        )
-        after = [e for e in peer.events[clear + 1 :] if e["type"] == "input_audio_buffer.append"]
-        assert all(set(base64.b64decode(e["audio"])) <= {0, 2} for e in after)
         assert service.is_usable
 
 
@@ -266,7 +176,11 @@ async def test_pending_tool_survives_more_than_128_completed_responses():
         await peer.end(parent)
         await until(lambda: bool(calls))
         for _ in range(130):
-            await worker.queue_frame(LLMRunFrame())
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Later turn"}], run_llm=True
+                )
+            )
             await answer(peer, text="Later turn", samples=0)
         release.set()
         request = await peer.next()
@@ -302,7 +216,9 @@ async def test_startup_http_refusal_policy(status):
                 startup=RimeStartupParams(retry_interval=0, total_timeout=2),
                 shutdown_timeout=0.1,
             )
-            _, upstream = await run_test(service, frames_to_send=[LLMRunFrame(), SleepFrame(0.15)])
+            _, upstream = await run_test(
+                service, frames_to_send=[LLMContextFrame(LLMContext()), SleepFrame(0.15)]
+            )
             assert len(attempts) == (1 if status == 401 else 2)
             errors = [f for f in upstream if isinstance(f, ErrorFrame)]
             assert bool(errors) == (status == 401)
@@ -385,10 +301,16 @@ async def test_spoken_progress_then_final_respects_reply_policy(final_run, progr
         await peer.end(parent)
         if not progress_run:
             await until(lambda: len(sent(peer, "conversation.item.create")) == 1)
-            await worker.queue_frame(RimeReplyFrame(text="Answer while the lookup runs"))
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Answer while the lookup runs"}],
+                    run_llm=True,
+                )
+            )
         await answer(peer, text="Progress recorded")
         release.set()
-        await until(lambda: len(sent(peer, "conversation.item.create")) == 3)
+        writes = 3 if progress_run else 4
+        await until(lambda: len(sent(peer, "conversation.item.create")) == writes)
         if final_run:
             request = await peer.next()
             assert "prism_call_id" not in request["response"]
@@ -402,10 +324,10 @@ async def test_spoken_progress_then_final_respects_reply_policy(final_run, progr
             await until(lambda: any("Finished" in str(m) for m in context.get_messages()))
             assert len(sent(peer, "response.create")) == 2
         assert calls == [True]
-        # An ordinary shared view must not import the async final a second time.
+        # A later context frame does not write the async final a second time.
         await worker.queue_frame(LLMContextFrame(context))
-        await answer(peer, text="After progress")
-        assert len(sent(peer, "conversation.item.create")) == 3
+        await asyncio.sleep(0.05)
+        assert len(sent(peer, "conversation.item.create")) == writes
         assert not any(isinstance(f, ErrorFrame) for f in upstream)
 
 
@@ -539,20 +461,25 @@ async def test_startup_retry_exhaustion_and_diagnostics(retry_after):
                 startup=RimeStartupParams(max_retries=1, retry_interval=0.01, total_timeout=0.4),
                 shutdown_timeout=0.1,
             )
-            _, upstream = await run_test(service, frames_to_send=[LLMRunFrame(), SleepFrame(0.12)])
+            _, upstream = await run_test(
+                service, frames_to_send=[LLMContextFrame(LLMContext()), SleepFrame(0.12)]
+            )
             assert len(attempts) == 2
             assert attempts[-1] - attempts[0] >= 0.01
             assert any(isinstance(f, ErrorFrame) for f in upstream)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("native", [False, True])
-async def test_interruption_before_creation_cancels_late_reply(native):
+async def test_interruption_before_creation_cancels_late_reply():
     from pipecat.frames.frames import InterruptionFrame
 
     async with conversation() as (peer, service, worker, context, output, *_):
         await worker.queue_frame(LLMSetToolChoiceFrame(tool_choice="none"))
-        await worker.queue_frame(RimeReplyFrame(text="Accepted late") if native else LLMRunFrame())
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "Accepted late"}], run_llm=True
+            )
+        )
         request = await peer.next()
         await worker.queue_frame(InterruptionFrame())
         await asyncio.sleep(0.02)
@@ -564,38 +491,7 @@ async def test_interruption_before_creation_cancels_late_reply(native):
         await until(lambda: len(sent(peer, "session.update")) == 3)
         assert not output.writes
         assert service.is_usable
-        if native:
-            assert context.get_messages().count({"role": "user", "content": "Accepted late"}) == 1
-
-
-@pytest.mark.asyncio
-async def test_retained_text_tracks_one_item_inside_an_aggregated_reply():
-    async with conversation() as (peer, service, worker, context, _, upstream, __):
-        response = await peer.start()
-        await peer.message(response, item_id="part-1", text="First sentence.", samples=0)
-        await peer.message(response, item_id="part-2", text="Second sentence.", samples=0)
-        await peer.end(response)
-        await until(lambda: bool(context.get_messages()))
-        original = list(context.get_messages())
-        await worker.queue_frame(LLMContextFrame(context))
-        await answer(peer, text="Next", samples=0)
-        await peer.emit(
-            "conversation.item.truncated",
-            item_id="part-2",
-            content_index=0,
-            audio_end_ms=0,
-            prism_kept_text="",
-        )
-        await asyncio.sleep(0.02)
-        peer.refuse["conversation.item.create"] = "invalid_request"
-        await worker.queue_frame(
-            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Refused"}], run_llm=True)
-        )
-        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
-        error = next(f.exception for f in upstream if isinstance(f, ErrorFrame))
-        assert error.confirmed_context[0]["content"] == "First sentence."
-        assert original[0] in context.get_messages()
-        assert service.is_usable
+        assert context.get_messages().count({"role": "user", "content": "Accepted late"}) == 1
 
 
 @pytest.mark.asyncio
@@ -635,24 +531,17 @@ async def test_suppression_restore_failure_is_terminal():
         upstream,
         ___,
     ):
-        await worker.queue_frames([LLMSetToolChoiceFrame(tool_choice="none"), LLMRunFrame()])
+        await worker.queue_frames(
+            [
+                LLMSetToolChoiceFrame(tool_choice="none"),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Hello"}], run_llm=True
+                ),
+            ]
+        )
         request = await peer.next()
         peer.refuse["session.update"] = "invalid_request"
         await answer(peer, request)
         await until(lambda: not service.is_usable)
         await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
         assert peer.settings["tools"] == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("place", [0, 1, 2])
-async def test_explicit_history_insert_reorders_provider_with_acknowledgments(place):
-    original = [{"role": "user", "content": "first"}, {"role": "assistant", "content": "last"}]
-    async with conversation(context=LLMContext(original)) as (peer, service, worker, *_):
-        edited = [*original]
-        edited.insert(place, {"role": "user", "content": "inserted"})
-        await worker.queue_frame(LLMMessagesUpdateFrame(messages=edited, run_llm=True))
-        request = await peer.next()
-        assert [item["text"] for item in peer.history] == [m["content"] for m in edited]
-        await answer(peer, request)
-        assert service.is_usable

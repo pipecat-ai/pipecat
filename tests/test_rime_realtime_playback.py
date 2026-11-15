@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Output completion must preserve interruption reporting for later audio."""
+"""Playback stops must preserve interruption reporting for later audio."""
 
 import asyncio
 
@@ -13,21 +13,18 @@ import pytest
 pytest.importorskip("rimelabs_sdk")
 
 from pipecat.frames.frames import BotStoppedSpeakingFrame, ErrorFrame, InterruptionFrame
-from pipecat.services.rime.realtime._aggregators import _RimeOutputStoppedFrame
 from tests.rime_realtime_peer import conversation, until
 from tests.test_rime_realtime_service import sent
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("generation_ended", [False, True])
-async def test_earlier_playback_stop_preserves_later_interruption(generation_ended):
+async def test_earlier_playback_stop_preserves_streaming_interruption():
     async with conversation() as (peer, service, worker, _, output, upstream, __):
         first_write = asyncio.Event()
         release_first = asyncio.Event()
         second_write = asyncio.Event()
         release_second = asyncio.Event()
         stopped = asyncio.Event()
-        output_stopped = asyncio.Event()
         write_audio = output.write_audio_frame
         process_frame = service.process_frame
         writes = 0
@@ -47,8 +44,6 @@ async def test_earlier_playback_stop_preserves_later_interruption(generation_end
             await process_frame(frame, direction)
             if isinstance(frame, BotStoppedSpeakingFrame):
                 stopped.set()
-            elif isinstance(frame, _RimeOutputStoppedFrame):
-                output_stopped.set()
 
         output.write_audio_frame = gated_write
         service.process_frame = observe_stop
@@ -59,9 +54,7 @@ async def test_earlier_playback_stop_preserves_later_interruption(generation_end
             await asyncio.wait_for(first_write.wait(), 3)
 
             second = await peer.start()
-            await peer.message(second, text="Second output", samples=2400, done=generation_ended)
-            if generation_ended:
-                await peer.end(second)
+            await peer.message(second, text="Second output", samples=2400, done=False)
             await until(
                 lambda: (
                     service._latest_audio_output is not None
@@ -71,15 +64,13 @@ async def test_earlier_playback_stop_preserves_later_interruption(generation_end
             release_first.set()
             await asyncio.wait_for(second_write.wait(), 3)
             await asyncio.wait_for(stopped.wait(), 3)
-            await asyncio.wait_for(output_stopped.wait(), 3)
 
             await worker.queue_frame(InterruptionFrame())
             await until(lambda: bool(sent(peer, "conversation.item.truncate")))
             report = sent(peer, "conversation.item.truncate")[-1]
             assert report["item_id"] == f"message-{second}"
             assert 0 <= report["audio_end_ms"] <= 100
-            if not generation_ended:
-                assert sent(peer, "response.cancel")[-1]["response_id"] == second
+            assert sent(peer, "response.cancel")[-1]["response_id"] == second
             await until(lambda: not service._requests)
             assert service.is_usable
             assert not any(isinstance(frame, ErrorFrame) for frame in upstream)
@@ -112,7 +103,7 @@ async def test_completed_output_is_not_truncated_by_a_later_interruption():
 
 
 @pytest.mark.asyncio
-async def test_output_stop_waits_for_the_transport_write():
+async def test_playback_stop_waits_for_the_transport_write():
     async with conversation() as (peer, service, _, __, output, ___, ____):
         writing = asyncio.Event()
         release_write = asyncio.Event()
@@ -127,7 +118,7 @@ async def test_output_stop_waits_for_the_transport_write():
 
         async def observe_acknowledgment(frame, direction):
             await process_frame(frame, direction)
-            if isinstance(frame, _RimeOutputStoppedFrame):
+            if isinstance(frame, BotStoppedSpeakingFrame):
                 acknowledged.set()
 
         output.write_audio_frame = gated_write

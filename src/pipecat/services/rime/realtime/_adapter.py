@@ -38,6 +38,8 @@ def history_items(messages: list) -> list[r.HistoryItem]:
         if not isinstance(message, dict):
             raise ValueError("Prism does not support opaque provider history")
         role = message.get("role")
+        if role == "developer":
+            role = "system"
         if role in ("user", "assistant", "system"):
             if message.get("content") is not None and (
                 message.get("content") or not message.get("tool_calls")
