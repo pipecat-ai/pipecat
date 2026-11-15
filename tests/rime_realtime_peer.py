@@ -279,9 +279,19 @@ async def until(predicate, timeout=3):
             await asyncio.sleep(0.005)
 
 
+async def open_with_run(worker, context):
+    await worker.queue_frame(LLMRunFrame())
+
+
 @asynccontextmanager
 async def conversation(
-    *, context=None, enabled=True, unversioned=False, worker_params=None, **options
+    *,
+    context=None,
+    enabled=True,
+    unversioned=False,
+    worker_params=None,
+    opening=open_with_run,
+    **options,
 ):
     peer = Peer(unversioned=unversioned)
     context = context or LLMContext()
@@ -320,7 +330,7 @@ async def conversation(
                 running = tasks.create_task(runner.run())
                 await asyncio.wait_for(started.wait(), 3)
                 await until(lambda: any(isinstance(f, LLMServiceMetadataFrame) for f in upstream))
-                await worker.queue_frame(LLMRunFrame())
+                await opening(worker, context)
                 initial = await peer.next()
                 response = await peer.start(initial)
                 await peer.end(response)

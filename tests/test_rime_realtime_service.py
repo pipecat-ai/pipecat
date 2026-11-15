@@ -16,6 +16,8 @@ pytest.importorskip("rimelabs_sdk")
 from rimelabs_sdk import realtime as r
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     ErrorFrame,
     InputAudioRawFrame,
     InterruptionFrame,
@@ -47,6 +49,27 @@ async def answer(peer, request=None, *, text="Hello", samples=480):
 
 def created_texts(peer):
     return [event["item"].get("text") for event in sent(peer, "conversation.item.create")]
+
+
+def hold_audio(output):
+    """Keep the bot speaking until the returned event is set."""
+    release = asyncio.Event()
+    write_audio = output.write_audio_frame
+
+    async def held_write(frame):
+        await release.wait()
+        return await write_audio(frame)
+
+    output.write_audio_frame = held_write
+    return release
+
+
+async def speak(peer, downstream):
+    response = await peer.start()
+    await peer.message(response, text="Speaking", samples=2400)
+    await peer.end(response)
+    await until(lambda: any(isinstance(f, BotStartedSpeakingFrame) for f in downstream))
+    return response
 
 
 @pytest.mark.asyncio
@@ -243,6 +266,151 @@ async def test_partial_append_failure_is_recoverable():
         assert service.is_usable
         assert [item["text"] for item in peer.history] == ["First"]
         assert len(sent(peer, "response.create")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_llm", [False, True])
+async def test_append_queued_with_the_opening_reaches_prism(run_llm):
+    async def opening(worker, context):
+        await worker.queue_frames(
+            [
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Early"}], run_llm=run_llm
+                ),
+                LLMRunFrame(),
+            ]
+        )
+
+    context = LLMContext([{"role": "system", "content": "Be brief"}])
+    async with conversation(context=context, opening=opening) as (peer, service, *_):
+        await until(lambda: {"role": "user", "content": "Early"} in context.get_messages())
+        await asyncio.sleep(0.05)
+        assert created_texts(peer) == ["Be brief", "Early"]
+        assert len(sent(peer, "response.create")) == 1
+        assert service.is_usable
+
+
+@pytest.mark.asyncio
+async def test_append_recorded_before_the_opening_is_written_once():
+    async def opening(worker, context):
+        await worker.queue_frame(
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Early"}])
+        )
+        await until(lambda: bool(context.get_messages()))
+        await worker.queue_frame(LLMRunFrame())
+
+    async with conversation(opening=opening) as (peer, *_):
+        assert created_texts(peer) == ["Early"]
+        assert len(sent(peer, "response.create")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prism_answers", [False, True])
+async def test_reply_held_while_the_bot_speaks_is_skipped_once_prism_answers(prism_answers):
+    async with conversation() as (peer, service, worker, context, output, _, downstream):
+        release = hold_audio(output)
+        try:
+            await speak(peer, downstream)
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Appended"}], run_llm=True
+                )
+            )
+            await until(lambda: created_texts(peer) == ["Appended"])
+            await asyncio.sleep(0.05)
+            if prism_answers:
+                response = await peer.start()
+                await peer.message(response, text="Answer that took it in", samples=0)
+                await peer.end(response)
+            release.set()
+            await until(lambda: any(isinstance(f, BotStoppedSpeakingFrame) for f in downstream))
+            if prism_answers:
+                await asyncio.sleep(0.1)
+                assert len(sent(peer, "response.create")) == 1
+            else:
+                await answer(peer)
+                assert len(sent(peer, "response.create")) == 2
+            assert service.is_usable
+        finally:
+            release.set()
+
+
+@pytest.mark.asyncio
+async def test_response_started_during_the_append_write_is_not_its_reply():
+    async with conversation() as (peer, service, worker, context, output, _, downstream):
+        release = hold_audio(output)
+        written = peer.gates["conversation.item.create"] = asyncio.Event()
+        try:
+            await speak(peer, downstream)
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Appended"}], run_llm=True
+                )
+            )
+            await until(lambda: created_texts(peer) == ["Appended"])
+            response = await peer.start()
+            await peer.message(response, text="Earlier answer", samples=0)
+            await peer.end(response)
+            await asyncio.sleep(0.05)
+            written.set()
+            await until(lambda: [item["text"] for item in peer.history] == ["Appended"])
+            release.set()
+            await answer(peer)
+            assert len(sent(peer, "response.create")) == 2
+            assert service.is_usable
+        finally:
+            written.set()
+            release.set()
+
+
+@pytest.mark.asyncio
+async def test_failed_append_keeps_the_reply_owed_to_an_earlier_one():
+    async with conversation() as (peer, service, worker, context, output, upstream, downstream):
+        release = hold_audio(output)
+        try:
+            await speak(peer, downstream)
+            peer.history_failure_at = peer.history_mutations + 2
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "First"}], run_llm=True
+                )
+            )
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Second"}])
+            )
+            await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
+            release.set()
+            await answer(peer)
+            assert [item["text"] for item in peer.history] == ["First"]
+            assert len(sent(peer, "response.create")) == 2
+            assert service.is_usable
+        finally:
+            release.set()
+
+
+@pytest.mark.asyncio
+async def test_interruption_drops_a_held_reply():
+    async with conversation() as (peer, service, worker, context, output, _, downstream):
+        release = hold_audio(output)
+        try:
+            await speak(peer, downstream)
+            await worker.queue_frame(
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Appended"}], run_llm=True
+                )
+            )
+            await until(lambda: created_texts(peer) == ["Appended"])
+            await worker.queue_frame(InterruptionFrame())
+            release.set()
+            await until(lambda: not service._requests)
+            await worker.queue_frame(
+                LLMMessagesUpdateFrame(messages=context.get_messages(), run_llm=True)
+            )
+            await asyncio.sleep(0.1)
+            assert len(sent(peer, "response.create")) == 1
+            assert service.is_usable
+        finally:
+            release.set()
 
 
 @pytest.mark.asyncio
