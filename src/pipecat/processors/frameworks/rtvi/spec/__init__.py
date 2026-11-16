@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, TypeAdapter
+from pydantic.json_schema import JsonSchemaMode
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 
@@ -77,7 +78,7 @@ class RTVIMessageSpec:
 
 def _summary(obj: Any) -> str:
     """The first paragraph of an object's docstring, on one line."""
-    return " ".join(inspect.getdoc(obj).split("\n\n")[0].split())
+    return " ".join((inspect.getdoc(obj) or "").split("\n\n")[0].split())
 
 
 def _client(
@@ -411,7 +412,7 @@ def build_spec() -> dict:
     """
     # What the server accepts is the client's messages as the models validate
     # them, and what it produces is its own as the models serialize them.
-    inputs = [
+    inputs: list[tuple[str, JsonSchemaMode, TypeAdapter[Any]]] = [
         (
             spec.type,
             "validation" if spec.direction == "client-to-server" else "serialization",
