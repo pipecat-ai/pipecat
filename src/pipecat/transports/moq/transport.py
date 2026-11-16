@@ -62,7 +62,7 @@ except ModuleNotFoundError as e:
 # subclass, then a plain namespace class for the variants — so static type
 # checkers resolve it as a non-Exception type even though the Exception
 # subclass is restored at runtime. Re-type it for use in ``except`` clauses.
-_MoqError = cast("type[BaseException]", moq.Error)
+_MoqError = cast("type[Exception]", moq.Error)
 
 
 # 0.14 reset codes (moq-rs 0.14's shared moq-net registry) that mean "the
