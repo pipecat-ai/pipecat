@@ -1900,12 +1900,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._user_speaking: bool = False
         self._bot_speaking: bool = False
+        # Between LLMFullResponseStartFrame and LLMFullResponseEndFrame: a response is
+        # being generated and its text is not in the context yet.
+        self._llm_responding: bool = False
 
-        # When a function call result arrives while the bot is speaking, we defer the LLM
-        # re-invocation until the bot stops speaking. This flag is set to True in that case
-        # so that `BotStoppedSpeakingFrame` knows to push a context frame. Multiple results
-        # arriving in the same speaking window are bundled into a single deferred push.
-        self._push_context_on_bot_stopped_speaking: bool = False
+        # When a function call result arrives while the bot is speaking or a response is
+        # being generated, the LLM re-invocation waits until both are over. This flag is set
+        # to True in that case so that `BotStoppedSpeakingFrame` or `LLMFullResponseEndFrame`
+        # knows to push a context frame. Multiple results arriving in the same window are
+        # bundled into a single deferred push.
+        self._deferred_context_push: bool = False
 
         # A function call result asked to run inference and the push hasn't happened yet:
         # it was held for results still queued, or for a user who is speaking. Whichever
@@ -1992,8 +1996,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
-        self._push_context_on_bot_stopped_speaking = False
-        self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -2030,9 +2032,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._context_push_owed = False
+            if not self._realtime_service_mode:
+                self._llm_responding = True
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
+            self._llm_responding = False
+            await self._maybe_push_deferred_context("Response ended")
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
         elif isinstance(frame, LLMMarkerFrame):
@@ -2089,9 +2095,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
-            if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
-                logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+            await self._maybe_push_deferred_context("Bot stopped speaking")
         elif isinstance(frame, LLMServiceMetadataFrame):
             # Auto-configure realtime mode on the assistant half too — the
             # broadcast reaches both halves. The assistant only needs the flag
@@ -2202,8 +2206,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
             The frame pushed.
         """
         frame = await super().push_context_frame(direction)
-        self._push_context_on_bot_stopped_speaking = False
-        self._context_push_owed = False
+        # Only an upstream push runs the LLM. A downstream one, such as the record of a
+        # finished assistant turn, leaves a deferred or owed run in place.
+        if direction == FrameDirection.UPSTREAM:
+            self._deferred_context_push = False
+            self._context_push_owed = False
         return frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
@@ -2238,7 +2245,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # The output transport sends a BotStoppedSpeakingFrame right after the
         # interruption, and it is handled before the turn closes. Drop the
         # context push waiting for it: it belongs to the cancelled response.
-        self._push_context_on_bot_stopped_speaking = False
+        # An interrupted response may also never send its LLMFullResponseEndFrame.
+        # A deferred or owed run is dropped with it: the user's new turn brings a
+        # run of its own.
+        self._llm_responding = False
+        self._deferred_context_push = False
+        self._context_push_owed = False
 
         if not self._assistant_turn_start_timestamp:
             await self.reset()
@@ -2258,6 +2270,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
         await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
+
+    async def _maybe_push_deferred_context(self, reason: str):
+        """Push a deferred context frame once the bot is quiet and no response is in flight."""
+        if (
+            self._deferred_context_push
+            and not self._user_speaking
+            and not self._bot_speaking
+            and not self._llm_responding
+        ):
+            logger.debug(f"{self}: {reason} — pushing deferred context frame!")
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
@@ -2417,15 +2440,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # a burst can end with an intermediate result, or an
             # LLMMessagesAppendFrame with run_llm=False, that doesn't.
             logger.debug(f"{self}: More results or appends queued — deferring context frame push.")
-        elif self._bot_speaking:
-            # Defer the context frame push until the bot finishes speaking. If multiple
-            # function call results arrive while the bot is speaking, they all accumulate
-            # in the context and a single push is performed once speaking stops, preventing
-            # the LLM from running multiple times and producing duplicated responses.
-            # This should be an edge case, since it would require a FunctionCallResultFrame
-            # being queued between an LLM response start and end frame.
-            logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
-            self._push_context_on_bot_stopped_speaking = True
+        elif self._bot_speaking or self._llm_responding:
+            # Defer the context frame push until the bot finishes speaking and the response
+            # being generated has ended. A run started now would see a context that lacks
+            # that response, so the model would answer the same turn again. Results arriving
+            # in the meantime accumulate in the context and are covered by a single push.
+            # Async function calls make this common: their results arrive at any time,
+            # including while a response to another turn is being generated.
+            logger.debug(f"{self}: Bot is speaking or responding — deferring context frame push.")
+            self._deferred_context_push = True
         else:
             logger.debug(f"{self}: Pushing context frame!")
             await self.push_context_frame(FrameDirection.UPSTREAM)

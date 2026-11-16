@@ -2238,6 +2238,125 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[LLMContextFrame],
         )
 
+    async def test_a_result_asking_to_run_waits_for_the_response_in_flight(self):
+        """A run started mid-response would answer a context that lacks that response."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            LLMMessagesAppendFrame(messages=[{"role": "user", "content": "And the time?"}]),
+            LLMFullResponseStartFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                result={"answer": 42},
+                run_llm=True,
+            ),
+            SleepFrame(),
+        ]
+        _, up = await run_test(aggregator, frames_to_send=frames_to_send)
+        assert not [f for f in up if isinstance(f, LLMContextFrame)]
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        _, up = await run_test(
+            aggregator,
+            frames_to_send=[
+                *frames_to_send,
+                LLMTextFrame("It's noon."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+            ],
+        )
+        assert len([f for f in up if isinstance(f, LLMContextFrame)]) == 1
+        # The response is in the context ahead of the run it was holding back.
+        assert {"role": "assistant", "content": "It's noon."} in context.get_messages()
+
+    async def test_an_append_asking_to_run_waits_for_the_response_in_flight(self):
+        message = {"role": "developer", "content": "Backend: It's 62 and raining."}
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+            ],
+            expected_up_frames=[],
+        )
+
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+            ],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_a_run_deferred_by_a_response_waits_for_the_bot_to_stop_speaking(self):
+        """A response that ends while its audio still plays hands the push to the bot stopping."""
+        message = {"role": "developer", "content": "Backend: Done."}
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+            ],
+            expected_up_frames=[],
+        )
+
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                LLMTextFrame("Working on it."),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+            expected_up_frames=[LLMContextAssistantTurnFrame, LLMContextFrame],
+        )
+
+    async def test_an_interrupted_response_does_not_hold_later_runs(self):
+        """An interrupted response may never end, so it stops deferring at the interruption."""
+        message = {"role": "developer", "content": "Backend: Done."}
+        aggregator = LLMAssistantAggregator(LLMContext())
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                SleepFrame(),
+                InterruptionFrame(),
+                SleepFrame(),
+                LLMMessagesAppendFrame(messages=[message], run_llm=True),
+                SleepFrame(),
+            ],
+            expected_up_frames=[LLMContextFrame],
+        )
+
     async def test_an_append_asking_to_run_while_the_user_speaks_is_settled_by_the_turns_run(self):
         """The run the user's turn brings sees the context as it stands, so nothing is owed after it."""
         context = LLMContext()
