@@ -5,6 +5,7 @@ A machine-readable description of the RTVI protocol between a client and a Pipec
 ```
 spec/
 ├── __init__.py              # the MESSAGES and BEHAVIORS tables, and the document builder
+├── released.json            # the protocol versions Pipecat has released
 ├── 2.3.0/
 │   └── rtvi.asyncapi.json   # the document of protocol 2.3.0
 └── <version>/
@@ -46,7 +47,17 @@ The document's `x-rtvi-behaviors` lists the rules the server follows across mess
 
 5. Run `uv run pytest tests/test_rtvi_spec.py`. It fails when the current version's document doesn't match the code, and when an example doesn't match its message's payload.
 
-A change to the wire format without a version bump rewrites the current version's document, so keep changes to a released version backward compatible, such as a new optional field.
+A released version's document never changes, since clients implement the version from it: any change to the wire format after a release, even a new optional field, is a new protocol version.
+
+## Releases
+
+`released.json` records each protocol version a Pipecat release has shipped, with the SHA-256 of its document and the Pipecat release that first shipped it:
+
+```json
+{ "2.3.0": { "sha256": "57e5…", "pipecat": "1.15.0" } }
+```
+
+The changelog workflow (`.github/workflows/generate-changelog.yml`) runs `scripts/rtvi/record_released_spec.py --version <release>` at release-prep, so the current protocol version is recorded in the release PR. A version already recorded stays as it is. `tests/test_rtvi_spec.py` fails when a recorded document has changed, and when the current version is recorded and its document no longer matches the code, which means it's time to bump `PROTOCOL_VERSION`.
 
 ## Testing the server against the documents
 

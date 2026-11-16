@@ -25,8 +25,12 @@ export script to refresh it::
 
 ``README.md`` next to this module describes the documents and how to change
 the protocol.
+
+``released.json`` records each protocol version a Pipecat release has shipped,
+with its document's hash; a released document never changes.
 """
 
+import hashlib
 import inspect
 import json
 from dataclasses import dataclass
@@ -579,3 +583,27 @@ def spec_path(version: str = RTVI.PROTOCOL_VERSION) -> Path:
 def render_spec() -> str:
     """The content of the current protocol version's ``rtvi.asyncapi.json``."""
     return json.dumps(build_spec(), indent=2, ensure_ascii=False) + "\n"
+
+
+def released_path() -> Path:
+    """The path of ``released.json``, the record of released protocol versions."""
+    return Path(__file__).parent / "released.json"
+
+
+def released() -> dict[str, dict]:
+    """The protocol versions a Pipecat release has shipped.
+
+    Returns:
+        For each version, the SHA-256 of its document (``sha256``) and the
+        Pipecat release that first shipped it (``pipecat``).
+    """
+    return json.loads(released_path().read_text(encoding="utf-8"))
+
+
+def document_sha256(version: str = RTVI.PROTOCOL_VERSION) -> str:
+    """The SHA-256 of a protocol version's document, as hex.
+
+    Args:
+        version: The protocol version. Defaults to the current one.
+    """
+    return hashlib.sha256(spec_path(version).read_bytes()).hexdigest()
