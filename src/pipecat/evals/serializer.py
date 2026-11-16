@@ -410,7 +410,8 @@ class EvalClientSerializer(RTVIClientSerializer):
     ``llm-function-call-stopped`` becomes an :class:`EvalFunctionCallCancelFrame`,
     which keeps its place among the bot's other function-call reports. The
     bot's ``metrics`` stay raw messages too, so the sink can report them as
-    they were sent. The deprecated ``user-transcription`` is dropped:
+    they were sent, and so does a ``server-message``, whose data is the bot's
+    own. The deprecated ``user-transcription`` is dropped:
     ``user-input`` carries the same transcriptions.
     """
 
@@ -468,6 +469,8 @@ class EvalClientSerializer(RTVIClientSerializer):
                 # The bot's metrics, reported as sent: no per-metric mapping
                 # here to fall behind the protocol.
                 or msg_type == "metrics"
+                # A message of the bot's own making, for the scenario to read.
+                or msg_type == "server-message"
             ):
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.

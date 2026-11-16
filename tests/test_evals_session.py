@@ -437,7 +437,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_unmapped_message_ignored(self):
         msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": {}}
+            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-ready", "data": {}}
         )
         self.assertIsNone(_stream().frame_to_event(msg))
 
@@ -3821,6 +3821,48 @@ class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await m.match(first, time.monotonic(), 1000, 0, 0))
         looking_back = EvalExpectation(event="metrics", metric="ttfb", check_from="turn_start")
         self.assertIsNone(await m.match(looking_back, time.monotonic(), 1000, 0, 1))
+
+
+class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
+    """A message of the bot's own making is an event a scenario can read."""
+
+    @staticmethod
+    def _frame(data) -> InputTransportMessageFrame:
+        return InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": data}
+        )
+
+    def test_a_server_message_becomes_an_event_with_its_data_and_its_text(self):
+        data = {"done": True, "transcript": "héllo"}
+        self.assertEqual(
+            _stream().frame_to_event(self._frame(data)),
+            {
+                "type": "server_message",
+                "data": data,
+                "text": '{"done": true, "transcript": "héllo"}',
+            },
+        )
+
+    def test_string_data_is_its_own_text(self):
+        event = _stream().frame_to_event(self._frame("finished"))
+        self.assertEqual((event["data"], event["text"]), ("finished", "finished"))
+
+    async def test_an_expectation_reads_the_data_and_records_it(self):
+        m = _matcher()
+        data = {"kind": "result", "ttfb": 0.31}
+        await m._stream.append(m._stream.frame_to_event(self._frame(data)))
+        expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
+        self.assertIsNone(await m.match(expectation, time.monotonic(), 1000, 0, 0))
+        self.assertEqual(json.loads(m.last_match_text), data)
+
+    async def test_a_content_check_judges_the_next_message(self):
+        # As for any event: the next one of the type is the one checked.
+        m = _matcher()
+        await m._stream.append(m._stream.frame_to_event(self._frame({"kind": "progress"})))
+        expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
+        failure = await m.match(expectation, time.monotonic(), 1000, 0, 0)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.kind, "text_mismatch")
 
 
 class TestBotImageEvent(unittest.TestCase):

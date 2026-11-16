@@ -54,6 +54,9 @@ scenario ``event:``             RTVI server message(s)
                                 processing time, usage), as sent, under ``data``.
                                 Kept in :attr:`EvalEventStream.metrics` and out of
                                 ``events_seen``
+``server_message``              ``server-message``: a message of the bot's own making
+                                (an ``RTVIServerMessageFrame``), with its ``data``
+                                and, as ``text``, the data as JSON
 ``expression``                  ``bot-output`` in expressive conversation (alpha):
                                 expression the bot's TTS performed, in the tags
                                 the LLM writes: ``<<excited>>`` where the delivery of
@@ -65,6 +68,7 @@ scenario ``event:``             RTVI server message(s)
 """
 
 import asyncio
+import json
 import math
 import time
 from collections.abc import Callable
@@ -641,6 +645,12 @@ class EvalEventStream:
             return self._user_input_event(data)
         elif msg_type == "metrics":
             return {"type": "metrics", "data": dict(data)}
+        elif msg_type == "server-message":
+            # The data is the bot's own, in any JSON shape; its text is what a
+            # scenario's content checks read and what a match records.
+            data = message.get("data")
+            text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            return {"type": "server_message", "data": data, "text": text}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",

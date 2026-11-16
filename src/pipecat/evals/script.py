@@ -32,8 +32,8 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``, ``metrics``.
-The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``, ``metrics``,
+``server_message``. The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
 gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
 turns).
 
@@ -64,6 +64,19 @@ was waiting for its own event is behind this one, so look back for it::
 
 Every report of a run is kept with its result, expected or not, so an
 expectation is only needed to hold a turn open until one arrives.
+
+``server_message`` is a message of the bot's own making: whatever data it
+pushed in an ``RTVIServerMessageFrame``. It is how a bot built for an eval
+reports what only it can know, such as a result it computed or that it has
+finished its work on a turn. The event's text is the data as JSON (or the
+data itself when it is a string), so the content checks read it and a matched
+expectation records it in the run's result::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: server_message
+            text_contains: '"done": true'
 
 ``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
