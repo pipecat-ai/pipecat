@@ -3762,6 +3762,25 @@ class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e["type"] for e in s.metrics], ["metrics"])
         self.assertIn("at", s.metrics[0])
 
+    async def test_the_result_carries_every_report_with_its_time(self):
+        async def on_progress(_):
+            pass
+
+        stream = _stream()
+        driver = EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[]),
+            default_timeout_ms=5000,
+            client=None,  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+        data = {"ttfb": [{"processor": "STT#0", "value": 0.3}]}
+        await stream.append({"type": "metrics", "data": data, "at": 1.5})
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.bot_metrics, [{"at": 1.5, "data": data}])
+
     async def test_an_expectation_takes_the_report_holding_its_metric(self):
         m = _matcher()
         await m._stream.append(_metrics(processing=[{"processor": "STT#0", "value": 0.01}]))

@@ -219,6 +219,7 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             debug_log=debug_log,
             success=self._simulation.success,
             failure_kind=failures[0].kind if failures else None,
+            bot_metrics=self.bot_metrics(),
         )
 
     def timeline(self) -> list[dict]:
