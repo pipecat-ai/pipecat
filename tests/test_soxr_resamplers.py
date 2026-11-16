@@ -7,10 +7,21 @@
 import numpy as np
 import pytest
 
-from pipecat.audio.filters.rnnoise_filter import RNNoiseFilter
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
+
+pytestmark = pytest.mark.filterwarnings("ignore:`SOXR.*is deprecated:DeprecationWarning")
+
+
+def test_soxr_audio_resampler_emits_deprecation_warning():
+    with pytest.warns(DeprecationWarning, match="`SOXRAudioResampler` is deprecated"):
+        SOXRAudioResampler()
+
+
+def test_soxr_stream_audio_resampler_emits_deprecation_warning():
+    with pytest.warns(DeprecationWarning, match="`SOXRStreamAudioResampler` is deprecated"):
+        SOXRStreamAudioResampler()
 
 
 @pytest.mark.asyncio
@@ -101,29 +112,6 @@ async def test_soxr_stream_audio_resampler_defaults_to_vhq(monkeypatch):
     await SOXRStreamAudioResampler().resample(audio, 8000, 16000)
 
     assert calls["quality"] == "VHQ"
-
-
-@pytest.mark.asyncio
-async def test_rnnoise_default_resampler_quality_is_forwarded(monkeypatch):
-    qualities = []
-
-    class RNNoise:
-        def __init__(self, sample_rate):
-            self.sample_rate = sample_rate
-
-    class Resampler:
-        def __init__(self, quality):
-            qualities.append(quality)
-
-    monkeypatch.setattr("pipecat.audio.filters.rnnoise_filter.RNNoise", RNNoise)
-    monkeypatch.setattr(
-        "pipecat.audio.resamplers.soxr_stream_resampler.SOXRStreamAudioResampler", Resampler
-    )
-
-    rnnoise_filter = RNNoiseFilter()
-    await rnnoise_filter.start(16000)
-
-    assert qualities == ["QQ", "QQ"]
 
 
 def _tone(samples: int, rate: int = 16000) -> bytes:

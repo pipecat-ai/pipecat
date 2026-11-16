@@ -48,6 +48,16 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.flush()
         assert result.text == "How are you?"
 
+    async def test_numbered_list(self):
+        text = "1. The morning sun warmed the quiet street.\n2. Birds sang."
+        for chunk_size in (1, 3, len(text)):
+            aggregator = SimpleTextAggregator()
+            results = []
+            for i in range(0, len(text), chunk_size):
+                results += [a.text async for a in aggregator.aggregate(text[i : i + chunk_size])]
+            results.append((await aggregator.flush()).text)
+            assert results == ["1. The morning sun warmed the quiet street.", "\n2. Birds sang."]
+
     async def test_lookahead_decimal_number(self):
         """Test that $29.95 is not split at $29."""
         text = "Ask me for only $29.95/month."
@@ -183,9 +193,9 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
 
 class TestSimpleTextAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from pipecat.utils.text.base_text_aggregator import AggregationType
+        from pipecat.utils.text.base_text_aggregator import TextType
 
-        self.aggregator = SimpleTextAggregator(aggregation_type=AggregationType.TOKEN)
+        self.aggregator = SimpleTextAggregator(aggregation_type=TextType.TOKEN)
 
     async def test_token_passthrough(self):
         """TOKEN mode yields text immediately without buffering."""

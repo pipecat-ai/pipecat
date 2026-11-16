@@ -24,6 +24,7 @@ from pipecat.services.speechmatics.tts import SpeechmaticsTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -37,6 +38,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -61,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
        - Automatically identifies and distinguishes between different speakers
        - First speaker is identified as 'S1', others get subsequent IDs
        - Enabled with the `enable_diarization` parameter
-       - `speaker_active_format` wraps each result with the speaker label for the LLM
+       - `speaker_format` wraps each result with the speaker label for the LLM
 
     2. Turn detection (STT)
        - `turn_detection_mode=VAD`: the Speechmatics service runs its own VAD and closes
@@ -86,7 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 # VAD mode: the Speechmatics service runs its own VAD and closes turns itself.
                 turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.VAD,
                 enable_diarization=True,
-                speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+                speaker_format="<{speaker}>{text}</{speaker}>",
             ),
         )
 

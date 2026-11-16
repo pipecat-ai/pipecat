@@ -15,7 +15,6 @@ import asyncio
 import hashlib
 import hmac
 import inspect
-import warnings
 from collections.abc import Awaitable, Callable
 
 import aiohttp
@@ -30,6 +29,7 @@ from pipecat.transports.whatsapp.api import (
     WhatsAppTerminateCallValue,
     WhatsAppWebhookRequest,
 )
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class WhatsAppClient:
@@ -248,10 +248,11 @@ class WhatsAppClient:
                                             ):
                                                 await connection_callback(connection, call)
                                             else:
-                                                warnings.warn(
-                                                    "connection_callback with a single (connection) argument is deprecated. "
-                                                    "Update it to accept (connection, call: WhatsAppConnectCall).",
-                                                    DeprecationWarning,
+                                                warn_deprecated(
+                                                    "`connection_callback(connection)` is deprecated since 1.4.0 "
+                                                    "and will be removed in 2.0.0. Use "
+                                                    "`connection_callback(connection, call: WhatsAppConnectCall)` "
+                                                    "instead.",
                                                     stacklevel=2,
                                                 )
                                                 await connection_callback(connection)

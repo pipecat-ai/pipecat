@@ -13,9 +13,9 @@ Contains two TTS services:
 Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware speech synthesis and precise voice cloning capabilities, enabling developers to build natural and engaging experiences with human-like speech quality at an accessible price point.
 """
 
-import asyncio
 import base64
 import json
+import re
 import uuid
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
@@ -27,7 +27,6 @@ from typing import (
 )
 
 import aiohttp
-import websockets
 from loguru import logger
 
 from pipecat import version as pipecat_version
@@ -36,11 +35,16 @@ USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 from websockets.protocol import State
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.inworld_adapter import (
+    InworldExpressionAdapter,
+    InworldFlashExpressionAdapter,
+)
 from pipecat.frames.frames import (
-    AggregationType,
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    TextType,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -51,8 +55,12 @@ from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
+from pipecat.utils.text.phonemes import normalize_ipa
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven
+
+# A pause tag, which Inworld reports as a word of its own.
+_BREAK_TAG = re.compile(r"<break\b[^>]*>", re.IGNORECASE)
 
 
 def language_to_inworld_language(language: Language) -> str:
@@ -85,6 +93,45 @@ def language_to_inworld_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+def format_inworld_pronunciation(word: str, ipa: str) -> str | None:
+    """Render a pronunciation as IPA between slashes, as Inworld reads it.
+
+    Inworld speaks the IPA wherever it appears inline, one word per pair of
+    slashes, so a pronunciation covering several words cannot be written. Only
+    English IPA symbols are read.
+
+    Args:
+        word: The word being pronounced (unused: the IPA replaces it).
+        ipa: The pronunciation, in IPA.
+
+    Returns:
+        The IPA wrapped in slashes, e.g. ``/kriːt/``, or None for an empty
+        pronunciation or one spanning several words.
+    """
+    ipa = normalize_ipa(ipa)
+    return f"/{ipa}/" if ipa and " " not in ipa else None
+
+
+def _supports_sentence_boundary(model: str | NotGiven | None) -> bool:
+    # The SENTENCE_BOUNDARY auto-mode strategy is only served by inworld-tts-2 models.
+    return isinstance(model, str) and model.startswith("inworld-tts-2")
+
+
+def _tts_2_expression_adapter(
+    model: Any,
+    tts_2: InworldExpressionAdapter,
+    tts_2_flash: InworldFlashExpressionAdapter,
+) -> BaseExpressionAdapter | None:
+    """The expression adapter for an Inworld TTS-2 model, or None for an older model."""
+    if not isinstance(model, str):
+        return None
+    if model.startswith("inworld-tts-2-flash"):
+        return tts_2_flash
+    if model.startswith("inworld-tts-2"):
+        return tts_2
+    return None
+
+
 @dataclass
 class InworldTTSSettings(TTSSettings):
     """Settings for InworldTTSService and InworldHttpTTSService.
@@ -97,6 +144,14 @@ class InworldTTSSettings(TTSSettings):
             ``"BALANCED"`` is the default midpoint.
             ``"CREATIVE"`` produces more expressive, emotionally varied speech.
             Only supported by ``inworld-tts-2``.
+        instruction: Plain-English steering for the whole request, e.g.
+            ``"speak loudly and urgently"``. Honored by
+            :class:`InworldHttpTTSService` with ``inworld-tts-2``; the
+            WebSocket API takes steering as inline ``[tags]`` in the text
+            instead, so :class:`InworldTTSService` ignores this field.
+        enhance_generation: Whether to denoise the synthesized audio. Honored by
+            :class:`InworldHttpTTSService`; the WebSocket API has no equivalent,
+            so :class:`InworldTTSService` ignores this field.
     """
 
     speaking_rate: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -104,6 +159,8 @@ class InworldTTSSettings(TTSSettings):
     delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enhance_generation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {
         "voiceId": "voice",
@@ -206,6 +263,8 @@ class InworldHttpTTSService(TTSService):
             speaking_rate=None,
             temperature=None,
             delivery_mode=None,
+            instruction=None,
+            enhance_generation=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -257,6 +316,37 @@ class InworldHttpTTSService(TTSService):
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
         self._timestamp_transport_strategy = timestamp_transport_strategy
+
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -324,7 +414,7 @@ class InworldHttpTTSService(TTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track the end time of the last word in this chunk
             if end_times and len(end_times) > 0:
@@ -363,6 +453,10 @@ class InworldHttpTTSService(TTSService):
             payload["temperature"] = self._settings.temperature
         if self._settings.delivery_mode is not None:
             payload["deliveryMode"] = self._settings.delivery_mode
+        if self._settings.instruction is not None:
+            payload["instruction"] = self._settings.instruction
+        if self._settings.enhance_generation is not None:
+            payload["enhanceGeneration"] = self._settings.enhance_generation
         if self._settings.language is not None:
             payload["language"] = self._settings.language
 
@@ -409,7 +503,7 @@ class InworldHttpTTSService(TTSService):
                         f"{self}: No timestamps received, pushing fallback text: [{text_clean}]"
                     )
                     fallback = TTSTextFrame(
-                        text_clean, aggregated_by=AggregationType.SENTENCE, context_id=context_id
+                        text_clean, text_type=TextType.SENTENCE, context_id=context_id
                     )
                     ctx = self._tts_contexts.get(context_id)
                     fallback.append_to_context = ctx.append_to_context if ctx else True
@@ -577,8 +671,10 @@ class InworldTTSService(WebsocketTTSService):
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
             apply_text_normalization: Whether to apply text normalization.
-            max_buffer_delay_ms: Maximum buffer delay in milliseconds.
-            buffer_char_threshold: Buffer character threshold.
+            max_buffer_delay_ms: Maximum buffer delay in milliseconds. Use the
+                ``max_buffer_delay_ms`` constructor argument instead.
+            buffer_char_threshold: Buffer character threshold. Use the
+                ``buffer_char_threshold`` constructor argument instead.
             auto_mode: Whether to use auto mode. Recommended when texts are sent
                 in full sentences/phrases. When enabled, the server controls
                 flushing of buffered text to achieve minimal latency while
@@ -607,6 +703,8 @@ class InworldTTSService(WebsocketTTSService):
         auto_mode: bool | None = None,
         apply_text_normalization: str | None = None,
         timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",
+        max_buffer_delay_ms: int | None = None,
+        buffer_char_threshold: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         aggregate_sentences: bool | None = None,
@@ -639,6 +737,13 @@ class InworldTTSService(WebsocketTTSService):
             apply_text_normalization: Whether to apply text normalization.
             timestamp_transport_strategy: Strategy for timestamp transport
                 ("ASYNC" or "SYNC"). Defaults to "ASYNC".
+            max_buffer_delay_ms: Maximum time in milliseconds the server buffers
+                text before synthesizing it when auto mode is off. If None
+                (default), 3000 is used.
+            buffer_char_threshold: Number of buffered characters that triggers
+                synthesis. With the ``SENTENCE_BOUNDARY`` strategy it also cuts
+                sentences longer than it. If None (default), 250 is used, or
+                Inworld's default with ``SENTENCE_BOUNDARY``.
             params: Input parameters for Inworld WebSocket TTS configuration.
 
                 .. deprecated:: 0.0.105
@@ -653,7 +758,10 @@ class InworldTTSService(WebsocketTTSService):
                     Use ``text_aggregation_mode`` instead.
                     Will be removed in 2.0.0.
 
-            text_aggregation_mode: How to aggregate text before synthesis.
+            text_aggregation_mode: How to aggregate text before synthesis. With
+                ``TextAggregationMode.TOKEN``, auto mode and an ``inworld-tts-2``
+                model, tokens are streamed as they arrive and the server splits
+                them at sentence boundaries.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
@@ -669,6 +777,8 @@ class InworldTTSService(WebsocketTTSService):
             speaking_rate=None,
             temperature=None,
             delivery_mode=None,
+            instruction=None,
+            enhance_generation=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -680,8 +790,6 @@ class InworldTTSService(WebsocketTTSService):
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
-        _buffer_max_delay_ms = None
-        _buffer_char_threshold = None
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
@@ -695,8 +803,10 @@ class InworldTTSService(WebsocketTTSService):
                     timestamp_transport_strategy = params.timestamp_transport_strategy
                 if params.auto_mode is not None:
                     auto_mode = params.auto_mode
-            _buffer_max_delay_ms = params.max_buffer_delay_ms
-            _buffer_char_threshold = params.buffer_char_threshold
+            if max_buffer_delay_ms is None:
+                max_buffer_delay_ms = params.max_buffer_delay_ms
+            if buffer_char_threshold is None:
+                buffer_char_threshold = params.buffer_char_threshold
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -719,12 +829,11 @@ class InworldTTSService(WebsocketTTSService):
         self._timestamp_type = "WORD"
 
         self._buffer_settings = {
-            "maxBufferDelayMs": _buffer_max_delay_ms,
-            "bufferCharThreshold": _buffer_char_threshold,
+            "maxBufferDelayMs": max_buffer_delay_ms,
+            "bufferCharThreshold": buffer_char_threshold,
         }
 
         self._receive_task = None
-        self._keepalive_task = None
 
         # Track cumulative time across generations for monotonic timestamps within a turn.
         # When auto_mode is enabled, the server controls generations and timestamps reset
@@ -733,11 +842,6 @@ class InworldTTSService(WebsocketTTSService):
         self._cumulative_time = 0.0
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
-
-        # Context IDs already sent to the server via _send_context, used to
-        # make _send_context idempotent so on_turn_context_created can eagerly
-        # open contexts without causing duplicate creates in run_tts.
-        self._sent_context_ids: set[str] = set()
 
         # Fallback tracking for when timestamps are not received. Without
         # timestamps, interruptions commit the full text rather than only the
@@ -751,6 +855,37 @@ class InworldTTSService(WebsocketTTSService):
         self._auto_mode = auto_mode
         self._apply_text_normalization = apply_text_normalization
         self._timestamp_transport_strategy = timestamp_transport_strategy
+
+        self._tts_2_expression_adapter = InworldExpressionAdapter()
+        self._tts_2_flash_expression_adapter = InworldFlashExpressionAdapter()
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: audio markup on TTS-2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        adapter = _tts_2_expression_adapter(
+            self._settings.model,
+            self._tts_2_expression_adapter,
+            self._tts_2_flash_expression_adapter,
+        )
+        return adapter or super().get_expression_adapter()
+
+    @classmethod
+    def format_pronunciation(cls, word: str, ipa: str) -> str | None:
+        """Render a pronunciation as IPA between slashes.
+
+        See :func:`format_inworld_pronunciation`.
+
+        Args:
+            word: The word being pronounced.
+            ipa: The pronunciation, in IPA.
+
+        Returns:
+            The IPA wrapped in slashes, or None when the pronunciation cannot be used.
+        """
+        return format_inworld_pronunciation(word, ipa)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -791,23 +926,15 @@ class InworldTTSService(WebsocketTTSService):
         flush_id = context_id or self.get_active_audio_context_id()
         if flush_id and self._websocket:
             logger.trace(f"Flushing audio for context {flush_id}")
-            await self._send_flush(flush_id)
+            try:
+                await self._send_flush(flush_id)
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _reset_generation_timing(self):
         """Reset the cumulative time and generation end time for a new generation."""
         self._cumulative_time = 0.0
         self._generation_end_time = 0.0
-
-    async def on_turn_context_created(self, context_id: str):
-        """Eagerly open the context on the server when a new turn starts.
-
-        This overlaps server-side context creation with sentence aggregation
-        time, so the context is ready by the time text arrives in run_tts.
-        """
-        try:
-            await self._send_context(context_id)
-        except Exception as e:
-            logger.warning(f"{self}: Failed to pre-open context: {e}")
 
     def _calculate_word_times(self, timestamp_info: dict[str, Any]) -> list[tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
@@ -832,7 +959,7 @@ class InworldTTSService(WebsocketTTSService):
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
                 word_start = self._cumulative_time + start_times[i]
-                word_times.append((word, word_start))
+                word_times.append((_BREAK_TAG.sub("", word), word_start))
 
             # Track cumulative end time for this generation
             if end_times and len(end_times) > 0:
@@ -847,16 +974,18 @@ class InworldTTSService(WebsocketTTSService):
 
         return word_times
 
-    async def _close_context(self, context_id: str | None):
+    async def _close_context(self, context_id: str | None, *, cancel: bool = False):
         if not context_id:
             return
         if self._websocket:
-            logger.info(f"{self}: Closing context {context_id} due to interruption or completion")
+            logger.info(f"{self}: {'Cancelling' if cancel else 'Closing'} context {context_id}")
             try:
-                await self._send_close_context(context_id)
+                if cancel:
+                    await self._send_cancel_context(context_id)
+                else:
+                    await self._send_close_context(context_id)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        self._sent_context_ids.discard(context_id)
 
     async def on_turn_context_completed(self):
         """Close the server-side context at end of turn.
@@ -865,13 +994,15 @@ class InworldTTSService(WebsocketTTSService):
         last audio byte.
         """
         ctx_id = self._turn_context_id
+        opened = ctx_id is not None and self.audio_context_available(ctx_id)
         await super().on_turn_context_completed()
-        await self._close_context(ctx_id)
+        if opened:
+            await self._close_context(ctx_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
         await self._maybe_push_fallback_text(context_id)
-        await self._close_context(context_id)
+        await self._close_context(context_id, cancel=True)
         await super().on_audio_context_interrupted(context_id)
 
     async def _maybe_push_fallback_text(self, context_id: str):
@@ -890,7 +1021,7 @@ class InworldTTSService(WebsocketTTSService):
         if had_timestamps or not text:
             return
         logger.debug(f"{self}: No timestamps for context {context_id}, pushing fallback: [{text}]")
-        fallback = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        fallback = TTSTextFrame(text, text_type=TextType.SENTENCE)
         fallback.context_id = context_id
         ctx = self._tts_contexts.get(context_id)
         fallback.append_to_context = ctx.append_to_context if ctx else True
@@ -906,37 +1037,32 @@ class InworldTTSService(WebsocketTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _connect(self):
-        """Connect to the Inworld WebSocket TTS service.
+    @property
+    def _receive_loop_running(self) -> bool:
+        """Whether the receive loop is running, and so owns reconnecting."""
+        return self._receive_task is not None and not self._receive_task.done()
 
-        Returns:
-            The websocket.
-        """
+    async def _connect(self):
+        """Connect to the Inworld WebSocket TTS service."""
         await super()._connect()
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_task:
+        if self._websocket and not self._receive_loop_running:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=60)
 
     async def _disconnect(self):
-        """Disconnect from the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Disconnect from the Inworld WebSocket TTS service."""
         await super()._disconnect()
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -956,11 +1082,7 @@ class InworldTTSService(WebsocketTTSService):
         return changed
 
     async def _connect_websocket(self):
-        """Connect to the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Connect to the Inworld WebSocket TTS service."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -980,28 +1102,24 @@ class InworldTTSService(WebsocketTTSService):
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
-        """Disconnect from the Inworld WebSocket TTS service.
-
-        Returns:
-            The websocket.
-        """
+        """Disconnect from the Inworld WebSocket TTS service."""
         try:
             await self.stop_all_metrics()
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                audio_contexts = self.get_audio_contexts()
-                if audio_contexts:
-                    for ctx_id in audio_contexts:
-                        await self._send_close_context(ctx_id)
+                try:
+                    for ctx_id in self.get_audio_contexts():
+                        await self._send_cancel_context(ctx_id)
+                except Exception as e:
+                    # The connection is already gone; it still needs closing.
+                    logger.debug(f"{self}: unable to close contexts before disconnecting: {e}")
                 await self._websocket.close()
                 logger.debug("Disconnected from Inworld WebSocket TTS")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
-            self._sent_context_ids.clear()
             self._reset_generation_timing()
             self._context_texts.clear()
             self._contexts_with_timestamps.clear()
@@ -1099,41 +1217,26 @@ class InworldTTSService(WebsocketTTSService):
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 60
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self.get_active_audio_context_id()
-                    if context_id:
-                        keepalive_message = {
-                            "send_text": {"text": ""},
-                            "contextId": context_id,
-                        }
-                        logger.trace(f"Sending keepalive for context {context_id}")
-                    else:
-                        keepalive_message = {"send_text": {"text": ""}}
-                        logger.trace("Sending keepalive without context")
-                    await self._websocket.send(json.dumps(keepalive_message))
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
+    async def _send_keepalive(self):
+        """Send empty text, on the active context if there is one."""
+        context_id = self.get_active_audio_context_id()
+        if context_id:
+            keepalive_message = {
+                "send_text": {"text": ""},
+                "contextId": context_id,
+            }
+            logger.trace(f"Sending keepalive for context {context_id}")
+        else:
+            keepalive_message = {"send_text": {"text": ""}}
+            logger.trace("Sending keepalive without context")
+        await self._get_websocket().send(json.dumps(keepalive_message))
 
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.
 
-        Idempotent: skips the send if this context was already opened on the
-        server (e.g., eagerly via on_turn_context_created).
-
         Args:
             context_id: The context ID.
         """
-        if context_id in self._sent_context_ids:
-            return
-        self._sent_context_ids.add(context_id)
-
         audio_config = {
             "audioEncoding": self._audio_encoding,
             "sampleRateHertz": self._audio_sample_rate,
@@ -1157,19 +1260,31 @@ class InworldTTSService(WebsocketTTSService):
             create_config["applyTextNormalization"] = self._apply_text_normalization
         if self._auto_mode is not None:
             create_config["autoMode"] = self._auto_mode
+        sentence_boundary = bool(
+            self._auto_mode
+            and self._is_streaming_tokens
+            and _supports_sentence_boundary(self._settings.model)
+        )
+        if sentence_boundary:
+            # Let the server find sentence boundaries in the raw token stream.
+            create_config["autoModeStrategy"] = "SENTENCE_BOUNDARY"
         if self._timestamp_transport_strategy is not None:
             create_config["timestampTransportStrategy"] = self._timestamp_transport_strategy
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
         create_config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"] or 3000
-        create_config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"] or 250
+        buffer_char_threshold = self._buffer_settings["bufferCharThreshold"]
+        # With SENTENCE_BOUNDARY the threshold also cuts long sentences, so only a set
+        # value is sent and the server default applies otherwise.
+        if buffer_char_threshold or not sentence_boundary:
+            create_config["bufferCharThreshold"] = buffer_char_threshold or 250
 
         create_config["timestampType"] = self._timestamp_type
 
         msg = {"create": create_config, "contextId": context_id}
         logger.trace(f"{self}: Sending context create: {create_config}")
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_text(self, context_id: str, text: str):
         """Send text to the Inworld WebSocket TTS service.
@@ -1179,7 +1294,7 @@ class InworldTTSService(WebsocketTTSService):
             text: The text to send.
         """
         msg = {"send_text": {"text": text}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_flush(self, context_id: str):
         """Send a flush to the Inworld WebSocket TTS service.
@@ -1188,7 +1303,7 @@ class InworldTTSService(WebsocketTTSService):
             context_id: The context ID.
         """
         msg = {"flush_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_close_context(self, context_id: str):
         """Send a close context to the Inworld WebSocket TTS service.
@@ -1197,7 +1312,16 @@ class InworldTTSService(WebsocketTTSService):
             context_id: The context ID.
         """
         msg = {"close_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
+
+    async def _send_cancel_context(self, context_id: str):
+        """Stop a context, discarding text the server has not synthesized yet.
+
+        Args:
+            context_id: The context ID.
+        """
+        msg = {"cancel_context": {}, "contextId": context_id}
+        await self._get_websocket().send(json.dumps(msg))
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
@@ -1213,7 +1337,14 @@ class InworldTTSService(WebsocketTTSService):
         logger.debug(f"{self}: Generating WebSocket TTS [{text}, for context: {context_id}]")
 
         try:
-            if not self._websocket or self._websocket.state is State.CLOSED:
+            if not self._websocket or self._websocket.state is not State.OPEN:
+                if self._receive_loop_running:
+                    # The receive loop reconnects. A connection opened here
+                    # would race it, leaving this turn's audio on a connection
+                    # nothing reads. Pushed rather than yielded: this turn has
+                    # no audio context to carry the error.
+                    await self.push_error(error_msg=f"{self}: websocket reconnecting, skipping TTS")
+                    return
                 await self._connect()
 
             if self._websocket is None:

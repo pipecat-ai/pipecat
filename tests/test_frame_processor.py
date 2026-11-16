@@ -43,6 +43,30 @@ class BroadcastTestFrame(DataFrame):
     items: list[str] = field(default_factory=list)
 
 
+@dataclass
+class _CancelInProgressFrame(SystemFrame):
+    """Asks the processor to cancel ``target`` if it is the frame in progress."""
+
+    target: Frame | None = None
+
+
+class _CancelInProgressProcessor(FrameProcessor):
+    """Takes 0.4s over every non-system frame, and records what each cancel request did."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled: list[bool] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, _CancelInProgressFrame):
+            assert frame.target is not None
+            self.cancelled.append(await self._cancel_frame_in_progress(frame.target))
+        elif not isinstance(frame, SystemFrame):
+            await asyncio.sleep(0.4)
+        await self.push_frame(frame, direction)
+
+
 class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_before_after_events(self):
         identity = IdentityFilter()
@@ -194,6 +218,58 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
+
+    async def test_cancel_frame_in_progress_keeps_the_queue(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            TextFrame(text="queued"),
+            _CancelInProgressFrame(target=in_progress),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
+        self.assertEqual(down[-1].text, "queued")
+
+    async def test_cancel_frame_in_progress_leaves_other_frames_alone(self):
+        processor = _CancelInProgressProcessor()
+        queued = TextFrame(text="queued")
+        frames_to_send = [
+            TextFrame(text="in progress"),
+            SleepFrame(sleep=0.1),
+            queued,
+            _CancelInProgressFrame(target=queued),
+        ]
+        down, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, TextFrame, TextFrame],
+        )
+        self.assertEqual(processor.cancelled, [False])
+        self.assertEqual([f.text for f in down[1:]], ["in progress", "queued"])
+
+    async def test_an_interruption_after_cancel_frame_in_progress_still_interrupts(self):
+        processor = _CancelInProgressProcessor()
+        in_progress = TextFrame(text="in progress")
+        frames_to_send = [
+            in_progress,
+            SleepFrame(sleep=0.1),
+            _CancelInProgressFrame(target=in_progress),
+            TextFrame(text="next"),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+        ]
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[_CancelInProgressFrame, InterruptionFrame],
+        )
+        self.assertEqual(processor.cancelled, [True])
 
     async def test_interruptible_flag_decides_for_a_frame(self):
         """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""
@@ -625,6 +701,57 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(processed, ["StartFrame", "UserStartedSpeakingFrame", "TextFrame"])
         finally:
             await processor.cleanup()
+
+
+class TestPushErrorUsability(unittest.IsolatedAsyncioTestCase):
+    """The usability verdict push_error derives from an error's category, and
+    the ways a caller can override it."""
+
+    def _processor(self):
+        from unittest.mock import AsyncMock
+
+        from pipecat.processors.filters.identity_filter import IdentityFilter
+
+        processor = IdentityFilter()
+        processor.push_frame = AsyncMock()
+        return processor
+
+    def _permanent_error(self):
+        """An exception whose HTTP status classifies as a permanent category."""
+
+        class FakeApiError(Exception):
+            status_code = 400
+
+        return FakeApiError("bad request")
+
+    async def test_permanent_category_marks_processor_unusable(self):
+        processor = self._processor()
+        await processor.push_error("bad request", exception=self._permanent_error())
+        self.assertFalse(processor.is_usable)
+        await processor.cleanup()
+
+    async def test_explicit_category_overrides_exception_classification(self):
+        """A caller that knows better can keep the processor usable by passing
+        a non-permanent category — e.g. an LLM service reporting a provider
+        rejection as APPLICATION after removing the rejected context message,
+        where the exception alone would classify as a permanent invalid
+        request."""
+        from pipecat.utils.errors import ErrorCategory
+
+        processor = self._processor()
+        await processor.push_error(
+            "bad request",
+            exception=self._permanent_error(),
+            category=ErrorCategory.APPLICATION,
+        )
+        self.assertTrue(processor.is_usable)
+        await processor.cleanup()
+
+    async def test_force_treat_as_permanent_wins_over_transient_category(self):
+        processor = self._processor()
+        await processor.push_error("kept failing", force_treat_as_permanent=True)
+        self.assertFalse(processor.is_usable)
+        await processor.cleanup()
 
 
 if __name__ == "__main__":

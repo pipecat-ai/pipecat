@@ -12,12 +12,14 @@ information to bot functions.
 
 import argparse
 import asyncio
-import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+
+from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.file_storage import FileStorage
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -156,6 +158,14 @@ class RunnerArguments:
         session_id: Identifier for this bot session.
         cli_args: Parsed CLI arguments from the runner, when launched via the
             development runner.
+        file_storage: The storage backend serving the host's upload endpoints,
+            injected by whichever host runs the bot — the one returned by the
+            bot module's ``create_file_storage()`` if it defines one, otherwise
+            the host's default (the development runner's ``-u/--uploads-folder``
+            local storage). Hand it to the LLM service's ``FileResolver``
+            (``file_resolver=FileResolver(file_storage=runner_args.file_storage)``)
+            so send-file messages can resolve the URLs it mints. ``None`` when
+            uploads are disabled.
     """
 
     # Use kw_only so subclasses don't need to worry about ordering.
@@ -166,6 +176,7 @@ class RunnerArguments:
     call_data: CallData | None = field(default=None, kw_only=True)
     session_id: str | None = field(default=None, kw_only=True)
     cli_args: argparse.Namespace | None = field(default=None, init=False, kw_only=True)
+    file_storage: FileStorage | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         self.handle_sigint = False
@@ -249,6 +260,10 @@ class LiveKitRunnerArguments(RunnerArguments):
     token: str
 
 
+@deprecated(
+    "`EvalRunnerArguments` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `WebSocketRunnerArguments` instead."
+)
 @dataclass
 class EvalRunnerArguments(RunnerArguments):
     """Eval transport session arguments for the runner.
@@ -258,6 +273,11 @@ class EvalRunnerArguments(RunnerArguments):
     sends scripted user input, and asserts on the RTVI events the bot emits.
     Intended for fast pipeline behavioral evaluations.
 
+    .. deprecated:: 1.13.0
+        Use :class:`WebSocketRunnerArguments` instead: the dev runner hands an
+        eval harness's connection to the bot like any WebSocket session.
+        Will be removed in 2.0.0.
+
     Parameters:
         host: Host address to bind the eval transport's WebSocket server to.
         port: Port number to bind the eval transport's WebSocket server to.
@@ -265,6 +285,88 @@ class EvalRunnerArguments(RunnerArguments):
 
     host: str = "localhost"
     port: int = 7860
+
+
+@dataclass
+class SIPRunnerArguments(RunnerArguments):
+    """SIP transport session arguments for the runner.
+
+    Used to launch a bot on a :class:`~pipecat.transports.sip.transport.SIPTransport`.
+    baresip registers with the SIP server itself, so there is no HTTP signaling
+    route; the development runner reads the account from the ``SIP_USER``,
+    ``SIP_PASS``, ``SIP_DOMAIN``, ``SIP_TRANSPORT``, ``SIP_AUDIO_CODECS``,
+    ``SIP_AUTH_USER``, ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``,
+    ``SIP_INSTANCE_ID``, ``SIP_NET_INTERFACE``, and ``SIP_JITTER_BUFFER``
+    environment variables. Without ``SIP_USER`` and
+    ``SIP_DOMAIN``, the runner provisions a temporary SIP client on the Daily
+    domain instead (``DAILY_API_KEY``) and deletes it when the bot exits.
+    For debugging, ``SIP_NATIVE_LOG_LEVEL`` and ``SIP_TRACE`` control the
+    native stack's logging. The account may also arrive in the request body
+    as ``body["sip_client"]`` (a Daily SIP-trunk notification), which
+    :func:`pipecat.runner.sip.configure` reads first. Building this type by
+    hand is the advanced layer: :func:`pipecat.runner.sip.sip_runner_arguments`
+    builds it from an account and the environment, and
+    :func:`pipecat.runner.utils.create_transport` does so itself for plain
+    ``RunnerArguments`` whose body or environment holds the account.
+
+    Parameters:
+        user: The user part of ``sip:user@domain``.
+        domain: Registration domain; may carry a port.
+        password: Authentication password; may be empty.
+        transport: SIP transport: "udp", "tcp", or "tls".
+        audio_codecs: Codec preference order by stack name (e.g.
+            ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
+        auth_user: Digest username when the credential store keys it
+            differently from ``user`` (credential-list trunks).
+        extra_params: Extra baresip account parameters, each a
+            ``"key=value"`` string, appended verbatim to the SIP
+            address-of-record — e.g. ``("medianat=stun",
+            "stunserver=stun:HOST:PORT")`` for media-NAT traversal behind an
+            endpoint-independent NAT, ``medianat=turn`` behind a symmetric
+            one, and ``medianat=ice`` only when the peer also speaks ICE; see
+            the NAT notes on
+            :class:`~pipecat.transports.sip.connection.SIPConnection`. None
+            adds nothing.
+        reg_interval: Seconds between registration refreshes; 0 disables
+            registration entirely (trunk mode).
+        rtp_timeout: Seconds without received RTP after which a call is
+            declared dead and closed; 0 disables detection.
+        instance_id: A canonical lowercase UUID identifying this endpoint
+            across restarts (RFC 5626 ``+sip.instance``); None sends no
+            instance parameter.
+        native_log_level: Lowest severity captured from the native SIP
+            stack's own logging ("debug", "info", "warning", or "error").
+        sip_trace: Log every SIP message sent and received, verbatim.
+            Contains authentication material — keep it off in production.
+        net_interface: Restrict the stack to one local interface, by name
+            or address; None (the default) lets the OS pick the source
+            address per destination. Set it for a registrar on loopback
+            ("127.0.0.1") or one address of a multi-homed host. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection`.
+        jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or
+            "adaptive"; None selects the transport's default, a fixed
+            40–60 ms buffer. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection` for
+            what each mode costs.
+        jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
+            adaptive buffer; None with no mode selects the default.
+    """
+
+    user: str
+    domain: str
+    password: str = ""
+    transport: str = "udp"
+    audio_codecs: tuple | None = None
+    auth_user: str | None = None
+    extra_params: tuple | None = None
+    reg_interval: int = 600
+    rtp_timeout: int = 0
+    instance_id: str | None = None
+    native_log_level: str = "warning"
+    sip_trace: bool = False
+    net_interface: str | None = None
+    jitter_buffer_mode: str | None = None
+    jitter_buffer_ms: tuple | None = None
 
 
 @dataclass
@@ -337,10 +439,9 @@ class MOQRunnerArguments(RunnerArguments):
         """Carry the pre-1.8.0 ``serve_bind`` spelling over to ``bind``; check the dial target."""
         super().__post_init__()
         if self.serve_bind is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`MOQRunnerArguments.serve_bind` is deprecated since 1.8.0 and will be "
                 "removed in 2.0.0. Use `MOQRunnerArguments.bind` instead.",
-                DeprecationWarning,
                 stacklevel=2,
             )
             if self.bind is None:

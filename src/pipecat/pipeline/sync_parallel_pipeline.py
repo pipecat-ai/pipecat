@@ -17,13 +17,14 @@ regular data frames.
 """
 
 import asyncio
+import weakref
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
 
 from loguru import logger
 
-from pipecat.frames.frames import ControlFrame, EndFrame, Frame, SystemFrame
+from pipecat.frames.frames import ControlFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -139,7 +140,8 @@ class SyncParallelPipeline(BasePipeline):
 
     System frames (except ``EndFrame``) bypass this mechanism entirely — they are
     forwarded through each pipeline and pushed immediately, since system frames
-    are expected to race ahead of regular data frames.
+    are expected to race ahead of regular data frames. The copies that later
+    come out of the pipelines are dropped.
 
     By default, output frames are pushed in the order they arrive from any pipeline
     (``FrameOrder.ARRIVAL``). Set ``frame_order=FrameOrder.PIPELINE`` to push frames
@@ -174,6 +176,11 @@ class SyncParallelPipeline(BasePipeline):
 
         self._up_queue = asyncio.Queue()
         self._down_queue = asyncio.Queue()
+
+        # Frames already pushed, so the copies that come out of the pipelines
+        # later are dropped. Held weakly: a frame no pipeline holds can't come
+        # out again, so an entry goes away with its frame.
+        self._seen_frames: weakref.WeakValueDictionary[int, Frame] = weakref.WeakValueDictionary()
 
         logger.debug(f"Creating {self} pipelines")
         for processors in args:
@@ -242,6 +249,9 @@ class SyncParallelPipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
+        # This pipeline is set up, so let the StartFrame in: each branch holds
+        # it until its own setup is done.
+        self._setup_finished()
         await self._setup_processors(self._pipelines, setup)
 
     async def cleanup(self):
@@ -262,6 +272,10 @@ class SyncParallelPipeline(BasePipeline):
         """
         await super().process_frame(frame, direction)
 
+        if isinstance(frame, StartFrame) and direction == FrameDirection.DOWNSTREAM:
+            await self._start_pipelines(frame)
+            return
+
         # SystemFrames are simply passed through all internal pipelines without
         # draining queued output. This avoids the race condition where a
         # SystemFrame's wait_for_sync steals frames from a concurrent
@@ -273,7 +287,7 @@ class SyncParallelPipeline(BasePipeline):
             elif direction == FrameDirection.DOWNSTREAM:
                 for s in self._sources:
                     await s["processor"].process_frame(frame, direction)
-            await self.push_frame(frame, direction)
+            await self._push_frame_once(frame, direction)
             return
 
         use_pipeline_order = self._frame_order == FrameOrder.PIPELINE
@@ -297,31 +311,23 @@ class SyncParallelPipeline(BasePipeline):
 
             await processor.process_frame(frame, direction)
 
+            # An EndFrame is the last frame out of a pipeline, so it marks the
+            # end of the output itself. It is pushed once, after every
+            # pipeline's output.
             if isinstance(frame, EndFrame):
-                new_frame = await queue.get()
-                if isinstance(new_frame, EndFrame):
-                    if use_pipeline_order:
-                        output_frames.append(new_frame)
-                    else:
-                        await main_queue.put(new_frame)
-                else:
-                    while not isinstance(new_frame, EndFrame):
-                        if use_pipeline_order:
-                            output_frames.append(new_frame)
-                        else:
-                            await main_queue.put(new_frame)
-                        queue.task_done()
-                        new_frame = await queue.get()
+                sentinel = EndFrame
             else:
                 await processor.process_frame(SyncFrame(), direction)
+                sentinel = SyncFrame
+
+            new_frame = await queue.get()
+            while not isinstance(new_frame, sentinel):
+                if use_pipeline_order:
+                    output_frames.append(new_frame)
+                else:
+                    await main_queue.put(new_frame)
+                queue.task_done()
                 new_frame = await queue.get()
-                while not isinstance(new_frame, SyncFrame):
-                    if use_pipeline_order:
-                        output_frames.append(new_frame)
-                    else:
-                        await main_queue.put(new_frame)
-                    queue.task_done()
-                    new_frame = await queue.get()
 
             return output_frames
 
@@ -337,27 +343,45 @@ class SyncParallelPipeline(BasePipeline):
             )
 
         if use_pipeline_order:
-            # Push frames in pipeline definition order, deduplicating by id.
-            seen_ids = set()
+            # Push frames in pipeline definition order.
             for pipeline_frames in frames_per_pipeline:
                 for f in pipeline_frames:
-                    if f.id not in seen_ids:
-                        await self.push_frame(f, direction)
-                        seen_ids.add(f.id)
+                    await self._push_frame_once(f, direction)
         else:
             # ARRIVAL mode: drain the shared queues in the order frames arrived.
-            seen_ids = set()
             while not self._up_queue.empty():
-                frame = await self._up_queue.get()
-                if frame.id not in seen_ids:
-                    await self.push_frame(frame, FrameDirection.UPSTREAM)
-                    seen_ids.add(frame.id)
+                f = await self._up_queue.get()
+                await self._push_frame_once(f, FrameDirection.UPSTREAM)
                 self._up_queue.task_done()
 
-            seen_ids = set()
             while not self._down_queue.empty():
-                frame = await self._down_queue.get()
-                if frame.id not in seen_ids:
-                    await self.push_frame(frame, FrameDirection.DOWNSTREAM)
-                    seen_ids.add(frame.id)
+                f = await self._down_queue.get()
+                await self._push_frame_once(f, FrameDirection.DOWNSTREAM)
                 self._down_queue.task_done()
+
+        if isinstance(frame, EndFrame):
+            await self.push_frame(frame, direction)
+
+    async def _push_frame_once(self, frame: Frame, direction: FrameDirection):
+        """Push a frame unless it has already been pushed."""
+        if frame.id in self._seen_frames:
+            return
+        self._seen_frames[frame.id] = frame
+        await self.push_frame(frame, direction)
+
+    async def _start_pipelines(self, frame: StartFrame):
+        """Start every pipeline, then pass the StartFrame on once it is through all of them."""
+        await asyncio.gather(
+            *[
+                self._start_pipeline(pipeline, source["queue"], frame)
+                for pipeline, source in zip(self._pipelines, self._sources)
+            ]
+        )
+        await self.push_frame(frame)
+
+    async def _start_pipeline(self, pipeline: Pipeline, queue: asyncio.Queue, frame: StartFrame):
+        """Push the StartFrame into a pipeline and wait for it to come out of the pipeline's sink."""
+        # Into the pipeline rather than straight to its source, so the pipeline
+        # and each of its processors hold it until they are set up.
+        await pipeline.queue_frame(frame)
+        await queue.get()

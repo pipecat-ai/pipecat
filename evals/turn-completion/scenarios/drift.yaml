@@ -53,7 +53,8 @@ scenarios:
       markers: 1
       text_after: true
     - event: response
-      eval: the reply engages with the user wanting to visit Italy or Spain for the food and history
+      eval: the reply responds to the user wanting to visit Italy or Spain for the food and history, for
+        example by commenting on them or asking which one the user prefers
 - name: drift_many_long_then_complete
   context:
   - role: developer

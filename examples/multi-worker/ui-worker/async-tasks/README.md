@@ -1,41 +1,37 @@
 # async-tasks
 
-A `BaseUIWorker` dispatcher fans out long-running work to multiple peer
-workers in parallel, streams their progress to an in-flight panel on the
-page, and lets the user cancel mid-flight — with a single LLM and no
-`UIWorker`.
+A `UIWorker` fans out long-running work to multiple peer workers in
+parallel, streams their progress to an in-flight panel on the page, lets
+the user cancel mid-flight, and hands the results back to the voice LLM
+when every worker has answered.
 
 ## What it shows
 
-- **Client-visible job groups without an LLM**: `BaseUIWorker` is a
-  plain bus worker, and every group it dispatches forwards its whole
-  lifecycle to the client automatically. The voice LLM's `research` tool
-  calls `ui_jobs.request_job_group("wikipedia", "news", "scholar",
-  params=JobGroupParams(payload=..., label=...))` on the dispatcher it
-  looks up with `params.worker_runner.get_worker("ui-jobs")`, and the
-  worker does the rest.
+- **Client-visible job groups**: every group a `UIWorker` dispatches
+  reports its whole lifecycle to the client automatically. The voice
+  LLM's `research` tool sends a `research` job to the worker, whose
+  handler opens `self.job_group("wikipedia", "news", "scholar",
+  params=JobGroupParams(payload=..., label=...))`, waits for the three
+  answers, and responds with their summaries.
 - The four **`ui-job-group` envelopes** the worker forwards (`group_started`,
   `job_update`, `job_completed`, `group_completed`) and the
   client-side `RTVIEvent.UIJobGroup` event for consuming them. The client
   keeps a state map keyed by `job_id` and renders per-worker progress.
 - **Cancellation**: the in-flight card's Cancel button calls
-  `client.cancelUIJobGroup(job_id, reason)`. The reserved `__cancel_job_group`
-  event is translated by the dispatching worker into `cancel_job_group(job_id)`
-  on the registered group; cancelled workers report status `cancelled`.
-- **Background dispatch from a tool**: `request_job_group` returns
-  immediately so the LLM speaks its acknowledgement
-  ("Researching the Mariana Trench now") while the workers run — and is
-  free to take follow-up turns.
+  `client.cancelUIJobGroup(job_id, reason)`. The dispatching worker turns
+  the client's cancel event into `cancel_job_group(job_id)` on the
+  registered group; cancelled workers report status `cancelled`.
+- **Results back to the voice**: the `research` tool says "Researching
+  the Mariana Trench now" through TTS, then waits for the group. The
+  cards fill in while the workers run, and a few seconds later the LLM
+  gets the three summaries and tells the user what came back.
 
 ## What it adds vs. the prior demos
 
-The other examples put an LLM *on the page*: a `UIWorker` that reads
-snapshots and drives the UI. This one shows the streaming job-group
-half of the protocol needs none of that — a `BaseUIWorker` dispatcher
-fans out the peer workers and the client renders their progress. Reach
-for `UIWorker` when the delegate must read or act on page content (see
-document-review); use `BaseUIWorker`, like here, when the page is just
-a view of background work.
+The other examples have the UIWorker read snapshots and drive the page.
+This one shows the streaming job-group half of the protocol on its own:
+the worker fans out the peer workers and the client renders their
+progress. The same worker would also own the screen in a fuller app.
 
 ## Run
 

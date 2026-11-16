@@ -23,12 +23,11 @@ pytest.importorskip("mcp")
 import anyio  # noqa: E402
 from mcp.client.session import ClientSession  # noqa: E402
 from mcp.client.session_group import StreamableHttpParameters  # noqa: E402
-from mcp.shared import exceptions as mcp_exceptions  # noqa: E402
+from mcp.shared.exceptions import MCPError  # noqa: E402
 from mcp.shared.memory import create_client_server_memory_streams  # noqa: E402
 from mcp.types import (  # noqa: E402
     CONNECTION_CLOSED,
     CallToolResult,
-    ErrorData,
     JSONRPCResponse,
     TextContent,
 )
@@ -37,20 +36,13 @@ from pipecat.services import mcp_service  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
 
-# The SDK spells the error class McpError on its 1.x line and MCPError on 2.x.
-_MCPError = getattr(mcp_exceptions, "MCPError", None) or mcp_exceptions.McpError
 
-
-def _tool(name, properties=None, required=None, description="A tool.", schema_field="inputSchema"):
-    """Build a fake MCP server tool as returned by ``session.list_tools()``.
-
-    ``schema_field`` selects which spelling of the schema attribute the tool
-    carries: the SDK spells it inputSchema on 1.x and input_schema on 2.x.
-    """
+def _tool(name, properties=None, required=None, description="A tool."):
+    """Build a fake MCP server tool as returned by ``session.list_tools()``."""
     return SimpleNamespace(
         name=name,
         description=description,
-        **{schema_field: {"properties": properties or {}, "required": required or []}},
+        input_schema={"properties": properties or {}, "required": required or []},
     )
 
 
@@ -151,7 +143,7 @@ class _FakeTransport:
         if server.connect_delay:
             # A connect window wide enough to cancel the caller inside it.
             await asyncio.sleep(server.connect_delay)
-        return (MagicMock(), MagicMock(), MagicMock())
+        return (MagicMock(), MagicMock())
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         server = self._server
@@ -169,12 +161,7 @@ class _FakeTransport:
 
 def _connection_closed_error():
     """Build the error an SDK raises for a request its transport could not serve."""
-    message = "Connection closed"
-    try:
-        return _MCPError(code=CONNECTION_CLOSED, message=message)
-    except TypeError:
-        # The 1.x line takes the error data as one argument.
-        return _MCPError(ErrorData(code=CONNECTION_CLOSED, message=message))
+    return MCPError(code=CONNECTION_CLOSED, message="Connection closed")
 
 
 def _connection_lost_errors():
@@ -240,25 +227,15 @@ class TestTools(MCPClientTestBase):
             self.assertIsNotNone(schema.handler)
         await client.close()
 
-    async def test_tools_reads_either_schema_field_spelling(self):
-        """The SDK spells the schema field inputSchema in 1.x, input_schema in 2.x."""
-        for schema_field in ("inputSchema", "input_schema"):
-            with self.subTest(schema_field=schema_field):
-                client, _ = self._make_client(
-                    [
-                        _tool(
-                            "tool_a",
-                            properties={"x": {"type": "string"}},
-                            required=["x"],
-                            schema_field=schema_field,
-                        )
-                    ]
-                )
-                tools_schema = await client.tools()
-                schema = tools_schema.standard_tools[0]
-                self.assertEqual(schema.properties, {"x": {"type": "string"}})
-                self.assertEqual(schema.required, ["x"])
-                await client.close()
+    async def test_tools_reads_the_schema(self):
+        client, _ = self._make_client(
+            [_tool("tool_a", properties={"x": {"type": "string"}}, required=["x"])]
+        )
+        tools_schema = await client.tools()
+        schema = tools_schema.standard_tools[0]
+        self.assertEqual(schema.properties, {"x": {"type": "string"}})
+        self.assertEqual(schema.required, ["x"])
+        await client.close()
 
     async def test_tools_is_idempotent_on_connection(self):
         client, server = self._make_client([_tool("tool_a")])

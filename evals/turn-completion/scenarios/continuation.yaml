@@ -31,8 +31,9 @@ scenarios:
       markers: 1
       text_after: true
     - event: response
-      eval: the reply engages with the user wanting to visit Japan for its culture and food, rather than
-        asking them to continue or finish their thought
+      eval: the reply responds to the user wanting to visit Japan for its culture and food, for example
+        by commenting on it or asking a follow-up question about it; a reply that only asks the user to
+        go on or finish their thought does not count
 - name: continuation_travel_stt
   context:
   - role: developer
@@ -55,8 +56,9 @@ scenarios:
       markers: 1
       text_after: true
     - event: response
-      eval: the reply engages with the user wanting to visit Japan for its culture and food, rather than
-        asking them to continue or finish their thought
+      eval: the reply responds to the user wanting to visit Japan for its culture and food, for example
+        by commenting on it or asking a follow-up question about it; a reply that only asks the user to
+        go on or finish their thought does not count
 - name: continuation_request
   context:
   - role: developer

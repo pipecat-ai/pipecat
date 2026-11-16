@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
@@ -249,6 +250,66 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_intermediate_result_keeps_function_call_in_progress(self):
+        """An async tool's intermediate result does not settle the call.
+
+        An async function call (``cancel_on_interruption=False``) can report
+        progress with ``is_final=False`` results while it keeps running. The
+        bot may speak each update and stop again, but the user is still
+        waiting on the tool, so the idle timer must stay off until the final
+        result arrives.
+        """
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Async tool starts; bot acknowledges it and stops speaking
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Tool reports progress while still running; bot speaks the update
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test",
+                tool_call_id="123",
+                arguments={},
+                result="halfway",
+                properties=FunctionCallResultProperties(is_final=False),
+            )
+        )
+        self.assertTrue(controller.function_calls_in_progress)
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Wait longer than timeout — should not fire (tool still running)
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(idle_triggered)
+
+        # Final result settles the call; bot speaks it
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="test", tool_call_id="123", arguments={}, result="done"
+            )
+        )
+        self.assertFalse(controller.function_calls_in_progress)
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        # Now the timer should start and fire
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
     async def test_disabled_by_default(self):
         """Test that timeout=0 means idle detection is disabled."""
         controller = UserIdleController()
@@ -476,6 +537,90 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
 
         self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_wait_for_user_arms_timer(self):
+        """Test that wait_for_user arms the timer after a user turn."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # The user speaks while the bot is idle: the timer is cancelled and
+        # nothing else would restart it.
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await controller.process_frame(UserStartedSpeakingFrame())
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_wait_for_user_while_bot_speaking_does_not_arm(self):
+        """Test that wait_for_user does nothing while the bot is speaking."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_wait_for_user_during_function_call_does_not_arm(self):
+        """Test that wait_for_user does nothing while a function call is pending."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await controller.wait_for_user()
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_waiting_for_user(self):
+        """Test that waiting_for_user follows the bot finishing and the user speaking."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        self.assertFalse(controller.waiting_for_user)
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        self.assertTrue(controller.waiting_for_user)
+        await controller.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(controller.waiting_for_user)
+        await controller.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(controller.waiting_for_user)
 
         await controller.cleanup()
 

@@ -9,7 +9,7 @@
 import base64
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 from websockets.protocol import State
@@ -27,13 +27,26 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Settings for ResembleAITTSService."""
+    """Settings for ResembleAITTSService.
 
-    pass
+    Parameters:
+        apply_custom_pronunciations: Whether Resemble AI applies the team's
+            custom pronunciations to matching words in the input text.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
+    """
+
+    apply_custom_pronunciations: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ResembleAITTSService(WebsocketTTSService):
@@ -82,6 +95,7 @@ class ResembleAITTSService(WebsocketTTSService):
             model=None,
             voice=None,
             language=None,
+            apply_custom_pronunciations=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -155,6 +169,7 @@ class ResembleAITTSService(WebsocketTTSService):
             "sample_rate": self._resemble_sample_rate,
             "precision": self._precision,
             "no_audio_header": True,
+            "apply_custom_pronunciations": self._settings.apply_custom_pronunciations,
         }
 
         self._request_id_counter += 1
@@ -197,6 +212,8 @@ class ResembleAITTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from the Resemble AI WebSocket."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -260,7 +277,7 @@ class ResembleAITTSService(WebsocketTTSService):
         """Stop metrics after the Resemble AI context finishes playing.
 
         No close message is needed: Resemble AI signals completion with an
-        ``audio_end`` message (handled in ``_process_messages``), after which
+        ``audio_end`` message (handled in ``_receive_messages``), after which
         the server-side context is already closed.
         """
         await super().on_audio_context_completed(context_id)
@@ -269,9 +286,9 @@ class ResembleAITTSService(WebsocketTTSService):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message
-        # which is handled in _process_messages
+        # which is handled in _receive_messages
 
-    async def _process_messages(self):
+    async def _receive_messages(self):
         """Process incoming WebSocket messages from Resemble AI."""
         async for message in self._get_websocket():
             try:
@@ -416,17 +433,6 @@ class ResembleAITTSService(WebsocketTTSService):
                     await self._connect_websocket()
             else:
                 logger.warning(f"{self} unknown message type: {msg_type}")
-
-    async def _receive_messages(self):
-        """Main loop for receiving messages from Resemble AI."""
-        while True:
-            try:
-                await self._process_messages()
-            except Exception as e:
-                await self.push_error(error_msg=f"Error in receive loop: {e}", exception=e)
-                # Try to reconnect
-                logger.debug(f"{self} Resemble AI connection lost, reconnecting")
-                await self._connect_websocket()
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

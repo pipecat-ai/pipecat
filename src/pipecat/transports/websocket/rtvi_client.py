@@ -21,7 +21,10 @@ defaulting its serializer to
 
 import json
 
+from pydantic import ValidationError
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.transports.websocket.client import (
     WebsocketClientParams,
@@ -63,12 +66,22 @@ class RTVIClientTransport(WebsocketClientTransport):
         super().__init__(uri, params)
 
         self._bot_ready = False
+        self._bot_capabilities: BotCapabilities | None = None
         self._register_event_handler("on_bot_ready")
 
     @property
     def bot_ready(self) -> bool:
         """Whether the bot has answered the handshake with ``bot-ready``."""
         return self._bot_ready
+
+    @property
+    def bot_capabilities(self) -> BotCapabilities | None:
+        """What the bot reported it does in ``bot-ready``.
+
+        ``None`` before ``bot-ready``, and when the bot reported nothing
+        readable, as bots on Pipecat before 1.13 do.
+        """
+        return self._bot_capabilities
 
     async def _on_connected(self, websocket):
         """On connect, fire the user's handler and start the RTVI handshake."""
@@ -79,6 +92,7 @@ class RTVIClientTransport(WebsocketClientTransport):
         """Watch for ``bot-ready`` to complete the handshake, then dispatch normally."""
         if not self._bot_ready and self._is_bot_ready(message):
             self._bot_ready = True
+            self._bot_capabilities = self._capabilities(message)
             await self._call_event_handler("on_bot_ready")
         await super()._on_message(websocket, message)
 
@@ -106,3 +120,15 @@ class RTVIClientTransport(WebsocketClientTransport):
             and data.get("label") == RTVI.MESSAGE_LABEL
             and data.get("type") == "bot-ready"
         )
+
+    @staticmethod
+    def _capabilities(bot_ready) -> BotCapabilities | None:
+        """Return the capabilities a ``bot-ready`` message reports, or ``None`` if none."""
+        data = json.loads(bot_ready).get("data")
+        capabilities = data.get("capabilities") if isinstance(data, dict) else None
+        if capabilities is None:
+            return None
+        try:
+            return BotCapabilities.model_validate(capabilities)
+        except ValidationError:
+            return None

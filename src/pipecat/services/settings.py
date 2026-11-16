@@ -331,6 +331,11 @@ class LLMSettings(ServiceSettings):
                 Pass the config to
                 ``FilterIncompleteUserTurnStrategies(config=...)`` instead. Will
                 be removed in 2.0.0.
+
+        use_provider_thinking_default: Whether a model with no thinking configured
+            runs at its provider's default. Services that otherwise send each
+            model its lowest thinking setting, for the fastest responses, send
+            none. ``BackendLLMWorker`` sets it on its LLM. Defaults to False.
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -345,6 +350,7 @@ class LLMSettings(ServiceSettings):
     user_turn_completion_config: UserTurnCompletionConfig | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    use_provider_thinking_default: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass

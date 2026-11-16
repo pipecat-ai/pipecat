@@ -6,22 +6,15 @@
 
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
-import warnings
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from loguru import logger
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
+from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-
-AzureTokenProvider = Callable[[], Awaitable[str]]
-"""Async callable returning a Microsoft Entra ID bearer token.
-
-Matches :func:`azure.identity.aio.get_bearer_token_provider` used with the
-``https://ai.azure.com/.default`` scope.
-"""
+from pipecat.utils.deprecation import warn_deprecated
 
 V1_ENDPOINT_PATH = "/openai/v1"
 """Endpoint path suffix identifying Azure's v1 API surface."""
@@ -109,12 +102,11 @@ class AzureLLMService(OpenAILLMService):
             raise ValueError("Either `api_key` or `token_provider` is required.")
 
         if api_version is not None:
-            warnings.warn(
+            warn_deprecated(
                 "`api_version` is deprecated since 1.8.0 and will be removed in 2.0.0. "
                 "Use an `endpoint` ending in `/openai/v1` instead. Azure issued no dated "
                 "version after 2025-04-01-preview, and new features reach only the v1 "
                 "API surface.",
-                DeprecationWarning,
                 stacklevel=2,
             )
 
