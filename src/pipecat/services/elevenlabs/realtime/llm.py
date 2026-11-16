@@ -7,26 +7,17 @@
 """ElevenLabs Realtime speech-to-speech service implementation."""
 
 import re
-import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.frames.frames import (
-    FunctionCallCancelFrame,
-    FunctionCallResultFrame,
-    InputAudioRawFrame,
-    LLMTextFrame,
-)
+from pipecat.frames.frames import InputAudioRawFrame, LLMTextFrame
 from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
 ELEVENLABS_REALTIME_DEFAULT_MODEL = "eleven_realtime_v1_mini"
-
-# The server stops waiting for a function call's output after this long.
-FUNCTION_CALL_OUTPUT_DEADLINE_SECS = 20.0
 
 _AUDIO_TAG_RE = re.compile(r"\[[^\s][^\]]*\]")
 _REPEATED_SPACES_RE = re.compile(r"[ \t]{2,}")
@@ -53,7 +44,7 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
     Once the user's audio reaches the server, only the instructions and tools
     can change; other session properties stay as they were when the session
     was configured. Expressive audio tags such as ``[cheerful]`` are removed
-    from the bot's transcript, and the API reports no token usage.
+    from the bot's transcript.
 
     Example::
 
@@ -106,18 +97,11 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
         # The model is chosen in session.update; the server ignores a `?model=` query.
         self.base_url = base_url
 
-        if self._is_turn_detection_disabled():
-            logger.warning(
-                f"{self}: ElevenLabs Realtime can repeat earlier audio in each committed "
-                "turn's transcript when turn_detection is disabled."
-            )
-
         self._max_duration_seconds = max_duration_seconds
         self._input_pacing = input_pacing
         self._turn_timeout = turn_timeout
         self._configured_session: dict[str, Any] = {}
         self._audio_tag_tails: dict[str, str] = {}
-        self._function_call_opened_at: dict[str, float] = {}
 
     async def _auth_headers(self) -> dict[str, str]:
         return {"xi-api-key": self.api_key}
@@ -177,26 +161,7 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
         # The server drops system items without an error.
         await super()._send_message_item(text, role="assistant" if role == "assistant" else "user")
 
-    async def _handle_evt_function_call_arguments_done(self, evt):
-        self._function_call_opened_at[evt.call_id] = time.monotonic()
-        await super()._handle_evt_function_call_arguments_done(evt)
-
-    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
-        # An output the server no longer waits for also swallows the next response.create.
-        deadline = time.monotonic() - FUNCTION_CALL_OUTPUT_DEADLINE_SECS
-        for call_id in list(self._open_function_calls):
-            if self._function_call_opened_at.get(call_id, deadline) <= deadline:
-                self._open_function_calls.discard(call_id)
-        await super()._handle_function_call_result(frame)
-
-    async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
-        # The server settles abandoned calls itself; answering one would be a late output.
-        self._open_function_calls.discard(frame.tool_call_id)
-        self._completed_tool_calls.add(frame.tool_call_id)
-
     async def _handle_interruption(self):
-        # The server abandons open function calls when the user barges in.
-        self._open_function_calls.clear()
         self._audio_tag_tails.clear()
         await super()._handle_interruption()
 
@@ -227,7 +192,6 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
     async def _disconnect(self):
         await super()._disconnect()
         self._audio_tag_tails.clear()
-        self._function_call_opened_at.clear()
 
     async def _receive_task_handler(self):
         websocket = self._websocket

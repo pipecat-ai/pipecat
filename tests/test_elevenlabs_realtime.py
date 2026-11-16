@@ -4,14 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import time
 from unittest.mock import AsyncMock
 
 import pytest
 
 from pipecat.frames.frames import (
-    FunctionCallCancelFrame,
-    FunctionCallResultFrame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
     TTSTextFrame,
@@ -146,38 +143,6 @@ async def test_audio_tags_are_stripped_across_transcript_deltas():
     texts = [frame.text for frame in frames if isinstance(frame, TTSTextFrame)]
     assert texts == ["Hi ", " there, item ", "[1"]
     assert isinstance(frames[-1], LLMFullResponseEndFrame)
-
-
-@pytest.mark.asyncio
-async def test_cancelled_function_call_is_not_answered():
-    service = _service()
-    service._open_function_calls.add("call_1")
-
-    await service._handle_function_call_cancel(
-        FunctionCallCancelFrame(function_name="get_weather", tool_call_id="call_1")
-    )
-
-    assert _sent(service) == []
-
-
-@pytest.mark.asyncio
-async def test_result_after_the_server_deadline_is_sent_as_a_message():
-    service = _service()
-    service._open_function_calls.add("call_1")
-    service._function_call_opened_at["call_1"] = time.monotonic() - 21
-
-    await service._handle_function_call_result(
-        FunctionCallResultFrame(
-            function_name="get_weather",
-            tool_call_id="call_1",
-            arguments={},
-            result={"temperature": 24},
-        )
-    )
-
-    item = _sent(service)[0]["item"]
-    assert item["type"] == "message"
-    assert item["role"] == "user"
 
 
 @pytest.mark.asyncio
