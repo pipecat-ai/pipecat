@@ -33,12 +33,14 @@ with the hash of its wire format, which never changes after the release.
 import hashlib
 import inspect
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, TypeAdapter
-from pydantic.json_schema import JsonSchemaMode
+from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode, JsonSchemaValue
+from pydantic_core import core_schema
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 
@@ -81,11 +83,6 @@ class RTVIMessageSpec:
     deprecated: str | None = None
 
 
-def _summary(obj: Any) -> str:
-    """The first paragraph of an object's docstring, on one line."""
-    return " ".join((inspect.getdoc(obj) or "").split("\n\n")[0].split())
-
-
 def _client(
     type: str, description: str, data: Any = _NO_DATA, example: Any = None
 ) -> RTVIMessageSpec:
@@ -102,14 +99,16 @@ def _client(
     )
 
 
-def _server(model: type[BaseModel], example: Any = None, **kwargs) -> RTVIMessageSpec:
+def _server(
+    model: type[BaseModel], description: str, example: Any = None, **kwargs
+) -> RTVIMessageSpec:
     """Describe a message the server sends, from the model it sends it with."""
     fields = model.model_fields
     data = fields.get("data")
     return RTVIMessageSpec(
         type=fields["type"].default,
         direction="server-to-client",
-        description=_summary(model),
+        description=description,
         data=data.annotation if data else None,
         data_required=bool(data and data.is_required()),
         has_id="id" in fields,
@@ -218,37 +217,122 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
     # -- Server to client: session --
     _server(
         RTVI.BotReady,
+        "Answers client-ready once the bot is ready to talk, with the protocol version "
+        "the server speaks to this client, information about the bot, and what it can do. "
+        "Its id is the client-ready's id.",
         {
             "version": RTVI.PROTOCOL_VERSION,
             "about": {"library": "pipecat-ai", "library_version": "1.3.0"},
             "capabilities": {"audio_in": True, "audio_out": True, "video_in": False},
         },
     ),
-    _server(RTVI.Error, {"error": "The LLM service failed", "fatal": False}),
-    _server(RTVI.ErrorResponse, {"error": "Unsupported type foo"}),
-    _server(RTVI.ServerResponse, {"t": "get-weather", "d": {"temperature": 21}}),
-    _server(RTVI.ServerMessage, {"event": "order-updated", "status": "shipped"}),
+    _server(
+        RTVI.Error,
+        "Reports an error in the bot, such as an AI service that failed. When fatal is "
+        "true, the bot can't go on and the session ends.",
+        {"error": "The LLM service failed", "fatal": False},
+    ),
+    _server(
+        RTVI.ErrorResponse,
+        "Answers a client message the server couldn't handle, with what went wrong. Its "
+        "id is the id of the message it answers.",
+        {"error": "Unsupported type foo"},
+    ),
+    _server(
+        RTVI.ServerResponse,
+        "The bot's answer to a client-message. Its id is the client-message's id, and t "
+        "is the client-message's t.",
+        {"t": "get-weather", "d": {"temperature": 21}},
+    ),
+    _server(
+        RTVI.ServerMessage,
+        "A message from the bot's application to the client, with data of the application's own.",
+        {"event": "order-updated", "status": "shipped"},
+    ),
     _server(
         RTVI.MetricsMessage,
+        "Performance metrics of the bot's services, such as how long each took to respond "
+        "and how much it processed.",
         {"ttfb": [{"processor": "OpenAILLMService#0", "value": 0.42}]},
         enabled_by="metrics_enabled",
     ),
-    _server(RTVI.SystemLogMessage, {"text": "Pipeline started"}, enabled_by="system_logs_enabled"),
+    _server(
+        RTVI.SystemLogMessage,
+        "A line of the server's log, for debugging.",
+        {"text": "Pipeline started"},
+        enabled_by="system_logs_enabled",
+    ),
     # -- Server to client: speaking --
-    _server(RTVI.UserStartedSpeakingMessage, enabled_by="user_speaking_enabled"),
-    _server(RTVI.UserStoppedSpeakingMessage, enabled_by="user_speaking_enabled"),
-    _server(RTVI.VADUserStartedSpeakingMessage, enabled_by="vad_user_speaking_enabled"),
-    _server(RTVI.VADUserStoppedSpeakingMessage, enabled_by="vad_user_speaking_enabled"),
-    _server(RTVI.UserMuteStartedMessage, enabled_by="user_mute_enabled"),
-    _server(RTVI.UserMuteStoppedMessage, enabled_by="user_mute_enabled"),
-    _server(RTVI.BotStartedSpeakingMessage, enabled_by="bot_speaking_enabled"),
-    _server(RTVI.BotStoppedSpeakingMessage, enabled_by="bot_speaking_enabled"),
-    _server(RTVI.BotInterruptedMessage, enabled_by="bot_speaking_enabled"),
-    _server(RTVI.UserAudioLevelMessage, {"value": 0.3}, enabled_by="user_audio_level_enabled"),
-    _server(RTVI.BotAudioLevelMessage, {"value": 0.5}, enabled_by="bot_audio_level_enabled"),
+    _server(
+        RTVI.UserStartedSpeakingMessage,
+        "The user's turn started: the bot considers the user to be speaking.",
+        enabled_by="user_speaking_enabled",
+    ),
+    _server(
+        RTVI.UserStoppedSpeakingMessage,
+        "The user's turn ended: the bot considers the user done speaking.",
+        enabled_by="user_speaking_enabled",
+    ),
+    _server(
+        RTVI.VADUserStartedSpeakingMessage,
+        "Voice activity detection (VAD) heard the user start speaking. It reacts to any "
+        "voice, sooner than user-started-speaking, which comes when the bot decides the "
+        "user's turn started.",
+        enabled_by="vad_user_speaking_enabled",
+    ),
+    _server(
+        RTVI.VADUserStoppedSpeakingMessage,
+        "Voice activity detection (VAD) heard the user stop speaking. It reacts to any "
+        "pause, sooner than user-stopped-speaking, which comes when the bot decides the "
+        "user's turn ended.",
+        enabled_by="vad_user_speaking_enabled",
+    ),
+    _server(
+        RTVI.UserMuteStartedMessage,
+        "The bot stopped listening to the user, for example while it says something that "
+        "must not be interrupted.",
+        enabled_by="user_mute_enabled",
+    ),
+    _server(
+        RTVI.UserMuteStoppedMessage,
+        "The bot listens to the user again.",
+        enabled_by="user_mute_enabled",
+    ),
+    _server(
+        RTVI.BotStartedSpeakingMessage,
+        "The bot started speaking: its audio started playing to the user.",
+        enabled_by="bot_speaking_enabled",
+    ),
+    _server(
+        RTVI.BotStoppedSpeakingMessage,
+        "The bot stopped speaking.",
+        enabled_by="bot_speaking_enabled",
+    ),
+    _server(
+        RTVI.BotInterruptedMessage,
+        "The bot was interrupted and stopped what it was saying. A client should drop the "
+        "bot's text that hadn't been spoken yet.",
+        enabled_by="bot_speaking_enabled",
+    ),
+    _server(
+        RTVI.UserAudioLevelMessage,
+        "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
+        "the user's audio comes in.",
+        {"value": 0.3},
+        enabled_by="user_audio_level_enabled",
+    ),
+    _server(
+        RTVI.BotAudioLevelMessage,
+        "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
+        "the bot speaks.",
+        {"value": 0.5},
+        enabled_by="bot_audio_level_enabled",
+    ),
     # -- Server to client: what the user said --
     _server(
         RTVI.UserInputMessage,
+        "What the user said or typed: a transcription of their speech, text the client "
+        "sent, or a short acknowledgment the user said while the bot talks.",
         {
             "text": "What's the weather like?",
             "input_type": "transcription",
@@ -259,16 +343,23 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         enabled_by="user_input_enabled",
     ),
     _server(
-        RTVI.UserLLMTextMessage, {"text": "What's the weather like?"}, enabled_by="user_llm_enabled"
+        RTVI.UserLLMTextMessage,
+        "The user's message as the bot's LLM receives it.",
+        {"text": "What's the weather like?"},
+        enabled_by="user_llm_enabled",
     ),
     _server(
         RTVI.STTRawTextMessage,
+        "A transcription of the user's speech as the speech-to-text service produces it, "
+        "including interim transcriptions that may still change.",
         {"text": "What's the", "user_id": "user_1", "timestamp": _TIMESTAMP, "final": False},
         enabled_by="stt_raw_text_enabled",
         min_client_version="2.2.0",
     ),
     _server(
         RTVI.UserTranscriptionMessage,
+        "A transcription of the user's speech, including interim transcriptions that may "
+        "still change.",
         {"text": "What's the", "user_id": "user_1", "timestamp": _TIMESTAMP, "final": False},
         enabled_by="user_transcription_enabled",
         deprecated="Use user-input or stt-raw-text instead.",
@@ -276,6 +367,8 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
     # -- Server to client: what the bot says --
     _server(
         RTVI.BotOutputMessage,
+        "Text the bot says or shows, a sentence or another unit at a time, with whether "
+        "it will be spoken and how much of it has been spoken.",
         {
             "text": "It's sunny in Lisbon.",
             "output_type": "sentence",
@@ -286,48 +379,79 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         },
         enabled_by="bot_output_enabled",
     ),
-    _server(RTVI.BotLLMStartedMessage, enabled_by="bot_llm_enabled"),
-    _server(RTVI.BotLLMStoppedMessage, enabled_by="bot_llm_enabled"),
-    _server(RTVI.BotTTSStartedMessage, enabled_by="bot_tts_enabled"),
-    _server(RTVI.BotTTSStoppedMessage, enabled_by="bot_tts_enabled"),
+    _server(
+        RTVI.BotLLMStartedMessage,
+        "The bot's LLM started generating a response.",
+        enabled_by="bot_llm_enabled",
+    ),
+    _server(
+        RTVI.BotLLMStoppedMessage,
+        "The bot's LLM finished generating a response.",
+        enabled_by="bot_llm_enabled",
+    ),
+    _server(
+        RTVI.BotTTSStartedMessage,
+        "The bot's text-to-speech service started turning a response into speech.",
+        enabled_by="bot_tts_enabled",
+    ),
+    _server(
+        RTVI.BotTTSStoppedMessage,
+        "The bot's text-to-speech service finished turning a response into speech.",
+        enabled_by="bot_tts_enabled",
+    ),
     _server(
         RTVI.LLMRawTextMessage,
+        "Text exactly as the bot's LLM streams it, a chunk at a time.",
         {"text": "It's sunny"},
         enabled_by="llm_raw_text_enabled",
         min_client_version="2.2.0",
     ),
     _server(
         RTVI.TTSRawTextMessage,
+        "Text the bot's text-to-speech service speaks, as it speaks it.",
         {"text": "It's"},
         enabled_by="tts_raw_text_enabled",
         min_client_version="2.2.0",
     ),
     _server(
         RTVI.BotLLMMarkerMessage,
+        "The marker the bot's LLM put in a response, outside the text it speaks, such as "
+        "one saying whether the user's turn was complete. Sent once per response, when it "
+        "ends.",
         {"text": "✓", "kind": "complete", "raw": "✓ It's sunny in Lisbon.", "markers": ["✓"]},
         enabled_by="bot_llm_marker_enabled",
     ),
     _server(
         RTVI.BotTranscriptionMessage,
+        "The text of the bot's LLM response, a whole sentence at a time.",
         {"text": "It's sunny in Lisbon."},
         enabled_by="bot_llm_enabled",
     ),
     _server(
         RTVI.BotLLMTextMessage,
+        "Text as the bot's LLM streams it, a chunk at a time.",
         {"text": "It's sunny"},
         enabled_by="bot_llm_enabled",
         deprecated="Use llm-raw-text instead.",
     ),
     _server(
         RTVI.BotTTSTextMessage,
+        "Text the bot's text-to-speech service speaks, as it speaks it.",
         {"text": "It's"},
         enabled_by="bot_tts_enabled",
         deprecated="Use tts-raw-text instead.",
     ),
     # -- Server to client: function calls --
-    _server(RTVI.LLMFunctionCallStartMessage, {"function_name": "get_weather"}),
+    _server(
+        RTVI.LLMFunctionCallStartMessage,
+        "The bot's LLM started calling a function. The server's settings decide whether "
+        "it includes the function's name.",
+        {"function_name": "get_weather"},
+    ),
     _server(
         RTVI.LLMFunctionCallInProgressMessage,
+        "A function call is running, with its id and, as the server's settings decide, "
+        "the function's name and arguments.",
         {
             "tool_call_id": "call_123",
             "function_name": "get_weather",
@@ -336,17 +460,26 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
     ),
     _server(
         RTVI.LLMFunctionCallStoppedMessage,
+        "A function call finished or was cancelled, with its id and, as the server's "
+        "settings decide, the function's name and result.",
         {"tool_call_id": "call_123", "cancelled": False, "function_name": "get_weather"},
     ),
     _server(
         RTVI.LLMFunctionCallMessage,
+        "The bot's LLM called a function, with its name, id and arguments.",
         {"function_name": "get_weather", "tool_call_id": "call_123", "args": {"city": "Lisbon"}},
         deprecated="Use llm-function-call-in-progress instead.",
     ),
     # -- Server to client: UI worker --
-    _server(RTVI.UICommandMessage, {"command": "toast", "payload": {"title": "Order shipped"}}),
+    _server(
+        RTVI.UICommandMessage,
+        "A command from the bot to the client's UI, such as showing a notification.",
+        {"command": "toast", "payload": {"title": "Order shipped"}},
+    ),
     _server(
         RTVI.UIJobGroupMessage,
+        "Progress of work the bot handed to other workers, for the client's UI: the work "
+        "started, a worker's update or result, or all of it completed.",
         {
             "kind": "group_started",
             "job_id": "job_1",
@@ -422,8 +555,8 @@ BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
     ),
     RTVIBehaviorSpec(
         "messages-turned-off",
-        "The server sends a message that has x-rtvi-enabled-by only while that "
-        "RTVIObserverParams field is on.",
+        "The server sends a message that has x-rtvi-enabled-by only while the server "
+        "setting it names is on. The settings are fields of Pipecat's RTVIObserverParams.",
         (),
     ),
     RTVIBehaviorSpec(
@@ -440,6 +573,77 @@ BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
     ),
 )
 """The rules the server follows across messages, each checked by a conformance test."""
+
+
+_ROLE = re.compile(r":(?:class|meth|attr|func|mod|data|obj):`~?([^`]+)`")
+_JSON_VALUES = {"`None`": "`null`", "`True`": "`true`", "`False`": "`false`"}
+# A deprecation in a field's entry, which ends it: its first sentence names the
+# replacement, and the rest is about Pipecat's releases, not the protocol.
+_DEPRECATED = re.compile(r"\.\. deprecated::[^\n]*\n\s*([^.]*\.).*", re.S)
+
+
+def _markdown(text: str) -> str:
+    """Docstring text as one line of Markdown, as a reader of the document needs it.
+
+    Sphinx roles and markup become code, Python's values JSON's, and a
+    deprecation its replacement.
+    """
+    text = _DEPRECATED.sub(lambda match: f"Deprecated: {match.group(1)}", text)
+    text = _ROLE.sub(lambda match: f"`{match.group(1).rsplit('.', 1)[-1]}`", text)
+    text = text.replace("``", "`")
+    for python, json_value in _JSON_VALUES.items():
+        text = text.replace(python, json_value)
+    return " ".join(text.split())
+
+
+def _docstring(cls: type) -> tuple[str, dict[str, str]]:
+    """A class's summary and its fields' descriptions, from its Google-style docstring."""
+    # A class without a docstring of its own would get its base's from getdoc.
+    doc = inspect.cleandoc(cls.__dict__.get("__doc__") or "")
+    summary = _summary(doc)
+    fields = {}
+    section = re.search(r"^Parameters:\n(.*?)(?=^\S|\Z)", doc, re.M | re.S)
+    if section:
+        for entry in re.split(r"^    (?=\S)", section.group(1), flags=re.M):
+            name, _, text = entry.partition(":")
+            if name.strip():
+                fields[name.strip()] = _markdown(text)
+    return summary, fields
+
+
+def _summary(doc: str) -> str:
+    """The first paragraph of a docstring, as Markdown."""
+    return _markdown(doc.split("\n\n")[0])
+
+
+class _SchemaGenerator(GenerateJsonSchema):
+    """Describes each model by its docstring's summary, and each field by its entry.
+
+    A model's whole docstring is written for Python readers; the document gives a
+    client's author the first paragraph, and a description for each field from the
+    docstring's ``Parameters:`` section. An enum's description is trimmed after
+    generation, since Pydantic sets it after this generator runs.
+    """
+
+    def _describe(self, json_schema: JsonSchemaValue, cls: type):
+        summary, fields = _docstring(cls)
+        if summary:
+            json_schema["description"] = summary
+        else:
+            json_schema.pop("description", None)
+        for name, field in json_schema.get("properties", {}).items():
+            if name in fields:
+                field.setdefault("description", fields[name])
+
+    def model_schema(self, schema: core_schema.ModelSchema) -> JsonSchemaValue:
+        json_schema = super().model_schema(schema)
+        self._describe(json_schema, schema["cls"])
+        return json_schema
+
+    def dataclass_schema(self, schema: core_schema.DataclassSchema) -> JsonSchemaValue:
+        json_schema = super().dataclass_schema(schema)
+        self._describe(json_schema, schema["cls"])
+        return json_schema
 
 
 def _message_key(spec: RTVIMessageSpec) -> str:
@@ -509,9 +713,12 @@ def build_spec() -> dict:
         if spec.data is not None
     ]
     schemas, definitions = TypeAdapter.json_schemas(
-        inputs, ref_template="#/components/schemas/{model}"
+        inputs, ref_template="#/components/schemas/{model}", schema_generator=_SchemaGenerator
     )
     data_schemas = {key: schema for (key, _), schema in schemas.items()}
+    for schema in definitions.get("$defs", {}).values():
+        if "description" in schema:
+            schema["description"] = _summary(schema["description"])
 
     messages = {
         _message_key(spec): _message(spec, data_schemas.get(spec.type)) for spec in MESSAGES
@@ -530,10 +737,19 @@ def build_spec() -> dict:
             "title": "RTVI",
             "version": RTVI.PROTOCOL_VERSION,
             "description": (
-                "The Real-Time Voice Interface protocol between a client and a Pipecat "
-                "server, from the server's point of view. Every message is a JSON object "
-                f'labeled "{RTVI.MESSAGE_LABEL}" that the transport carries as a data '
-                "message."
+                "RTVI (Real-Time Voice Interface) is the protocol a client app and a Pipecat "
+                "bot use to talk to each other during a session. This document describes it "
+                "from the server's point of view: receiveClientMessages lists the messages a "
+                "client sends, and sendServerMessages the messages the server sends.\n\n"
+                f'Every message is a JSON object with the label "{RTVI.MESSAGE_LABEL}", a '
+                "type, its data, and an id on every message a client sends and on the "
+                "server's answers to them. The session's transport carries messages as data "
+                "messages, next to the audio and video.\n\n"
+                "A message can also have x-rtvi-enabled-by, the server setting that turns it "
+                "on (a field of Pipecat's RTVIObserverParams); x-rtvi-min-client-version, the "
+                "lowest client protocol version the server sends it to; and "
+                "x-rtvi-deprecated, what replaces a deprecated message. x-rtvi-behaviors lists "
+                "the rules the server follows across messages."
             ),
         },
         "defaultContentType": "application/json",

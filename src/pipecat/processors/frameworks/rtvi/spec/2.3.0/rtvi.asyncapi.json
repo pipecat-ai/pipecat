@@ -3,7 +3,7 @@
   "info": {
     "title": "RTVI",
     "version": "2.3.0",
-    "description": "The Real-Time Voice Interface protocol between a client and a Pipecat server, from the server's point of view. Every message is a JSON object labeled \"rtvi-ai\" that the transport carries as a data message."
+    "description": "RTVI (Real-Time Voice Interface) is the protocol a client app and a Pipecat bot use to talk to each other during a session. This document describes it from the server's point of view: receiveClientMessages lists the messages a client sends, and sendServerMessages the messages the server sends.\n\nEvery message is a JSON object with the label \"rtvi-ai\", a type, its data, and an id on every message a client sends and on the server's answers to them. The session's transport carries messages as data messages, next to the audio and video.\n\nA message can also have x-rtvi-enabled-by, the server setting that turns it on (a field of Pipecat's RTVIObserverParams); x-rtvi-min-client-version, the lowest client protocol version the server sends it to; and x-rtvi-deprecated, what replaces a deprecated message. x-rtvi-behaviors lists the rules the server follows across messages."
   },
   "defaultContentType": "application/json",
   "channels": {
@@ -855,7 +855,7 @@
       },
       "bot_ready": {
         "name": "bot-ready",
-        "summary": "Message indicating bot is ready for interaction.",
+        "summary": "Answers client-ready once the bot is ready to talk, with the protocol version the server speaks to this client, information about the bot, and what it can do. Its id is the client-ready's id.",
         "payload": {
           "type": "object",
           "properties": {
@@ -903,7 +903,7 @@
       },
       "error": {
         "name": "error",
-        "summary": "RTVI error event message.",
+        "summary": "Reports an error in the bot, such as an AI service that failed. When fatal is true, the bot can't go on and the session ends.",
         "payload": {
           "type": "object",
           "properties": {
@@ -938,7 +938,7 @@
       },
       "error_response": {
         "name": "error-response",
-        "summary": "RTVI error response message.",
+        "summary": "Answers a client message the server couldn't handle, with what went wrong. Its id is the id of the message it answers.",
         "payload": {
           "type": "object",
           "properties": {
@@ -977,7 +977,7 @@
       },
       "server_response": {
         "name": "server-response",
-        "summary": "The RTVI-formatted message response from the server to the client.",
+        "summary": "The bot's answer to a client-message. Its id is the client-message's id, and t is the client-message's t.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1019,7 +1019,7 @@
       },
       "server_message": {
         "name": "server-message",
-        "summary": "Generic server message.",
+        "summary": "A message from the bot's application to the client, with data of the application's own.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1052,7 +1052,7 @@
       },
       "metrics": {
         "name": "metrics",
-        "summary": "Message containing performance metrics.",
+        "summary": "Performance metrics of the bot's services, such as how long each took to respond and how much it processed.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1093,7 +1093,7 @@
       },
       "system_log": {
         "name": "system-log",
-        "summary": "Message including a system log.",
+        "summary": "A line of the server's log, for debugging.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1128,7 +1128,7 @@
       },
       "user_started_speaking": {
         "name": "user-started-speaking",
-        "summary": "Message indicating user has started speaking.",
+        "summary": "The user's turn started: the bot considers the user to be speaking.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1156,7 +1156,7 @@
       },
       "user_stopped_speaking": {
         "name": "user-stopped-speaking",
-        "summary": "Message indicating user has stopped speaking.",
+        "summary": "The user's turn ended: the bot considers the user done speaking.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1184,7 +1184,7 @@
       },
       "vad_user_started_speaking": {
         "name": "vad-user-started-speaking",
-        "summary": "Message indicating VAD detected the user started speaking.",
+        "summary": "Voice activity detection (VAD) heard the user start speaking. It reacts to any voice, sooner than user-started-speaking, which comes when the bot decides the user's turn started.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1212,7 +1212,7 @@
       },
       "vad_user_stopped_speaking": {
         "name": "vad-user-stopped-speaking",
-        "summary": "Message indicating VAD detected the user stopped speaking.",
+        "summary": "Voice activity detection (VAD) heard the user stop speaking. It reacts to any pause, sooner than user-stopped-speaking, which comes when the bot decides the user's turn ended.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1240,7 +1240,7 @@
       },
       "user_mute_started": {
         "name": "user-mute-started",
-        "summary": "Message indicating user has been muted.",
+        "summary": "The bot stopped listening to the user, for example while it says something that must not be interrupted.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1268,7 +1268,7 @@
       },
       "user_mute_stopped": {
         "name": "user-mute-stopped",
-        "summary": "Message indicating user has been unmuted.",
+        "summary": "The bot listens to the user again.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1296,7 +1296,7 @@
       },
       "bot_started_speaking": {
         "name": "bot-started-speaking",
-        "summary": "Message indicating bot has started speaking.",
+        "summary": "The bot started speaking: its audio started playing to the user.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1324,7 +1324,7 @@
       },
       "bot_stopped_speaking": {
         "name": "bot-stopped-speaking",
-        "summary": "Message indicating bot has stopped speaking.",
+        "summary": "The bot stopped speaking.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1352,7 +1352,7 @@
       },
       "bot_interrupted": {
         "name": "bot-interrupted",
-        "summary": "Message indicating the bot was interrupted and its in-flight output cut off.",
+        "summary": "The bot was interrupted and stopped what it was saying. A client should drop the bot's text that hadn't been spoken yet.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1380,7 +1380,7 @@
       },
       "user_audio_level": {
         "name": "user-audio-level",
-        "summary": "Message indicating user audio level.",
+        "summary": "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while the user's audio comes in.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1415,7 +1415,7 @@
       },
       "bot_audio_level": {
         "name": "bot-audio-level",
-        "summary": "Message indicating bot audio level.",
+        "summary": "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while the bot speaks.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1450,7 +1450,7 @@
       },
       "user_input": {
         "name": "user-input",
-        "summary": "Message containing what the user said or typed.",
+        "summary": "What the user said or typed: a transcription of their speech, text the client sent, or a short acknowledgment the user said while the bot talks.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1489,7 +1489,7 @@
       },
       "user_llm_text": {
         "name": "user-llm-text",
-        "summary": "Message containing user text input for LLM.",
+        "summary": "The user's message as the bot's LLM receives it.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1524,7 +1524,7 @@
       },
       "stt_raw_text": {
         "name": "stt-raw-text",
-        "summary": "Message reporting a transcription as the STT produced it, interim ones included.",
+        "summary": "A transcription of the user's speech as the speech-to-text service produces it, including interim transcriptions that may still change.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1563,7 +1563,7 @@
       },
       "user_transcription": {
         "name": "user-transcription",
-        "summary": "Message containing user transcription.",
+        "summary": "A transcription of the user's speech, including interim transcriptions that may still change.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1602,7 +1602,7 @@
       },
       "bot_output": {
         "name": "bot-output",
-        "summary": "Message containing bot output text.",
+        "summary": "Text the bot says or shows, a sentence or another unit at a time, with whether it will be spoken and how much of it has been spoken.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1645,7 +1645,7 @@
       },
       "bot_llm_started": {
         "name": "bot-llm-started",
-        "summary": "Message indicating bot LLM processing has started.",
+        "summary": "The bot's LLM started generating a response.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1673,7 +1673,7 @@
       },
       "bot_llm_stopped": {
         "name": "bot-llm-stopped",
-        "summary": "Message indicating bot LLM processing has stopped.",
+        "summary": "The bot's LLM finished generating a response.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1701,7 +1701,7 @@
       },
       "bot_tts_started": {
         "name": "bot-tts-started",
-        "summary": "Message indicating bot TTS processing has started.",
+        "summary": "The bot's text-to-speech service started turning a response into speech.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1729,7 +1729,7 @@
       },
       "bot_tts_stopped": {
         "name": "bot-tts-stopped",
-        "summary": "Message indicating bot TTS processing has stopped.",
+        "summary": "The bot's text-to-speech service finished turning a response into speech.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1757,7 +1757,7 @@
       },
       "llm_raw_text": {
         "name": "llm-raw-text",
-        "summary": "Message reporting a chunk of text as the LLM streamed it.",
+        "summary": "Text exactly as the bot's LLM streams it, a chunk at a time.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1793,7 +1793,7 @@
       },
       "tts_raw_text": {
         "name": "tts-raw-text",
-        "summary": "Message reporting text the TTS speaks, as it is spoken.",
+        "summary": "Text the bot's text-to-speech service speaks, as it speaks it.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1829,7 +1829,7 @@
       },
       "bot_llm_marker": {
         "name": "bot-llm-marker",
-        "summary": "Message reporting the sideband marker the bot's LLM emitted in a response.",
+        "summary": "The marker the bot's LLM put in a response, outside the text it speaks, such as one saying whether the user's turn was complete. Sent once per response, when it ends.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1869,7 +1869,7 @@
       },
       "bot_transcription": {
         "name": "bot-transcription",
-        "summary": "Message containing bot transcription text.",
+        "summary": "The text of the bot's LLM response, a whole sentence at a time.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1904,7 +1904,7 @@
       },
       "bot_llm_text": {
         "name": "bot-llm-text",
-        "summary": "Message containing bot LLM text output.",
+        "summary": "Text as the bot's LLM streams it, a chunk at a time.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1940,7 +1940,7 @@
       },
       "bot_tts_text": {
         "name": "bot-tts-text",
-        "summary": "Message containing bot TTS text output.",
+        "summary": "Text the bot's text-to-speech service speaks, as it speaks it.",
         "payload": {
           "type": "object",
           "properties": {
@@ -1976,7 +1976,7 @@
       },
       "llm_function_call_started": {
         "name": "llm-function-call-started",
-        "summary": "Message notifying that an LLM function call has started.",
+        "summary": "The bot's LLM started calling a function. The server's settings decide whether it includes the function's name.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2010,7 +2010,7 @@
       },
       "llm_function_call_in_progress": {
         "name": "llm-function-call-in-progress",
-        "summary": "Message notifying that an LLM function call is in progress.",
+        "summary": "A function call is running, with its id and, as the server's settings decide, the function's name and arguments.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2048,7 +2048,7 @@
       },
       "llm_function_call_stopped": {
         "name": "llm-function-call-stopped",
-        "summary": "Message notifying that an LLM function call has stopped.",
+        "summary": "A function call finished or was cancelled, with its id and, as the server's settings decide, the function's name and result.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2084,7 +2084,7 @@
       },
       "llm_function_call": {
         "name": "llm-function-call",
-        "summary": "Message notifying of an LLM function call.",
+        "summary": "The bot's LLM called a function, with its name, id and arguments.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2123,7 +2123,7 @@
       },
       "ui_command": {
         "name": "ui-command",
-        "summary": "RTVI ``ui-command`` message (server → client).",
+        "summary": "A command from the bot to the client's UI, such as showing a notification.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2160,7 +2160,7 @@
       },
       "ui_job_group": {
         "name": "ui-job-group",
-        "summary": "RTVI ``ui-job-group`` message (server → client).",
+        "summary": "Progress of work the bot handed to other workers, for the client's UI: the work started, a worker's update or result, or all of it completed.",
         "payload": {
           "type": "object",
           "properties": {
@@ -2216,13 +2216,15 @@
     "schemas": {
       "A11yNode": {
         "additionalProperties": true,
-        "description": "One node in the UI accessibility snapshot tree.\n\nMirrors the client-side ``A11yNode`` wire shape. Extra fields are\nallowed so clients can add platform-specific or future metadata\nwithout breaking older servers.\n\nParameters:\n    ref: Stable client-assigned element reference.\n    role: ARIA-style role for the node.\n    name: Optional accessible name.\n    value: Optional current value for inputs/progress/etc.\n    state: Optional short state tags (e.g. ``\"focused\"``,\n        ``\"disabled\"``, ``\"offscreen\"``).\n    level: Optional heading level.\n    colcount: Optional column count for grid-like containers.\n    rowcount: Optional row count for grid-like containers.\n    children: Optional child nodes.",
+        "description": "One node in the UI accessibility snapshot tree.",
         "properties": {
           "ref": {
+            "description": "Stable client-assigned element reference.",
             "title": "Ref",
             "type": "string"
           },
           "role": {
+            "description": "ARIA-style role for the node.",
             "title": "Role",
             "type": "string"
           },
@@ -2236,6 +2238,7 @@
               }
             ],
             "default": null,
+            "description": "Optional accessible name.",
             "title": "Name"
           },
           "value": {
@@ -2248,6 +2251,7 @@
               }
             ],
             "default": null,
+            "description": "Optional current value for inputs/progress/etc.",
             "title": "Value"
           },
           "state": {
@@ -2263,6 +2267,7 @@
               }
             ],
             "default": null,
+            "description": "Optional short state tags (e.g. `\"focused\"`, `\"disabled\"`, `\"offscreen\"`).",
             "title": "State"
           },
           "level": {
@@ -2275,6 +2280,7 @@
               }
             ],
             "default": null,
+            "description": "Optional heading level.",
             "title": "Level"
           },
           "colcount": {
@@ -2287,6 +2293,7 @@
               }
             ],
             "default": null,
+            "description": "Optional column count for grid-like containers.",
             "title": "Colcount"
           },
           "rowcount": {
@@ -2299,6 +2306,7 @@
               }
             ],
             "default": null,
+            "description": "Optional row count for grid-like containers.",
             "title": "Rowcount"
           },
           "children": {
@@ -2314,6 +2322,7 @@
               }
             ],
             "default": null,
+            "description": "Optional child nodes.",
             "title": "Children"
           }
         },
@@ -2326,13 +2335,15 @@
       },
       "A11ySelection": {
         "additionalProperties": true,
-        "description": "The user's current text selection in the UI snapshot.\n\nExtra fields are allowed for forward compatibility with client\nsnapshot additions.\n\nParameters:\n    ref: Ref of the element that carries the selection.\n    text: Selected text.\n    start_offset: Optional selection start offset.\n    end_offset: Optional selection end offset.",
+        "description": "The user's current text selection in the UI snapshot.",
         "properties": {
           "ref": {
+            "description": "Ref of the element that carries the selection.",
             "title": "Ref",
             "type": "string"
           },
           "text": {
+            "description": "Selected text.",
             "title": "Text",
             "type": "string"
           },
@@ -2346,6 +2357,7 @@
               }
             ],
             "default": null,
+            "description": "Optional selection start offset.",
             "title": "Start Offset"
           },
           "end_offset": {
@@ -2358,6 +2370,7 @@
               }
             ],
             "default": null,
+            "description": "Optional selection end offset.",
             "title": "End Offset"
           }
         },
@@ -2370,12 +2383,14 @@
       },
       "A11ySnapshot": {
         "additionalProperties": true,
-        "description": "Client accessibility snapshot sent in a ``ui-snapshot`` message.\n\nMirrors the client-side ``A11ySnapshot`` wire shape. Extra fields\nare allowed so clients can add compatible metadata over time.\n\nParameters:\n    root: Root accessibility node.\n    captured_at: Client-side epoch milliseconds when captured.\n    selection: Optional current text selection.",
+        "description": "Client accessibility snapshot sent in a `ui-snapshot` message.",
         "properties": {
           "root": {
-            "$ref": "#/components/schemas/A11yNode"
+            "$ref": "#/components/schemas/A11yNode",
+            "description": "Root accessibility node."
           },
           "captured_at": {
+            "description": "Client-side epoch milliseconds when captured.",
             "title": "Captured At",
             "type": "integer"
           },
@@ -2388,7 +2403,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "Optional current text selection."
           }
         },
         "required": [
@@ -2399,9 +2415,10 @@
         "type": "object"
       },
       "AboutClientData": {
-        "description": "Data about the RTVI client.\n\nContains information about the client, including which RTVI library it\nis using, what platform it is on and any additional details, if available.",
+        "description": "Data about the RTVI client.",
         "properties": {
           "library": {
+            "description": "The RTVI library the client uses, such as `@pipecat-ai/client-js`.",
             "title": "Library",
             "type": "string"
           },
@@ -2415,6 +2432,7 @@
               }
             ],
             "default": null,
+            "description": "The version of that library.",
             "title": "Library Version"
           },
           "platform": {
@@ -2427,6 +2445,7 @@
               }
             ],
             "default": null,
+            "description": "The platform the client runs on, such as a browser or `iOS`.",
             "title": "Platform"
           },
           "platform_version": {
@@ -2439,6 +2458,7 @@
               }
             ],
             "default": null,
+            "description": "The platform's version.",
             "title": "Platform Version"
           },
           "platform_details": {
@@ -2449,6 +2469,7 @@
               }
             ],
             "default": null,
+            "description": "Anything else the client says about its platform.",
             "title": "Platform Details"
           }
         },
@@ -2462,6 +2483,7 @@
         "description": "Data format for sending audio levels.",
         "properties": {
           "value": {
+            "description": "How loud the audio is, from 0 (quiet) to 1 (loud).",
             "title": "Value",
             "type": "number"
           }
@@ -2473,7 +2495,7 @@
         "type": "object"
       },
       "BotCapabilities": {
-        "description": "What a bot does in a session.\n\nEvery field is optional: ``None`` means unknown, and a client should keep\nits default behavior for it. ``False`` means the bot does not do it, so a\nclient can hide the matching UI.\n\nParameters:\n    audio_in: Whether the bot receives the user's audio.\n    audio_out: Whether the bot sends audio to the user.\n    video_in: Whether the bot receives the user's video.\n    screen_in: Whether the bot receives the user's screen share. Known when\n        the transport captures its video sources from ``video_in_sources``;\n        unknown when the application captures them itself.\n    video_out: Whether the bot sends video to the user.\n    metrics: Whether the bot reports metrics.",
+        "description": "What a bot does in a session.",
         "properties": {
           "audio_in": {
             "anyOf": [
@@ -2485,6 +2507,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot receives the user's audio.",
             "title": "Audio In"
           },
           "audio_out": {
@@ -2497,6 +2520,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot sends audio to the user.",
             "title": "Audio Out"
           },
           "video_in": {
@@ -2509,6 +2533,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot receives the user's video.",
             "title": "Video In"
           },
           "screen_in": {
@@ -2521,6 +2546,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot receives the user's screen share. Known when the transport captures its video sources from `video_in_sources`; unknown when the application captures them itself.",
             "title": "Screen In"
           },
           "video_out": {
@@ -2533,6 +2559,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot sends video to the user.",
             "title": "Video Out"
           },
           "metrics": {
@@ -2545,6 +2572,7 @@
               }
             ],
             "default": null,
+            "description": "Whether the bot reports metrics.",
             "title": "Metrics"
           }
         },
@@ -2552,9 +2580,10 @@
         "type": "object"
       },
       "BotLLMMarkerMessageData": {
-        "description": "Data for a bot LLM marker message.\n\nParameters:\n    text: The marker as the LLM produced it; empty when the response\n        carried none.\n    kind: What the marker means, in the emitter's vocabulary (the\n        turn-completion mixin's ``complete``, ``short`` or ``long``), or\n        ``None`` when the emitter gave none.\n    raw: The response's text as the LLM produced it, markers included.\n    markers: Every marker the emitter recognizes.",
+        "description": "Data for a bot LLM marker message.",
         "properties": {
           "text": {
+            "description": "The marker as the LLM produced it; empty when the response carried none.",
             "title": "Text",
             "type": "string"
           },
@@ -2568,14 +2597,17 @@
               }
             ],
             "default": null,
+            "description": "What the marker means, such as `complete`, `short` or `long` for the markers that say whether the user's turn was complete, or `null` when it means nothing the server knows.",
             "title": "Kind"
           },
           "raw": {
             "default": "",
+            "description": "The response's text as the LLM produced it, markers included.",
             "title": "Raw",
             "type": "string"
           },
           "markers": {
+            "description": "Every marker the emitter recognizes.",
             "items": {
               "type": "string"
             },
@@ -2590,9 +2622,10 @@
         "type": "object"
       },
       "BotOutputMessageData": {
-        "description": "Data for bot output RTVI messages.\n\nExtends TextMessageData to include metadata about the output.\n\nThis class supports both protocol v1 (1.4.x) and v2 (2.0.0+) clients. The\nobserver populates different field subsets depending on the negotiated version;\n``send_rtvi_message`` serialises with ``exclude_none=True`` so each client\nonly sees the fields relevant to its version.\n\nParameters:\n    output_type: What form the text is in (e.g., sentence, code, etc.).\n    text_type: What form the text is in, always the same as ``output_type``.\n\n        .. deprecated:: 1.14.0\n            Use ``output_type`` instead.\n            Will be removed in 2.0.0.\n\n    aggregated_by: What form the text is in, always the same as ``output_type``.\n\n        .. deprecated:: 1.13.0\n            Use ``output_type`` instead.\n            Will be removed in 2.0.0.\n\n    segment_id: ID of the source AggregatedTextFrame.\n    spoken: **(v1 only)** Whether the text has been spoken by TTS.\n    will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.\n    spoken_status: **(v2+)** Lifecycle status of the segment: ``\"new\"`` on\n        its first message, the only one for text that isn't spoken;\n        ``\"in-progress\"`` as each of its words is spoken, for TTS services\n        with word timestamps; ``\"completed\"`` once its last word is spoken.\n    spoken_progress: **(v2+)** Accumulated / remaining text breakdown.\n        Present when ``will_be_spoken`` is ``True``.\n    delivery: **(2.3.0+)** The delivery of the text just spoken, by its\n        universal names, such as ``[\"warm\", \"emphasis\"]``, empty for the\n        voice's baseline. They change within a segment where its delivery\n        does, so a segment's ``\"new\"`` message has none. Present in\n        expressive conversation (alpha).",
+        "description": "Data for bot output RTVI messages.",
         "properties": {
           "text": {
+            "description": "The text.",
             "title": "Text",
             "type": "string"
           },
@@ -2605,6 +2638,7 @@
                 "type": "string"
               }
             ],
+            "description": "What form the text is in (e.g., sentence, code, etc.).",
             "title": "Output Type"
           },
           "text_type": {
@@ -2620,6 +2654,7 @@
               }
             ],
             "default": null,
+            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead.",
             "title": "Text Type"
           },
           "aggregated_by": {
@@ -2635,6 +2670,7 @@
               }
             ],
             "default": null,
+            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead.",
             "title": "Aggregated By"
           },
           "segment_id": {
@@ -2647,6 +2683,7 @@
               }
             ],
             "default": null,
+            "description": "Identifies the segment the text belongs to; every message about one segment, such as its spoken progress, carries the same id.",
             "title": "Segment Id"
           },
           "spoken": {
@@ -2659,6 +2696,7 @@
               }
             ],
             "default": null,
+            "description": "**(v1 only)** Whether the text has been spoken by TTS.",
             "title": "Spoken"
           },
           "will_be_spoken": {
@@ -2671,6 +2709,7 @@
               }
             ],
             "default": null,
+            "description": "**(v2+)** Whether the text will be spoken by TTS.",
             "title": "Will Be Spoken"
           },
           "spoken_status": {
@@ -2688,6 +2727,7 @@
               }
             ],
             "default": null,
+            "description": "**(v2+)** Lifecycle status of the segment: `\"new\"` on its first message, the only one for text that isn't spoken; `\"in-progress\"` as each of its words is spoken, for TTS services with word timestamps; `\"completed\"` once its last word is spoken.",
             "title": "Spoken Status"
           },
           "spoken_progress": {
@@ -2699,7 +2739,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "**(v2+)** Accumulated / remaining text breakdown. Present when `will_be_spoken` is `true`."
           },
           "delivery": {
             "anyOf": [
@@ -2714,6 +2755,7 @@
               }
             ],
             "default": null,
+            "description": "**(2.3.0+)** The delivery of the text just spoken, by its universal names, such as `[\"warm\", \"emphasis\"]`, empty for the voice's baseline. They change within a segment where its delivery does, so a segment's `\"new\"` message has none. Present in expressive conversation (alpha).",
             "title": "Delivery"
           }
         },
@@ -2725,9 +2767,10 @@
         "type": "object"
       },
       "BotReadyData": {
-        "description": "Data for bot ready notification.\n\nContains protocol version and initial configuration.\n\nParameters:\n    version: The RTVI protocol version the bot speaks with this client.\n    about: Information about the bot, such as the Pipecat library and version.\n    capabilities: What the bot does in this session (media sent and received,\n        metrics), so the client can show only the UI that applies. Added in\n        protocol 2.2.0.",
+        "description": "Data for bot ready notification.",
         "properties": {
           "version": {
+            "description": "The RTVI protocol version the bot speaks with this client.",
             "title": "Version",
             "type": "string"
           },
@@ -2742,6 +2785,7 @@
               }
             ],
             "default": null,
+            "description": "Information about the bot, such as the Pipecat library and version.",
             "title": "About"
           },
           "capabilities": {
@@ -2753,7 +2797,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "What the bot does in this session (media sent and received, metrics), so the client can show only the UI that applies. Added in protocol 2.2.0."
           }
         },
         "required": [
@@ -2763,14 +2808,16 @@
         "type": "object"
       },
       "ClientReadyData": {
-        "description": "Data format of client ready messages.\n\nContains the RTVI protocol version and client information.",
+        "description": "Data format of client ready messages.",
         "properties": {
           "version": {
+            "description": "The RTVI protocol version the client speaks, such as `2.3.0`.",
             "title": "Version",
             "type": "string"
           },
           "about": {
-            "$ref": "#/components/schemas/AboutClientData"
+            "$ref": "#/components/schemas/AboutClientData",
+            "description": "Information about the client."
           }
         },
         "required": [
@@ -2781,9 +2828,10 @@
         "type": "object"
       },
       "DTMFInputData": {
-        "description": "Data format for DTMF keypresses sent from the client.\n\nCarries one or more keypad entries (``0``-``9``, ``*``, ``#``), delivered\nin order, so the bot's DTMF handling (e.g. a ``DTMFAggregator``) sees them\nexactly as a telephony transport would deliver rapid keypresses.\n\nProtocol 2.1.0 replaced the single ``button`` field with ``buttons``.",
+        "description": "Data format for DTMF keypresses sent from the client.",
         "properties": {
           "buttons": {
+            "description": "The keys pressed, in order: `0`-`9`, `*` or `#`.",
             "items": {
               "$ref": "#/components/schemas/KeypadEntry"
             },
@@ -2799,13 +2847,15 @@
         "type": "object"
       },
       "ErrorData": {
-        "description": "Data for an RTVI error event.\n\nContains error information including whether it's fatal.",
+        "description": "Data for an RTVI error event.",
         "properties": {
           "error": {
+            "description": "What went wrong.",
             "title": "Error",
             "type": "string"
           },
           "fatal": {
+            "description": "Whether the bot stopped because of the error.",
             "title": "Fatal",
             "type": "boolean"
           }
@@ -2818,9 +2868,10 @@
         "type": "object"
       },
       "ErrorResponseData": {
-        "description": "Data for an RTVI error response.\n\nContains the error message to send back to the client.",
+        "description": "Data for an RTVI error response.",
         "properties": {
           "error": {
+            "description": "What went wrong.",
             "title": "Error",
             "type": "string"
           }
@@ -2835,6 +2886,7 @@
         "description": "File data structure for RTVI file sending.",
         "properties": {
           "format": {
+            "description": "The file's MIME type, such as `application/pdf` or `image/png`.",
             "title": "Format",
             "type": "string"
           },
@@ -2848,6 +2900,7 @@
               }
             ],
             "default": null,
+            "description": "The file's name.",
             "title": "Name"
           },
           "source": {
@@ -2859,6 +2912,7 @@
                 "$ref": "#/components/schemas/FileUrl"
               }
             ],
+            "description": "Where the file's content is: its bytes, or a URL.",
             "title": "Source"
           }
         },
@@ -2874,6 +2928,7 @@
         "properties": {
           "type": {
             "default": "bytes",
+            "description": "Always `\"bytes\"`.",
             "enum": [
               "bytes",
               "url"
@@ -2882,6 +2937,7 @@
             "type": "string"
           },
           "bytes": {
+            "description": "The file's content, base64-encoded.",
             "title": "Bytes",
             "type": "string"
           },
@@ -2895,6 +2951,7 @@
               }
             ],
             "default": null,
+            "description": "For an image, its width in pixels.",
             "title": "Width"
           },
           "height": {
@@ -2907,6 +2964,7 @@
               }
             ],
             "default": null,
+            "description": "For an image, its height in pixels.",
             "title": "Height"
           }
         },
@@ -2917,10 +2975,11 @@
         "type": "object"
       },
       "FileUrl": {
-        "description": "File source as a URL.\n\nParameters:\n    url: The file's URL: whatever the ``POST /files`` upload endpoint\n        returned (``pipecat:<id>`` with the default local storage, or a\n        URL minted by a custom storage backend), a cloud-storage URI\n        (``s3://``, ``gs://``), or a plain ``http(s)`` URL. The URL is\n        resolved at completion time: the LLM provider fetches it itself\n        when it can (public URLs, its own cloud IAM), and otherwise the\n        LLM service's :class:`~pipecat.utils.file_resolver.FileResolver`\n        downloads the bytes and inlines them.",
+        "description": "File source as a URL.",
         "properties": {
           "type": {
             "default": "url",
+            "description": "Always `\"url\"`.",
             "enum": [
               "bytes",
               "url"
@@ -2929,6 +2988,7 @@
             "type": "string"
           },
           "url": {
+            "description": "The file's URL: whatever the `POST /files` upload endpoint returned (`pipecat:<id>` with the default local storage, or a URL minted by a custom storage backend), a cloud-storage URI (`s3://`, `gs://`), or a plain `http(s)` URL. The URL is resolved at completion time: the LLM provider fetches it itself when it can (public URLs, its own cloud IAM), and otherwise the LLM service's `FileResolver` downloads the bytes and inlines them.",
             "title": "Url",
             "type": "string"
           }
@@ -2940,7 +3000,7 @@
         "type": "object"
       },
       "KeypadEntry": {
-        "description": "DTMF keypad entries for phone system integration.\n\nParameters:\n    ONE: Number key 1.\n    TWO: Number key 2.\n    THREE: Number key 3.\n    FOUR: Number key 4.\n    FIVE: Number key 5.\n    SIX: Number key 6.\n    SEVEN: Number key 7.\n    EIGHT: Number key 8.\n    NINE: Number key 9.\n    ZERO: Number key 0.\n    POUND: Pound/hash key (#).\n    STAR: Star/asterisk key (*).",
+        "description": "DTMF keypad entries for phone system integration.",
         "enum": [
           "1",
           "2",
@@ -2959,9 +3019,10 @@
         "type": "string"
       },
       "LLMFunctionCallInProgressMessageData": {
-        "description": "Data for LLM function call in-progress notification.\n\nContains function call details including name, ID, and arguments.\nFields may be omitted based on the configured function_call_report_level for security.\n\nParameters:\n    tool_call_id: Unique identifier of the call.\n    function_name: Name of the function called.\n    arguments: Arguments passed to the function.",
+        "description": "Data for LLM function call in-progress notification.",
         "properties": {
           "tool_call_id": {
+            "description": "Unique identifier of the call.",
             "title": "Tool Call Id",
             "type": "string"
           },
@@ -2975,6 +3036,7 @@
               }
             ],
             "default": null,
+            "description": "Name of the function called.",
             "title": "Function Name"
           },
           "arguments": {
@@ -2988,6 +3050,7 @@
               }
             ],
             "default": null,
+            "description": "Arguments passed to the function.",
             "title": "Arguments"
           }
         },
@@ -2999,18 +3062,21 @@
       },
       "LLMFunctionCallMessageData": {
         "deprecated": true,
-        "description": "Data for LLM function call notification.\n\nContains function call details including name, ID, and arguments.\n\n.. deprecated:: 0.0.102\n    Use :class:`LLMFunctionCallInProgressMessageData` instead. Will be removed in 2.0.0.",
+        "description": "Data for LLM function call notification.",
         "properties": {
           "function_name": {
+            "description": "Name of the function called.",
             "title": "Function Name",
             "type": "string"
           },
           "tool_call_id": {
+            "description": "Unique identifier of the call.",
             "title": "Tool Call Id",
             "type": "string"
           },
           "args": {
             "additionalProperties": true,
+            "description": "Arguments passed to the function.",
             "title": "Args",
             "type": "object"
           }
@@ -3024,18 +3090,21 @@
         "type": "object"
       },
       "LLMFunctionCallResultData": {
-        "description": "Data for LLM function call result.\n\nContains function call details and result.",
+        "description": "Data for LLM function call result.",
         "properties": {
           "function_name": {
+            "description": "Name of the function called.",
             "title": "Function Name",
             "type": "string"
           },
           "tool_call_id": {
+            "description": "Unique identifier of the call, as the server reported it.",
             "title": "Tool Call Id",
             "type": "string"
           },
           "arguments": {
             "additionalProperties": true,
+            "description": "Arguments the function was called with.",
             "title": "Arguments",
             "type": "object"
           },
@@ -3049,6 +3118,7 @@
                 "type": "string"
               }
             ],
+            "description": "What the function returned.",
             "title": "Result"
           }
         },
@@ -3062,7 +3132,7 @@
         "type": "object"
       },
       "LLMFunctionCallStartMessageData": {
-        "description": "Data for LLM function call start notification.\n\nContains the function name being called. Fields may be omitted based on\nthe configured function_call_report_level for security.\n\nParameters:\n    function_name: Name of the function called.",
+        "description": "Data for LLM function call start notification.",
         "properties": {
           "function_name": {
             "anyOf": [
@@ -3074,6 +3144,7 @@
               }
             ],
             "default": null,
+            "description": "Name of the function called.",
             "title": "Function Name"
           }
         },
@@ -3081,13 +3152,15 @@
         "type": "object"
       },
       "LLMFunctionCallStoppedMessageData": {
-        "description": "Data for LLM function call stopped notification.\n\nContains details about the function call that stopped, including\nwhether it was cancelled or completed with a result.\nFields may be omitted based on the configured function_call_report_level for security.\n\nParameters:\n    tool_call_id: Unique identifier of the call.\n    cancelled: Whether the call was cancelled rather than completed.\n    function_name: Name of the function called.\n    result: The result, when the call completed with one.",
+        "description": "Data for LLM function call stopped notification.",
         "properties": {
           "tool_call_id": {
+            "description": "Unique identifier of the call.",
             "title": "Tool Call Id",
             "type": "string"
           },
           "cancelled": {
+            "description": "Whether the call was cancelled rather than completed.",
             "title": "Cancelled",
             "type": "boolean"
           },
@@ -3101,6 +3174,7 @@
               }
             ],
             "default": null,
+            "description": "Name of the function called.",
             "title": "Function Name"
           },
           "result": {
@@ -3111,6 +3185,7 @@
               }
             ],
             "default": null,
+            "description": "The result, when the call completed with one.",
             "title": "Result"
           }
         },
@@ -3122,9 +3197,10 @@
         "type": "object"
       },
       "RawAudioBatchData": {
-        "description": "Data format for a ``raw-audio-batch`` message: several chunks of the user's audio.\n\nParameters:\n    base64AudioBatch: Chunks of 16-bit PCM audio, each base64-encoded, in order.\n    sampleRate: The audio's sample rate, in Hz.\n    numChannels: The audio's number of channels.",
+        "description": "Data format for a `raw-audio-batch` message: several chunks of the user's audio.",
         "properties": {
           "base64AudioBatch": {
+            "description": "Chunks of 16-bit PCM audio, each base64-encoded, in order.",
             "items": {
               "type": "string"
             },
@@ -3132,10 +3208,12 @@
             "type": "array"
           },
           "sampleRate": {
+            "description": "The audio's sample rate, in Hz.",
             "title": "Samplerate",
             "type": "integer"
           },
           "numChannels": {
+            "description": "The audio's number of channels.",
             "title": "Numchannels",
             "type": "integer"
           }
@@ -3149,17 +3227,20 @@
         "type": "object"
       },
       "RawAudioData": {
-        "description": "Data format for a ``raw-audio`` message: one chunk of the user's audio.\n\nParameters:\n    base64Audio: 16-bit PCM audio, base64-encoded.\n    sampleRate: The audio's sample rate, in Hz.\n    numChannels: The audio's number of channels.",
+        "description": "Data format for a `raw-audio` message: one chunk of the user's audio.",
         "properties": {
           "base64Audio": {
+            "description": "16-bit PCM audio, base64-encoded.",
             "title": "Base64Audio",
             "type": "string"
           },
           "sampleRate": {
+            "description": "The audio's sample rate, in Hz.",
             "title": "Samplerate",
             "type": "integer"
           },
           "numChannels": {
+            "description": "The audio's number of channels.",
             "title": "Numchannels",
             "type": "integer"
           }
@@ -3176,6 +3257,7 @@
         "description": "Data structure expected from client messages sent to the RTVI server.",
         "properties": {
           "t": {
+            "description": "The message's type, one of the application's own.",
             "title": "T",
             "type": "string"
           },
@@ -3187,6 +3269,7 @@
               }
             ],
             "default": null,
+            "description": "The message's data, of the application's own.",
             "title": "D"
           }
         },
@@ -3200,6 +3283,7 @@
         "description": "Data structure for server responses to client messages.",
         "properties": {
           "t": {
+            "description": "The `t` of the client message this answers.",
             "title": "T",
             "type": "string"
           },
@@ -3211,6 +3295,7 @@
               }
             ],
             "default": null,
+            "description": "The answer's data, of the application's own.",
             "title": "D"
           }
         },
@@ -3221,21 +3306,25 @@
         "type": "object"
       },
       "STTRawTextMessageData": {
-        "description": "Data for STT raw text messages.\n\nParameters:\n    text: The transcribed text.\n    user_id: Identifier for the user who spoke.\n    timestamp: When the user said it.\n    final: Whether the transcription is final, as opposed to interim.\n    speaker: Who said it, when the STT service's diarization tells speakers\n        apart.",
+        "description": "Data for STT raw text messages.",
         "properties": {
           "text": {
+            "description": "The transcribed text.",
             "title": "Text",
             "type": "string"
           },
           "user_id": {
+            "description": "Identifier for the user who spoke.",
             "title": "User Id",
             "type": "string"
           },
           "timestamp": {
+            "description": "When the user said it.",
             "title": "Timestamp",
             "type": "string"
           },
           "final": {
+            "description": "Whether the transcription is final, as opposed to interim.",
             "title": "Final",
             "type": "boolean"
           },
@@ -3248,7 +3337,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "Who said it, when the STT service's diarization tells speakers apart."
           }
         },
         "required": [
@@ -3261,14 +3351,16 @@
         "type": "object"
       },
       "SendFileData": {
-        "description": "Data format for sending a file to the LLM.\n\nContains the information of the file to send and any options for how the pipeline should process it.",
+        "description": "Data format for sending a file to the LLM.",
         "properties": {
           "content": {
+            "description": "Text that goes with the file, such as a question about it.",
             "title": "Content",
             "type": "string"
           },
           "file": {
-            "$ref": "#/components/schemas/File"
+            "$ref": "#/components/schemas/File",
+            "description": "The file."
           },
           "options": {
             "anyOf": [
@@ -3279,7 +3371,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "How the bot handles the file."
           }
         },
         "required": [
@@ -3294,11 +3387,13 @@
         "properties": {
           "run_immediately": {
             "default": true,
+            "description": "Whether the bot responds to the file right away, interrupting itself if it is speaking. When false, the file waits in the conversation for the bot's next response.",
             "title": "Run Immediately",
             "type": "boolean"
           },
           "audio_response": {
             "default": true,
+            "description": "Whether the bot speaks its response. When false, the response is text only.",
             "title": "Audio Response",
             "type": "boolean"
           },
@@ -3313,6 +3408,7 @@
               }
             ],
             "default": null,
+            "description": "Options for the LLM provider, such as OpenAI's `detail` or Bedrock's `citations`.",
             "title": "Custom Options"
           }
         },
@@ -3320,9 +3416,10 @@
         "type": "object"
       },
       "SendTextData": {
-        "description": "Data format for sending text input to the LLM.\n\nContains the text content to send and any options for how the pipeline should process it.",
+        "description": "Data format for sending text input to the LLM.",
         "properties": {
           "content": {
+            "description": "The text.",
             "title": "Content",
             "type": "string"
           },
@@ -3335,7 +3432,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "How the bot handles the text."
           }
         },
         "required": [
@@ -3345,15 +3443,17 @@
         "type": "object"
       },
       "SendTextOptions": {
-        "description": "Options for sending text input to the LLM.\n\nContains options for how the pipeline should process the text input.",
+        "description": "Options for sending text input to the LLM.",
         "properties": {
           "run_immediately": {
             "default": true,
+            "description": "Whether the bot responds to the text right away, interrupting itself if it is speaking. When false, the text waits in the conversation for the bot's next response.",
             "title": "Run Immediately",
             "type": "boolean"
           },
           "audio_response": {
             "default": true,
+            "description": "Whether the bot speaks its response. When false, the response is text only.",
             "title": "Audio Response",
             "type": "boolean"
           }
@@ -3362,13 +3462,15 @@
         "type": "object"
       },
       "SpokenProgressData": {
-        "description": "Word-level TTS progress within a spoken segment.\n\nParameters:\n    accumulated_text: Text already spoken in this segment, including the current word.\n    remaining_text: Text not yet spoken in this segment.",
+        "description": "Word-level TTS progress within a spoken segment.",
         "properties": {
           "accumulated_text": {
+            "description": "Text already spoken in this segment, including the current word.",
             "title": "Accumulated Text",
             "type": "string"
           },
           "remaining_text": {
+            "description": "Text not yet spoken in this segment.",
             "title": "Remaining Text",
             "type": "string"
           }
@@ -3381,9 +3483,10 @@
         "type": "object"
       },
       "TextMessageData": {
-        "description": "Data for text-based RTVI messages.\n\nContains text content.",
+        "description": "Data for text-based RTVI messages.",
         "properties": {
           "text": {
+            "description": "The text.",
             "title": "Text",
             "type": "string"
           }
@@ -3395,7 +3498,7 @@
         "type": "object"
       },
       "TextType": {
-        "description": "Built-in text types.\n\n``BACKCHANNEL`` is a short acknowledgment the bot says while the user talks,\nsuch as \"Mm-hmm.\". Text can also have a type of its own, such as ``\"code\"``.\n\n``EXPRESSION_SOUND`` and ``EXPRESSION_PAUSE`` are part of expressive\nconversation (alpha): a sound or a silence an LLM writes into its reply,\nwhich isn't spoken as words. The text is the sound's name, as written in\nits tag, or the pause's duration in milliseconds.",
+        "description": "Built-in text types.",
         "enum": [
           "backchannel",
           "expression_sound",
@@ -3408,13 +3511,15 @@
         "type": "string"
       },
       "TranscriptionSpeaker": {
-        "description": "A speaker an STT service's diarization told apart in a transcription stream.\n\nLabels are opaque and provider-specific. Numbers count speakers in the order\nthey first appeared in the STT service's session, so they read the same\nwhatever labels the provider uses. Both only hold within that session: a\nprovider that restarts its labels (e.g. after a reconnect) may give a known\nlabel, and so its number, to a different person, and services that diarize\neach speech segment separately don't keep labels across segments.\n\nParameters:\n    label: The provider's label for the speaker (e.g. ``\"A\"``, ``\"S1\"``,\n        ``\"2\"``).\n    number: The speaker's place in the order speakers first appeared,\n        starting at ``1``.",
+        "description": "A speaker an STT service's diarization told apart in a transcription stream.",
         "properties": {
           "label": {
+            "description": "The provider's label for the speaker (e.g. `\"A\"`, `\"S1\"`, `\"2\"`).",
             "title": "Label",
             "type": "string"
           },
           "number": {
+            "description": "The speaker's place in the order speakers first appeared, starting at `1`.",
             "title": "Number",
             "type": "integer"
           }
@@ -3427,9 +3532,10 @@
         "type": "object"
       },
       "UICancelJobGroupData": {
-        "description": "Inner ``data`` for a ``ui-cancel-job-group`` message.\n\nParameters:\n    job_id: The job group id the client wants cancelled.\n    reason: Optional human-readable reason.",
+        "description": "Inner `data` for a `ui-cancel-job-group` message.",
         "properties": {
           "job_id": {
+            "description": "The job group id the client wants cancelled.",
             "title": "Job Id",
             "type": "string"
           },
@@ -3443,6 +3549,7 @@
               }
             ],
             "default": null,
+            "description": "Optional human-readable reason.",
             "title": "Reason"
           }
         },
@@ -3453,9 +3560,10 @@
         "type": "object"
       },
       "UICommandData": {
-        "description": "Inner ``data`` for a ``ui-command`` message.\n\nParameters:\n    command: App-defined command.\n    payload: App-defined payload (already a plain dict by the\n        time it lands on the wire). The standard command payload models\n        below produce the right shape via ``model_dump()``.",
+        "description": "Inner `data` for a `ui-command` message.",
         "properties": {
           "command": {
+            "description": "App-defined command.",
             "title": "Command",
             "type": "string"
           },
@@ -3467,6 +3575,7 @@
               }
             ],
             "default": null,
+            "description": "App-defined payload, a JSON object.",
             "title": "Payload"
           }
         },
@@ -3477,9 +3586,10 @@
         "type": "object"
       },
       "UIEventData": {
-        "description": "Inner ``data`` for a ``ui-event`` message.\n\nParameters:\n    event: App-defined event.\n    payload: App-defined payload, schemaless by design.",
+        "description": "Inner `data` for a `ui-event` message.",
         "properties": {
           "event": {
+            "description": "App-defined event.",
             "title": "Event",
             "type": "string"
           },
@@ -3491,6 +3601,7 @@
               }
             ],
             "default": null,
+            "description": "App-defined payload, schemaless by design.",
             "title": "Payload"
           }
         },
@@ -3501,23 +3612,27 @@
         "type": "object"
       },
       "UIJobCompletedData": {
-        "description": "``data`` for a ``ui-job-group`` envelope with kind ``job_completed``.\n\nParameters:\n    kind: Always ``\"job_completed\"``.\n    job_id: The shared job-group identifier.\n    worker_name: The worker that produced the response.\n    status: Completion status string.\n    response: The worker's response payload.\n    at: Epoch milliseconds when the response was received.",
+        "description": "`data` for a `ui-job-group` envelope with kind `job_completed`.",
         "properties": {
           "kind": {
             "const": "job_completed",
             "default": "job_completed",
+            "description": "Always `\"job_completed\"`.",
             "title": "Kind",
             "type": "string"
           },
           "job_id": {
+            "description": "The shared job-group identifier.",
             "title": "Job Id",
             "type": "string"
           },
           "worker_name": {
+            "description": "The worker that produced the response.",
             "title": "Worker Name",
             "type": "string"
           },
           "status": {
+            "description": "Completion status string.",
             "title": "Status",
             "type": "string"
           },
@@ -3529,10 +3644,12 @@
               }
             ],
             "default": null,
+            "description": "The worker's response payload.",
             "title": "Response"
           },
           "at": {
             "default": 0,
+            "description": "Epoch milliseconds when the response was received.",
             "title": "At",
             "type": "integer"
           }
@@ -3546,20 +3663,23 @@
         "type": "object"
       },
       "UIJobGroupCompletedData": {
-        "description": "``data`` for a ``ui-job-group`` envelope with kind ``group_completed``.\n\nParameters:\n    kind: Always ``\"group_completed\"``.\n    job_id: The shared job-group identifier.\n    at: Epoch milliseconds when the group completed.",
+        "description": "`data` for a `ui-job-group` envelope with kind `group_completed`.",
         "properties": {
           "kind": {
             "const": "group_completed",
             "default": "group_completed",
+            "description": "Always `\"group_completed\"`.",
             "title": "Kind",
             "type": "string"
           },
           "job_id": {
+            "description": "The shared job-group identifier.",
             "title": "Job Id",
             "type": "string"
           },
           "at": {
             "default": 0,
+            "description": "Epoch milliseconds when the group completed.",
             "title": "At",
             "type": "integer"
           }
@@ -3571,15 +3691,17 @@
         "type": "object"
       },
       "UIJobGroupStartedData": {
-        "description": "``data`` for a ``ui-job-group`` envelope with kind ``group_started``.\n\nParameters:\n    kind: Always ``\"group_started\"``.\n    job_id: Shared job-group identifier for the group.\n    workers: Names of the workers the work was dispatched to.\n    label: Optional human-readable label for the group.\n    cancellable: Whether the client may request cancellation.\n    at: Epoch milliseconds when the group started.",
+        "description": "`data` for a `ui-job-group` envelope with kind `group_started`.",
         "properties": {
           "kind": {
             "const": "group_started",
             "default": "group_started",
+            "description": "Always `\"group_started\"`.",
             "title": "Kind",
             "type": "string"
           },
           "job_id": {
+            "description": "Shared job-group identifier for the group.",
             "title": "Job Id",
             "type": "string"
           },
@@ -3596,6 +3718,7 @@
               }
             ],
             "default": null,
+            "description": "Names of the workers the work was dispatched to.",
             "title": "Workers"
           },
           "label": {
@@ -3608,15 +3731,18 @@
               }
             ],
             "default": null,
+            "description": "Optional human-readable label for the group.",
             "title": "Label"
           },
           "cancellable": {
             "default": true,
+            "description": "Whether the client may request cancellation.",
             "title": "Cancellable",
             "type": "boolean"
           },
           "at": {
             "default": 0,
+            "description": "Epoch milliseconds when the group started.",
             "title": "At",
             "type": "integer"
           }
@@ -3628,19 +3754,22 @@
         "type": "object"
       },
       "UIJobUpdateData": {
-        "description": "``data`` for a ``ui-job-group`` envelope with kind ``job_update``.\n\nParameters:\n    kind: Always ``\"job_update\"``.\n    job_id: The shared job-group identifier.\n    worker_name: The worker that produced the update.\n    data: The worker's update payload, forwarded verbatim.\n    at: Epoch milliseconds when the update was emitted.",
+        "description": "`data` for a `ui-job-group` envelope with kind `job_update`.",
         "properties": {
           "kind": {
             "const": "job_update",
             "default": "job_update",
+            "description": "Always `\"job_update\"`.",
             "title": "Kind",
             "type": "string"
           },
           "job_id": {
+            "description": "The shared job-group identifier.",
             "title": "Job Id",
             "type": "string"
           },
           "worker_name": {
+            "description": "The worker that produced the update.",
             "title": "Worker Name",
             "type": "string"
           },
@@ -3652,10 +3781,12 @@
               }
             ],
             "default": null,
+            "description": "The worker's update payload, forwarded verbatim.",
             "title": "Data"
           },
           "at": {
             "default": 0,
+            "description": "Epoch milliseconds when the update was emitted.",
             "title": "At",
             "type": "integer"
           }
@@ -3668,10 +3799,11 @@
         "type": "object"
       },
       "UISnapshotData": {
-        "description": "Inner ``data`` for a ``ui-snapshot`` message.\n\nThe accessibility snapshot tree mirrors the client-side\n``A11ySnapshot`` wire shape and is kept forward-compatible by\nallowing extra fields on the snapshot models.\n\nParameters:\n    tree: The serialized accessibility tree.",
+        "description": "Inner `data` for a `ui-snapshot` message.",
         "properties": {
           "tree": {
-            "$ref": "#/components/schemas/A11ySnapshot"
+            "$ref": "#/components/schemas/A11ySnapshot",
+            "description": "The serialized accessibility tree."
           }
         },
         "required": [
@@ -3681,13 +3813,15 @@
         "type": "object"
       },
       "UserInputMessageData": {
-        "description": "Data for user input messages.\n\nParameters:\n    text: What the user said or typed.\n    input_type: What kind of input it is: ``\"transcription\"`` for speech\n        transcribed by the STT, ``\"chat\"`` for text the client sent, or\n        ``\"backchannel\"`` for a short acknowledgment the user said while the\n        bot talks, such as \"mhm\".\n    timestamp: When the user said or sent it.\n    final: Whether the text is final. Only an interim transcription isn't.\n    user_id: Identifier for the user who spoke or typed. For chat, set only\n        when the transport knows the sender, such as Daily and LiveKit.\n    msg_id: For chat, the id of the client's ``send-text`` message.\n    perception: For a transcription, how the user said it, when the STT\n        service reports a reading with it. Part of expressive conversation\n        (alpha).\n    speaker: For a transcription, who said it, when the STT service's\n        diarization tells speakers apart.",
+        "description": "Data for user input messages.",
         "properties": {
           "text": {
+            "description": "What the user said or typed.",
             "title": "Text",
             "type": "string"
           },
           "input_type": {
+            "description": "What kind of input it is: `\"transcription\"` for speech transcribed by the STT, `\"chat\"` for text the client sent, or `\"backchannel\"` for a short acknowledgment the user said while the bot talks, such as \"mhm\".",
             "enum": [
               "transcription",
               "chat",
@@ -3697,10 +3831,12 @@
             "type": "string"
           },
           "timestamp": {
+            "description": "When the user said or sent it.",
             "title": "Timestamp",
             "type": "string"
           },
           "final": {
+            "description": "Whether the text is final. Only an interim transcription isn't.",
             "title": "Final",
             "type": "boolean"
           },
@@ -3714,6 +3850,7 @@
               }
             ],
             "default": null,
+            "description": "Identifier for the user who spoke or typed. For chat, set only when the transport knows the sender, such as Daily and LiveKit.",
             "title": "User Id"
           },
           "msg_id": {
@@ -3726,6 +3863,7 @@
               }
             ],
             "default": null,
+            "description": "For chat, the id of the client's `send-text` message.",
             "title": "Msg Id"
           },
           "perception": {
@@ -3741,6 +3879,7 @@
               }
             ],
             "default": null,
+            "description": "For a transcription, how the user said it, when the STT service reports a reading with it. Part of expressive conversation (alpha).",
             "title": "Perception"
           },
           "speaker": {
@@ -3752,7 +3891,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "For a transcription, who said it, when the STT service's diarization tells speakers apart."
           }
         },
         "required": [
@@ -3765,13 +3905,15 @@
         "type": "object"
       },
       "UserPerceptionLabel": {
-        "description": "A label of a perception signal, with how sure the reading is.\n\nParameters:\n    label: The label, such as ``\"frustrated\"``.\n    confidence: How sure the reading is, from 0 to 1.",
+        "description": "A label of a perception signal, with how sure the reading is.",
         "properties": {
           "label": {
+            "description": "The label, such as `\"frustrated\"`.",
             "title": "Label",
             "type": "string"
           },
           "confidence": {
+            "description": "How sure the reading is, from 0 to 1.",
             "title": "Confidence",
             "type": "number"
           }
@@ -3784,14 +3926,16 @@
         "type": "object"
       },
       "UserPerceptionSignal": {
-        "description": "One signal of a reading of how the user spoke.\n\nParameters:\n    name: What is read, such as ``\"tone\"``.\n    labels: The likeliest labels, likeliest first, for a signal read as labels.\n    value: The measure, for a signal read as a value.",
+        "description": "One signal of a reading of how the user spoke.",
         "properties": {
           "name": {
+            "description": "What is read, such as `\"tone\"`.",
             "title": "Name",
             "type": "string"
           },
           "labels": {
             "default": [],
+            "description": "The likeliest labels, likeliest first, for a signal read as labels.",
             "items": {
               "$ref": "#/components/schemas/UserPerceptionLabel"
             },
@@ -3808,6 +3952,7 @@
               }
             ],
             "default": null,
+            "description": "The measure, for a signal read as a value.",
             "title": "Value"
           }
         },
@@ -3818,21 +3963,25 @@
         "type": "object"
       },
       "UserTranscriptionMessageData": {
-        "description": "Data for user transcription messages.\n\nContains transcription text and metadata.\n\n.. deprecated:: 1.13.0\n    Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.",
+        "description": "Data for user transcription messages.",
         "properties": {
           "text": {
+            "description": "The transcribed text.",
             "title": "Text",
             "type": "string"
           },
           "user_id": {
+            "description": "Identifier for the user who spoke.",
             "title": "User Id",
             "type": "string"
           },
           "timestamp": {
+            "description": "When the user said it.",
             "title": "Timestamp",
             "type": "string"
           },
           "final": {
+            "description": "Whether the transcription is final, as opposed to interim.",
             "title": "Final",
             "type": "boolean"
           }
@@ -3906,7 +4055,7 @@
     },
     {
       "id": "messages-turned-off",
-      "description": "The server sends a message that has x-rtvi-enabled-by only while that RTVIObserverParams field is on.",
+      "description": "The server sends a message that has x-rtvi-enabled-by only while the server setting it names is on. The settings are fields of Pipecat's RTVIObserverParams.",
       "messages": []
     },
     {

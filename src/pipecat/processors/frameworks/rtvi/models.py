@@ -67,7 +67,12 @@ class Message(BaseModel):
 
 
 class RawClientMessageData(BaseModel):
-    """Data structure expected from client messages sent to the RTVI server."""
+    """Data structure expected from client messages sent to the RTVI server.
+
+    Parameters:
+        t: The message's type, one of the application's own.
+        d: The message's data, of the application's own.
+    """
 
     t: str
     d: Any | None = None
@@ -82,7 +87,12 @@ class ClientMessage(BaseModel):
 
 
 class RawServerResponseData(BaseModel):
-    """Data structure for server responses to client messages."""
+    """Data structure for server responses to client messages.
+
+    Parameters:
+        t: The ``t`` of the client message this answers.
+        d: The answer's data, of the application's own.
+    """
 
     t: str
     d: Any | None = None
@@ -105,6 +115,13 @@ class AboutClientData(BaseModel):
 
     Contains information about the client, including which RTVI library it
     is using, what platform it is on and any additional details, if available.
+
+    Parameters:
+        library: The RTVI library the client uses, such as ``@pipecat-ai/client-js``.
+        library_version: The version of that library.
+        platform: The platform the client runs on, such as a browser or ``iOS``.
+        platform_version: The platform's version.
+        platform_details: Anything else the client says about its platform.
     """
 
     library: str
@@ -118,6 +135,10 @@ class ClientReadyData(BaseModel):
     """Data format of client ready messages.
 
     Contains the RTVI protocol version and client information.
+
+    Parameters:
+        version: The RTVI protocol version the client speaks, such as ``2.3.0``.
+        about: Information about the client.
     """
 
     version: str
@@ -131,6 +152,9 @@ class ErrorResponseData(BaseModel):
     """Data for an RTVI error response.
 
     Contains the error message to send back to the client.
+
+    Parameters:
+        error: What went wrong.
     """
 
     error: str
@@ -152,10 +176,14 @@ class ErrorData(BaseModel):
     """Data for an RTVI error event.
 
     Contains error information including whether it's fatal.
+
+    Parameters:
+        error: What went wrong.
+        fatal: Whether the bot stopped because of the error.
     """
 
     error: str
-    fatal: bool  # Indicates the pipeline has stopped due to this error
+    fatal: bool
 
 
 class Error(BaseModel):
@@ -211,6 +239,11 @@ class LLMFunctionCallMessageData(BaseModel):
 
     Contains function call details including name, ID, and arguments.
 
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call.
+        args: Arguments passed to the function.
+
     .. deprecated:: 0.0.102
         Use :class:`LLMFunctionCallInProgressMessageData` instead. Will be removed in 2.0.0.
     """
@@ -243,6 +276,13 @@ class SendTextOptions(BaseModel):
     """Options for sending text input to the LLM.
 
     Contains options for how the pipeline should process the text input.
+
+    Parameters:
+        run_immediately: Whether the bot responds to the text right away,
+            interrupting itself if it is speaking. When false, the text waits in
+            the conversation for the bot's next response.
+        audio_response: Whether the bot speaks its response. When false, the
+            response is text only.
     """
 
     run_immediately: bool = True
@@ -253,6 +293,10 @@ class SendTextData(BaseModel):
     """Data format for sending text input to the LLM.
 
     Contains the text content to send and any options for how the pipeline should process it.
+
+    Parameters:
+        content: The text.
+        options: How the bot handles the text.
     """
 
     content: str
@@ -266,10 +310,17 @@ class FileSource(BaseModel):
 
 
 class FileBytes(FileSource):
-    """File source as base64-encoded bytes."""
+    """File source as base64-encoded bytes.
+
+    Parameters:
+        type: Always ``"bytes"``.
+        bytes: The file's content, base64-encoded.
+        width: For an image, its width in pixels.
+        height: For an image, its height in pixels.
+    """
 
     type: RTVIFileSourceType = "bytes"
-    bytes: str  # base64-encoded string
+    bytes: str
     width: int | None = None
     height: int | None = None
 
@@ -278,6 +329,7 @@ class FileUrl(FileSource):
     """File source as a URL.
 
     Parameters:
+        type: Always ``"url"``.
         url: The file's URL: whatever the ``POST /files`` upload endpoint
             returned (``pipecat:<id>`` with the default local storage, or a
             URL minted by a custom storage backend), a cloud-storage URI
@@ -293,28 +345,49 @@ class FileUrl(FileSource):
 
 
 class File(BaseModel):
-    """File data structure for RTVI file sending."""
+    """File data structure for RTVI file sending.
 
-    format: str  # Mime format of the file, e.g., 'application/pdf'
+    Parameters:
+        format: The file's MIME type, such as ``application/pdf`` or ``image/png``.
+        name: The file's name.
+        source: Where the file's content is: its bytes, or a URL.
+    """
+
+    format: str
     name: str | None = None
     source: FileBytes | FileUrl
 
 
 class SendFileOptions(BaseModel):
-    """Options for sending a file to the LLM."""
+    """Options for sending a file to the LLM.
+
+    Parameters:
+        run_immediately: Whether the bot responds to the file right away,
+            interrupting itself if it is speaking. When false, the file waits in
+            the conversation for the bot's next response.
+        audio_response: Whether the bot speaks its response. When false, the
+            response is text only.
+        custom_options: Options for the LLM provider, such as OpenAI's ``detail``
+            or Bedrock's ``citations``.
+    """
 
     run_immediately: bool = True
     audio_response: bool = True
-    custom_options: dict | None = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+    custom_options: dict | None = None
 
 
 class SendFileData(BaseModel):
     """Data format for sending a file to the LLM.
 
     Contains the information of the file to send and any options for how the pipeline should process it.
+
+    Parameters:
+        content: Text that goes with the file, such as a question about it.
+        file: The file.
+        options: How the bot handles the file.
     """
 
-    content: str  # Text to accompany the file
+    content: str
     file: File
     options: SendFileOptions | None = None
 
@@ -327,6 +400,9 @@ class DTMFInputData(BaseModel):
     exactly as a telephony transport would deliver rapid keypresses.
 
     Protocol 2.1.0 replaced the single ``button`` field with ``buttons``.
+
+    Parameters:
+        buttons: The keys pressed, in order: ``0``-``9``, ``*`` or ``#``.
     """
 
     buttons: list[KeypadEntry] = Field(min_length=1)
@@ -388,6 +464,12 @@ class LLMFunctionCallResultData(BaseModel):
     """Data for LLM function call result.
 
     Contains function call details and result.
+
+    Parameters:
+        function_name: Name of the function called.
+        tool_call_id: Unique identifier of the call, as the server reported it.
+        arguments: Arguments the function was called with.
+        result: What the function returned.
     """
 
     function_name: str
@@ -486,7 +568,8 @@ class BotTTSStoppedMessage(BaseModel):
 class TextMessageData(BaseModel):
     """Data for text-based RTVI messages.
 
-    Contains text content.
+    Parameters:
+        text: The text.
     """
 
     text: str
@@ -534,6 +617,7 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
+        text: The text.
         output_type: What form the text is in (e.g., sentence, code, etc.).
         text_type: What form the text is in, always the same as ``output_type``.
 
@@ -547,7 +631,8 @@ class BotOutputMessageData(TextMessageData):
                 Use ``output_type`` instead.
                 Will be removed in 2.0.0.
 
-        segment_id: ID of the source AggregatedTextFrame.
+        segment_id: Identifies the segment the text belongs to; every message
+            about one segment, such as its spoken progress, carries the same id.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
         spoken_status: **(v2+)** Lifecycle status of the segment: ``"new"`` on
@@ -630,9 +715,9 @@ class BotLLMMarkerMessageData(BaseModel):
     Parameters:
         text: The marker as the LLM produced it; empty when the response
             carried none.
-        kind: What the marker means, in the emitter's vocabulary (the
-            turn-completion mixin's ``complete``, ``short`` or ``long``), or
-            ``None`` when the emitter gave none.
+        kind: What the marker means, such as ``complete``, ``short`` or ``long``
+            for the markers that say whether the user's turn was complete, or
+            ``None`` when it means nothing the server knows.
         raw: The response's text as the LLM produced it, markers included.
         markers: Every marker the emitter recognizes.
     """
@@ -710,6 +795,12 @@ class UserTranscriptionMessageData(BaseModel):
     """Data for user transcription messages.
 
     Contains transcription text and metadata.
+
+    Parameters:
+        text: The transcribed text.
+        user_id: Identifier for the user who spoke.
+        timestamp: When the user said it.
+        final: Whether the transcription is final, as opposed to interim.
 
     .. deprecated:: 1.13.0
         Use :class:`STTRawTextMessageData` instead. Will be removed in 2.0.0.
@@ -961,7 +1052,11 @@ class ServerMessage(BaseModel):
 
 
 class AudioLevelMessageData(BaseModel):
-    """Data format for sending audio levels."""
+    """Data format for sending audio levels.
+
+    Parameters:
+        value: How loud the audio is, from 0 (quiet) to 1 (loud).
+    """
 
     value: float
 
@@ -1046,9 +1141,7 @@ class UICommandData(BaseModel):
 
     Parameters:
         command: App-defined command.
-        payload: App-defined payload (already a plain dict by the
-            time it lands on the wire). The standard command payload models
-            below produce the right shape via ``model_dump()``.
+        payload: App-defined payload, a JSON object.
     """
 
     command: str
