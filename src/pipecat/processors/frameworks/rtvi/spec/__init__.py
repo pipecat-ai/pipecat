@@ -112,16 +112,25 @@ def _client(
 
 
 def _server(
-    model: type[BaseModel], description: str, example: Any = None, **kwargs
+    model: type[BaseModel],
+    description: str,
+    example: Any = None,
+    data_type: Any = None,
+    **kwargs,
 ) -> RTVIMessageSpec:
-    """Describe a message the server sends, from the model it sends it with."""
+    """Describe a message the server sends, from the model it sends it with.
+
+    ``data_type`` describes the message's ``data`` more precisely than the
+    model does, for data the model leaves open but the server sends in a
+    known shape.
+    """
     fields = model.model_fields
     data = fields.get("data")
     return RTVIMessageSpec(
         type=fields["type"].default,
         direction="server-to-client",
         description=description,
-        data=data.annotation if data else None,
+        data=data_type or (data.annotation if data else None),
         data_required=bool(data and data.is_required()),
         has_id="id" in fields,
         example=example,
@@ -294,6 +303,7 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "Performance metrics of the bot's services, such as how long each took to respond "
         "and how much it processed.",
         {"ttfb": [{"processor": "OpenAILLMService#0", "value": 0.42}]},
+        data_type=RTVI.MetricsMessageData,
         enabled_by="metrics_enabled",
     ),
     _server(

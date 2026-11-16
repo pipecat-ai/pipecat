@@ -60,7 +60,17 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    STTUsage,
+    STTUsageMetricsData,
+    TTFAMetricsData,
+    TTFATMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
+)
 from pipecat.observers.base_observer import FramePushed
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -231,8 +241,30 @@ async def _run_session(client_version: str, params: RTVIObserverParams = _EVERYT
         await session.push(RTVIServerResponseFrame(client_msg=client_message, data={"t": 21}))
         await session.push(RTVIServerResponseFrame(client_msg=client_message, error="No city"))
         await session.push(RTVIServerMessageFrame(data={"event": "order-shipped"}))
+        # Every kind of metric, so the document's metrics schema is checked whole.
         await session.push(
-            MetricsFrame(data=[TTFBMetricsData(processor="OpenAILLMService#0", value=0.4)])
+            MetricsFrame(
+                data=[
+                    TTFBMetricsData(processor="OpenAILLMService#0", value=0.4),
+                    TTFAMetricsData(
+                        processor="CartesiaTTSService#0", ttfa=0.6, ttfb=0.2, leading_silence=0.4
+                    ),
+                    TTFATMetricsData(
+                        processor="OpenAILLMService#0", ttfat=0.9, ttfb=0.4, thinking_time=0.5
+                    ),
+                    ProcessingMetricsData(processor="OpenAILLMService#0", value=0.05),
+                    LLMUsageMetricsData(
+                        processor="OpenAILLMService#0",
+                        value=LLMTokenUsage(
+                            prompt_tokens=10, completion_tokens=20, total_tokens=30
+                        ),
+                    ),
+                    STTUsageMetricsData(
+                        processor="DeepgramSTTService#0", value=STTUsage(audio_seconds=1.5)
+                    ),
+                    TTSUsageMetricsData(processor="CartesiaTTSService#0", value=42),
+                ]
+            )
         )
         logger.info("Conformance test log line")
         await logger.complete()

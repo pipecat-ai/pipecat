@@ -1206,8 +1206,7 @@
               "const": "metrics"
             },
             "data": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/MetricsMessageData"
             }
           },
           "required": [
@@ -3548,6 +3547,262 @@
         "title": "LLMFunctionCallStoppedMessageData",
         "type": "object"
       },
+      "LLMTokenUsage": {
+        "description": "Token usage statistics for LLM operations.",
+        "properties": {
+          "prompt_tokens": {
+            "description": "Number of tokens in the input prompt, net or gross of the cache counts depending on the service. Includes tool results the provider feeds back to the model, which are billed as input.",
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "description": "Number of tokens in the generated completion, including any reasoning tokens.",
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "description": "Total number of tokens used, including any cached input tokens.",
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of tokens read from cache, if applicable. Billed below the input rate.",
+            "title": "Cache Read Input Tokens"
+          },
+          "cache_creation_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of tokens written to cache, if applicable. Billed at or above the input rate.",
+            "title": "Cache Creation Input Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of completion tokens used for reasoning, if applicable.",
+            "title": "Reasoning Tokens"
+          },
+          "input_audio_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of prompt tokens that were audio, if applicable.",
+            "title": "Input Audio Tokens"
+          },
+          "output_audio_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of completion tokens that were audio, if applicable.",
+            "title": "Output Audio Tokens"
+          },
+          "cache_read_input_audio_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Number of cache-read tokens that were audio, if applicable.",
+            "title": "Cache Read Input Audio Tokens"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "title": "LLMTokenUsage",
+        "type": "object"
+      },
+      "MetricsMessageData": {
+        "description": "Data for a metrics message: the metrics the bot's services reported.",
+        "properties": {
+          "processing": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProcessingMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long each service took to process, in seconds.",
+            "title": "Processing"
+          },
+          "ttfb": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TTFBMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Each service's time to first byte, in seconds.",
+            "title": "Ttfb"
+          },
+          "ttfa": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TTFAMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Each TTS service's time to first audio: its time to first byte plus any silence before the first audible sample.",
+            "title": "Ttfa"
+          },
+          "ttfat": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TTFATMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Each LLM service's time to first answer token: its time to first byte plus any reasoning it streamed first.",
+            "title": "Ttfat"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LLMTokenUsage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The tokens each LLM call used.",
+            "title": "Tokens"
+          },
+          "stt_usage": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/STTUsageMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How much audio each STT service received.",
+            "title": "Stt Usage"
+          },
+          "characters": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TTSUsageMetricsData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many characters each TTS service spoke.",
+            "title": "Characters"
+          }
+        },
+        "title": "MetricsMessageData",
+        "type": "object"
+      },
+      "ProcessingMetricsData": {
+        "description": "General processing time metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "value": {
+            "description": "Processing time measurement in seconds.",
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "processor",
+          "value"
+        ],
+        "title": "ProcessingMetricsData",
+        "type": "object"
+      },
       "RawAudioBatchData": {
         "description": "Data format for a `raw-audio-batch` message: several chunks of the user's audio.",
         "properties": {
@@ -3702,6 +3957,52 @@
         "title": "STTRawTextMessageData",
         "type": "object"
       },
+      "STTUsage": {
+        "description": "Usage statistics for STT operations.",
+        "properties": {
+          "audio_seconds": {
+            "description": "Client-measured seconds of audio submitted to the service since the last usage report.",
+            "title": "Audio Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "audio_seconds"
+        ],
+        "title": "STTUsage",
+        "type": "object"
+      },
+      "STTUsageMetricsData": {
+        "description": "Speech-to-Text usage metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "value": {
+            "$ref": "#/components/schemas/STTUsage",
+            "description": "Usage statistics for the STT operation."
+          }
+        },
+        "required": [
+          "processor",
+          "value"
+        ],
+        "title": "STTUsageMetricsData",
+        "type": "object"
+      },
       "SendFileData": {
         "description": "Data format for sending a file to the LLM.",
         "properties": {
@@ -3832,6 +4133,158 @@
           "remaining_text"
         ],
         "title": "SpokenProgressData",
+        "type": "object"
+      },
+      "TTFAMetricsData": {
+        "description": "Time To First Audio (TTFA) metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "ttfa": {
+            "description": "TTFA measurement in seconds (`ttfb` plus `leading_silence`).",
+            "title": "Ttfa",
+            "type": "number"
+          },
+          "ttfb": {
+            "description": "Time-to-first-byte that TTFA builds on, in seconds. This mirrors the standalone `TTFBMetricsData` (emitted earlier) for convenience; it is not a separate measurement, so don't aggregate both.",
+            "title": "Ttfb",
+            "type": "number"
+          },
+          "leading_silence": {
+            "description": "Silence padding before the first audible sample, in seconds (`ttfa` minus `ttfb`).",
+            "title": "Leading Silence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "processor",
+          "ttfa",
+          "ttfb",
+          "leading_silence"
+        ],
+        "title": "TTFAMetricsData",
+        "type": "object"
+      },
+      "TTFATMetricsData": {
+        "description": "Time To First Answer Token (TTFAT) metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "ttfat": {
+            "description": "TTFAT measurement in seconds (`ttfb` plus `thinking_time`).",
+            "title": "Ttfat",
+            "type": "number"
+          },
+          "ttfb": {
+            "description": "Time-to-first-byte that TTFAT builds on, in seconds. This mirrors the standalone `TTFBMetricsData` (emitted earlier) for convenience; it is not a separate measurement, so don't aggregate both.",
+            "title": "Ttfb",
+            "type": "number"
+          },
+          "thinking_time": {
+            "description": "Time between the model's first output and the first answer token, in seconds (`ttfat` minus `ttfb`). Reasoning is the usual reason a model streams something before it starts answering, though a model that reasons none still spends a little time here.",
+            "title": "Thinking Time",
+            "type": "number"
+          }
+        },
+        "required": [
+          "processor",
+          "ttfat",
+          "ttfb",
+          "thinking_time"
+        ],
+        "title": "TTFATMetricsData",
+        "type": "object"
+      },
+      "TTFBMetricsData": {
+        "description": "Time To First Byte (TTFB) metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "value": {
+            "description": "TTFB measurement in seconds.",
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "processor",
+          "value"
+        ],
+        "title": "TTFBMetricsData",
+        "type": "object"
+      },
+      "TTSUsageMetricsData": {
+        "description": "Text-to-Speech usage metrics data.",
+        "properties": {
+          "processor": {
+            "title": "Processor",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "value": {
+            "description": "Number of characters processed by TTS.",
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "processor",
+          "value"
+        ],
+        "title": "TTSUsageMetricsData",
         "type": "object"
       },
       "TextMessageData": {

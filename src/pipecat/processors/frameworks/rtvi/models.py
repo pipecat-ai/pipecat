@@ -27,6 +27,15 @@ from pipecat.frames.frames import (
     TextType,
     TranscriptionSpeaker,
 )
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    ProcessingMetricsData,
+    STTUsageMetricsData,
+    TTFAMetricsData,
+    TTFATMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
+)
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.utils.deprecation import deprecated
 
@@ -1027,6 +1036,34 @@ class BotInterruptedMessage(BaseModel):
 
     label: MessageLiteral = MESSAGE_LABEL
     type: Literal["bot-interrupted"] = "bot-interrupted"
+
+
+class MetricsMessageData(BaseModel):
+    """Data for a metrics message: the metrics the bot's services reported.
+
+    Each kind of metric is a list with one entry per report, and a kind no
+    service reported is left out. :class:`MetricsMessage` carries it as a
+    plain mapping; this model describes its shape for the RTVI specification.
+
+    Parameters:
+        processing: How long each service took to process, in seconds.
+        ttfb: Each service's time to first byte, in seconds.
+        ttfa: Each TTS service's time to first audio: its time to first byte plus
+            any silence before the first audible sample.
+        ttfat: Each LLM service's time to first answer token: its time to first
+            byte plus any reasoning it streamed first.
+        tokens: The tokens each LLM call used.
+        stt_usage: How much audio each STT service received.
+        characters: How many characters each TTS service spoke.
+    """
+
+    processing: list[ProcessingMetricsData] | None = None
+    ttfb: list[TTFBMetricsData] | None = None
+    ttfa: list[TTFAMetricsData] | None = None
+    ttfat: list[TTFATMetricsData] | None = None
+    tokens: list[LLMTokenUsage] | None = None
+    stt_usage: list[STTUsageMetricsData] | None = None
+    characters: list[TTSUsageMetricsData] | None = None
 
 
 class MetricsMessage(BaseModel):
