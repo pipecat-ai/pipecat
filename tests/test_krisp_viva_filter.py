@@ -87,6 +87,13 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         )
         self.sample_rates_patch.start()
 
+        # krisp_instance keeps the krisp_audio module from whichever test file
+        # imported it first, which may be another file's mock without a version.
+        self.krisp_instance_patch = patch(
+            "pipecat.audio.krisp_instance.krisp_audio", self.mock_krisp_audio
+        )
+        self.krisp_instance_patch.start()
+
         # Patch KrispVivaSDKManager
         self.sdk_manager_patcher = patch(
             "pipecat.audio.filters.krisp_viva_filter.KrispVivaSDKManager"
@@ -99,6 +106,7 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         """Clean up test fixtures after each test method."""
         # Stop all patchers
         self.sample_rates_patch.stop()
+        self.krisp_instance_patch.stop()
         self.sdk_manager_patcher.stop()
 
         # Remove temporary model file
@@ -125,6 +133,14 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
 
             # Verify SDK was NOT acquired during initialization (happens in start())
             self.mock_sdk_manager.acquire.assert_not_called()
+            self.assertEqual(filter_instance._model_path, self.model_path)
+
+    async def test_initialization_with_deprecated_env_variable(self):
+        """Test that the KRISP_VIVA_MODEL_PATH fallback works and warns."""
+        with patch.dict(os.environ, {"KRISP_VIVA_MODEL_PATH": self.model_path}, clear=True):
+            with self.assertWarnsRegex(DeprecationWarning, "KRISP_VIVA_MODEL_PATH"):
+                filter_instance = KrispVivaFilter()
+
             self.assertEqual(filter_instance._model_path, self.model_path)
 
     async def test_initialization_without_model_path(self):

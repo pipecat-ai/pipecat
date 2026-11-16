@@ -24,8 +24,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams, VideoInSourceParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -40,6 +41,20 @@ transport_params = {
         audio_out_enabled=True,
         audio_out_10ms_chunks=2,
         video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(framerate=30),
+        },
+        video_out_enabled=True,
+        video_out_is_live=True,
+    ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_10ms_chunks=2,
+        video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(framerate=30),
+        },
         video_out_enabled=True,
         video_out_is_live=True,
     ),
@@ -48,6 +63,9 @@ transport_params = {
         audio_out_enabled=True,
         audio_out_10ms_chunks=2,
         video_in_enabled=True,
+        video_in_sources={
+            "camera": VideoInSourceParams(framerate=30),
+        },
         video_out_enabled=True,
         video_out_is_live=True,
     ),
@@ -155,10 +173,6 @@ async def run_bot(pipecat_transport):
     @pipecat_transport.event_handler("on_client_connected")
     async def on_client_connected(transport, participant):
         logger.info("Pipecat Client connected")
-        if isinstance(transport, DailyTransport):
-            await pipecat_transport.capture_participant_video(participant["id"], framerate=30)
-        else:
-            await pipecat_transport.capture_participant_video("camera")
 
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

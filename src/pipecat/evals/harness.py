@@ -12,8 +12,6 @@
     Will be removed in 2.0.0.
 """
 
-import warnings
-
 # Everything the module used to define or import at its old path, from where it
 # lives now; the star import covers the scripted session's constants.
 from pipecat.evals.client import BOT_READY_TIMEOUT_S  # noqa: F401
@@ -29,13 +27,11 @@ from pipecat.evals.script import EvalScenario, EvalTurn  # noqa: F401
 from pipecat.evals.script_driver import SEND_AFTER_MAX_WAIT_S, SEND_AFTER_POLL_S  # noqa: F401
 from pipecat.evals.script_session import *  # noqa: F401,F403
 from pipecat.evals.session import DEFAULT_EVENT_TIMEOUT_MS, EvalSession  # noqa: F401
+from pipecat.utils.deprecation import warn_deprecated
 
-with warnings.catch_warnings():
-    warnings.simplefilter("always")
-    warnings.warn(
-        "`pipecat.evals.harness` is deprecated since 1.9.0 and will be removed in 2.0.0. "
-        "Use `pipecat.evals.session` for `EvalSession` and `DEFAULT_EVENT_TIMEOUT_MS`, and "
-        "`pipecat.evals.script_session` for the rest.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+warn_deprecated(
+    "`pipecat.evals.harness` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+    "Use `pipecat.evals.session` and `pipecat.evals.script_session` instead. "
+    "`EvalSession` and `DEFAULT_EVENT_TIMEOUT_MS` are in the first, the rest in the second.",
+    stacklevel=2,
+)

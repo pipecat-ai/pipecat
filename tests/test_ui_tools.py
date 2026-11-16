@@ -15,15 +15,18 @@ canonical ``reply`` shape doesn't fit.
 """
 
 import unittest
+import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 from pipecat.bus.ui.messages import BusUICommandMessage
 from pipecat.workers.llm.tool_decorator import _collect_tools
 from pipecat.workers.ui import ReplyToolMixin, UIWorker
 
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
 
-class _WorkerWithReply(ReplyToolMixin, UIWorker):
-    pass
+    class _WorkerWithReply(ReplyToolMixin, UIWorker):
+        pass
 
 
 class _PlainWorker(UIWorker):
@@ -152,6 +155,12 @@ class TestUIWorkerActionHelpers(unittest.IsolatedAsyncioTestCase):
 
 
 class TestReplyToolMixin(unittest.IsolatedAsyncioTestCase):
+    async def test_composing_the_mixin_warns(self):
+        with self.assertWarns(DeprecationWarning):
+
+            class _Composed(ReplyToolMixin, UIWorker):
+                pass
+
     async def test_mixin_exposes_reply_tool(self):
         worker = _new(_WorkerWithReply)
         tool_names = [t.__name__ for t in _collect_tools(worker)]

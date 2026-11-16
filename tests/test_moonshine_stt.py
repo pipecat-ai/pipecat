@@ -12,7 +12,14 @@ import types
 
 import pytest
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.worker import PipelineParams
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
 # Architectures published per language, best first. English has the widest range;
@@ -36,9 +43,10 @@ def moonshine_module(monkeypatch):
     class FakeTranscriber:
         instances = []
 
-        def __init__(self, model_path, model_arch):
+        def __init__(self, model_path, model_arch, options=None):
             self.model_path = model_path
             self.model_arch = model_arch
+            self.options = options
             self.instances.append(self)
 
         def transcribe_without_streaming(self, audio, sample_rate):
@@ -128,6 +136,25 @@ def test_requested_architecture_is_kept_when_available(moonshine_module):
     assert fake_transcriber.instances[-1].model_path == "/models/ja-tiny"
 
 
+@pytest.mark.parametrize(
+    "language, expected",
+    [
+        (Language.EN, None),
+        (Language.ES, None),
+        (Language.JA, "13.0"),
+        (Language.ZH, "13.0"),
+        (Language.UK, "13.0"),
+    ],
+)
+def test_non_latin_languages_raise_the_token_rate_cap(moonshine_module, language, expected):
+    stt, fake_transcriber = moonshine_module
+
+    stt.MoonshineSTTService(settings=stt.MoonshineSTTService.Settings(language=language))
+
+    options = fake_transcriber.instances[-1].options
+    assert options.get("max_tokens_per_second") == expected
+
+
 def test_unsupported_language_raises(moonshine_module):
     stt, _ = moonshine_module
 
@@ -186,6 +213,25 @@ async def test_run_stt_yields_a_transcription_frame(moonshine_module):
 
 
 @pytest.mark.asyncio
+async def test_8khz_input_reaches_the_model_at_16khz(moonshine_module):
+    stt, fake_transcriber = moonshine_module
+    service = stt.MoonshineSTTService(trailing_silence_secs=0)
+    one_second = b"\x00\x00" * 8000
+
+    await run_test(
+        service,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=one_second, sample_rate=8000, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+        pipeline_params=PipelineParams(audio_in_sample_rate=8000),
+    )
+
+    assert len(fake_transcriber.instances[-1].audio) == stt.MOONSHINE_SAMPLE_RATE
+
+
+@pytest.mark.asyncio
 async def test_language_update_reloads_the_model(moonshine_module):
     stt, fake_transcriber = moonshine_module
     service = stt.MoonshineSTTService()
@@ -211,7 +257,7 @@ async def test_failed_reload_keeps_the_loaded_model(moonshine_module):
 
     service.push_error = push_error
 
-    def failing_transcriber(model_path, model_arch):
+    def failing_transcriber(model_path, model_arch, options=None):
         raise RuntimeError("boom")
 
     stt.Transcriber = failing_transcriber

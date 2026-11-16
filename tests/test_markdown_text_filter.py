@@ -14,6 +14,10 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.filter = MarkdownTextFilter()
 
+    def test_deprecated(self):
+        with self.assertWarns(DeprecationWarning):
+            MarkdownTextFilter()
+
     async def test_basic_markdown_removal(self):
         """Test removal of basic Markdown formatting while preserving content."""
         input_text = """

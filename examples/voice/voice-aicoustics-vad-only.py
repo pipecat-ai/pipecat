@@ -64,6 +64,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -144,7 +145,7 @@ class VADEventLogger(FrameProcessor):
 
 aic_filter = AICFilter(
     license_key=os.environ["AIC_SDK_LICENSE"],
-    model_id="quail-vf-2.2-l-16khz",
+    model_id="quail-vf-2.3-l-16khz",
     enhancement_level=0.8,
 )
 aic_vad_analyzer = LoggingAICQuailVADAnalyzer(
@@ -156,6 +157,10 @@ aic_vad_analyzer = LoggingAICQuailVADAnalyzer(
 # analyzer is wired via VADProcessor below.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_in_filter=aic_filter,
     ),

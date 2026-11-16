@@ -95,6 +95,17 @@ def krisp_sdk_uses_nanobind_bindings() -> bool:
     return (version.major, version.minor, version.patch) >= _NANOBIND_SDK_VERSION
 
 
+# IP ``process()`` accepts a bot-speaking flag as its third argument starting in
+# 1.14.0; earlier builds take only (frame, voice_detected).
+_IP_BOT_SPEAKING_SDK_VERSION = (1, 14, 0)
+
+
+def krisp_sdk_ip_accepts_bot_speaking() -> bool:
+    """Whether the installed krisp_audio IP ``process()`` takes a bot-speaking flag (>= 1.14.0)."""
+    version = krisp_audio.getVersion()
+    return (version.major, version.minor, version.patch) >= _IP_BOT_SPEAKING_SDK_VERSION
+
+
 class KrispVivaSDKManager:
     """Singleton manager for Krisp VIVA SDK with reference counting.
 

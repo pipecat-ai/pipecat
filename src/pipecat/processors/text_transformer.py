@@ -17,7 +17,8 @@ class StatelessTextTransformer(FrameProcessor):
 
     This processor intercepts TextFrame objects and applies a user-provided
     transformation function to the text content. The function can be either
-    synchronous or asynchronous (coroutine).
+    synchronous or asynchronous (coroutine). The frame keeps its type, its
+    other fields and its direction; only its text changes.
     """
 
     def __init__(
@@ -45,6 +46,7 @@ class StatelessTextTransformer(FrameProcessor):
             result = self._transform_fn(frame.text)
             if isinstance(result, Coroutine):
                 result = await result
-            await self.push_frame(TextFrame(text=result))
+            frame.text = result
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)

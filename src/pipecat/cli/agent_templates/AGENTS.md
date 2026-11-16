@@ -235,9 +235,9 @@ transport_params = {
     # ... your real transports (smallwebrtc, daily, …) stay as-is
 }
 ```
-The dev runner wraps this in the eval transport + serializer when you pass `-t eval`; you don't construct them. Audio-mode scenarios need `audio_in_enabled=True` here.
+The dev runner wraps this in the eval transport + serializer when the eval harness connects; you don't construct them. Audio-mode scenarios need `audio_in_enabled=True` here.
 
-**Boot it.** `uv run bot.py -t eval` starts the bot as a headless eval WebSocket server (default `ws://localhost:7860`); no exceptions + pipeline assembled is your fastest "did I wire it right" signal. Keep its stdout durable and greppable (e.g. `uv run bot.py -t eval 2>&1 | tee /tmp/pipecat-output.txt`) so when a scenario fails you grep for the traceback instead of re-running. The bot stays up between runs, so boot once and drive scenario after scenario from a second terminal.
+**Boot it.** `uv run bot.py` starts the dev runner, which the eval harness connects to (default `ws://localhost:7860/ws`); each scenario gets a fresh bot session, and no exceptions + pipeline assembled is your fastest "did I wire it right" signal. Keep its stdout durable and greppable (e.g. `uv run bot.py 2>&1 | tee /tmp/pipecat-output.txt`) so when a scenario fails you grep for the traceback instead of re-running. The runner stays up between runs, so boot once and drive scenario after scenario from a second terminal.
 
 **Scripted scenarios: the inner loop.** A list of `turns:`, each with `expect:` assertions on the events the bot emits back: `text_contains`, a `function_call` with its args, `within_ms` latency, or an `eval:` criterion for the judge. Same input every run, so a failure is reproducible and you fix from the assertion. A minimal one:
 ```yaml
@@ -285,7 +285,7 @@ runs: 3                     # every run must pass; one run proves little
 
 **Switching to audio.** Either kind switches the same way: `user: {modality: audio, speech: {service: kokoro, voice: af_heart}}` synthesizes the user's speech so the bot's real VAD + STT run, and `judge: {modality: audio}` (with a `transcription:` block) makes the bot speak and transcribes that audio into `response`. Kokoro and Moonshine run **locally with no API key**, slower than text but free. Add `-a` to save `<record-dir>/<scenario>.wav` for a human to listen back. A **speech-to-speech bot** has no text LLM step to assert on, so for it both blocks are required; scenarios, judge, and assertions are otherwise the same as for a cascade bot.
 
-**Running many scenarios.** Because the bot stays up, its context carries over. Give a scripted scenario a top-level `context:` (a list of LLM messages) to start from a known state, or use `pipecat eval suite` (a fresh bot per run from a manifest listing both kinds; `-k script` / `-k simulation` selects one) when runs must be isolated. The bot's `on_client_disconnected` handler won't fire during a normal eval; pass `--trigger-disconnect` or set `trigger_disconnect: true` to exercise it, and if it cancels the pipeline treat that run as terminal. Route output with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); the suite writes to `eval-runs/<timestamp>/`.
+**Running many scenarios.** Each scenario gets a fresh bot session, so nothing carries over between runs; give a scripted scenario a top-level `context:` (a list of LLM messages) to start from a known state. `pipecat eval suite` runs many at once from a manifest listing both kinds (`-k script` / `-k simulation` selects one). The bot's `on_client_disconnected` handler fires when each scenario's connection ends, and the harness then ends the session. Route output with `--logs-dir eval-runs` (and `--record-dir eval-runs` for `-a` recordings); the suite writes to `eval-runs/<timestamp>/`.
 
 ## 7. Deploying (optional — Pipecat Cloud)
 
@@ -310,6 +310,6 @@ pipecat cloud deploy --yes
 Re-set the secrets whenever keys change. Tail a live bot with `pipecat cloud agent logs <agent-name>`.
 
 **Krisp noise cancellation** (`--enable-krisp`, requires cloud) is Cloud-provided, and **the scaffold already wires it correctly — keep that block, don't re-wire it**:
-- The generated `if os.environ.get("ENV") != "local"` guard, plus the dev runner forcing `ENV=local` on every local run (including `-t eval`), means the bot boots locally with no Krisp model or license and turns Krisp on only once deployed to Pipecat Cloud. Don't add your own guard.
+- The generated `if os.environ.get("ENV") != "local"` guard, plus the dev runner forcing `ENV=local` on every local run (including evals), means the bot boots locally with no Krisp model or license and turns Krisp on only once deployed to Pipecat Cloud. Don't add your own guard.
 - Deploying to Pipecat Cloud → the scaffold default is already right; don't ask the user how to wire Krisp.
 - Krisp with **no** cloud deploy is the only case to raise: the user self-hosts the SDK + model (`KRISP_VIVA_FILTER_MODEL_PATH`, `KRISP_VIVA_API_KEY`).

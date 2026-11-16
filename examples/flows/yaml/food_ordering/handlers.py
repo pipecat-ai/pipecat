@@ -96,4 +96,6 @@ async def get_delivery_estimate(
 ):
     """Provide delivery estimate information."""
     delivery_time = datetime.now() + timedelta(minutes=30)
-    return DeliveryEstimateResult(time=f"{delivery_time}"), TRANSITION_IN_YAML
+    return DeliveryEstimateResult(
+        time=f"about 30 minutes, around {delivery_time:%-I:%M %p}"
+    ), TRANSITION_IN_YAML

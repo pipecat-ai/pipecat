@@ -6,7 +6,7 @@
 
 """User-facing job group context (compatibility shim).
 
-A group dispatched by a ``BaseUIWorker`` is client-visible, so a plain
+A group dispatched by a ``UIWorker`` is client-visible, so a plain
 ``JobGroupContext`` covers what this subclass used to. It keeps the
 historical constructor signature for code that imported it directly.
 """
@@ -21,11 +21,11 @@ from pipecat.workers.base_worker import BaseWorker
     "Use `JobGroupContext` instead."
 )
 class UIJobGroupContext(JobGroupContext):
-    """Deprecated alias for a :class:`JobGroupContext` on a ``BaseUIWorker``.
+    """Deprecated alias for a :class:`JobGroupContext` on a ``UIWorker``.
 
     .. deprecated:: 1.8.0
         Use :class:`~pipecat.pipeline.job_context.JobGroupContext` instead;
-        a group dispatched by a ``BaseUIWorker`` is client-visible either
+        a group dispatched by a ``UIWorker`` is client-visible either
         way. Will be removed in 2.0.0.
     """
 

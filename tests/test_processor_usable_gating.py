@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
@@ -119,7 +118,7 @@ class TestSegmentedSTTStatusGating(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.transcribe_calls, 0)
         # The buffered audio is released rather than growing for the rest of
         # the session.
-        self.assertEqual(len(service._audio_buffer), 0)
+        self.assertEqual(service._speech_buffer.stop(), b"")
 
 
 class TestTTSStatusGating(unittest.IsolatedAsyncioTestCase):
@@ -172,7 +171,7 @@ class TestApplicationErrorClassification(unittest.IsolatedAsyncioTestCase):
     async def test_failing_text_transformer_leaves_the_service_usable(self):
         service = CountingTTSService()
 
-        async def failing_transform(text: str, aggregation_type) -> str:
+        async def failing_transform(text: str, text_type) -> str:
             # A transformer calling some API that rejects its own credentials.
             request = httpx.Request("POST", "https://translate.example.com/v1")
             raise httpx.HTTPStatusError(

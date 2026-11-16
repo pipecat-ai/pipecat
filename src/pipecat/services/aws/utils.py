@@ -21,8 +21,6 @@ import struct
 import urllib.parse
 from dataclasses import dataclass
 
-from loguru import logger
-
 
 @dataclass
 class AWSCredentials:
@@ -50,19 +48,19 @@ def resolve_credentials(
     aws_session_token: str | None = None,
     region: str | None = None,
 ) -> AWSCredentials:
-    """Resolve AWS credentials using the standard fallback chain.
+    """Resolve AWS credentials from explicit parameters and the environment.
 
     Resolution order:
 
     1. Explicit parameters
     2. Environment variables (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
        ``AWS_SESSION_TOKEN``, ``AWS_REGION``)
-    3. Default botocore credential chain (instance profiles, IRSA,
-       ECS task roles, SSO, credential files, etc.)
 
-    The botocore fallback (step 3) is only attempted when *both* access key and
-    secret key are still unresolved after steps 1-2.  This avoids replacing
-    explicitly provided credentials with ambient ones.
+    When neither supplies keys, ``access_key`` and ``secret_key`` are ``None``
+    and the caller leaves credentials to an AWS session's default provider
+    chain (instance profiles, IRSA, ECS task roles, SSO, credential files,
+    etc.). A session renews the temporary credentials that chain hands out, so
+    they aren't resolved here once and kept: they would expire.
 
     Args:
         aws_access_key_id: Explicit access key ID.
@@ -71,37 +69,14 @@ def resolve_credentials(
         region: Explicit AWS region.
 
     Returns:
-        An :class:`AWSCredentials` instance.  ``access_key`` and
-        ``secret_key`` may still be ``None`` if no credentials could be
-        resolved (the caller should raise an appropriate error).
+        An :class:`AWSCredentials` instance. ``access_key`` and ``secret_key``
+        are ``None`` when neither the parameters nor the environment supply
+        them.
     """
     access_key = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
     secret_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
     session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
     resolved_region = region or os.getenv("AWS_REGION", "us-east-1")
-
-    # Fall back to the botocore credential provider chain (pod roles, IRSA,
-    # instance profiles, SSO, credential files, etc.) when explicit
-    # credentials were not supplied.
-    if not access_key and not secret_key:
-        try:
-            import botocore.session
-
-            session = botocore.session.Session()
-            session.set_config_variable("region", resolved_region)
-            creds = session.get_credentials()
-            if creds:
-                frozen = creds.get_frozen_credentials()
-                access_key = access_key or frozen.access_key
-                secret_key = secret_key or frozen.secret_key
-                session_token = session_token or frozen.token
-        except ImportError:
-            logger.debug(
-                "botocore not available for credential chain fallback; "
-                "install pipecat-ai[aws] for full credential support."
-            )
-        except Exception as e:
-            logger.warning(f"Failed to resolve AWS credentials via botocore chain: {e}")
 
     return AWSCredentials(
         access_key=access_key,
@@ -115,7 +90,11 @@ def get_presigned_url(
     *,
     region: str,
     credentials: dict[str, str | None],
-    language_code: str,
+    language_code: str | None = None,
+    identify_language: bool = False,
+    identify_multiple_languages: bool = False,
+    language_options: list[str] | None = None,
+    preferred_language: str | None = None,
     media_encoding: str = "pcm",
     sample_rate: int = 16000,
     number_of_channels: int = 1,
@@ -132,7 +111,14 @@ def get_presigned_url(
         region: AWS region for the service.
         credentials: Dictionary containing AWS credentials. Must include
             'access_key' and 'secret_key', with optional 'session_token'.
-        language_code: Language code for transcription (e.g., "en-US").
+        language_code: Language code for transcription (e.g., "en-US"). AWS
+            rejects it alongside language identification.
+        identify_language: Whether to identify the dominant language among
+            ``language_options``.
+        identify_multiple_languages: Whether to identify and transcribe each
+            language among ``language_options`` as it is spoken.
+        language_options: Candidate language codes for language identification.
+        preferred_language: The most likely of ``language_options``.
         media_encoding: Audio encoding format. Defaults to "pcm".
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
         number_of_channels: Number of audio channels. Defaults to 1.
@@ -165,6 +151,10 @@ def get_presigned_url(
     return url_generator.get_request_url(
         sample_rate=sample_rate,
         language_code=language_code,
+        identify_language=identify_language,
+        identify_multiple_languages=identify_multiple_languages,
+        language_options=language_options,
+        preferred_language=preferred_language,
         media_encoding=media_encoding,
         vocabulary_name=vocabulary_name,
         vocabulary_filter_name=vocabulary_filter_name,
@@ -223,7 +213,11 @@ class AWSTranscribePresignedURL:
     def get_request_url(
         self,
         sample_rate: int,
-        language_code: str = "",
+        language_code: str | None = None,
+        identify_language: bool = False,
+        identify_multiple_languages: bool = False,
+        language_options: list[str] | None = None,
+        preferred_language: str | None = None,
         media_encoding: str = "pcm",
         vocabulary_name: str | None = None,
         vocabulary_filter_name: str | None = None,
@@ -238,6 +232,10 @@ class AWSTranscribePresignedURL:
         Args:
             sample_rate: Audio sample rate in Hz.
             language_code: Language code for transcription.
+            identify_language: Whether to identify the dominant language.
+            identify_multiple_languages: Whether to identify each language as it is spoken.
+            language_options: Candidate language codes for language identification.
+            preferred_language: The most likely of ``language_options``.
             media_encoding: Audio encoding format.
             vocabulary_name: Custom vocabulary name.
             vocabulary_filter_name: Vocabulary filter name.
@@ -272,18 +270,30 @@ class AWSTranscribePresignedURL:
             )
         self.canonical_querystring += "&X-Amz-SignedHeaders=" + self.signed_headers
 
+        # SigV4 signs the canonical query string with its parameters sorted by
+        # name, so each one is appended in name order.
         if enable_channel_identification:
             self.canonical_querystring += "&enable-channel-identification=true"
         if enable_partial_results_stabilization:
             self.canonical_querystring += "&enable-partial-results-stabilization=true"
+        if identify_language:
+            self.canonical_querystring += "&identify-language=true"
+        if identify_multiple_languages:
+            self.canonical_querystring += "&identify-multiple-languages=true"
         if language_code:
             self.canonical_querystring += "&language-code=" + language_code
+        if language_options:
+            self.canonical_querystring += "&language-options=" + urllib.parse.quote(
+                ",".join(language_options), safe=""
+            )
         if media_encoding:
             self.canonical_querystring += "&media-encoding=" + media_encoding
         if number_of_channels > 1:
             self.canonical_querystring += "&number-of-channels=" + str(number_of_channels)
         if partial_results_stability:
             self.canonical_querystring += "&partial-results-stability=" + partial_results_stability
+        if preferred_language:
+            self.canonical_querystring += "&preferred-language=" + preferred_language
         if sample_rate:
             self.canonical_querystring += "&sample-rate=" + str(sample_rate)
         if show_speaker_label:

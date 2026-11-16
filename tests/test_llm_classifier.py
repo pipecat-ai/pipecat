@@ -12,12 +12,15 @@ JSON parsing and the results.
 """
 
 import asyncio
+import base64
+import os
 
 import pytest
 
 from pipecat.classifiers.base_classifier import (
     ChoiceQuestion,
     ClassifierError,
+    ClassifierImage,
     ScoreQuestion,
     YesNoQuestion,
 )
@@ -52,6 +55,21 @@ class _ScriptedLLM(LLMService):
 
 class _NoInferenceLLM(LLMService):
     pass
+
+
+class _FailingLLM(LLMService):
+    """Fails run_inference() the way a provider client does."""
+
+    async def run_inference(self, context, **kwargs) -> str | None:
+        raise RuntimeError("connection reset")
+
+
+class _SilentLLM(LLMService):
+    """Never answers run_inference()."""
+
+    async def run_inference(self, context, **kwargs) -> str | None:
+        await asyncio.Event().wait()
+        return None
 
 
 def _classifier(*replies: str | None, **kwargs) -> tuple[LLMClassifier, _ScriptedLLM]:
@@ -233,6 +251,13 @@ async def test_a_lone_answer_without_its_name_is_accepted():
 
 
 @pytest.mark.asyncio
+async def test_a_failed_llm_call_is_a_classifier_error():
+    classifier = LLMClassifier(llm=_FailingLLM())
+    with pytest.raises(ClassifierError, match="connection reset"):
+        await classifier.yes_no("hi", {"q": YesNoQuestion(instructions="?")})
+
+
+@pytest.mark.asyncio
 async def test_a_text_reply_is_an_error():
     classifier, _ = _classifier("I think yes.")
     with pytest.raises(ClassifierError, match="JSON object"):
@@ -255,6 +280,13 @@ async def test_a_choice_outside_the_options_is_an_error():
         await classifier.choice(
             "hi", {"q": ChoiceQuestion(instructions="?", options={"a": "", "b": ""})}
         )
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_does_not_come_in_time_is_an_error():
+    classifier = LLMClassifier(llm=_SilentLLM(), timeout=0.05)
+    with pytest.raises(ClassifierError, match="did not answer within"):
+        await classifier.yes_no("hello", {"answer": YesNoQuestion(instructions="a greeting?")})
 
 
 @pytest.mark.asyncio
@@ -301,3 +333,69 @@ async def test_a_named_classifier_reports_metrics_under_its_name():
 
     assert classifier.name == "voicemail"
     assert seen[0].processor == "voicemail"
+
+
+class _RecordingLLM(LLMService):
+    """Answers run_inference() with one reply and keeps the message it was sent."""
+
+    def __init__(self, reply: str):
+        super().__init__()
+        self._reply = reply
+        self.contents: list = []
+
+    async def run_inference(self, context: LLMContext, **kwargs) -> str | None:
+        self.contents.append(context.messages[-1]["content"])
+        return self._reply
+
+
+@pytest.mark.asyncio
+async def test_images_go_to_the_llm_before_the_questions():
+    llm = _RecordingLLM('{"red": {"probability": 0.9}}')
+    classifier = LLMClassifier(llm=llm)
+    image = ClassifierImage(data=b"jpeg bytes", content_type="image/jpeg")
+    question = {"red": YesNoQuestion(instructions="is there a red circle?")}
+    assert classifier.supports_images
+
+    results = await classifier.yes_no("A camera frame.", question, inputs=[image, image])
+    await classifier.yes_no("No frame.", question)
+
+    assert results["red"].probability == 0.9
+    with_images, without_images = llm.contents
+    url = f"data:image/jpeg;base64,{base64.b64encode(b'jpeg bytes').decode()}"
+    assert with_images[:2] == [
+        {"type": "image_url", "image_url": {"url": url}},
+        {"type": "image_url", "image_url": {"url": url}},
+    ]
+    assert with_images[2]["type"] == "text"
+    assert "A camera frame." in with_images[2]["text"]
+    assert isinstance(without_images, str)
+
+
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
+@pytest.mark.asyncio
+async def test_a_vision_llm_answers_a_question_about_an_image():
+    import io
+
+    from PIL import Image, ImageDraw
+
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    def circle(color: str) -> ClassifierImage:
+        image = Image.new("RGB", (640, 480), "white")
+        ImageDraw.Draw(image).ellipse((220, 140, 420, 340), fill=color)
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG")
+        return ClassifierImage(data=buffer.getvalue(), content_type="image/jpeg")
+
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(model="gpt-4.1-mini"),
+    )
+    classifier = LLMClassifier(llm=llm, timeout=30)
+    question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
+
+    red = await classifier.yes_no("A camera frame.", question, inputs=[circle("red")])
+    blue = await classifier.yes_no("A camera frame.", question, inputs=[circle("blue")])
+
+    assert red["red"].is_yes
+    assert not blue["red"].is_yes

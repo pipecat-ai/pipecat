@@ -7,9 +7,9 @@
 import unittest
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EagerTranscriptionFrame,
     Frame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
@@ -44,7 +44,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         assert isinstance(prediction, EagerTranscriptionFrame)
         assert prediction.text == "book a flight"
         assert prediction.user_id == "user"
-        assert isinstance(withdrawal, EagerEndOfTurnCancelFrame)
+        assert isinstance(withdrawal, UserTurnResponseCancelFrame)
         assert not service.eager_end_of_turn_pending
 
     async def test_a_committed_turn_resolves_the_prediction_without_withdrawing_it(self):
@@ -56,7 +56,7 @@ class TestEagerEndOfTurnMixin(unittest.IsolatedAsyncioTestCase):
         # afterwards would discard a response the committed transcript may keep.
         await service._cancel_eager_end_of_turn()
 
-        assert not any(isinstance(f, EagerEndOfTurnCancelFrame) for f in service.pushed)
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in service.pushed)
         assert not service.eager_end_of_turn_pending
 
     async def test_withdrawing_without_a_prediction_does_nothing(self):
@@ -83,23 +83,36 @@ class TestEagerEndOfTurnIsOptIn(unittest.IsolatedAsyncioTestCase):
         assert not service.eager_end_of_turn_pending
         assert not service.eager_end_of_turn_enabled
 
-    def test_it_recommends_eager_strategies_only_when_enabled(self):
+    def test_it_builds_eager_strategies_only_when_enabled(self):
         assert isinstance(
-            Predictor().recommended_user_turn_strategies(enable_interruptions=True),
+            Predictor().eager_user_turn_strategies(enable_interruptions=True),
             EagerUserTurnStrategies,
         )
-
-        recommended = Predictor(enable_eager_end_of_turn=False).recommended_user_turn_strategies(
-            enable_interruptions=True
+        assert (
+            Predictor(enable_eager_end_of_turn=False).eager_user_turn_strategies(
+                enable_interruptions=True
+            )
+            is None
         )
-        assert isinstance(recommended, ExternalUserTurnStrategies)
-        assert not isinstance(recommended, EagerUserTurnStrategies)
 
-    def test_the_recommendation_carries_the_match_policy_and_interruptions(self):
+    def test_the_eager_strategies_carry_the_match_policy_and_interruptions(self):
         service = Predictor(eager_match_policy=ExactMatch())
 
-        recommended = service.recommended_user_turn_strategies(enable_interruptions=False)
+        strategies = service.eager_user_turn_strategies(enable_interruptions=False)
 
-        assert isinstance(recommended.stop[0], EagerUserTurnStopStrategy)
-        assert isinstance(recommended.stop[0].match_policy, ExactMatch)
-        assert recommended.enable_interruptions is False
+        assert strategies is not None
+        assert isinstance(strategies.stop[0], EagerUserTurnStopStrategy)
+        assert isinstance(strategies.stop[0].match_policy, ExactMatch)
+        assert strategies.enable_interruptions is False
+
+    def test_the_deprecated_recommendation_falls_back_to_external_strategies(self):
+        with self.assertWarns(DeprecationWarning):
+            recommended = Predictor().recommended_user_turn_strategies(enable_interruptions=True)
+        assert isinstance(recommended, EagerUserTurnStrategies)
+
+        with self.assertWarns(DeprecationWarning):
+            recommended = Predictor(
+                enable_eager_end_of_turn=False
+            ).recommended_user_turn_strategies(enable_interruptions=True)
+        assert isinstance(recommended, ExternalUserTurnStrategies)
+        assert not isinstance(recommended, EagerUserTurnStrategies)

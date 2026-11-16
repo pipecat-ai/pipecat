@@ -37,17 +37,13 @@ computed message — following the template above::
             Will be removed in 2.0.0.
         \"\"\"
 
-**Everything else — parameters, module moves, behavior/value changes:** the
-decorator cannot mark these, so emit a ``DeprecationWarning`` by hand with
-``warnings.warn(..., DeprecationWarning)``. These do not get static-checker
-detection, but the ``.. deprecated::`` directive (below) still records them for
-documentation and tooling.
-
-**Fields whose reads are intercepted:** a field that warns from
-``__getattribute__`` is read wherever its object travels, so warn through
-:func:`warn_deprecated_read` rather than by hand. A bare ``warnings.warn`` under
-the ``always`` filter repeats itself without bound; the helper warns once per
-call site.
+**Everything else — parameters, fields, module moves, behavior/value changes:**
+the decorator cannot mark these, so warn with :func:`warn_deprecated`, never a
+bare ``warnings.warn``. These do not get static-checker detection, but the
+``.. deprecated::`` directive (below) still records them for documentation and
+tooling. Pass the message as a string or f-string literal so
+``tests/test_deprecation_markers.py`` can check it against the template, and set
+``stacklevel`` so the warning names the caller's line.
 
 In all cases, add a ``.. deprecated:: X.Y.Z`` directive to the docstring (for a
 parameter, in its ``Args:`` / ``Parameters:`` entry). The directive is the
@@ -67,16 +63,24 @@ Prefer Sphinx cross-reference roles (``:class:``, ``:meth:``, ``:func:``,
 docs — but a backticked name is accepted.
 """
 
+import functools
 import re
 import sys
 import warnings
 
 from typing_extensions import deprecated
 
-__all__ = ["DEPRECATION_MESSAGE_RE", "deprecated", "warn_deprecated_read"]
+__all__ = [
+    "DEPRECATION_MESSAGE_RE",
+    "deprecated",
+    "renamed_init_field",
+    "warn_deprecated",
+    "warn_deprecated_read",
+]
 
-# The canonical @deprecated decorator message. Kept consistent and parseable so
-# the developer-facing message agrees with the docstring directive.
+# The canonical deprecation message, for @deprecated and hand-written warnings
+# alike. Kept consistent and parseable so the developer-facing message agrees
+# with the docstring directive.
 DEPRECATION_MESSAGE_RE = re.compile(
     r"^`(?P<subject>[^`]+)` is deprecated since (?P<version>\d+\.\d+\.\d+) "
     r"and will be removed in (?P<removal>\d+\.\d+\.\d+)\. "
@@ -84,35 +88,111 @@ DEPRECATION_MESSAGE_RE = re.compile(
 )
 
 
-# Call sites already warned about by :func:`warn_deprecated_read`, identified by
+# Call sites already warned about by :func:`warn_deprecated`, identified by
 # message and source location.
-_warned_read_sites: set[tuple[str, str, int]] = set()
+_warned_sites: set[tuple[str, str, int]] = set()
 
 
+def warn_deprecated(message: str, stacklevel: int = 1) -> None:
+    """Warn once per call site that something deprecated was used.
+
+    Python's default filters hide ``DeprecationWarning`` unless the line it
+    names is in ``__main__``, and many of Pipecat's deprecations are detected
+    inside Pipecat, as a pipeline runs, where no line of the developer's code is
+    on the stack. So the warning is raised under the ``always`` filter, which
+    shows it wherever it is raised, and a per-site record keeps it to one
+    warning per call site: a deprecated field read wherever its object travels,
+    or a check on every frame, would otherwise repeat without bound.
+
+    The record of warned sites lasts for the life of the process, so a test
+    asserting on one of these warnings clears :data:`_warned_sites` first.
+
+    Args:
+        message: The warning message, following :data:`DEPRECATION_MESSAGE_RE`.
+        stacklevel: As for :func:`warnings.warn`, counted from the caller: ``1``
+            names the line that calls this function, ``2`` its caller.
+    """
+    try:
+        frame = sys._getframe(stacklevel)
+        site = (message, frame.f_code.co_filename, frame.f_lineno)
+    except ValueError:
+        site = (message, "", 0)
+    if site in _warned_sites:
+        return
+    _warned_sites.add(site)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn(message, DeprecationWarning, stacklevel=stacklevel + 1)
+
+
+@deprecated(
+    "`warn_deprecated_read` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `warn_deprecated` instead."
+)
 def warn_deprecated_read(message: str) -> None:
     """Warn once per call site that a deprecated field was read.
 
-    For fields whose reads are intercepted by ``__getattribute__``. Such a field
-    is read wherever its object travels, so a caller that reflects over every
-    field of every object it sees — a frame serializer, say — would otherwise
-    repeat one warning without bound. The warning is raised under the ``always``
-    filter so it survives the default ``ignore::DeprecationWarning`` that hides
-    call sites outside ``__main__``; the per-site record supplies the
-    deduplication that filter would otherwise provide.
+    Call it from the ``__getattribute__`` that intercepts the read.
 
-    Call it directly from the intercepting ``__getattribute__`` so that the
-    location reported to the user is the one that performed the read. The record
-    of warned sites lasts for the life of the process, so a test asserting on
-    one of these warnings clears :data:`_warned_read_sites` first.
+    .. deprecated:: 1.13.0
+        Use :func:`warn_deprecated` instead, with ``stacklevel=2``.
+        Will be removed in 2.0.0.
 
     Args:
-        message: The ``DeprecationWarning`` message.
+        message: The warning message.
     """
-    caller = sys._getframe(2)
-    site = (message, caller.f_code.co_filename, caller.f_lineno)
-    if site in _warned_read_sites:
-        return
-    _warned_read_sites.add(site)
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(message, DeprecationWarning, stacklevel=3)
+    # Past this function, the decorator's wrapper, and __getattribute__ to the
+    # line that read the field.
+    warn_deprecated(message, stacklevel=4)
+
+
+def renamed_init_field(old: str, new: str, message: str):
+    """Let a dataclass, and every subclass of it, take a renamed field by its old name.
+
+    Apply it above ``@dataclass``. ``@dataclass`` gives each subclass a
+    constructor of its own, so the first time a class is built, its constructor
+    and those of the classes between it and the decorated one are wrapped to
+    take the old name. A constructor that passes the old name to ``super()``
+    finds it taken too.
+
+    It supports one rename per class hierarchy, since each use replaces
+    ``__new__``, and a subclass whose own ``__new__`` doesn't call the base
+    class's is left as it is.
+
+    Args:
+        old: The field's deprecated name.
+        new: The field's name.
+        message: The warning message, following :data:`DEPRECATION_MESSAGE_RE`.
+
+    Returns:
+        The class decorator.
+    """
+
+    def wrap_init(cls):
+        init = cls.__init__
+
+        @functools.wraps(init)
+        def __init__(self, *args, **kwargs):
+            if old in kwargs:
+                warn_deprecated(message, stacklevel=2)
+                kwargs.setdefault(new, kwargs.pop(old))
+            init(self, *args, **kwargs)
+
+        cls.__init__ = __init__
+
+    def decorate(cls):
+        marker = f"_{cls.__name__}_takes_{old}"
+
+        def __new__(subcls, *args, **kwargs):
+            if marker not in subcls.__dict__:
+                for c in subcls.__mro__:
+                    if issubclass(c, cls) and marker not in c.__dict__:
+                        if "__init__" in c.__dict__:
+                            wrap_init(c)
+                        setattr(c, marker, True)
+            return object.__new__(subcls)
+
+        cls.__new__ = staticmethod(__new__)
+        return cls
+
+    return decorate

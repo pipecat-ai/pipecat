@@ -47,6 +47,18 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(frame, InterruptionFrame)
 
+    async def test_malformed_message_does_not_prevent_next_frame(self):
+        for data in (b"\x80", b"\x0a\x05x", b"\x00"):
+            with self.subTest(data=data):
+                self.assertIsNone(await self.serializer.deserialize(data))
+
+                text_frame = TextFrame(text="Still connected")
+                frame = await self.serializer.deserialize(
+                    await self.serializer.serialize(text_frame)
+                )
+                self.assertIsInstance(frame, TextFrame)
+                self.assertEqual(frame.text, text_frame.text)
+
 
 if __name__ == "__main__":
     unittest.main()

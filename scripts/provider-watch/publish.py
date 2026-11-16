@@ -31,6 +31,8 @@ Then commit and push ``_reports``. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
 or a highlights-less render made here when none exists — and opens (or
 updates) the digest issue on the reports repo when there is anything to show.
+The issue carries the digest with only its high-priority changes to consider
+listed and links the full digest for the rest (see ``digest.render_issue``).
 Run::
 
     uv run python scripts/provider-watch/publish.py --date 2026-08-20
@@ -71,7 +73,7 @@ class Shell:
     """Runs git and gh; tests swap in a fake."""
 
     def run(self, *args: str, cwd: Path | None = None, check: bool = True) -> str:
-        result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+        result = subprocess.run(args, cwd=cwd, capture_output=True, encoding="utf-8")
         if check and result.returncode != 0:
             raise RuntimeError(
                 f"{' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}"
@@ -90,7 +92,7 @@ class Report:
 
     @classmethod
     def load(cls, path: Path) -> Report:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         meta = digest.parse_frontmatter(text)
         end = text.find("\n---", 3)
         body = text[end + 4 :] if text.startswith("---") and end != -1 else text
@@ -99,7 +101,7 @@ class Report:
     def save(self) -> None:
         front = yaml.safe_dump(self.meta, sort_keys=False, allow_unicode=True, width=1000).rstrip()
         body = self.body if self.body.startswith("\n") else "\n" + self.body
-        self.path.write_text(f"---\n{front}\n---{body}")
+        self.path.write_text(f"---\n{front}\n---{body}", encoding="utf-8")
 
 
 @dataclass
@@ -147,37 +149,24 @@ def _fragment_type(name: str) -> str:
     return next((part for part in name.split(".") if part in FRAGMENT_TYPES), "other")
 
 
-def _rename_changelog_fragments(sh: Shell, repo_root: Path, branch: str, pr_url: str) -> None:
+def _rename_changelog_fragments(
+    sh: Shell, repo_root: Path, branch: str, number: str, added: list[str]
+) -> None:
     """Give a PR's changelog fragments the PR's number.
 
     Researchers write towncrier's ``+slug`` orphan form because no PR exists
     when a branch is committed, and must not guess a number. Once the PR is
-    open its number is known: one follow-up commit renames every fragment the
-    branch adds that does not already carry it — orphans and wrong guesses
-    alike — to ``<number>.<type>.md``, with ``.2``/``.3`` counters when a
-    branch adds several of one type. Works from the branch as pushed, in a
-    detached worktree, so it needs no local branch and cannot collide with a
-    leftover researcher worktree still holding one.
+    open its number is known: one follow-up commit renames every fragment in
+    ``added`` (the fragments the PR adds) that does not already carry it —
+    orphans and wrong guesses alike — to ``<number>.<type>.md``, with
+    ``.2``/``.3`` counters when a branch adds several of one type. Works from
+    the branch as pushed, in a detached worktree, so it needs no local branch
+    and cannot collide with a leftover researcher worktree still holding one.
     """
-    number = pr_url.rstrip("/").split("/")[-1]
-    if not number.isdigit():
-        return
-    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
-    added = sh.run(
-        "git",
-        "diff",
-        "--name-only",
-        "--diff-filter=A",
-        # Three-dot: only what the branch itself adds, however far main has
-        # moved since the branch was cut.
-        f"{_main_base(sh, repo_root)}...FETCH_HEAD",
-        "--",
-        "changelog/",
-        cwd=repo_root,
-    ).split()
     rename = sorted(p for p in added if not Path(p).name.startswith(f"{number}."))
     if not rename:
         return
+    sh.run("git", "fetch", "--quiet", "origin", branch, cwd=repo_root)
     counters: dict[str, int] = {}
     for path in added:
         if Path(path).name.startswith(f"{number}."):
@@ -250,13 +239,19 @@ def rename_open_pr_fragments(sh: Shell, repo_root: Path, pipecat_repo: str) -> l
         files = json.loads(
             sh.run("gh", "pr", "view", number, "--repo", pipecat_repo, "--json", "files") or "{}"
         ).get("files")
-        fragments = [f["path"] for f in files or [] if f["path"].startswith("changelog/")]
-        if all(Path(p).name.startswith(f"{number}.") for p in fragments):
+        # GitHub lists the PR's files against the current main. This clone's
+        # origin/main can be days old (the digest job checks out the run's
+        # triggering commit), and a diff against it would also claim fragments
+        # other PRs added since.
+        added = [
+            f["path"]
+            for f in files or []
+            if f["path"].startswith("changelog/") and f.get("changeType") == "ADDED"
+        ]
+        if all(Path(p).name.startswith(f"{number}.") for p in added):
             continue
         try:
-            _rename_changelog_fragments(
-                sh, repo_root, head, f"https://github.com/{pipecat_repo}/pull/{number}"
-            )
+            _rename_changelog_fragments(sh, repo_root, head, number, added)
         except RuntimeError as exc:
             skipped.append(f"{head}: fragments not renamed: {exc}")
     return skipped
@@ -381,7 +376,7 @@ def ensure_digest(reports_dir: Path, date: str, reports_repo: str) -> Path:
         highlights=None,
         repo_url=f"https://github.com/{reports_repo}",
     )
-    out.write_text(text)
+    out.write_text(text, encoding="utf-8")
     return out
 
 
@@ -397,8 +392,22 @@ def worth_an_issue(reports: list[Report]) -> bool:
     )
 
 
-def open_or_update_issue(sh: Shell, reports_repo: str, date: str, body_file: Path) -> str:
+def issue_body(reports_dir: Path, date: str, reports_repo: str, digest_file: Path) -> str:
+    """The digest issue's body: ``digest.render_issue`` with the published digest's highlights."""
+    repo_url = f"https://github.com/{reports_repo}"
+    return digest.render_issue(
+        digest.load_reports(reports_dir, date),
+        date=date,
+        highlights=digest.highlights_of(digest_file.read_text(encoding="utf-8")),
+        repo_url=repo_url,
+        digest_url=f"{repo_url}/blob/main/{digest_file.relative_to(reports_dir).as_posix()}",
+    )
+
+
+def open_or_update_issue(sh: Shell, reports_repo: str, date: str, body: str) -> str:
     title = f"Provider watch {date}"
+    body_file = Path(tempfile.mkdtemp(prefix="pw-issue-")) / "body.md"
+    body_file.write_text(body, encoding="utf-8")
     existing = json.loads(
         sh.run(
             "gh",
@@ -478,7 +487,12 @@ def main(argv: list[str] | None = None) -> int:
         digest_file = ensure_digest(args.reports, args.date, args.reports_repo)
     outcome.reports_pushed = push_reports(sh, args.reports, args.date)
     if args.finalize and worth_an_issue(reports):
-        outcome.issue_url = open_or_update_issue(sh, args.reports_repo, args.date, digest_file)
+        outcome.issue_url = open_or_update_issue(
+            sh,
+            args.reports_repo,
+            args.date,
+            issue_body(args.reports, args.date, args.reports_repo, digest_file),
+        )
 
     print(json.dumps(outcome.__dict__, indent=2))
     return 0

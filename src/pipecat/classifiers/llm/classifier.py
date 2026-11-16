@@ -11,16 +11,20 @@ through the service's ``run_inference()``. The LLM is asked for one JSON
 object with an answer per question, and the object is parsed into results.
 """
 
+import asyncio
+import base64
 import json
 import re
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ChoiceQuestion,
     ChoiceResult,
     ClassifierError,
+    ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -28,7 +32,7 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
     YesNoResult,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.services.llm_service import LLMService
 
 DEFAULT_INSTRUCTIONS = (
@@ -56,11 +60,12 @@ class LLMClassifier(BaseClassifier):
     Any service that implements ``run_inference()`` can back a classifier;
     realtime services cannot. The reply's shape is enforced by the provider
     where the service supports a reply schema, and otherwise asked for in
-    the prompt and parsed from the reply.
+    the prompt and parsed from the reply. Images go to the LLM with the
+    questions, so they need an LLM that can see them.
 
     Example::
 
-        classifier = LLMClassifier(llm=OpenAILLMService(model="gpt-4o-mini"))
+        classifier = LLMClassifier(llm=OpenAILLMService(model="gpt-6-luna"))
         results = await classifier.yes_no(
             "Hi, you've reached Dana. Leave a message.",
             {"voicemail": YesNoQuestion(instructions="is this a voicemail greeting?")},
@@ -74,6 +79,7 @@ class LLMClassifier(BaseClassifier):
         llm: LLMService[Any],
         instructions: str | None = None,
         max_tokens: int | None = None,
+        timeout: float = 10.0,
         **kwargs,
     ):
         """Initialize the classifier.
@@ -83,12 +89,14 @@ class LLMClassifier(BaseClassifier):
             instructions: System instructions for the LLM. The default asks
                 for one JSON object with an answer per question.
             max_tokens: Cap on the reply's length, for services that take one.
+            timeout: Seconds to wait for the LLM's reply before giving up.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(**kwargs)
         self._llm = llm
         self._instructions = instructions or DEFAULT_INSTRUCTIONS
         self._max_tokens = max_tokens
+        self._timeout = timeout
 
     @property
     def llm(self) -> LLMService[Any]:
@@ -101,20 +109,36 @@ class LLMClassifier(BaseClassifier):
         model = self._llm.settings.model
         return model if isinstance(model, str) else None
 
+    @property
+    def supports_images(self) -> bool:
+        """Whether questions can come with images; the LLM must be able to see them."""
+        return True
+
     async def _ask(
-        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], None]:
         """Answer the questions in one LLM call. The call reports no token usage."""
-        context = LLMContext([{"role": "user", "content": self._render(state, questions)}])
+        images = [item for item in inputs if isinstance(item, ClassifierImage)]
+        context = LLMContext([self._message(state, questions, images)])
         try:
-            reply = await self._llm.run_inference(
-                context,
-                max_tokens=self._max_tokens,
-                system_instruction=self._instructions,
-                response_schema=self._schema(questions),
+            reply = await asyncio.wait_for(
+                self._llm.run_inference(
+                    context,
+                    max_tokens=self._max_tokens,
+                    system_instruction=self._instructions,
+                    response_schema=self._schema(questions),
+                ),
+                self._timeout,
             )
         except NotImplementedError as e:
             raise ClassifierError(f"{self._llm} cannot run a one-shot inference") from e
+        except TimeoutError as e:
+            raise ClassifierError(f"{self._llm} did not answer within {self._timeout}s") from e
+        except Exception as e:
+            raise ClassifierError(f"{self._llm} failed to answer: {e}") from e
         answers = self._parse(reply or "")
         if len(questions) == 1 and not any(name in answers for name in questions):
             # A lone answer often comes back without its name around it.
@@ -126,6 +150,26 @@ class LLMClassifier(BaseClassifier):
                 raise ClassifierError(f"the LLM gave no answer for {name!r}")
             results[name] = self._result(question, answer)
         return results, None
+
+    def _message(
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: Mapping[str, ClassifierQuestion],
+        images: Sequence[ClassifierImage],
+    ) -> LLMContextMessage:
+        """The message the LLM answers: any images, then the state and the questions."""
+        text = self._render(state, questions)
+        if not images:
+            return {"role": "user", "content": text}
+        content: list[dict[str, Any]] = [
+            {"type": "image_url", "image_url": {"url": self._data_url(image)}} for image in images
+        ]
+        content.append({"type": "text", "text": text})
+        return cast(LLMContextMessage, {"role": "user", "content": content})
+
+    def _data_url(self, image: ClassifierImage) -> str:
+        """The image as a base64 data URL."""
+        return f"data:{image.content_type};base64,{base64.b64encode(image.data).decode()}"
 
     def _render(
         self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, ClassifierQuestion]

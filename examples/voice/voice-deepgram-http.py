@@ -23,11 +23,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.stt import DeepgramSegmentedSTTService
 from pipecat.services.deepgram.tts import DeepgramHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -42,6 +43,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -60,7 +65,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+        # Deepgram's pre-recorded API transcribes one VAD-detected speech
+        # segment per HTTP request.
+        stt = DeepgramSegmentedSTTService(
+            api_key=os.environ["DEEPGRAM_API_KEY"],
+            aiohttp_session=session,
+        )
 
         tts = DeepgramHttpTTSService(
             api_key=os.environ["DEEPGRAM_API_KEY"],

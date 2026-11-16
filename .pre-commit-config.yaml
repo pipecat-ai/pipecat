@@ -8,6 +8,16 @@ repos:
         entry: uv run ruff check --fix --extend-select F401
         language: system
         types: [python]
+      # Text file IO in the framework states its encoding: the locale default is the
+      # ANSI code page on Windows. PLW1514 is a preview rule, so until it is stable it
+      # runs on its own here rather than turning preview on for every rule in
+      # pyproject.toml.
+      - id: ruff-encoding
+        name: ruff-encoding
+        entry: uv run ruff check --preview --select PLW1514
+        language: system
+        types: [python]
+        files: ^src/pipecat/
       - id: ruff-format
         name: ruff-format
         entry: uv run ruff format

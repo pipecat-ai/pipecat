@@ -123,8 +123,10 @@ class LLMTokenUsage(BaseModel):
 
     Parameters:
         prompt_tokens: Number of tokens in the input prompt, net or gross of the
-            cache counts depending on the service.
-        completion_tokens: Number of tokens in the generated completion.
+            cache counts depending on the service. Includes tool results the
+            provider feeds back to the model, which are billed as input.
+        completion_tokens: Number of tokens in the generated completion,
+            including any reasoning tokens.
         total_tokens: Total number of tokens used, including any cached input
             tokens.
         cache_read_input_tokens: Number of tokens read from cache, if applicable.

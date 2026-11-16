@@ -15,6 +15,8 @@ from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
         ("👋 Hello. 😀 Next", "en", "👋 Hello."),
         ("Cafe\u0301 is open. Next", "en", "Cafe\u0301 is open."),
         ("こんにちは。次", "ja", "こんにちは。"),
+        ("Dr. 田中が来ます。次の文です。", "ja", "Dr. 田中が来ます。"),
+        ("U.S.のAWSです。次の文です。", "ja", "U.S.のAWSです。"),
         ("你好。下一句", "zh", "你好。"),
         ("नमस्ते। यह", "hi", "नमस्ते।"),
         ("هل أنت بخير؟ نعم", "ar", "هل أنت بخير؟"),
@@ -40,6 +42,8 @@ def test_source_character_offsets(text, language, prefix):
         ("it", ["Il dott. Rossi arriva.", "Poi parte."]),
         ("nl", ["Dr. Jansen komt.", "Daarna vertrekt hij."]),
         ("ja", ["こんにちは。", "次の文です。"]),
+        ("ja", ["Dr. 田中が来ます。", "次の文です。"]),
+        ("ja", ["U.S.のAWSです。", "次の文です。"]),
     ],
 )
 async def test_chunk_boundaries_do_not_change_sentences(chunk_size, language, sentences):
