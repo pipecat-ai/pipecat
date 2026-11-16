@@ -60,6 +60,8 @@ The documents are generated, never edited by hand. The current version's documen
 
 Clients implement a protocol version from its document, so once a Pipecat release has shipped a version, its wire format never changes: what the server accepts and sends, and how. Any change to it is a new protocol version. The document's descriptions and examples can still be improved.
 
+A released version's schemas can also describe its wire format more precisely, where the server already sends exactly what the more precise schema says, such as `metrics` data typed by kind rather than left as any object. `tests/test_rtvi_conformance.py` must show the server's messages match it. Since the hash covers the schemas, update the version's `contract_sha256` in `released.json` in the same change, by hand: the record script never overwrites a version it has recorded.
+
 `released.json` records each protocol version a Pipecat release has shipped, with a hash of its wire format and the Pipecat release that first shipped it:
 
 ```json

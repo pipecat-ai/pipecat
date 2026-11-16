@@ -47,9 +47,11 @@ class TestRTVISpec(unittest.TestCase):
                 self.assertEqual(
                     contract_sha256(version),
                     entry["contract_sha256"],
-                    f"the wire format of protocol {version} changed since Pipecat "
-                    f"{entry['pipecat']} released it; bump PROTOCOL_VERSION in models.py "
-                    "for the change, and restore the released version's wire format",
+                    f"the contract of protocol {version} changed since Pipecat "
+                    f"{entry['pipecat']} released it. For a change to the wire format, bump "
+                    "PROTOCOL_VERSION in models.py and restore the released version. For a "
+                    "schema that describes what the server already sends more precisely, "
+                    "update contract_sha256 in spec/released.json (see spec/README.md)",
                 )
 
     def test_message_types_are_unique(self):
