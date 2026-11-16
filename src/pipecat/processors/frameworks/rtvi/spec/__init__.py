@@ -34,7 +34,7 @@ import hashlib
 import inspect
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Literal
 
@@ -43,8 +43,12 @@ from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode, JsonSchemaV
 from pydantic_core import core_schema
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 
 RTVIMessageDirection = Literal["client-to-server", "server-to-client"]
+
+_OBSERVER_DEFAULTS = {field.name: field.default for field in fields(RTVIObserverParams)}
+"""Each observer setting's default, for whether a message it turns on is on by default."""
 
 _NO_DATA = object()
 """Marks a message that carries no ``data`` field."""
@@ -69,6 +73,8 @@ class RTVIMessageSpec:
         min_client_version: The lowest client protocol version the server sends
             the message to.
         deprecated: What replaces a deprecated message.
+        details: More about the message, for a reader who needs it beyond the
+            description, as Markdown.
     """
 
     type: str
@@ -81,10 +87,15 @@ class RTVIMessageSpec:
     enabled_by: str | None = None
     min_client_version: str | None = None
     deprecated: str | None = None
+    details: str | None = None
 
 
 def _client(
-    type: str, description: str, data: Any = _NO_DATA, example: Any = None
+    type: str,
+    description: str,
+    data: Any = _NO_DATA,
+    example: Any = None,
+    details: str | None = None,
 ) -> RTVIMessageSpec:
     """Describe a message the client sends. Every client message carries an ``id``."""
     has_data = data is not _NO_DATA
@@ -96,6 +107,7 @@ def _client(
         data_required=has_data,
         has_id=True,
         example=example,
+        details=details,
     )
 
 
@@ -119,6 +131,19 @@ def _server(
 
 _TIMESTAMP = "2026-01-01T12:00:00.000Z"
 
+_FUNCTION_CALL_REPORT_LEVELS = (
+    "How much it carries depends on the server's report level for the function: "
+    "`none` sends only the call's id, `name` adds the function's name, `arguments` its "
+    "arguments, and `full` its result. At `disabled`, the server sends no messages about "
+    "the call."
+)
+
+_FUNCTION_CALL_STARTED_REPORT_LEVELS = (
+    "The server's report level for the function decides whether it carries the "
+    "function's name: `name`, `arguments` and `full` do, and `none` doesn't. At "
+    "`disabled`, the server sends no messages about the call."
+)
+
 MESSAGES: tuple[RTVIMessageSpec, ...] = (
     # -- Client to server --
     _client(
@@ -130,8 +155,17 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
             "version": RTVI.PROTOCOL_VERSION,
             "about": {"library": "@pipecat-ai/client-js", "library_version": "1.16.0"},
         },
+        details="Typically sent once the transport has connected.",
     ),
-    _client("disconnect-bot", "Asks the server to end the session."),
+    _client(
+        "disconnect-bot",
+        "Asks the server to end the session.",
+        details=(
+            "Disconnecting from the transport ends the session too. This message is for a "
+            "client that wants to stay connected to the transport but end its conversation "
+            "with the bot."
+        ),
+    ),
     _client(
         "client-message",
         "A custom message for the application. The server answers with server-response "
@@ -207,12 +241,14 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
                 "captured_at": 1767268800000,
             }
         },
+        details="Sent whenever the client's UI changes, so the bot works from what is on screen.",
     ),
     _client(
         "ui-cancel-job-group",
         "Asks the server to cancel a job group it reported with ui-job-group.",
         RTVI.UICancelJobGroupData,
         {"job_id": "job_1", "reason": "User closed the panel"},
+        details="The server cancels the group only if it reported the group as cancellable.",
     ),
     # -- Server to client: session --
     _server(
@@ -225,6 +261,10 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
             "about": {"library": "pipecat-ai", "library_version": "1.3.0"},
             "capabilities": {"audio_in": True, "audio_out": True, "video_in": False},
         },
+        details=(
+            "`about` is the bot's own information: Pipecat's library and version, unless the "
+            "application replaces it. An application shouldn't put anything sensitive in it."
+        ),
     ),
     _server(
         RTVI.Error,
@@ -292,11 +332,16 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "The bot stopped listening to the user, for example while it says something that "
         "must not be interrupted.",
         enabled_by="user_mute_enabled",
+        details=(
+            "The client should keep sending audio. It may show the user that their input "
+            "isn't being processed."
+        ),
     ),
     _server(
         RTVI.UserMuteStoppedMessage,
         "The bot listens to the user again.",
         enabled_by="user_mute_enabled",
+        details="The client may show the user that their input is being processed again.",
     ),
     _server(
         RTVI.BotStartedSpeakingMessage,
@@ -313,6 +358,10 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "The bot was interrupted and stopped what it was saying. A client should drop the "
         "bot's text that hadn't been spoken yet.",
         enabled_by="bot_speaking_enabled",
+        details=(
+            "The user speaking over the bot interrupts it, and so does a send-text with "
+            "`run_immediately`."
+        ),
     ),
     _server(
         RTVI.UserAudioLevelMessage,
@@ -320,6 +369,9 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "the user's audio comes in.",
         {"value": 0.3},
         enabled_by="user_audio_level_enabled",
+        details=(
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+        ),
     ),
     _server(
         RTVI.BotAudioLevelMessage,
@@ -327,6 +379,9 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "the bot speaks.",
         {"value": 0.5},
         enabled_by="bot_audio_level_enabled",
+        details=(
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+        ),
     ),
     # -- Server to client: what the user said --
     _server(
@@ -341,6 +396,11 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
             "user_id": "user_1",
         },
         enabled_by="user_input_enabled",
+        details=(
+            "Sent for each transcription of the user's speech; for each short acknowledgment "
+            "the user says while the bot talks, which neither interrupts the bot nor reaches "
+            "its LLM; and for each send-text message, with the send-text's id in `msg_id`."
+        ),
     ),
     _server(
         RTVI.UserLLMTextMessage,
@@ -420,12 +480,17 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "ends.",
         {"text": "✓", "kind": "complete", "raw": "✓ It's sunny in Lisbon.", "markers": ["✓"]},
         enabled_by="bot_llm_marker_enabled",
+        details=(
+            "It carries the raw text of the whole response, so it's meant for evaluation and "
+            "debugging rather than for the user."
+        ),
     ),
     _server(
         RTVI.BotTranscriptionMessage,
         "The text of the bot's LLM response, a whole sentence at a time.",
         {"text": "It's sunny in Lisbon."},
         enabled_by="bot_llm_enabled",
+        details="It carries no timing. For text as the bot speaks it, use tts-raw-text.",
     ),
     _server(
         RTVI.BotLLMTextMessage,
@@ -447,6 +512,7 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         "The bot's LLM started calling a function. The server's settings decide whether "
         "it includes the function's name.",
         {"function_name": "get_weather"},
+        details=_FUNCTION_CALL_STARTED_REPORT_LEVELS,
     ),
     _server(
         RTVI.LLMFunctionCallInProgressMessage,
@@ -457,12 +523,15 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
             "function_name": "get_weather",
             "arguments": {"city": "Lisbon"},
         },
+        details=_FUNCTION_CALL_REPORT_LEVELS
+        + " A client that runs the function itself answers with llm-function-call-result.",
     ),
     _server(
         RTVI.LLMFunctionCallStoppedMessage,
         "A function call finished or was cancelled, with its id and, as the server's "
         "settings decide, the function's name and result.",
         {"tool_call_id": "call_123", "cancelled": False, "function_name": "get_weather"},
+        details=_FUNCTION_CALL_REPORT_LEVELS,
     ),
     _server(
         RTVI.LLMFunctionCallMessage,
@@ -678,14 +747,32 @@ def _example(spec: RTVIMessageSpec) -> dict:
     return message
 
 
+def _notes(spec: RTVIMessageSpec) -> list[str]:
+    """What the message's extension fields say, as sentences for its summary."""
+    notes = []
+    if spec.enabled_by:
+        if _OBSERVER_DEFAULTS[spec.enabled_by]:
+            notes.append(f"On by default; turned off by the server's `{spec.enabled_by}` setting.")
+        else:
+            notes.append(f"Off by default; turned on by the server's `{spec.enabled_by}` setting.")
+    if spec.min_client_version:
+        notes.append(f"Sent only to clients of protocol {spec.min_client_version} or later.")
+    if spec.deprecated:
+        notes.append(f"Deprecated. {spec.deprecated}")
+    return notes
+
+
 def _message(spec: RTVIMessageSpec, data_schema: Any) -> dict:
     """A message's entry in the document's ``components``."""
     message: dict[str, Any] = {
         "name": spec.type,
-        "summary": spec.description,
+        "title": spec.type,
+        "summary": " ".join([spec.description, *_notes(spec)]),
         "payload": _envelope(spec, data_schema),
         "examples": [{"payload": _example(spec)}],
     }
+    if spec.details:
+        message["description"] = spec.details
     if spec.enabled_by:
         message["x-rtvi-enabled-by"] = spec.enabled_by
     if spec.min_client_version:
