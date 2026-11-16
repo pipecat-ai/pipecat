@@ -671,10 +671,16 @@ class BotTTSTextMessage(BaseModel):
     data: TextMessageData
 
 
+@deprecated(
+    "`AudioMessageData` is deprecated since 1.17.0 and will be removed in 2.0.0. No replacement."
+)
 class AudioMessageData(BaseModel):
     """Data for audio-based RTVI messages.
 
     Contains audio data and metadata.
+
+    .. deprecated:: 1.17.0
+        No replacement. Will be removed in 2.0.0.
     """
 
     audio: str
@@ -682,10 +688,17 @@ class AudioMessageData(BaseModel):
     num_channels: int
 
 
+@deprecated(
+    "`BotTTSAudioMessage` is deprecated since 1.17.0 and will be removed in 2.0.0. No replacement."
+)
 class BotTTSAudioMessage(BaseModel):
     """Message containing bot TTS audio output.
 
-    Sent when the bot's TTS generates audio.
+    The server never sends it: the bot's audio reaches the client through the
+    transport.
+
+    .. deprecated:: 1.17.0
+        No replacement. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
