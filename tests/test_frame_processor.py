@@ -671,6 +671,36 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         finally:
             logger.remove(handler_id)
 
+    async def test_push_frame_trace_logs(self):
+        """Pushing a frame is logged at the TRACE level in both directions."""
+        first = IdentityFilter()
+        second = IdentityFilter()
+        pipeline = Pipeline([first, second])
+        # Braces in the frame description must be logged as is.
+        down_frame = TextFrame(text="{down}")
+        up_frame = TextFrame(text="{up}")
+
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="TRACE", format="{message}")
+        try:
+            await run_test(
+                pipeline,
+                frames_to_send=[down_frame],
+                expected_down_frames=[TextFrame],
+            )
+            await run_test(
+                pipeline,
+                frames_to_send=[up_frame],
+                frames_to_send_direction=FrameDirection.UPSTREAM,
+                expected_up_frames=[TextFrame],
+            )
+        finally:
+            logger.remove(handler_id)
+
+        logs = sink.getvalue()
+        self.assertIn(f"Pushing {down_frame} downstream from {first} to {second}", logs)
+        self.assertIn(f"Pushing {up_frame} upstream from {second} to {first}", logs)
+
     async def test_start_frame_is_processed_first(self):
         """A processor holds every frame it receives until its StartFrame.
 
