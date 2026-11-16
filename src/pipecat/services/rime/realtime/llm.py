@@ -220,12 +220,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             raise ValueError("shutdown_timeout must be finite and positive")
         if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
             raise ValueError("Prism requires SDK server turn detection")
-        defaults: dict[str, Any] = {f.name: None for f in fields(LLMSettings) if f.name != "extra"}
-        defaults.update(
-            model="prism", filter_incomplete_user_turns=False, use_provider_thinking_default=False
-        )
-        store = self.Settings(
-            **defaults,
+        given = {"extra", "model", "filter_incomplete_user_turns", "use_provider_thinking_default"}
+        unset: dict[str, Any] = {f.name: None for f in fields(LLMSettings) if f.name not in given}
+        default_settings = self.Settings(
+            **unset,
+            model="prism",
+            filter_incomplete_user_turns=False,
+            use_provider_thinking_default=False,
             tools=None,
             voice=None,
             interrupt_on_speech=True,
@@ -238,17 +239,17 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             acknowledgment_phrases=None,
         )
         if settings is not None:
-            store.apply_update(copy.deepcopy(settings))
+            default_settings.apply_update(copy.deepcopy(settings))
         if turn_detection is not None:
             for name in _INTERRUPTION_RULES:
                 value = getattr(turn_detection, name)
                 if value is None:
                     continue
-                if getattr(store, name) is not None:
+                if getattr(default_settings, name) is not None:
                     raise ValueError(f"Set {name} in turn_detection or settings, not both")
-                setattr(store, name, list(value) if isinstance(value, tuple) else value)
-        self._validate_settings(store)
-        super().__init__(settings=store, **kwargs)
+                setattr(default_settings, name, list(value) if isinstance(value, tuple) else value)
+        self._validate_settings(default_settings)
+        super().__init__(settings=default_settings, **kwargs)
         if playback not in ("estimated", "discard"):
             raise ValueError("playback must be estimated or discard")
         self._startup = startup or RimeStartupParams()
