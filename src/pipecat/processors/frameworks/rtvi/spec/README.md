@@ -4,7 +4,7 @@ A machine-readable description of the RTVI protocol between a client and a Pipec
 
 ```
 spec/
-├── __init__.py              # the MESSAGES table and the document builder
+├── __init__.py              # the MESSAGES and BEHAVIORS tables, and the document builder
 ├── 2.3.0/
 │   └── rtvi.asyncapi.json   # the document of protocol 2.3.0
 └── <version>/
@@ -13,7 +13,7 @@ spec/
 
 Each `<version>/rtvi.asyncapi.json` is an [AsyncAPI 3.0](https://www.asyncapi.com/docs/reference/specification/v3.0.0) document, written from the server's point of view: the `receiveClientMessages` operation lists what clients send, and `sendServerMessages` what the server sends. Client SDKs generate their protocol code from the document of the version they implement.
 
-The documents are generated, never edited by hand. The current version's document is built from `MESSAGES` in `__init__.py` and the models in `../models.py`; documents of earlier versions stay as they were when that version was current.
+The documents are generated, never edited by hand. The current version's document is built from `MESSAGES` and `BEHAVIORS` in `__init__.py` and the models in `../models.py`; documents of earlier versions stay as they were when that version was current.
 
 ## What a message's entry says
 
@@ -27,10 +27,14 @@ Each message in `components.messages` has:
 
 Payloads of client messages describe what the server accepts, and payloads of server messages what it sends, so a field the server leaves out when it has no value is optional.
 
+## Behaviors
+
+The document's `x-rtvi-behaviors` lists the rules the server follows across messages, beyond the shape of each one: what answers a request and with which `id`, what `bot-ready` says about the version, which messages the observer params turn off, and how the server holds the bot's spoken text until the bot speaks and drops it on an interruption. Each behavior has an `id`, a `description`, and the types of the `messages` it involves.
+
 ## Changing the protocol
 
 1. Change the models in `../models.py`, and where the server sends a message, the observer or processor that sends it. A message that clients older than the new version must not receive is gated with `_client_is_at_least([...])` in the observer.
-2. Add a new message to `MESSAGES` in `__init__.py`, with an example and, where they apply, `enabled_by` and `min_client_version`. A new field on an existing message needs no change there, since the schema comes from the model.
+2. Add a new message to `MESSAGES` in `__init__.py`, with an example and, where they apply, `enabled_by` and `min_client_version`. A new field on an existing message needs no change there, since the schema comes from the model. A new rule across messages goes in `BEHAVIORS`, with its test in `tests/test_rtvi_conformance.py`.
 3. For a new protocol version, bump `PROTOCOL_VERSION` in `../models.py`.
 4. Regenerate the document:
 
@@ -52,7 +56,9 @@ A change to the wire format without a version bump rewrites the current version'
 - Its payload matches the document's schema. The check reads the JSON document, not the Python models.
 - The client is at least the message's `x-rtvi-min-client-version`. Sessions with clients just below each minimum check that those messages are left out.
 
-For messages a client sends, the server must accept each document's example without an error response, and answer a message that is missing its required `data`, or has an unknown type, with an `error-response` carrying the same `id`.
+For messages a client sends, the server must accept each document's example without an error response.
+
+Each behavior in a document has a test named after its `id`, `test_<id>` with underscores, in `TestRTVIBehaviors`, and a behavior without one fails the test.
 
 The session must make the server send every message of the current version, so a message added to the spec fails the test until `_run_session` in the test makes the server send it.
 

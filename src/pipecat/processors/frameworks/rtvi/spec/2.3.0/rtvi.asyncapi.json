@@ -3847,5 +3847,83 @@
         "type": "object"
       }
     }
-  }
+  },
+  "x-rtvi-behaviors": [
+    {
+      "id": "bot-ready-answers-client-ready",
+      "description": "Once the bot is ready, the server answers client-ready with a bot-ready carrying the client-ready's id.",
+      "messages": [
+        "client-ready",
+        "bot-ready"
+      ]
+    },
+    {
+      "id": "bot-ready-version",
+      "description": "bot-ready's version is the protocol version the server speaks to the client: the server's own for a client of the same major version, and the client's own for a 1.x client.",
+      "messages": [
+        "client-ready",
+        "bot-ready"
+      ]
+    },
+    {
+      "id": "client-ready-version-check",
+      "description": "A client-ready without a version, with a malformed one, or of a major version the server doesn't speak gets an error-response carrying its id. The session goes on, and the server still answers with bot-ready.",
+      "messages": [
+        "client-ready",
+        "error-response",
+        "bot-ready"
+      ]
+    },
+    {
+      "id": "failed-request-gets-error-response",
+      "description": "A client message the server can't handle, of an unknown type or with data that doesn't match its payload, gets an error-response carrying the message's id.",
+      "messages": [
+        "error-response"
+      ]
+    },
+    {
+      "id": "invalid-message-gets-error",
+      "description": "A transport message labeled \"rtvi-ai\" that isn't an RTVI message, such as one without an id, gets an error, since there is no id to answer. The server ignores a message without the \"rtvi-ai\" label.",
+      "messages": [
+        "error"
+      ]
+    },
+    {
+      "id": "client-message-answer",
+      "description": "The bot answers a client-message with a server-response or an error-response carrying the client-message's id. A server-response's t is the client-message's t.",
+      "messages": [
+        "client-message",
+        "server-response",
+        "error-response"
+      ]
+    },
+    {
+      "id": "disconnect-bot-ends-session",
+      "description": "disconnect-bot ends the bot's session.",
+      "messages": [
+        "disconnect-bot"
+      ]
+    },
+    {
+      "id": "messages-turned-off",
+      "description": "The server sends a message that has x-rtvi-enabled-by only while that RTVIObserverParams field is on.",
+      "messages": []
+    },
+    {
+      "id": "spoken-output-waits-for-speech",
+      "description": "bot-output for text the bot will speak waits for the bot to start speaking: the server sends it after bot-started-speaking, in the order the text came.",
+      "messages": [
+        "bot-started-speaking",
+        "bot-output"
+      ]
+    },
+    {
+      "id": "interruption-drops-unspoken-output",
+      "description": "On an interruption, the server sends bot-interrupted, and never sends the bot-output it was holding for speech that the interruption cut off.",
+      "messages": [
+        "bot-interrupted",
+        "bot-output"
+      ]
+    }
+  ]
 }

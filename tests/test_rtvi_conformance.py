@@ -12,10 +12,12 @@ client of that version, and every message they put on the wire is checked
 against the document: it must be a message the server sends, its payload must
 match the document's schema, and the client must be new enough to receive it.
 Messages a client sends are checked the other way: the server accepts the
-document's examples and answers a malformed message with an error response.
+document's examples. Each of the document's ``x-rtvi-behaviors`` has a test
+here of its own.
 """
 
 import asyncio
+import dataclasses
 import json
 import unittest
 import warnings
@@ -31,11 +33,13 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndWorkerFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -201,13 +205,17 @@ _EVERYTHING = RTVIObserverParams(
 )
 
 
-async def _run_session(client_version: str) -> list[dict]:
+async def _run_session(client_version: str, params: RTVIObserverParams = _EVERYTHING) -> list[dict]:
     """Hold a session that makes the server send every message it can.
+
+    Args:
+        client_version: The protocol version the client speaks.
+        params: Which of the observer's messages are turned on.
 
     Returns:
         The messages the server sent, as they went on the wire.
     """
-    session = _Session(_EVERYTHING)
+    session = _Session(params)
     try:
         # Session: handshake, errors, and replies to client messages.
         await session.receive(
@@ -356,21 +364,159 @@ class TestRTVIServerReceives(unittest.IsolatedAsyncioTestCase):
                     session = await self._receive(version, type, example.get("data"))
                     self.assertEqual(session.responses_to("under-test"), [])
 
-    async def test_missing_data_gets_an_error_response(self):
-        for version in _versions():
-            spec = _Spec(version)
-            for type in sorted(spec.client_types):
-                if "data" not in spec.messages[type]["payload"]["required"]:
-                    continue
-                with self.subTest(version=version, type=type):
-                    session = await self._receive(version, type, None)
-                    responses = session.responses_to("under-test")
-                    self.assertEqual([m["type"] for m in responses], ["error-response"])
 
-    async def test_unknown_type_gets_an_error_response(self):
-        session = await self._receive(RTVI.PROTOCOL_VERSION, "not-a-message-type", None)
-        responses = session.responses_to("under-test")
-        self.assertEqual([m["type"] for m in responses], ["error-response"])
+class TestRTVIBehaviors(unittest.IsolatedAsyncioTestCase):
+    """The server follows each of the document's behaviors.
+
+    A behavior's test is named after its id: ``test_<id>``, with underscores.
+    """
+
+    async def _session(self, params: RTVIObserverParams | None = None) -> _Session:
+        session = _Session(params)
+        self.addAsyncCleanup(session.cleanup)
+        return session
+
+    async def _ready(self, session: _Session, version: Any = RTVI.PROTOCOL_VERSION):
+        data = {} if version is None else {"version": version}
+        await session.receive("client-ready", data, id="ready")
+        await session.processor.set_bot_ready()
+
+    def test_every_behavior_has_a_test(self):
+        for version in _versions():
+            for behavior in _Spec(version).document["x-rtvi-behaviors"]:
+                with self.subTest(version=version, behavior=behavior["id"]):
+                    self.assertTrue(hasattr(self, "test_" + behavior["id"].replace("-", "_")))
+
+    async def test_bot_ready_answers_client_ready(self):
+        session = await self._session()
+        await self._ready(session)
+        bot_ready = [m for m in session.sent if m["type"] == "bot-ready"]
+        self.assertEqual([m["id"] for m in bot_ready], ["ready"])
+
+    async def test_bot_ready_version(self):
+        for client, expected in (
+            (RTVI.PROTOCOL_VERSION, RTVI.PROTOCOL_VERSION),
+            (RTVI.PROTOCOL_VERSION.split(".")[0] + ".0.0", RTVI.PROTOCOL_VERSION),
+            ("1.2.0", "1.2.0"),
+        ):
+            with self.subTest(client=client):
+                session = await self._session()
+                await self._ready(session, client)
+                (bot_ready,) = [m for m in session.sent if m["type"] == "bot-ready"]
+                self.assertEqual(bot_ready["data"]["version"], expected)
+
+    async def test_client_ready_version_check(self):
+        major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+        for version in (None, "2.x", "2.3", f"{major + 1}.0.0"):
+            with self.subTest(version=version):
+                session = await self._session()
+                await self._ready(session, version)
+                self.assertEqual(
+                    [m["type"] for m in session.sent if m.get("id") == "ready"],
+                    ["error-response", "bot-ready"],
+                )
+        for version in (RTVI.PROTOCOL_VERSION, "1.0.0"):
+            with self.subTest(version=version):
+                session = await self._session()
+                await self._ready(session, version)
+                self.assertEqual(session.responses_to("ready"), [])
+
+    async def test_failed_request_gets_error_response(self):
+        spec = _Spec(RTVI.PROTOCOL_VERSION)
+        malformed = [
+            (type, None)
+            for type in sorted(spec.client_types)
+            if "data" in spec.messages[type]["payload"]["required"]
+        ]
+        for type, data in [("not-a-message-type", None), *malformed]:
+            with self.subTest(type=type):
+                session = await self._session()
+                await session.receive(type, data, id="under-test")
+                responses = session.responses_to("under-test")
+                self.assertEqual([m["type"] for m in responses], ["error-response"])
+
+    async def test_invalid_message_gets_error(self):
+        session = await self._session()
+        no_id = {"label": RTVI.MESSAGE_LABEL, "type": "send-text", "data": {"content": "Hi"}}
+        await session.processor._handle_transport_message(InputTransportMessageFrame(no_id))
+        self.assertEqual([m["type"] for m in session.sent], ["error"])
+
+        session = await self._session()
+        not_rtvi = {"label": "other", "type": "send-text", "id": "1"}
+        await session.processor._handle_transport_message(InputTransportMessageFrame(not_rtvi))
+        self.assertEqual(session.sent, [])
+
+    async def test_client_message_answer(self):
+        session = await self._session()
+        await session.receive("client-message", {"t": "get-weather", "d": {}}, id="cm")
+        (request,) = [f for f in session.pushed if isinstance(f, RTVIClientMessageFrame)]
+        await session.push(RTVIServerResponseFrame(client_msg=request, data={"temperature": 21}))
+        await session.push(RTVIServerResponseFrame(client_msg=request, error="No city"))
+        client_message = RTVI.ClientMessage(msg_id="cm", type="get-weather", data={})
+        await session.processor.send_server_response(client_message, {"temperature": 21})
+        await session.processor.send_error_response(client_message, "No city")
+        answers = session.responses_to("cm")
+        self.assertEqual(
+            [m["type"] for m in answers],
+            ["server-response", "error-response", "server-response", "error-response"],
+        )
+        for answer in answers:
+            if answer["type"] == "server-response":
+                self.assertEqual(answer["data"]["t"], "get-weather")
+
+    async def test_disconnect_bot_ends_session(self):
+        session = await self._session()
+        await session.receive("disconnect-bot")
+        self.assertTrue(any(isinstance(f, EndWorkerFrame) for f in session.pushed))
+
+    async def test_messages_turned_off(self):
+        spec = _Spec(RTVI.PROTOCOL_VERSION)
+        # The param that turns each message on.
+        switches = {
+            m["name"]: m["x-rtvi-enabled-by"]
+            for m in spec.messages.values()
+            if "x-rtvi-enabled-by" in m
+        }
+        for field in sorted(set(switches.values())):
+            with self.subTest(off=field):
+                params = dataclasses.replace(_EVERYTHING, **{field: False})
+                sent = {m["type"] for m in await _run_session(RTVI.PROTOCOL_VERSION, params)}
+                turned_off = {type for type, f in switches.items() if f == field}
+                self.assertEqual(sent & turned_off, set())
+                # Turning one off leaves the rest on.
+                self.assertTrue(set(switches) - turned_off <= sent)
+
+    def _spoken(self, text: str) -> AggregatedTextFrame:
+        frame = AggregatedTextFrame(text, TextType.SENTENCE)
+        frame.will_be_spoken = True
+        return frame
+
+    async def test_spoken_output_waits_for_speech(self):
+        session = await self._session()
+        await self._ready(session)
+        await session.push(self._spoken("It's sunny."), source=session.output)
+        await session.push(self._spoken("In Lisbon."), source=session.output)
+        self.assertNotIn("bot-output", [m["type"] for m in session.sent])
+        await session.push(BotStartedSpeakingFrame())
+        after = [m for m in session.sent if m["type"] in ("bot-started-speaking", "bot-output")]
+        self.assertEqual(
+            [(m["type"], m.get("data", {}).get("text")) for m in after],
+            [
+                ("bot-started-speaking", None),
+                ("bot-output", "It's sunny."),
+                ("bot-output", "In Lisbon."),
+            ],
+        )
+
+    async def test_interruption_drops_unspoken_output(self):
+        session = await self._session()
+        await self._ready(session)
+        await session.push(self._spoken("It's sunny."), source=session.output)
+        await session.push(InterruptionFrame())
+        await session.push(BotStartedSpeakingFrame())
+        types = [m["type"] for m in session.sent]
+        self.assertIn("bot-interrupted", types)
+        self.assertNotIn("bot-output", types)
 
 
 if __name__ == "__main__":

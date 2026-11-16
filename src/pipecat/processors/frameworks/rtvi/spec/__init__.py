@@ -8,8 +8,9 @@
 
 :data:`MESSAGES` lists every message a Pipecat server accepts from an RTVI
 client and every message it sends back, with the direction, the payload type,
-an example and what makes the server send it. :func:`build_spec` turns that
-table into an `AsyncAPI 3.0 <https://www.asyncapi.com/docs/reference/specification/v3.0.0>`_
+an example and what makes the server send it, and :data:`BEHAVIORS` the rules
+the server follows across messages. :func:`build_spec` turns those tables into
+an `AsyncAPI 3.0 <https://www.asyncapi.com/docs/reference/specification/v3.0.0>`_
 document, written from the server's point of view: it receives the client's
 messages and sends its own.
 
@@ -355,6 +356,88 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
 """Every message of the RTVI protocol, in the order the specification lists them."""
 
 
+@dataclass(frozen=True)
+class RTVIBehaviorSpec:
+    """A rule the server follows across messages, beyond the shape of each one.
+
+    Parameters:
+        id: The behavior's name, e.g. ``"bot-ready-answers-client-ready"``.
+        description: What the server does.
+        messages: The types of the messages the behavior involves.
+    """
+
+    id: str
+    description: str
+    messages: tuple[str, ...]
+
+
+BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
+    RTVIBehaviorSpec(
+        "bot-ready-answers-client-ready",
+        "Once the bot is ready, the server answers client-ready with a bot-ready carrying "
+        "the client-ready's id.",
+        ("client-ready", "bot-ready"),
+    ),
+    RTVIBehaviorSpec(
+        "bot-ready-version",
+        "bot-ready's version is the protocol version the server speaks to the client: the "
+        "server's own for a client of the same major version, and the client's own for a "
+        "1.x client.",
+        ("client-ready", "bot-ready"),
+    ),
+    RTVIBehaviorSpec(
+        "client-ready-version-check",
+        "A client-ready without a version, with a malformed one, or of a major version the "
+        "server doesn't speak gets an error-response carrying its id. The session goes on, "
+        "and the server still answers with bot-ready.",
+        ("client-ready", "error-response", "bot-ready"),
+    ),
+    RTVIBehaviorSpec(
+        "failed-request-gets-error-response",
+        "A client message the server can't handle, of an unknown type or with data that "
+        "doesn't match its payload, gets an error-response carrying the message's id.",
+        ("error-response",),
+    ),
+    RTVIBehaviorSpec(
+        "invalid-message-gets-error",
+        'A transport message labeled "rtvi-ai" that isn\'t an RTVI message, such as one '
+        "without an id, gets an error, since there is no id to answer. The server ignores "
+        'a message without the "rtvi-ai" label.',
+        ("error",),
+    ),
+    RTVIBehaviorSpec(
+        "client-message-answer",
+        "The bot answers a client-message with a server-response or an error-response "
+        "carrying the client-message's id. A server-response's t is the client-message's t.",
+        ("client-message", "server-response", "error-response"),
+    ),
+    RTVIBehaviorSpec(
+        "disconnect-bot-ends-session",
+        "disconnect-bot ends the bot's session.",
+        ("disconnect-bot",),
+    ),
+    RTVIBehaviorSpec(
+        "messages-turned-off",
+        "The server sends a message that has x-rtvi-enabled-by only while that "
+        "RTVIObserverParams field is on.",
+        (),
+    ),
+    RTVIBehaviorSpec(
+        "spoken-output-waits-for-speech",
+        "bot-output for text the bot will speak waits for the bot to start speaking: the "
+        "server sends it after bot-started-speaking, in the order the text came.",
+        ("bot-started-speaking", "bot-output"),
+    ),
+    RTVIBehaviorSpec(
+        "interruption-drops-unspoken-output",
+        "On an interruption, the server sends bot-interrupted, and never sends the "
+        "bot-output it was holding for speech that the interruption cut off.",
+        ("bot-interrupted", "bot-output"),
+    ),
+)
+"""The rules the server follows across messages, each checked by a conformance test."""
+
+
 def _message_key(spec: RTVIMessageSpec) -> str:
     """The message's name in the document's ``components``."""
     return spec.type.replace("-", "_")
@@ -474,6 +557,10 @@ def build_spec() -> dict:
             "messages": messages,
             "schemas": definitions.get("$defs", {}),
         },
+        "x-rtvi-behaviors": [
+            {"id": b.id, "description": b.description, "messages": list(b.messages)}
+            for b in BEHAVIORS
+        ],
     }
 
 

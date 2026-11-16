@@ -11,7 +11,13 @@ from pydantic import TypeAdapter
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
-from pipecat.processors.frameworks.rtvi.spec import MESSAGES, build_spec, render_spec, spec_path
+from pipecat.processors.frameworks.rtvi.spec import (
+    BEHAVIORS,
+    MESSAGES,
+    build_spec,
+    render_spec,
+    spec_path,
+)
 
 
 class TestRTVISpec(unittest.TestCase):
@@ -56,6 +62,14 @@ class TestRTVISpec(unittest.TestCase):
         sent = len(operations["sendServerMessages"]["messages"])
         self.assertEqual(received, sum(s.direction == "client-to-server" for s in MESSAGES))
         self.assertEqual(sent, sum(s.direction == "server-to-client" for s in MESSAGES))
+
+    def test_behaviors_are_unique_and_name_known_messages(self):
+        ids = [behavior.id for behavior in BEHAVIORS]
+        self.assertEqual(len(ids), len(set(ids)))
+        types = {spec.type for spec in MESSAGES}
+        for behavior in BEHAVIORS:
+            with self.subTest(behavior.id):
+                self.assertEqual(set(behavior.messages) - types, set())
 
     def test_responses_carry_an_id(self):
         specs = {spec.type: spec for spec in MESSAGES}
