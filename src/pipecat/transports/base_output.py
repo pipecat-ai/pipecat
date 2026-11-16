@@ -852,6 +852,11 @@ class BaseOutputTransport(FrameProcessor):
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
+                # Playback never started, but the resampler can still hold
+                # audio from a turn that was abandoned, which would otherwise
+                # come out at the start of the next reply.
+                if self._resampler:
+                    await self._resampler.reset()
                 return
 
             self._bot_speaking = False
