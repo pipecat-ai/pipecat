@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.gradium.utils import GradiumLogLevel, log_server_message
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.deprecation import deprecated
@@ -70,6 +71,7 @@ class GradiumTTSService(WebsocketTTSService):
         url: str = "wss://api.gradium.ai/api/speech/tts",
         model: str | None = None,
         json_config: str | None = None,
+        log_level: GradiumLogLevel | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -92,6 +94,10 @@ class GradiumTTSService(WebsocketTTSService):
                     Will be removed in 2.0.0.
 
             json_config: Optional JSON configuration string for additional model settings.
+            log_level: Opt in to the server's log messages, such as a warning
+                about an unknown or deprecated ``json_config`` key: the lowest
+                level to receive ("debug", "info", "warning" or "error"). They
+                are logged at their own level. Off by default.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
@@ -140,6 +146,7 @@ class GradiumTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._url = url
         self._json_config = json_config
+        self._log_level = log_level
 
         # State tracking
         self._receive_task = None
@@ -185,6 +192,8 @@ class GradiumTTSService(WebsocketTTSService):
         }
         if self._json_config is not None:
             setup_msg["json_config"] = self._json_config
+        if self._log_level is not None:
+            setup_msg["log_level"] = self._log_level
         return setup_msg
 
     def _build_text_msg(self, text: str = "", context_id: str = "") -> dict:
@@ -350,6 +359,9 @@ class GradiumTTSService(WebsocketTTSService):
                 if ctx_id:
                     self._setup_context_ids.discard(ctx_id)
                 await self.stop_all_metrics()
+
+            elif msg["type"] == "log":
+                log_server_message(msg)
 
             elif msg["type"] == "error":
                 await self.push_frame(TTSStoppedFrame(context_id=ctx_id))
