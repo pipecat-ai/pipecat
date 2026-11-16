@@ -6,6 +6,7 @@
 
 import unittest
 import warnings
+from typing import Any
 
 from pydantic import TypeAdapter
 
@@ -21,6 +22,24 @@ from pipecat.processors.frameworks.rtvi.spec import (
     render_spec,
     spec_path,
 )
+
+
+def _undescribed(schema: Any, path: str = "") -> list[str]:
+    """The fields in a schema, nested ones included, that have no description."""
+    found = []
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key == "properties":
+                for field, field_schema in value.items():
+                    if "description" not in field_schema:
+                        found.append(path + field)
+                    found += _undescribed(field_schema, f"{path}{field}.")
+            else:
+                found += _undescribed(value, path)
+    elif isinstance(schema, list):
+        for value in schema:
+            found += _undescribed(value, path)
+    return found
 
 
 class TestRTVISpec(unittest.TestCase):
@@ -97,6 +116,23 @@ class TestRTVISpec(unittest.TestCase):
     def test_every_message_is_in_one_group(self):
         grouped = [type for group in GROUPS for type in group.messages]
         self.assertEqual(sorted(grouped), sorted(spec.type for spec in MESSAGES))
+
+    def test_every_field_has_a_description(self):
+        # A client's author reads each field's description, in the document and
+        # on the docs site. Describe a field in the Parameters: section of its
+        # model's docstring, and a message's free-form data in its message model's.
+        document = build_spec()
+        undescribed = []
+        for name, schema in document["components"]["schemas"].items():
+            undescribed += [f"{name}.{field}" for field in _undescribed(schema)]
+        for name, message in document["components"]["messages"].items():
+            data = message["payload"]["properties"].get("data")
+            if data is None:
+                continue
+            if not {"$ref", "anyOf", "description"} & data.keys():
+                undescribed.append(f"{name}.data")
+            undescribed += [f"{name}.data.{field}" for field in _undescribed(data)]
+        self.assertEqual(undescribed, [])
 
     def test_responses_carry_an_id(self):
         specs = {spec.type: spec for spec in MESSAGES}

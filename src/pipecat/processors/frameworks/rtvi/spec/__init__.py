@@ -76,6 +76,8 @@ class RTVIMessageSpec:
         deprecated: What replaces a deprecated message.
         details: More about the message, for a reader who needs it beyond the
             description, as Markdown.
+        data_description: What the message's ``data`` holds, for data whose type
+            has no description of its own.
     """
 
     type: str
@@ -89,6 +91,62 @@ class RTVIMessageSpec:
     min_client_version: str | None = None
     deprecated: str | None = None
     details: str | None = None
+    data_description: str | None = None
+
+
+_ROLE = re.compile(r":(?:class|meth|attr|func|mod|data|obj):`~?([^`]+)`")
+_JSON_VALUES = {"`None`": "`null`", "`True`": "`true`", "`False`": "`false`"}
+# A deprecation in a field's entry, which ends it: its first sentence names the
+# replacement, and the rest is about Pipecat's releases, not the protocol.
+_DEPRECATED = re.compile(r"\.\. deprecated::[^\n]*\n\s*([^.]*\.).*", re.S)
+
+
+def _markdown(text: str) -> str:
+    """Docstring text as one line of Markdown, as a reader of the document needs it.
+
+    Sphinx roles and markup become code, Python's values JSON's, and a
+    deprecation its replacement.
+    """
+    text = _DEPRECATED.sub(lambda match: f"Deprecated: {match.group(1)}", text)
+    text = _ROLE.sub(lambda match: f"`{match.group(1).rsplit('.', 1)[-1]}`", text)
+    text = text.replace("``", "`")
+    for python, json_value in _JSON_VALUES.items():
+        text = text.replace(python, json_value)
+    return " ".join(text.split())
+
+
+def _docstring(cls: type) -> tuple[str, dict[str, str]]:
+    """A class's summary and its fields' descriptions, from its Google-style docstring.
+
+    A field a base class declares keeps the description from the base's docstring,
+    unless the class describes it again.
+    """
+    fields = {}
+    for klass in reversed(cls.__mro__):
+        fields.update(_parameters(_own_doc(klass)))
+    return _summary(_own_doc(cls)), fields
+
+
+def _own_doc(cls: type) -> str:
+    # A class without a docstring of its own would get its base's from getdoc.
+    return inspect.cleandoc(cls.__dict__.get("__doc__") or "")
+
+
+def _parameters(doc: str) -> dict[str, str]:
+    """The field descriptions in a docstring's ``Parameters:`` section."""
+    fields = {}
+    section = re.search(r"^Parameters:\n(.*?)(?=^\S|\Z)", doc, re.M | re.S)
+    if section:
+        for entry in re.split(r"^    (?=\S)", section.group(1), flags=re.M):
+            name, _, text = entry.partition(":")
+            if name.strip():
+                fields[name.strip()] = _markdown(text)
+    return fields
+
+
+def _summary(doc: str) -> str:
+    """The first paragraph of a docstring, as Markdown."""
+    return _markdown(doc.split("\n\n")[0])
 
 
 def _client(
@@ -135,6 +193,7 @@ def _server(
         data_required=bool(data and data.is_required()),
         has_id="id" in fields,
         example=example,
+        data_description=_docstring(model)[1].get("data"),
         **kwargs,
     )
 
@@ -821,47 +880,6 @@ BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
 """The rules the server follows across messages, each checked by a conformance test."""
 
 
-_ROLE = re.compile(r":(?:class|meth|attr|func|mod|data|obj):`~?([^`]+)`")
-_JSON_VALUES = {"`None`": "`null`", "`True`": "`true`", "`False`": "`false`"}
-# A deprecation in a field's entry, which ends it: its first sentence names the
-# replacement, and the rest is about Pipecat's releases, not the protocol.
-_DEPRECATED = re.compile(r"\.\. deprecated::[^\n]*\n\s*([^.]*\.).*", re.S)
-
-
-def _markdown(text: str) -> str:
-    """Docstring text as one line of Markdown, as a reader of the document needs it.
-
-    Sphinx roles and markup become code, Python's values JSON's, and a
-    deprecation its replacement.
-    """
-    text = _DEPRECATED.sub(lambda match: f"Deprecated: {match.group(1)}", text)
-    text = _ROLE.sub(lambda match: f"`{match.group(1).rsplit('.', 1)[-1]}`", text)
-    text = text.replace("``", "`")
-    for python, json_value in _JSON_VALUES.items():
-        text = text.replace(python, json_value)
-    return " ".join(text.split())
-
-
-def _docstring(cls: type) -> tuple[str, dict[str, str]]:
-    """A class's summary and its fields' descriptions, from its Google-style docstring."""
-    # A class without a docstring of its own would get its base's from getdoc.
-    doc = inspect.cleandoc(cls.__dict__.get("__doc__") or "")
-    summary = _summary(doc)
-    fields = {}
-    section = re.search(r"^Parameters:\n(.*?)(?=^\S|\Z)", doc, re.M | re.S)
-    if section:
-        for entry in re.split(r"^    (?=\S)", section.group(1), flags=re.M):
-            name, _, text = entry.partition(":")
-            if name.strip():
-                fields[name.strip()] = _markdown(text)
-    return summary, fields
-
-
-def _summary(doc: str) -> str:
-    """The first paragraph of a docstring, as Markdown."""
-    return _markdown(doc.split("\n\n")[0])
-
-
 class _SchemaGenerator(GenerateJsonSchema):
     """Describes each model by its docstring's summary, and each field by its entry.
 
@@ -908,6 +926,8 @@ def _envelope(spec: RTVIMessageSpec, data_schema: Any) -> dict:
         properties["id"] = {"type": "string"}
         required.append("id")
     if spec.data is not None:
+        if spec.data_description and not {"$ref", "anyOf", "description"} & data_schema.keys():
+            data_schema = {**data_schema, "description": spec.data_description}
         properties["data"] = data_schema
         if spec.data_required:
             required.append("data")

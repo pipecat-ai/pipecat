@@ -1081,6 +1081,10 @@ class ServerMessage(BaseModel):
     """Generic server message.
 
     Used for custom server-to-client messages.
+
+    Parameters:
+        data: The application's own data, any JSON value, as the bot's application
+            sent it.
     """
 
     label: MessageLiteral = MESSAGE_LABEL
