@@ -497,7 +497,7 @@ async def test_interruption_before_creation_cancels_late_reply():
         )
         request = await peer.next()
         await worker.queue_frame(InterruptionFrame())
-        await asyncio.sleep(0.02)
+        await until(lambda: service._interruption_epoch == 1)
         response = await peer.start(request)
         await peer.message(response, text="Should not play", samples=2400)
         await until(
