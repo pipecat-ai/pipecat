@@ -38,7 +38,8 @@ class InceptionLLMSettings(BaseOpenAILLMService.Settings):
 
 @deprecated(
     "`InceptionLLMService` is deprecated since 1.17.0 and will be removed in 2.0.0. "
-    "No replacement. Inception stops serving the Mercury API after December 28, 2026."
+    "No replacement. Inception stops serving the Mercury API after December 28, 2026, "
+    "so the service may be removed in an earlier release after that date."
 )
 class InceptionLLMService(OpenAILLMService):
     """A service for interacting with Inception's API using the OpenAI-compatible interface.
@@ -49,7 +50,8 @@ class InceptionLLMService(OpenAILLMService):
 
     .. deprecated:: 1.17.0
         No replacement. Inception stops serving the Mercury API after
-        December 28, 2026. Will be removed in 2.0.0.
+        December 28, 2026. Will be removed in 2.0.0, or in an earlier
+        release after that date.
     """
 
     # Inception doesn't support the "developer" message role.

@@ -3662,7 +3662,7 @@
       "removed_in": "2.0.0",
       "relation": "none",
       "replacement": null,
-      "message": "`InceptionLLMService` is deprecated since 1.17.0 and will be removed in 2.0.0. No replacement. Inception stops serving the Mercury API after December 28, 2026.",
+      "message": "`InceptionLLMService` is deprecated since 1.17.0 and will be removed in 2.0.0. No replacement. Inception stops serving the Mercury API after December 28, 2026, so the service may be removed in an earlier release after that date.",
       "location": "pipecat/services/inception/llm.py"
     },
     {
