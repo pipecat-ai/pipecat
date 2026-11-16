@@ -7,7 +7,9 @@
 import unittest
 
 from langchain_core.language_models import FakeStreamingListLLM
+from langchain_core.messages import AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableGenerator
 
 from pipecat.frames.frames import (
     InterruptionFrame,
@@ -111,6 +113,29 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             context_aggregator.assistant().messages[-1]["content"], self.expected_response
         )
+
+    async def test_langchain_content_blocks(self):
+        async def stream(_input):
+            for content in (
+                [],
+                [
+                    {"type": "reasoning", "reasoning": "Greet the user."},
+                    {"type": "text", "text": "Hello"},
+                ],
+                [{"type": "text", "text": " dear human", "extras": {"signature": "c2ln"}}],
+                [],
+            ):
+                yield AIMessageChunk(content=content)
+
+        context = LLMContext([{"role": "user", "content": "Hi"}])
+        down_frames, _ = await run_test(
+            LangchainProcessor(chain=RunnableGenerator(stream)),
+            frames_to_send=[LLMContextFrame(context)],
+            expected_down_frames=None,
+        )
+
+        text = "".join(f.text for f in down_frames if isinstance(f, TextFrame))
+        self.assertEqual(text, self.expected_response)
 
 
 if __name__ == "__main__":
