@@ -299,7 +299,7 @@ class ActionManager:
         if needs_wait:
             await self._ongoing_actions_finished_event.wait()
 
-    async def _handle_tts_action(self, action: dict) -> None:
+    async def _handle_tts_action(self, action: dict, flow_manager: "FlowManager") -> None:
         """Built-in handler for TTS actions.
 
         Args:
@@ -307,6 +307,7 @@ class ActionManager:
                 the text to speak. Optional 'append_text_to_context' key (bool)
                 controlling whether the spoken text is appended to the LLM
                 context. Defaults to True.
+            flow_manager: Reference to the FlowManager instance.
         """
         text = action.get("text")
         if not text:
@@ -331,7 +332,7 @@ class ActionManager:
             self._decrement_ongoing_actions_count()
             logger.error(f"TTS error: {e}")
 
-    async def _handle_end_action(self, action: dict) -> None:
+    async def _handle_end_action(self, action: dict, flow_manager: "FlowManager") -> None:
         """Built-in handler for ending the conversation.
 
         This handler queues an EndFrame to terminate the conversation. If the action
@@ -342,6 +343,7 @@ class ActionManager:
                 goodbye message. Optional 'append_text_to_context' key (bool)
                 controlling whether that goodbye text is appended to the LLM
                 context. Defaults to True.
+            flow_manager: Reference to the FlowManager instance.
         """
         # Mark that we're starting the action
         self._increment_ongoing_actions_count()
@@ -361,7 +363,7 @@ class ActionManager:
         # NOTE: there's no point queueing an ActionFinishedFrame here, since the previously-queued
         # EndFrame ensures that it'll never get delivered to our observer
 
-    async def _handle_function_action(self, action: dict) -> None:
+    async def _handle_function_action(self, action: dict, flow_manager: "FlowManager") -> None:
         """Built-in handler for queuing functions to run inline in the pipeline.
 
         This handler queues a FunctionActionFrame to be executed when the pipeline
@@ -371,6 +373,7 @@ class ActionManager:
         Args:
             action: Action configuration dictionary. Required 'handler' key
                 containing the function to execute.
+            flow_manager: Reference to the FlowManager instance.
         """
         handler = action.get("handler")
         if not handler:

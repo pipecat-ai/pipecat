@@ -215,6 +215,25 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
         self.action_manager._register_action("modern", modern_handler)
         await self.action_manager.execute_actions([{"type": "modern", "data": "modern"}])
 
+    async def test_builtin_actions_emit_no_deprecation_warning(self):
+        """Test that the built-in actions raise no deprecation warning."""
+
+        async def handler(action: dict, flow_manager: Any):
+            pass
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.action_manager.execute_actions(
+                [
+                    {"type": "tts_say", "text": "Hello"},
+                    {"type": "function", "handler": handler},
+                    {"type": "end_conversation"},
+                ]
+            )
+        self.assertEqual(
+            [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)], []
+        )
+
     async def test_callable_instance_handler_is_awaited(self):
         """An object with an async __call__ runs, instead of its coroutine being dropped."""
         calls = []
