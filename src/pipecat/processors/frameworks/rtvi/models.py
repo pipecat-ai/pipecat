@@ -1588,3 +1588,19 @@ class SelectText(BaseModel):
     target_id: str | None = None
     start_offset: int | None = None
     end_offset: int | None = None
+
+
+STANDARD_UI_COMMANDS: dict[str, type[BaseModel]] = {
+    "toast": Toast,
+    "navigate": Navigate,
+    "scroll_to": ScrollTo,
+    "highlight": Highlight,
+    "focus": Focus,
+    "click": Click,
+    "set_input_value": SetInputValue,
+    "select_text": SelectText,
+}
+"""The standard ``ui-command`` commands, by name, and the payload each carries.
+
+``@pipecat-ai/client-react`` has a default handler for each of them.
+"""

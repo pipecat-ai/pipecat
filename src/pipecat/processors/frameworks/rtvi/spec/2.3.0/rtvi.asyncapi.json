@@ -2479,7 +2479,35 @@
               "const": "ui-command"
             },
             "data": {
-              "$ref": "#/components/schemas/UICommandData"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UIToastCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UINavigateCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UIScrollToCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UIHighlightCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UIFocusCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UIClickCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UISetInputValueCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UISelectTextCommand"
+                },
+                {
+                  "$ref": "#/components/schemas/UIAppCommand"
+                }
+              ]
             }
           },
           "required": [
@@ -2501,7 +2529,8 @@
               }
             }
           }
-        ]
+        ],
+        "description": "The standard commands each have a payload of their own, and `@pipecat-ai/client-react` has a default handler for each. An application can also send commands of its own."
       },
       "ui_job_group": {
         "name": "ui-job-group",
@@ -3158,6 +3187,39 @@
         "title": "BotReadyData",
         "type": "object"
       },
+      "Click": {
+        "description": "Click an element on the client.",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
+            "title": "Target Id"
+          }
+        },
+        "title": "Click",
+        "type": "object"
+      },
       "ClientReadyData": {
         "description": "Data format of client ready messages.",
         "properties": {
@@ -3348,6 +3410,85 @@
           "url"
         ],
         "title": "FileUrl",
+        "type": "object"
+      },
+      "Focus": {
+        "description": "Move input focus to a target element.",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client.",
+            "title": "Target Id"
+          }
+        },
+        "title": "Focus",
+        "type": "object"
+      },
+      "Highlight": {
+        "description": "Briefly emphasize a target element (flash, glow, pulse).",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client.",
+            "title": "Target Id"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional highlight duration. Client default applies when None.",
+            "title": "Duration Ms"
+          }
+        },
+        "title": "Highlight",
         "type": "object"
       },
       "KeypadEntry": {
@@ -3771,6 +3912,35 @@
         "title": "MetricsMessageData",
         "type": "object"
       },
+      "Navigate": {
+        "description": "Client-side navigation to a named view.",
+        "properties": {
+          "view": {
+            "description": "App-defined view name (route, screen id, tab key, etc.).",
+            "title": "View",
+            "type": "string"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional view-specific parameters.",
+            "title": "Params"
+          }
+        },
+        "required": [
+          "view"
+        ],
+        "title": "Navigate",
+        "type": "object"
+      },
       "ProcessingMetricsData": {
         "description": "General processing time metrics data.",
         "properties": {
@@ -4003,6 +4173,111 @@
         "title": "STTUsageMetricsData",
         "type": "object"
       },
+      "ScrollTo": {
+        "description": "Scroll a target element into view.",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client.",
+            "title": "Target Id"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional scroll behavior hint. Typical values: `\"smooth\"` or `\"instant\"`. Clients may ignore.",
+            "title": "Behavior"
+          }
+        },
+        "title": "ScrollTo",
+        "type": "object"
+      },
+      "SelectText": {
+        "description": "Select text on the page so the user can see what the worker means.",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`. Typically the ref of a paragraph or input element.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
+            "title": "Target Id"
+          },
+          "start_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Character offset within the target's text where the selection should start. For `<input>` and `<textarea>` this is the value offset; for document elements it is computed against the concatenation of descendant text nodes in document order.",
+            "title": "Start Offset"
+          },
+          "end_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "End character offset, exclusive. Same coordinate system as `start_offset`.",
+            "title": "End Offset"
+          }
+        },
+        "title": "SelectText",
+        "type": "object"
+      },
       "SendFileData": {
         "description": "Data format for sending a file to the LLM.",
         "properties": {
@@ -4112,6 +4387,51 @@
           }
         },
         "title": "SendTextOptions",
+        "type": "object"
+      },
+      "SetInputValue": {
+        "description": "Write a value into a text input or textarea on the client.",
+        "properties": {
+          "value": {
+            "default": "",
+            "description": "The text to write.",
+            "title": "Value",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot ref from `<ui_state>`. Typically the ref of an `<input>` or `<textarea>`.",
+            "title": "Ref"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
+            "title": "Target Id"
+          },
+          "replace": {
+            "default": true,
+            "description": "When True (the default), overwrite the current value. When False, append to it.",
+            "title": "Replace",
+            "type": "boolean"
+          }
+        },
+        "title": "SetInputValue",
         "type": "object"
       },
       "SpokenProgressData": {
@@ -4315,6 +4635,73 @@
         "title": "TextType",
         "type": "string"
       },
+      "Toast": {
+        "description": "A transient notification surface shown on the client.",
+        "properties": {
+          "title": {
+            "description": "Required headline.",
+            "title": "Title",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional second line beneath the title.",
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional body text.",
+            "title": "Description"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional leading image.",
+            "title": "Image Url"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional dismiss timer. Client default applies when None.",
+            "title": "Duration Ms"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "Toast",
+        "type": "object"
+      },
       "TranscriptionSpeaker": {
         "description": "A speaker an STT service's diarization told apart in a transcription stream.",
         "properties": {
@@ -4334,6 +4721,44 @@
           "number"
         ],
         "title": "TranscriptionSpeaker",
+        "type": "object"
+      },
+      "UIAppCommand": {
+        "description": "A command of the application's own, with a name and payload it defines.",
+        "properties": {
+          "command": {
+            "description": "The command's name, other than a standard command's.",
+            "not": {
+              "enum": [
+                "toast",
+                "navigate",
+                "scroll_to",
+                "highlight",
+                "focus",
+                "click",
+                "set_input_value",
+                "select_text"
+              ]
+            },
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The command's payload, a JSON object.",
+            "title": "Payload"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "UIAppCommand",
         "type": "object"
       },
       "UICancelJobGroupData": {
@@ -4364,30 +4789,25 @@
         "title": "UICancelJobGroupData",
         "type": "object"
       },
-      "UICommandData": {
-        "description": "Inner `data` for a `ui-command` message.",
+      "UIClickCommand": {
+        "description": "The standard `click` command: click an element on the client.",
         "properties": {
           "command": {
-            "description": "App-defined command.",
+            "const": "click",
+            "description": "The command's name.",
             "title": "Command",
             "type": "string"
           },
           "payload": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "App-defined payload, a JSON object.",
-            "title": "Payload"
+            "$ref": "#/components/schemas/Click",
+            "description": "The command's payload."
           }
         },
         "required": [
-          "command"
+          "command",
+          "payload"
         ],
-        "title": "UICommandData",
+        "title": "UIClickCommand",
         "type": "object"
       },
       "UIEventData": {
@@ -4414,6 +4834,48 @@
           "event"
         ],
         "title": "UIEventData",
+        "type": "object"
+      },
+      "UIFocusCommand": {
+        "description": "The standard `focus` command: move input focus to a target element.",
+        "properties": {
+          "command": {
+            "const": "focus",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Focus",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UIFocusCommand",
+        "type": "object"
+      },
+      "UIHighlightCommand": {
+        "description": "The standard `highlight` command: briefly emphasize a target element (flash, glow, pulse).",
+        "properties": {
+          "command": {
+            "const": "highlight",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Highlight",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UIHighlightCommand",
         "type": "object"
       },
       "UIJobCompletedData": {
@@ -4603,6 +5065,90 @@
         "title": "UIJobUpdateData",
         "type": "object"
       },
+      "UINavigateCommand": {
+        "description": "The standard `navigate` command: client-side navigation to a named view.",
+        "properties": {
+          "command": {
+            "const": "navigate",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Navigate",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UINavigateCommand",
+        "type": "object"
+      },
+      "UIScrollToCommand": {
+        "description": "The standard `scroll_to` command: scroll a target element into view.",
+        "properties": {
+          "command": {
+            "const": "scroll_to",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ScrollTo",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UIScrollToCommand",
+        "type": "object"
+      },
+      "UISelectTextCommand": {
+        "description": "The standard `select_text` command: select text on the page so the user can see what the worker means.",
+        "properties": {
+          "command": {
+            "const": "select_text",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/SelectText",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UISelectTextCommand",
+        "type": "object"
+      },
+      "UISetInputValueCommand": {
+        "description": "The standard `set_input_value` command: write a value into a text input or textarea on the client.",
+        "properties": {
+          "command": {
+            "const": "set_input_value",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/SetInputValue",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UISetInputValueCommand",
+        "type": "object"
+      },
       "UISnapshotData": {
         "description": "Inner `data` for a `ui-snapshot` message.",
         "properties": {
@@ -4615,6 +5161,27 @@
           "tree"
         ],
         "title": "UISnapshotData",
+        "type": "object"
+      },
+      "UIToastCommand": {
+        "description": "The standard `toast` command: a transient notification surface shown on the client.",
+        "properties": {
+          "command": {
+            "const": "toast",
+            "description": "The command's name.",
+            "title": "Command",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Toast",
+            "description": "The command's payload."
+          }
+        },
+        "required": [
+          "command",
+          "payload"
+        ],
+        "title": "UIToastCommand",
         "type": "object"
       },
       "UserInputMessageData": {

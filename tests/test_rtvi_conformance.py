@@ -328,6 +328,7 @@ async def _run_session(client_version: str, params: RTVIObserverParams = _EVERYT
 
         # A UI worker drives the client's UI.
         await session.push(RTVIUICommandFrame(command="toast", payload={"title": "Shipped"}))
+        await session.push(RTVIUICommandFrame(command="open-cart", payload={"items": 2}))
         await session.push(RTVIUIJobGroupFrame(data=RTVI.UIJobGroupStartedData(job_id="job_1")))
 
         # Let the system log sink deliver what it queued.

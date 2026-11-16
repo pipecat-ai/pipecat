@@ -36,9 +36,9 @@ import json
 import re
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Union, cast
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter, create_model
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode, JsonSchemaValue
 from pydantic_core import core_schema
 
@@ -136,6 +136,46 @@ def _server(
         example=example,
         **kwargs,
     )
+
+
+def _reserve_standard_commands(schema: dict[str, Any]) -> None:
+    """Keep the standard commands' names out of an application command's schema."""
+    command = cast(dict[str, Any], cast(dict[str, Any], schema["properties"])["command"])
+    command["not"] = {"enum": list(RTVI.STANDARD_UI_COMMANDS)}
+
+
+class UIAppCommand(RTVI.UICommandData):
+    """A command of the application's own, with a name and payload it defines.
+
+    Parameters:
+        command: The command's name, other than a standard command's.
+        payload: The command's payload, a JSON object.
+    """
+
+    # The standard commands' names are theirs, with their payloads.
+    model_config = ConfigDict(json_schema_extra=_reserve_standard_commands)
+
+
+def _ui_command_data() -> Any:
+    """A ui-command's data: one of the standard commands, or one of the application's own."""
+    commands = []
+    for name, payload in RTVI.STANDARD_UI_COMMANDS.items():
+        summary = " ".join((inspect.getdoc(payload) or "").split("\n\n")[0].split())
+        command_type: Any = Literal[name]  # pyright: ignore[reportInvalidTypeForm]
+        commands.append(
+            create_model(
+                "UI" + "".join(part.title() for part in name.split("_")) + "Command",
+                __doc__=(
+                    f"The standard `{name}` command: {summary[0].lower()}{summary[1:]}\n\n"
+                    "Parameters:\n"
+                    "    command: The command's name.\n"
+                    "    payload: The command's payload."
+                ),
+                command=(command_type, ...),
+                payload=(payload, ...),
+            )
+        )
+    return Union[(*commands, UIAppCommand)]  # pyright: ignore[reportInvalidTypeArguments]
 
 
 _TIMESTAMP = "2026-01-01T12:00:00.000Z"
@@ -554,6 +594,12 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         RTVI.UICommandMessage,
         "A command from the bot to the client's UI, such as showing a notification.",
         {"command": "toast", "payload": {"title": "Order shipped"}},
+        data_type=_ui_command_data(),
+        details=(
+            "The standard commands each have a payload of their own, and "
+            "`@pipecat-ai/client-react` has a default handler for each. An application can "
+            "also send commands of its own."
+        ),
     ),
     _server(
         RTVI.UIJobGroupMessage,
