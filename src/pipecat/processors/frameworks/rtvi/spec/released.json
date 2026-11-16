@@ -1,6 +1,6 @@
 {
   "2.3.0": {
-    "sha256": "57e585940f363d778a9141037cfecb04372c7b72c66cd0eece96c2bd03ee3820",
+    "contract_sha256": "56d576e3888df52c2bb9df613aefe6ad757e9fa1b27cb22125af4f05cfa4ae3f",
     "pipecat": "1.15.0"
   }
 }

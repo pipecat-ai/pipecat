@@ -47,17 +47,19 @@ The document's `x-rtvi-behaviors` lists the rules the server follows across mess
 
 5. Run `uv run pytest tests/test_rtvi_spec.py`. It fails when the current version's document doesn't match the code, and when an example doesn't match its message's payload.
 
-A released version's document never changes, since clients implement the version from it: any change to the wire format after a release, even a new optional field, is a new protocol version.
+Once a Pipecat release has shipped a version, its wire format never changes, since clients implement the version from its document: any change to the wire format after a release, even a new optional field, is a new protocol version. The document's descriptions and examples can still be improved.
 
 ## Releases
 
-`released.json` records each protocol version a Pipecat release has shipped, with the SHA-256 of its document and the Pipecat release that first shipped it:
+`released.json` records each protocol version a Pipecat release has shipped, with a hash of its wire format and the Pipecat release that first shipped it:
 
 ```json
-{ "2.3.0": { "sha256": "57e5…", "pipecat": "1.15.0" } }
+{ "2.3.0": { "contract_sha256": "56d5…", "pipecat": "1.15.0" } }
 ```
 
-The changelog workflow (`.github/workflows/generate-changelog.yml`) runs `scripts/rtvi/record_released_spec.py --version <release>` at release-prep, so the current protocol version is recorded in the release PR. A version already recorded stays as it is. `tests/test_rtvi_spec.py` fails when a recorded document has changed, and when the current version is recorded and its document no longer matches the code, which means it's time to bump `PROTOCOL_VERSION`.
+The hash covers the document without its descriptions, summaries, titles and examples, so rewording a description doesn't change it, and a change to the wire format does.
+
+The changelog workflow (`.github/workflows/generate-changelog.yml`) runs `scripts/rtvi/record_released_spec.py --version <release>` at release-prep, so the current protocol version is recorded in the release PR. A version already recorded stays as it is. `tests/test_rtvi_spec.py` fails when the wire format of a recorded version has changed, which means it's time to bump `PROTOCOL_VERSION`.
 
 ## Testing the server against the documents
 

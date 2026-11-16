@@ -115,8 +115,8 @@ jobs:
 
       # Record the RTVI protocol version this release ships. Adds it to
       # rtvi/spec/released.json, which rides along in this same release PR, so
-      # tests/test_rtvi_spec.py keeps its document from changing. No-op when an
-      # earlier release already shipped the version.
+      # tests/test_rtvi_spec.py keeps its wire format from changing. No-op when
+      # an earlier release already shipped the version.
       - name: Record released RTVI protocol version
         run: |
           uv run python scripts/rtvi/record_released_spec.py --version "${{ inputs.version }}"

@@ -7,11 +7,11 @@
 """Record the current RTVI protocol version as released.
 
 Adds the current protocol version to
-``src/pipecat/processors/frameworks/rtvi/spec/released.json``, with its
-document's hash and the Pipecat release that ships it, unless an earlier
-release already recorded it. ``tests/test_rtvi_spec.py`` then fails when a
-recorded document changes. The changelog workflow runs it at release-prep,
-with the release being prepared::
+``src/pipecat/processors/frameworks/rtvi/spec/released.json``, with a hash of
+its wire format and the Pipecat release that ships it, unless an earlier
+release already recorded it. ``tests/test_rtvi_spec.py`` then fails when the
+wire format of a recorded version changes. The changelog workflow runs it at
+release-prep, with the release being prepared::
 
     uv run python scripts/rtvi/record_released_spec.py --version 1.17.0
 """
@@ -22,7 +22,7 @@ import sys
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.processors.frameworks.rtvi.spec import (
-    document_sha256,
+    contract_sha256,
     released,
     released_path,
     render_spec,
@@ -54,7 +54,7 @@ def main() -> int:
         )
         return 1
 
-    record[version] = {"sha256": document_sha256(), "pipecat": args.version}
+    record[version] = {"contract_sha256": contract_sha256(), "pipecat": args.version}
     record = dict(sorted(record.items(), key=lambda item: _version_key(item[0])))
     released_path().write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"recorded RTVI {version} as released in Pipecat {args.version}")

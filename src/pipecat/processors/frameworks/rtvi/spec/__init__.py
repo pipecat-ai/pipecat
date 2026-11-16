@@ -27,7 +27,7 @@ export script to refresh it::
 the protocol.
 
 ``released.json`` records each protocol version a Pipecat release has shipped,
-with its document's hash; a released document never changes.
+with the hash of its wire format, which never changes after the release.
 """
 
 import hashlib
@@ -594,16 +594,43 @@ def released() -> dict[str, dict]:
     """The protocol versions a Pipecat release has shipped.
 
     Returns:
-        For each version, the SHA-256 of its document (``sha256``) and the
-        Pipecat release that first shipped it (``pipecat``).
+        For each version, the SHA-256 of its contract (``contract_sha256``, see
+        :func:`contract_sha256`) and the Pipecat release that first shipped it
+        (``pipecat``).
     """
     return json.loads(released_path().read_text(encoding="utf-8"))
 
 
-def document_sha256(version: str = RTVI.PROTOCOL_VERSION) -> str:
-    """The SHA-256 of a protocol version's document, as hex.
+# Keys that only describe, and maps whose keys are names rather than keywords.
+_PROSE = frozenset({"description", "summary", "title", "examples"})
+_NAMED = frozenset(
+    {"properties", "patternProperties", "$defs", "schemas", "messages", "channels", "operations"}
+)
+
+
+def _contract(node: Any, named: bool = False) -> Any:
+    """A document without its prose: what a client and a server must agree on."""
+    if isinstance(node, list):
+        return [_contract(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    if named:
+        return {key: _contract(value) for key, value in node.items()}
+    return {
+        key: _contract(value, key in _NAMED) for key, value in node.items() if key not in _PROSE
+    }
+
+
+def contract_sha256(version: str = RTVI.PROTOCOL_VERSION) -> str:
+    """The SHA-256 of a protocol version's contract, as hex.
+
+    The contract is the document without its descriptions, summaries, titles and
+    examples, so clearer wording doesn't change it, and any change to the wire
+    format does.
 
     Args:
         version: The protocol version. Defaults to the current one.
     """
-    return hashlib.sha256(spec_path(version).read_bytes()).hexdigest()
+    document = json.loads(spec_path(version).read_text(encoding="utf-8"))
+    contract = json.dumps(_contract(document), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(contract.encode()).hexdigest()

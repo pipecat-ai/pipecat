@@ -15,7 +15,7 @@ from pipecat.processors.frameworks.rtvi.spec import (
     BEHAVIORS,
     MESSAGES,
     build_spec,
-    document_sha256,
+    contract_sha256,
     released,
     render_spec,
     spec_path,
@@ -24,24 +24,19 @@ from pipecat.processors.frameworks.rtvi.spec import (
 
 class TestRTVISpec(unittest.TestCase):
     def test_shipped_spec_file_is_current(self):
-        # The repository keeps the document for client SDKs to vendor.
-        version = RTVI.PROTOCOL_VERSION
-        if version in released():
-            fix = (
-                f"{version} was released in Pipecat {released()[version]['pipecat']}, "
-                "so bump PROTOCOL_VERSION in models.py, then run "
-                "`uv run python scripts/rtvi/write_rtvi_spec.py`"
-            )
-        else:
-            fix = "run `uv run python scripts/rtvi/write_rtvi_spec.py`"
+        # The repository keeps the document for client SDKs to vendor. When the
+        # regenerated document changes the wire format of a released version,
+        # test_released_wire_formats_are_unchanged fails too.
         self.assertTrue(
             spec_path().read_text(encoding="utf-8") == render_spec(),
-            f"spec/{version}/rtvi.asyncapi.json is out of date; {fix}",
+            f"spec/{RTVI.PROTOCOL_VERSION}/rtvi.asyncapi.json is out of date; run "
+            "`uv run python scripts/rtvi/write_rtvi_spec.py`",
         )
 
-    def test_released_documents_are_unchanged(self):
-        # A client implements a released version from its document, so the
-        # document never changes; a change to the wire format is a new version.
+    def test_released_wire_formats_are_unchanged(self):
+        # A client implements a released version from its document, so its wire
+        # format never changes; a change to the wire format is a new version.
+        # Descriptions and examples can still be improved.
         for version, entry in released().items():
             with self.subTest(version):
                 self.assertTrue(
@@ -49,10 +44,11 @@ class TestRTVISpec(unittest.TestCase):
                     f"spec/{version} was released in Pipecat {entry['pipecat']}",
                 )
                 self.assertEqual(
-                    document_sha256(version),
-                    entry["sha256"],
-                    f"spec/{version}/rtvi.asyncapi.json changed since Pipecat "
-                    f"{entry['pipecat']} released it; restore it from that release",
+                    contract_sha256(version),
+                    entry["contract_sha256"],
+                    f"the wire format of protocol {version} changed since Pipecat "
+                    f"{entry['pipecat']} released it; bump PROTOCOL_VERSION in models.py "
+                    "for the change, and restore the released version's wire format",
                 )
 
     def test_message_types_are_unique(self):
