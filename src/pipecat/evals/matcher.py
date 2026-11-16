@@ -13,6 +13,7 @@ reply across its segments, the any-order matching of a turn's function calls,
 and the inverted ``absent:`` check.
 """
 
+import json
 import re
 import time
 
@@ -120,6 +121,8 @@ class ExpectationMatcher:
             # completes only when all are found, in any order (a response
             # arriving doesn't short-circuit it).
             return await self._match_function_calls(expectation, deadline, turn_idx, exp_idx, since)
+        if expectation.event == "metrics":
+            return await self._match_metrics(expectation, deadline, since)
         return await self._match_one(expectation, deadline, turn_idx, exp_idx, since)
 
     async def _match_one(
@@ -136,6 +139,30 @@ class ExpectationMatcher:
             self.last_match_text = self._match_summary(event)
             self._last_match_at = time.monotonic()
         return judge_failure
+
+    async def _match_metrics(
+        self, expectation: EvalExpectation, deadline: float, since: int
+    ) -> EvalAssertionFailure | None:
+        """Match the next metrics report holding the expected kind of metric.
+
+        A report without it is passed over, as an event of another type is: a
+        bot sends several per turn, and which one comes first is not the bot's
+        behavior.
+        """
+        self._trace.log(
+            f"match: waiting for 'metrics' ({expectation.metric or 'any'}"
+            + (f" from {expectation.processor!r})" if expectation.processor else ")")
+        )
+
+        def wanted(event: dict) -> dict[str, list]:
+            return matching_metrics(event, expectation.metric, expectation.processor)
+
+        event = await self._stream.next_event(
+            "metrics", deadline, since=since, accept=lambda event: bool(wanted(event))
+        )
+        self.last_match_text = json.dumps(wanted(event), separators=(",", ":"))
+        self._last_match_at = time.monotonic()
+        return None
 
     async def _match_aggregating(
         self,
@@ -617,6 +644,39 @@ class ExpectationMatcher:
     def _text_contains(self, content: str, needle: str) -> bool:
         """Whether ``needle`` occurs in ``content``, ignoring spacing."""
         return " ".join(needle.split()) in " ".join(content.split())
+
+
+def matching_metrics(
+    event: dict, metric: str | None = None, processor: str | None = None
+) -> dict[str, list]:
+    """The measurements of a ``metrics`` event that an expectation's filters take, by kind.
+
+    The zero a pipeline reports for every processor as it starts is a
+    placeholder, not a measurement, and is left out.
+
+    Args:
+        event: The ``metrics`` event.
+        metric: The kind of metric to keep, or ``None`` for every kind.
+        processor: Text the measuring processor's name must contain, or
+            ``None`` for any processor.
+
+    Returns:
+        The kept measurements under their kind; empty when none is kept.
+    """
+    kept: dict[str, list] = {}
+    for kind, entries in (event.get("data") or {}).items():
+        if metric is not None and kind != metric:
+            continue
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get("value")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0:
+                continue
+            if processor is not None and processor not in str(entry.get("processor", "")):
+                continue
+            kept.setdefault(kind, []).append(entry)
+    return kept
 
 
 def _judge_failure_kind(verdict: JudgeVerdict) -> str:

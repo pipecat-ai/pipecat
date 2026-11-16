@@ -437,7 +437,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_unmapped_message_ignored(self):
         msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": {}}
+            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": {}}
         )
         self.assertIsNone(_stream().frame_to_event(msg))
 
@@ -3738,6 +3738,70 @@ class TestSessionFromScenario(unittest.TestCase):
     def test_other_objects_are_rejected(self):
         with self.assertRaises(TypeError):
             EvalSession.from_scenario({"name": "x"}, "ws://localhost:0")  # type: ignore[arg-type]
+
+
+def _metrics(**kinds) -> dict:
+    return {"type": "metrics", "data": kinds}
+
+
+class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
+    """The bot's metrics reach the harness as sent, kept apart from its other events."""
+
+    def test_a_metrics_message_becomes_an_event_with_its_data(self):
+        data = {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]}
+        frame = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": data}
+        )
+        self.assertEqual(_stream().frame_to_event(frame), {"type": "metrics", "data": data})
+
+    async def test_metrics_are_recorded_apart_from_the_events_seen(self):
+        s = _stream()
+        await s.append({"type": "llm_started"})
+        await s.append(_metrics(ttfb=[{"processor": "LLM#0", "value": 0.2}]))
+        self.assertEqual([e["type"] for e in s.events_seen], ["llm_started"])
+        self.assertEqual([e["type"] for e in s.metrics], ["metrics"])
+        self.assertIn("at", s.metrics[0])
+
+    async def test_an_expectation_takes_the_report_holding_its_metric(self):
+        m = _matcher()
+        await m._stream.append(_metrics(processing=[{"processor": "STT#0", "value": 0.01}]))
+        await m._stream.append(_metrics(ttfb=[{"processor": "LLM#0", "value": 0.4}]))
+        await m._stream.append(
+            _metrics(
+                ttfb=[{"processor": "DeepgramSTTService#0", "value": 0.31}],
+                processing=[{"processor": "DeepgramSTTService#0", "value": 0.02}],
+            )
+        )
+        expectation = EvalExpectation(event="metrics", metric="ttfb", processor="STT")
+        failure = await m.match(expectation, time.monotonic(), 1000, 0, 0)
+        self.assertIsNone(failure)
+        self.assertEqual(
+            json.loads(m.last_match_text),
+            {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]},
+        )
+
+    async def test_the_zero_reported_at_start_is_not_a_measurement(self):
+        m = _matcher()
+        await m._stream.append(_metrics(ttfb=[{"processor": "STT#0", "value": 0.0}]))
+        expectation = EvalExpectation(event="metrics", metric="ttfb")
+        with self.assertRaises(TimeoutError):
+            await m.match(expectation, time.monotonic(), 50, 0, 0)
+
+    async def test_a_bare_expectation_takes_any_report(self):
+        m = _matcher()
+        await m._stream.append(_metrics(tokens=[{"prompt_tokens": 12, "completion_tokens": 3}]))
+        failure = await m.match(EvalExpectation(event="metrics"), time.monotonic(), 1000, 0, 0)
+        self.assertIsNone(failure)
+
+    async def test_a_report_from_earlier_in_the_turn_is_found_from_turn_start(self):
+        m = _matcher()
+        m.reset_turn()
+        await m._stream.append(_metrics(ttfb=[{"processor": "STT#0", "value": 0.3}]))
+        await m._stream.append({"type": "user_transcription", "transcript": "hello"})
+        first = EvalExpectation(event="user_transcription")
+        self.assertIsNone(await m.match(first, time.monotonic(), 1000, 0, 0))
+        looking_back = EvalExpectation(event="metrics", metric="ttfb", check_from="turn_start")
+        self.assertIsNone(await m.match(looking_back, time.monotonic(), 1000, 0, 1))
 
 
 class TestBotImageEvent(unittest.TestCase):

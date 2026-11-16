@@ -409,8 +409,9 @@ class EvalClientSerializer(RTVIClientSerializer):
     has no frame on the harness's side to become. A cancelled
     ``llm-function-call-stopped`` becomes an :class:`EvalFunctionCallCancelFrame`,
     which keeps its place among the bot's other function-call reports. The
-    deprecated ``user-transcription`` is dropped: ``user-input`` carries the same
-    transcriptions.
+    bot's ``metrics`` stay raw messages too, so the sink can report them as
+    they were sent. The deprecated ``user-transcription`` is dropped:
+    ``user-input`` carries the same transcriptions.
     """
 
     def __init__(self, **kwargs):
@@ -461,7 +462,13 @@ class EvalClientSerializer(RTVIClientSerializer):
                         function_name=payload.get("function_name") or "",
                         tool_call_id=payload.get("tool_call_id", ""),
                     )
-            if msg_type in _REPORTED_EVENT_TYPES or msg_type == EVAL_BOT_IMAGE_TYPE:
+            if (
+                msg_type in _REPORTED_EVENT_TYPES
+                or msg_type == EVAL_BOT_IMAGE_TYPE
+                # The bot's metrics, reported as sent: no per-metric mapping
+                # here to fall behind the protocol.
+                or msg_type == "metrics"
+            ):
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.
                 return InputTransportMessageFrame(message=message)

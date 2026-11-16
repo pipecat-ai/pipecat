@@ -50,6 +50,10 @@ scenario ``event:``             RTVI server message(s)
                                 acknowledgment the user said while the bot
                                 talked, which neither interrupted it nor reached
                                 the LLM
+``metrics``                     ``metrics``: what the bot's processors measured (TTFB,
+                                processing time, usage), as sent, under ``data``.
+                                Kept in :attr:`EvalEventStream.metrics` and out of
+                                ``events_seen``
 ``expression``                  ``bot-output`` in expressive conversation (alpha):
                                 expression the bot's TTS performed, in the tags
                                 the LLM writes: ``<<excited>>`` where the delivery of
@@ -128,6 +132,10 @@ class EvalEventStream:
         self._claimed: set[int] = set()
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
+        # Every metrics message the bot sent, in arrival order. Kept apart from
+        # events_seen: a bot reports several per turn, and they are measurements
+        # to read rather than the behavior a failed run is diagnosed from.
+        self.metrics: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
         self.latest_event_times: dict[str, float] = {}
         # Accumulates the bot's LLM text for the current response, emitted as one
@@ -305,16 +313,21 @@ class EvalEventStream:
         """Queue an event for the drivers.
 
         Stamps its arrival time as ``at`` (seconds since the stream began) unless
-        it has one, records it, and logs it.
+        it has one, records it, and logs it. A ``metrics`` event is recorded in
+        :attr:`metrics` rather than :attr:`events_seen`.
 
         Args:
             event: The event dict, with at least a ``type``.
         """
         event.setdefault("at", self.elapsed())
         self.touch()
-        self.events_seen.append(event)
+        if event["type"] == "metrics":
+            self.metrics.append(event)
+            preview = ", ".join(event.get("data") or {})
+        else:
+            self.events_seen.append(event)
+            preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self.latest_event_times[event["type"]] = time.monotonic()
-        preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
@@ -626,6 +639,8 @@ class EvalEventStream:
             return self._bot_backchannel_event(data) or self._expression_event(data)
         elif msg_type == "user-input":
             return self._user_input_event(data)
+        elif msg_type == "metrics":
+            return {"type": "metrics", "data": dict(data)}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",

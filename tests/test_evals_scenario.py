@@ -628,6 +628,35 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
             self.assertIn(message, str(ctx.exception))
 
+    def test_metrics_expectation(self):
+        s = EvalScriptScenario.load(
+            _write(
+                """
+                name: metrics
+                turns:
+                  - user: "hello"
+                    expect:
+                      - event: metrics
+                      - event: metrics
+                        metric: ttfb
+                        processor: STT
+                        check_from: turn_start
+                """
+            )
+        )
+        bare, filtered = s.turns[0].expect
+        self.assertEqual((bare.metric, bare.processor), (None, None))
+        self.assertEqual((filtered.metric, filtered.processor), ("ttfb", "STT"))
+        for bad, message in (
+            ("expect: [{event: response, metric: ttfb}]", "only applies to the 'metrics' event"),
+            ("expect: [{event: response, processor: STT}]", "only applies to the 'metrics' event"),
+            ("expect: [{event: metrics, metric: 1}]", "'metric:' must be a non-empty string"),
+            ("expect: [{event: metrics, absent: true, metric: ttfb}]", "cannot be combined"),
+        ):
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
+            self.assertIn(message, str(ctx.exception))
+
     def test_llm_marker_unknown_kind_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             EvalScriptScenario.load(
