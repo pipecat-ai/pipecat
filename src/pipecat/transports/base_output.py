@@ -473,6 +473,11 @@ class BaseOutputTransport(FrameProcessor):
             # audio first arrives at another rate.
             self._resampler: BaseAudioResampler | None = None
 
+            # Set when the output-idle fallback queued the audio still held
+            # back so it plays before the bot is reported as stopped. The
+            # audio task reports it as soon as that audio has been played.
+            self._stop_after_idle_flush = False
+
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
             self._mixer: BaseAudioMixer | None = None
@@ -648,6 +653,11 @@ class BaseOutputTransport(FrameProcessor):
             """
             if not self._params.audio_out_enabled:
                 return
+
+            # More audio means the bot isn't done after all, so a pending idle
+            # stop no longer applies.
+            if frame.audio:
+                self._stop_after_idle_flush = False
 
             # We might need to resample if incoming audio doesn't match the
             # transport sample rate.
@@ -856,6 +866,7 @@ class BaseOutputTransport(FrameProcessor):
 
             self._bot_speaking = False
             self._tts_audio_received = False
+            self._stop_after_idle_flush = False
 
             # Any remaining leftover here (e.g. from an interruption) is
             # discarded rather than flushed, since it's no longer wanted. The
@@ -957,6 +968,32 @@ class BaseOutputTransport(FrameProcessor):
             if volume != 1.0 and isinstance(frame, OutputAudioRawFrame):
                 frame.audio = scale_audio(frame.audio, volume)
 
+        async def _handle_output_idle(self) -> bool:
+            """Handle nothing having been queued for a while (the fallback stop).
+
+            If the bot was speaking, there may still be audio held back waiting
+            to fill a chunk (or inside the resampler) because the
+            `TTSStoppedFrame` that would normally flush it hasn't arrived yet.
+            That audio is queued so it plays, and the bot is reported as
+            stopped once it has. Otherwise the bot is reported as stopped right
+            away.
+
+            Returns:
+                Whether audio was queued and needs to be played first.
+            """
+            if self._bot_speaking and not self._stop_after_idle_flush:
+                await self._enqueue_flushed_audio_buffer()
+                if not self._audio_queue.empty():
+                    self._stop_after_idle_flush = True
+                    return True
+            await self._bot_stopped_speaking()
+            return False
+
+        async def _maybe_finish_idle_flush(self):
+            """Report the bot as stopped once the idle-flushed audio has played."""
+            if self._stop_after_idle_flush and self._audio_queue.empty():
+                await self._bot_stopped_speaking()
+
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             """Generate the next frame for audio processing.
 
@@ -966,6 +1003,7 @@ class BaseOutputTransport(FrameProcessor):
 
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 while True:
+                    await self._maybe_finish_idle_flush()
                     try:
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
@@ -976,7 +1014,7 @@ class BaseOutputTransport(FrameProcessor):
                         self._audio_queue.task_done()
                     except TimeoutError:
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
-                        await self._bot_stopped_speaking()
+                        await self._handle_output_idle()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 # Caller below only invokes this when `self._mixer` is set.
@@ -985,6 +1023,7 @@ class BaseOutputTransport(FrameProcessor):
                 last_frame_time = 0
                 silence = b"\x00" * self._audio_chunk_size
                 while True:
+                    await self._maybe_finish_idle_flush()
                     try:
                         frame = self._audio_queue.get_nowait()
                         await self._filter_audio(frame)
@@ -997,8 +1036,9 @@ class BaseOutputTransport(FrameProcessor):
                     except asyncio.QueueEmpty:
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         diff_time = time.time() - last_frame_time
-                        if diff_time > vad_stop_secs:
-                            await self._bot_stopped_speaking()
+                        if diff_time > vad_stop_secs and await self._handle_output_idle():
+                            # Play the flushed audio before more mixer-only output.
+                            continue
                         # Generate an audio frame with only the mixer's part.
                         frame = OutputAudioRawFrame(
                             audio=await mixer.mix(silence),

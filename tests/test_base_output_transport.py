@@ -11,7 +11,7 @@ import hashlib
 import io
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 from loguru import logger
@@ -485,6 +485,90 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportIdleFallback(unittest.IsolatedAsyncioTestCase):
+    """The output-idle fallback stops the bot when a `TTSStoppedFrame` is late.
+
+    Audio that didn't fill a whole chunk is still sitting in the buffer at that
+    point. It belongs to speech that already started playing, so it should be
+    played before the bot is reported as stopped, not thrown away.
+    """
+
+    def setUp(self):
+        # Shorten the fallback so the tests don't wait 3 seconds.
+        fallback = patch("pipecat.transports.base_output.BOT_VAD_STOP_FALLBACK_SECS", 0.2)
+        fallback.start()
+        self.addCleanup(fallback.stop)
+
+    async def _speak_one_and_a_half_chunks(self, mixer: BaseAudioMixer | None):
+        transport = await _make_transport(mixer=mixer)
+        sender = transport._media_senders[None]
+        chunk_size = sender.audio_chunk_size
+        audio = b"\x34\x12" * (chunk_size * 3 // 4)
+        await transport.process_frame(
+            TTSAudioRawFrame(audio=audio, sample_rate=sender.sample_rate, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+        return transport, sender, audio
+
+    @staticmethod
+    def _written_bot_audio(transport: BaseOutputTransport) -> bytes:
+        return b"".join(
+            call.args[0].audio
+            for call in transport.write_audio_frame.call_args_list
+            if isinstance(call.args[0], TTSAudioRawFrame)
+        )
+
+    @staticmethod
+    def _bot_stopped_count(transport: BaseOutputTransport) -> int:
+        return sum(
+            isinstance(call.args[0], BotStoppedSpeakingFrame)
+            for call in transport.push_frame.call_args_list
+        )
+
+    async def _assert_idle_plays_tail(self, mixer: BaseAudioMixer | None):
+        transport, sender, audio = await self._speak_one_and_a_half_chunks(mixer)
+        try:
+            chunk_size = sender.audio_chunk_size
+            await asyncio.sleep(0.1)
+            self.assertTrue(sender._bot_speaking)
+            self.assertEqual(sender._buffered_audio_bytes, len(audio) - chunk_size)
+
+            # No TTSStoppedFrame: wait for the idle fallback instead.
+            await asyncio.sleep(0.5)
+
+            padding = bytes(2 * chunk_size - len(audio))
+            self.assertEqual(self._written_bot_audio(transport), audio + padding)
+            self.assertFalse(sender._bot_speaking)
+            self.assertEqual(self._bot_stopped_count(transport), 2)  # downstream + upstream
+
+            # A late TTSStoppedFrame neither replays the tail nor stops again.
+            await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertEqual(self._written_bot_audio(transport), audio + padding)
+            self.assertEqual(self._bot_stopped_count(transport), 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_idle_fallback_plays_buffered_audio_before_stopping(self):
+        await self._assert_idle_plays_tail(mixer=None)
+
+    async def test_idle_fallback_with_mixer_plays_buffered_audio_before_stopping(self):
+        await self._assert_idle_plays_tail(mixer=_PassthroughMixer())
+
+    async def test_interruption_still_discards_buffered_audio(self):
+        transport, sender, audio = await self._speak_one_and_a_half_chunks(mixer=None)
+        try:
+            chunk_size = sender.audio_chunk_size
+            await asyncio.sleep(0.1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.5)
+
+            self.assertEqual(self._written_bot_audio(transport), audio[:chunk_size])
+            self.assertFalse(sender._bot_speaking)
         finally:
             await transport.cancel(CancelFrame())
 
