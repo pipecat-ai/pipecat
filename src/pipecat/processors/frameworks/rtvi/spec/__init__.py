@@ -44,6 +44,7 @@ from pydantic_core import core_schema
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
+from pipecat.services.google.rtvi import RTVIBotLLMSearchResponseMessage
 
 RTVIMessageDirection = Literal["client-to-server", "server-to-client"]
 
@@ -556,6 +557,29 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         enabled_by="bot_tts_enabled",
         deprecated="Use tts-raw-text instead.",
     ),
+    _server(
+        RTVIBotLLMSearchResponseMessage,
+        "The bot's LLM grounded its answer in a web search: the answer, and the sites "
+        "each part of it came from.",
+        {
+            "search_result": "Lisbon is sunny today, with a high of 24°C.",
+            "rendered_content": None,
+            "origins": [
+                {
+                    "site_uri": "https://weather.example.com/lisbon",
+                    "site_title": "Lisbon weather",
+                    "results": [
+                        {
+                            "text": "Lisbon is sunny today, with a high of 24°C.",
+                            "confidence": [0.92],
+                        }
+                    ],
+                }
+            ],
+        },
+        details="Only an LLM service that reports its searches sends it: in Pipecat, the "
+        "Google LLM services, with `GoogleRTVIProcessor` in place of `RTVIProcessor`.",
+    ),
     # -- Server to client: function calls --
     _server(
         RTVI.LLMFunctionCallStartMessage,
@@ -692,6 +716,7 @@ GROUPS: tuple[RTVIMessageGroup, ...] = (
             "bot-llm-text",
             "llm-raw-text",
             "bot-llm-marker",
+            "bot-llm-search-response",
             "bot-tts-started",
             "bot-tts-stopped",
             "bot-tts-text",

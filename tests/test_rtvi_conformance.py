@@ -88,6 +88,8 @@ from pipecat.processors.frameworks.rtvi.observer import (
 )
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.processors.frameworks.rtvi.spec import spec_path
+from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
+from pipecat.services.google.rtvi import GoogleRTVIObserver
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.text.base_text_aggregator import TextType
@@ -290,6 +292,29 @@ async def _run_session(client_version: str, params: RTVIObserverParams = _EVERYT
         await session.push(LLMTextFrame("It's sunny."))
         await session.push(LLMMarkerResponseFrame(raw="✓ It's sunny.", marker="✓"))
         await session.push(LLMFullResponseEndFrame())
+        # Only Google's observer sends the LLM's search results.
+        search = GoogleRTVIObserver(session.processor)
+        await search.on_push_frame(
+            FramePushed(
+                source=session.source,
+                destination=session.source,
+                frame=LLMSearchResponseFrame(
+                    search_result="It's sunny.",
+                    rendered_content="<div>Lisbon weather</div>",
+                    origins=[
+                        LLMSearchOrigin(
+                            site_uri="https://weather.example.com/lisbon",
+                            site_title="Lisbon weather",
+                            results=[LLMSearchResult(text="It's sunny.", confidence=[0.9])],
+                        )
+                    ],
+                ),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0,
+                first_push=True,
+            )
+        )
+        await search.cleanup()
         call = FunctionCallFromLLM(
             function_name="get_weather",
             tool_call_id="call_1",

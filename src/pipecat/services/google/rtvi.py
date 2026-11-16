@@ -24,9 +24,10 @@ class RTVISearchResponseMessageData(BaseModel):
     """Data payload for search response messages in RTVI protocol.
 
     Parameters:
-        search_result: The search result text, if available.
-        rendered_content: The rendered content from the search, if available.
-        origins: List of search result origins with metadata.
+        search_result: The bot's answer, grounded in the search.
+        rendered_content: HTML of the search suggestions the LLM provider asks to be
+            shown with a grounded answer, if it gave any.
+        origins: The sites the answer came from.
     """
 
     search_result: str | None

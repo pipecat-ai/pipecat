@@ -175,6 +175,9 @@
         "bot_tts_text": {
           "$ref": "#/components/messages/bot_tts_text"
         },
+        "bot_llm_search_response": {
+          "$ref": "#/components/messages/bot_llm_search_response"
+        },
         "llm_function_call_started": {
           "$ref": "#/components/messages/llm_function_call_started"
         },
@@ -347,6 +350,9 @@
         },
         {
           "$ref": "#/channels/rtvi/messages/bot_tts_text"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/bot_llm_search_response"
         },
         {
           "$ref": "#/channels/rtvi/messages/llm_function_call_started"
@@ -2286,6 +2292,62 @@
         "x-rtvi-enabled-by": "bot_tts_enabled",
         "x-rtvi-deprecated": "Use tts-raw-text instead."
       },
+      "bot_llm_search_response": {
+        "name": "bot-llm-search-response",
+        "title": "bot-llm-search-response",
+        "summary": "The bot's LLM grounded its answer in a web search: the answer, and the sites each part of it came from.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "bot-llm-search-response"
+            },
+            "data": {
+              "$ref": "#/components/schemas/RTVISearchResponseMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "bot-llm-search-response",
+              "data": {
+                "search_result": "Lisbon is sunny today, with a high of 24°C.",
+                "rendered_content": null,
+                "origins": [
+                  {
+                    "site_uri": "https://weather.example.com/lisbon",
+                    "site_title": "Lisbon weather",
+                    "results": [
+                      {
+                        "text": "Lisbon is sunny today, with a high of 24°C.",
+                        "confidence": [
+                          0.92
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Only an LLM service that reports its searches sends it: in Pipecat, the Google LLM services, with `GoogleRTVIProcessor` in place of `RTVIProcessor`."
+      },
       "llm_function_call_started": {
         "name": "llm-function-call-started",
         "title": "llm-function-call-started",
@@ -3688,6 +3750,70 @@
         "title": "LLMFunctionCallStoppedMessageData",
         "type": "object"
       },
+      "LLMSearchOrigin": {
+        "description": "Represents the origin source of search results.",
+        "properties": {
+          "site_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "URI of the source website.",
+            "title": "Site Uri"
+          },
+          "site_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Title of the source website.",
+            "title": "Site Title"
+          },
+          "results": {
+            "description": "The parts of the answer this site supports.",
+            "items": {
+              "$ref": "#/components/schemas/LLMSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "title": "LLMSearchOrigin",
+        "type": "object"
+      },
+      "LLMSearchResult": {
+        "description": "Represents a single search result with confidence scores.",
+        "properties": {
+          "text": {
+            "description": "A part of the answer that the site supports.",
+            "title": "Text",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "How confident the LLM is in each site this part of the answer cites, from 0 to 1, one score per site.",
+            "items": {
+              "type": "number"
+            },
+            "title": "Confidence",
+            "type": "array"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "LLMSearchResult",
+        "type": "object"
+      },
       "LLMTokenUsage": {
         "description": "Token usage statistics for LLM operations.",
         "properties": {
@@ -3971,6 +4097,50 @@
           "value"
         ],
         "title": "ProcessingMetricsData",
+        "type": "object"
+      },
+      "RTVISearchResponseMessageData": {
+        "description": "Data payload for search response messages in RTVI protocol.",
+        "properties": {
+          "search_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The bot's answer, grounded in the search.",
+            "title": "Search Result"
+          },
+          "rendered_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "HTML of the search suggestions the LLM provider asks to be shown with a grounded answer, if it gave any.",
+            "title": "Rendered Content"
+          },
+          "origins": {
+            "description": "The sites the answer came from.",
+            "items": {
+              "$ref": "#/components/schemas/LLMSearchOrigin"
+            },
+            "title": "Origins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "search_result",
+          "rendered_content",
+          "origins"
+        ],
+        "title": "RTVISearchResponseMessageData",
         "type": "object"
       },
       "RawAudioBatchData": {
