@@ -4,13 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import ast
+import inspect
 import unittest
 import warnings
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+import pipecat.processors.frameworks.rtvi.processor as rtvi_processor
+import pipecat.services.google.rtvi as google_rtvi
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.processors.frameworks.rtvi.spec import (
     BEHAVIORS,
@@ -22,6 +26,40 @@ from pipecat.processors.frameworks.rtvi.spec import (
     render_spec,
     spec_path,
 )
+
+# Message models the specification leaves out, since the server never sends them.
+_UNSENT_MODELS = {"bot-tts-audio"}
+
+
+def _message_models() -> dict[str, type[BaseModel]]:
+    """Every RTVI message model, by its type: each model with a label and a fixed type."""
+    models = {}
+    for module in (RTVI, google_rtvi):
+        for obj in vars(module).values():
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, BaseModel)
+                and obj.__module__ == module.__name__
+            ):
+                type = obj.model_fields.get("type")
+                if "label" in obj.model_fields and type and isinstance(type.default, str):
+                    models[type.default] = obj
+    return models
+
+
+def _handled_types() -> set[str]:
+    """The message types RTVIProcessor._handle_message has a case for."""
+    tree = ast.parse(inspect.getsource(rtvi_processor.RTVIProcessor._handle_message).strip())
+    types = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Match) and ast.unparse(node.subject) == "message.type":
+            for case in node.cases:
+                for pattern in ast.walk(case.pattern):
+                    if isinstance(pattern, ast.MatchValue) and isinstance(
+                        pattern.value, ast.Constant
+                    ):
+                        types.add(pattern.value.value)
+    return types
 
 
 def _undescribed(schema: Any, path: str = "") -> list[str]:
@@ -133,6 +171,20 @@ class TestRTVISpec(unittest.TestCase):
                 undescribed.append(f"{name}.data")
             undescribed += [f"{name}.data.{field}" for field in _undescribed(data)]
         self.assertEqual(undescribed, [])
+
+    def test_every_message_model_is_in_the_spec(self):
+        # A message the server sends needs its entry in MESSAGES, with a
+        # description and an example, even before anything sends it.
+        types = {spec.type for spec in MESSAGES}
+        self.assertEqual(set(_message_models()) - _UNSENT_MODELS - types, set())
+
+    def test_every_handled_client_message_is_in_the_spec(self):
+        # A message RTVIProcessor handles needs its entry in MESSAGES, and a
+        # message the specification lists needs its case in _handle_message.
+        handled = _handled_types()
+        self.assertTrue(handled)
+        clients = {spec.type for spec in MESSAGES if spec.direction == "client-to-server"}
+        self.assertEqual(handled, clients)
 
     def test_responses_carry_an_id(self):
         specs = {spec.type: spec for spec in MESSAGES}

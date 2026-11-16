@@ -74,7 +74,7 @@ When a release is prepared, the changelog workflow (`.github/workflows/generate-
 
 ## How the tests use the documents
 
-`tests/test_rtvi_spec.py` checks the current version's document against the code: it fails when the document is out of date, when an example doesn't match its message's schema, when a field has no description, and when a released version's wire format has changed.
+`tests/test_rtvi_spec.py` checks the current version's document against the code: it fails when the document is out of date, when an example doesn't match its message's schema, when a field has no description, when a message model or a message `RTVIProcessor` handles isn't in `MESSAGES`, and when a released version's wire format has changed.
 
 `tests/test_rtvi_conformance.py` checks that Pipecat behaves as each version's document says. It runs Pipecat's real `RTVIProcessor` and `RTVIObserver`, holds a session with a client of each version that has a document, and checks every message the server sends:
 
