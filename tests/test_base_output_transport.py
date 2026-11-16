@@ -783,6 +783,35 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_interruption_before_playback_drops_resampled_audio(self):
+        """Interrupted audio in the resampler is dropped even if none of it played.
+
+        Audio shorter than a chunk never reaches playback, so the bot never
+        starts speaking, and the interruption has to clear the resampler itself.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+            for frame in self._constant_frames(20000, 96):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            self.assertFalse(transport.write_audio_frame.called)
+            self.assertFalse(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            for frame in self._constant_frames(0, 3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            samples = self._samples(transport)
+            self.assertGreater(len(samples), 0)
+            self.assertEqual(int(np.max(np.abs(samples))), 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_a_turn_without_audio_writes_nothing(self):
         """A TTS turn that produced no audio writes nothing and starts no bot turn.
 
