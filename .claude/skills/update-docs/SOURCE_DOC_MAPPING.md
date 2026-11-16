@@ -40,7 +40,8 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `services/openai/responses/llm.py`           | `api-reference/server/services/llm/openai-responses.mdx`                                                                     |
 | `processors/frameworks/rtvi/processor.py`    | `api-reference/server/rtvi/rtvi-processor.mdx`                                                                               |
 | `processors/frameworks/rtvi/observer.py`     | `api-reference/server/rtvi/rtvi-observer.mdx`                                                                                |
-| `processors/frameworks/rtvi/models.py`       | `client/rtvi-standard.mdx` (the wire protocol: messages, fields, `PROTOCOL_VERSION`)                                         |
+| `processors/frameworks/rtvi/models.py`       | `api-reference/standards/rtvi-standard.mdx` (concepts, versions table); messages: see Checks                                 |
+| `processors/frameworks/rtvi/spec/**`         | `api-reference/standards/rtvi/<version>.mdx`, generated: see Checks                                                          |
 | `processors/frameworks/rtvi/frames.py`       | `api-reference/server/rtvi/rtvi-processor.mdx` and `api-reference/server/frames/system-frames.mdx`                           |
 | `processors/idle_frame_processor.py`         | `api-reference/server/pipeline/pipeline-idle-detection.mdx`                                                                  |
 | `pipeline/worker.py`                         | `api-reference/server/pipeline/pipeline-worker.mdx`                                                                          |
@@ -227,6 +228,24 @@ python3 DOCS_PATH/scripts/check-reference.py --pipecat .
 
 Each line names a page, a kind of mismatch, and what the code says. The docs
 repo's CI runs the same check on the pages a docs PR changes.
+
+`DOCS_PATH/scripts/gen-rtvi-reference.py` generates the RTVI protocol reference,
+`api-reference/standards/rtvi/<version>.mdx`, from each version's document in
+`processors/frameworks/rtvi/spec/`. Never edit those pages by hand: when a
+change touches the RTVI messages or the specification, regenerate them from the
+root of this repository:
+
+```bash
+python3 DOCS_PATH/scripts/gen-rtvi-reference.py --pipecat .
+```
+
+It also lists every version's page in the RTVI group of `docs.json` and in the
+Protocol Reference list of `api-reference/standards/rtvi-standard.mdx`. Two
+things on that page are written by hand, since the specification doesn't say
+them: for a new protocol version, add its row to the Protocol Versions table,
+with the Pipecat and client-js releases that ship it and what it changed, and
+update the version in the Note at the top of the page. The script fails until
+the table has the row.
 
 ## New pages
 
