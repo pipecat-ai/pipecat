@@ -117,6 +117,8 @@ class Tool:
     superseded: bool = False
     # Prism mentions the result of a closed round only when asked to report it.
     report: bool = False
+    # Progress went into the history beside the open call.
+    progress: bool = False
 
 
 class Conversation:

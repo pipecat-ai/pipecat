@@ -1041,12 +1041,21 @@ async def test_silent_progress_keeps_the_call_open_until_the_final_result():
         assert continuation["response"]["metadata"]["prism_cause"] == "tool_continuation"
         await answer(peer, continuation)
         creates = sent(peer, "conversation.item.create")
-        assert [event["item"]["type"] for event in creates] == ["message", "function_call_output"]
+        assert [event["item"]["type"] for event in creates] == [
+            "message",
+            "function_call_output",
+            "message",
+        ]
         progress = json.loads(creates[0]["item"]["text"])
         assert creates[0]["item"]["role"] == "system"
         assert (progress["tool_call_id"], progress["status"]) == ("call-1", "running")
         assert progress["result"] == '"Working"'
         assert (creates[1]["item"]["call_id"], creates[1]["item"]["output"]) == ("call-1", '"Done"')
+        # Prism files the output beside the call, so the result follows the progress too.
+        settled = json.loads(creates[2]["item"]["text"])
+        assert creates[2]["item"]["role"] == "system"
+        assert (settled["tool_call_id"], settled["status"]) == ("call-1", "finished")
+        assert settled["result"] == '"Done"'
         assert len(sent(peer, "response.create")) == 2
         assert not any(isinstance(f, ErrorFrame) for f in upstream)
         assert service.is_usable

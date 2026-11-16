@@ -312,10 +312,11 @@ async def test_progress_then_final_respects_reply_policy(final_run, progress_run
             )
         await answer(peer, text="Progress recorded")
         release.set()
-        writes = 2 if progress_run else 3
+        writes = 3 if progress_run else 4
         await until(lambda: len(sent(peer, "conversation.item.create")) == writes)
-        final = sent(peer, "conversation.item.create")[-1]["item"]
+        final, settled = (e["item"] for e in sent(peer, "conversation.item.create")[-2:])
         assert (final["type"], final["call_id"]) == ("function_call_output", "lookup-1")
+        assert (settled["role"], json.loads(settled["text"])["status"]) == ("system", "finished")
         if final_run:
             # The progress reply superseded the tool round, so the result is reported.
             request = await peer.next()
@@ -371,10 +372,16 @@ async def test_tool_failure_settles_once_without_repeat_execution(mode):
         else:
             await until(
                 lambda: any(
-                    e["item"].get("output") == "CANCELLED"
+                    '"status": "finished"' in (e["item"].get("text") or "")
                     for e in sent(peer, "conversation.item.create")
                 )
             )
+            items = [e["item"] for e in sent(peer, "conversation.item.create")]
+            assert [item.get("output") for item in items if item["type"] != "message"] == [
+                "CANCELLED"
+            ]
+            settled = json.loads(items[-1]["text"])
+            assert settled["result"].startswith("CANCELLED: this tool call was cancelled")
         assert calls == [True]
         assert service.is_usable
 

@@ -132,6 +132,8 @@ class _Operation:
     tool: Tool | None = None
     tool_output: str = ""
     tool_final: bool = False
+    # The async-tool message that settles the call after progress was written.
+    tool_message: str = ""
     # The write is content a reply can answer: appended messages or a tool update.
     answerable: bool = False
     # The reply answers earlier content and is skipped if none since the last
@@ -598,7 +600,10 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                     try:
                         if operation.tool is not None:
                             await self._write_tool_update(
-                                operation.tool, operation.tool_output, final=operation.tool_final
+                                operation.tool,
+                                operation.tool_output,
+                                final=operation.tool_final,
+                                message=operation.tool_message,
                             )
                         elif operation.append:
                             await self._ledger.append(operation.append)
@@ -1167,9 +1172,11 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                         tool=tool,
                         tool_output=self._tool_output(tool, frame, final=final),
                         tool_final=final,
+                        tool_message=self._settling_message(tool, frame) if tool.progress else "",
                         answerable=not tool.report,
                     )
                 )
+                tool.progress = tool.progress or not final
                 if not tool.report:
                     self._writes_unwritten += 1
                     self._reply_owed = True
@@ -1194,6 +1201,17 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         message = async_tool_messages.build_intermediate_result_message(
             tool.event.call.call_id, result
         )
+        return str(message.get("content", ""))
+
+    def _settling_message(
+        self, tool: Tool, frame: FunctionCallResultFrame | FunctionCallCancelFrame
+    ) -> str:
+        call_id = tool.event.call.call_id
+        if isinstance(frame, FunctionCallCancelFrame):
+            message = async_tool_messages.build_cancelled_message(call_id)
+        else:
+            output = self._tool_output(tool, frame, final=True)
+            message = async_tool_messages.build_final_result_message(call_id, output)
         return str(message.get("content", ""))
 
     def _reports_late_result(
@@ -1222,7 +1240,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             if not tool.final and tool.event.call.response_id != response_id:
                 tool.superseded = True
 
-    async def _write_tool_update(self, tool: Tool, output: str, *, final: bool) -> None:
+    async def _write_tool_update(
+        self, tool: Tool, output: str, *, final: bool, message: str = ""
+    ) -> None:
         call = tool.event.call
         if not final:
             # Prism keeps one result per call, so progress goes in beside the open call.
@@ -1241,6 +1261,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             response.calls.discard(call.call_id)
             # A reply that reports the call needs the response reference.
             response.operations += 1
+        if message:
+            # Prism files the result beside its call, ahead of progress written
+            # since, so the result is stated again after that progress.
+            try:
+                await self._ledger.append([{"role": "developer", "content": message}])
+            except Exception as error:
+                await self._operation_error(error)
         if tool.report:
             self._spawn_request(self._report_late_result(tool))
         else:
