@@ -290,6 +290,22 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(frame, InputTransportMessageFrame)
             self.assertEqual(frame.message["type"], msg_type)
 
+    async def test_metrics_stay_a_raw_message(self):
+        # The base serializer drops metrics; the harness reports them as sent.
+        data = {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]}
+        frame = await self.serializer.deserialize(self._server("metrics", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "metrics")
+        self.assertEqual(frame.message["data"], data)
+
+    async def test_server_message_stays_a_raw_message(self):
+        # The base serializer drops it; the harness reports the bot's own data.
+        data = {"done": True, "transcript": "hello"}
+        frame = await self.serializer.deserialize(self._server("server-message", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "server-message")
+        self.assertEqual(frame.message["data"], data)
+
     async def test_cancelled_function_call_is_not_a_system_frame(self):
         # Queued like the in-progress and result frames, so it can't overtake
         # the bot's earlier function-call reports.

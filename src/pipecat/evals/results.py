@@ -157,6 +157,11 @@ class EvalScriptResult:
         skipped: When set, the scenario was not run (e.g. a ``tts_response``
             assertion without audio mode); the string is the reason. Such a result
             is neither passed nor failed.
+        bot_metrics: Every metrics report the bot sent during the run, in
+            order: ``at`` (seconds since the run's stream began) and ``data``,
+            the report as the bot sent it, its measurements grouped by kind
+            (``ttfb``, ``processing``, ``tokens``, ...). Empty for a bot that
+            runs without metrics.
     """
 
     scenario_name: str
@@ -167,6 +172,7 @@ class EvalScriptResult:
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
+    bot_metrics: list[dict] = field(default_factory=list)
 
 
 @deprecated(
@@ -296,6 +302,10 @@ class EvalSimulationResult:
             empty when the judge gave none.
         success: The goal the conversation was judged on, the simulation's
             ``success`` as it was worded.
+        bot_metrics: Every metrics report the bot sent during the run, in
+            order: ``at`` (seconds since the run's stream began) and ``data``,
+            the report as the bot sent it. These are the bot's own
+            measurements, not the quality ``metrics`` the run was scored on.
     """
 
     simulation_name: str
@@ -315,6 +325,7 @@ class EvalSimulationResult:
     probabilities: dict[str, float] = field(default_factory=dict)
     success: str = ""
     failure_kind: str | None = None
+    bot_metrics: list[dict] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:

@@ -32,8 +32,8 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``. The ``vad_*``
-events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``, ``metrics``,
+``server_message``. The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
 gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
 turns).
 
@@ -44,6 +44,39 @@ images only to a scenario that expects one::
       - expect:
           - event: image
             within_ms: 60000
+
+``metrics`` is a report of what the bot's processors measured, such as a
+service's TTFB, its processing time or its usage. A bot sends them when its
+pipeline has ``enable_metrics`` on, grouped by kind (``ttfb``, ``processing``,
+``tokens``, ...). ``metric:`` names the kind the report must hold and
+``processor:`` text the measuring processor's name must contain; a bare
+``metrics`` takes any report. A report that arrived while an expectation above
+was waiting for its own event is behind this one, so look back for it::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: user_transcription
+          - event: metrics
+            metric: ttfb
+            processor: STT
+            check_from: turn_start
+
+Every report of a run is kept with its result, expected or not, so an
+expectation is only needed to hold a turn open until one arrives.
+
+``server_message`` is a message of the bot's own making: whatever data it
+pushed in an ``RTVIServerMessageFrame``. It is how a bot built for an eval
+reports what only it can know, such as a result it computed or that it has
+finished its work on a turn. The event's text is the data as JSON (or the
+data itself when it is a string), so the content checks read it and a matched
+expectation records it in the run's result::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: server_message
+            text_contains: '"done": true'
 
 ``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
@@ -133,6 +166,12 @@ Supported expectation fields (per event):
     for ``llm_marker`` — checks on the response's raw text: whether the first
     marker comes before any text, how many markers the text holds, and whether
     text follows the first marker
+
+``metric: <str>``, ``processor: <str>``
+    for ``metrics`` — the kind of metric the report must hold (``ttfb``,
+    ``processing``, ``tokens``, ...), and text the name of the processor that
+    measured it must contain. The zero a pipeline reports for every processor
+    as it starts is not a measurement and never matches
 
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by
@@ -435,6 +474,10 @@ class EvalExpectation:
             raw text must hold.
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
+        metric: For a ``metrics`` event, the kind of metric the report must
+            hold, as the bot names it: ``ttfb``, ``processing``, ``tokens``, ...
+        processor: For a ``metrics`` event, text the name of the processor
+            that measured the metric must contain.
         check_from: Where the expectation checks for its event from:
             ``previous`` (the default), where the expectation above it was
             met; or ``turn_start``, the beginning of the turn, at events the
@@ -457,6 +500,8 @@ class EvalExpectation:
     marker_first: bool | None = None
     markers: int | None = None
     text_after: bool | None = None
+    metric: str | None = None
+    processor: str | None = None
     check_from: str = "previous"
     absent: bool = False
 
@@ -1045,6 +1090,8 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
                 "marker_first",
                 "markers",
                 "text_after",
+                "metric",
+                "processor",
             )
             if key in e
         ]
@@ -1075,6 +1122,15 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         ):
             raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
 
+    for key in ("metric", "processor"):
+        value = e.get(key)
+        if value is None:
+            continue
+        if event != "metrics":
+            raise ValueError(f"{where} '{key}:' only applies to the 'metrics' event, not {event!r}")
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{where} '{key}:' must be a non-empty string")
+
     text_matches = e.get("text_matches")
     if isinstance(text_matches, str):
         text_matches = [text_matches]
@@ -1099,6 +1155,8 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         marker_first=e.get("marker_first"),
         markers=e.get("markers"),
         text_after=e.get("text_after"),
+        metric=e.get("metric"),
+        processor=e.get("processor"),
         check_from=check_from,
         absent=absent,
     )
