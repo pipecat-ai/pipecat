@@ -102,6 +102,7 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
         self._turn_timeout = turn_timeout
         self._configured_session: dict[str, Any] = {}
         self._audio_tag_tails: dict[str, str] = {}
+        self._unspaced_items: set[str] = set()
 
     async def _auth_headers(self) -> dict[str, str]:
         return {"xi-api-key": self.api_key}
@@ -163,6 +164,7 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
 
     async def _handle_interruption(self):
         self._audio_tag_tails.clear()
+        self._unspaced_items.clear()
         await super()._handle_interruption()
 
     async def _handle_evt_text_delta(self, evt):
@@ -178,10 +180,18 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
         start = text.rfind("[")
         if start != -1 and "]" not in text[start:]:
             text, self._audio_tag_tails[item_id] = text[:start], text[start:]
-        return _REPEATED_SPACES_RE.sub(" ", _AUDIO_TAG_RE.sub("", text))
+        text = _REPEATED_SPACES_RE.sub(" ", _AUDIO_TAG_RE.sub("", text))
+        if item_id not in self._unspaced_items:
+            text = text.lstrip(" \t")
+        if text.endswith((" ", "\t")):
+            self._unspaced_items.discard(item_id)
+        elif text:
+            self._unspaced_items.add(item_id)
+        return text
 
     async def _handle_evt_response_done(self, evt):
         tails, self._audio_tag_tails = self._audio_tag_tails, {}
+        self._unspaced_items.clear()
         for tail in tails.values():
             if "audio" in self._get_enabled_modalities():
                 await self._push_output_transcript_text_frames(tail)
@@ -192,6 +202,7 @@ class ElevenLabsRealtimeLLMService(OpenAIRealtimeLLMService):
     async def _disconnect(self):
         await super()._disconnect()
         self._audio_tag_tails.clear()
+        self._unspaced_items.clear()
 
     async def _receive_task_handler(self):
         websocket = self._websocket

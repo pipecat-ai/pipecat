@@ -141,8 +141,21 @@ async def test_audio_tags_are_stripped_across_transcript_deltas():
 
     frames = [call.args[0] for call in service.push_frame.call_args_list]
     texts = [frame.text for frame in frames if isinstance(frame, TTSTextFrame)]
-    assert texts == ["Hi ", " there, item ", "[1"]
+    assert texts == ["Hi ", "there, item ", "[1"]
     assert isinstance(frames[-1], LLMFullResponseEndFrame)
+
+
+@pytest.mark.asyncio
+async def test_a_removed_audio_tag_leaves_one_space():
+    service = _service()
+    service.push_frame = AsyncMock()
+
+    for delta in ["[happy] Yes", " I", " can laugh [", "laugh]", " hello", " there"]:
+        await service._handle_evt_audio_transcript_delta(_transcript_delta(delta))
+
+    frames = [call.args[0] for call in service.push_frame.call_args_list]
+    text = "".join(frame.text for frame in frames if isinstance(frame, TTSTextFrame))
+    assert text == "Yes I can laugh hello there"
 
 
 @pytest.mark.asyncio
