@@ -66,7 +66,7 @@ Clients implement a protocol version from its document, so once a Pipecat releas
 { "2.3.0": { "contract_sha256": "56d5…", "pipecat": "1.15.0" } }
 ```
 
-The hash covers the document without its descriptions, summaries, titles and examples, so rewording a description doesn't change it, and a change to the wire format does.
+The hash covers the document without its descriptions, summaries, titles, examples and tags, so rewording a description doesn't change it, and a change to the wire format does.
 
 When a release is prepared, the changelog workflow (`.github/workflows/generate-changelog.yml`) runs `scripts/rtvi/record_released_spec.py --version <release>`, which adds the current protocol version to `released.json` in the release PR. A version already recorded stays as it is. `tests/test_rtvi_spec.py` fails when the wire format of a recorded version has changed, which means it's time to bump `PROTOCOL_VERSION`.
 

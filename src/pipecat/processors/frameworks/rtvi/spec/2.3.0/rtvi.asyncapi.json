@@ -3,7 +3,37 @@
   "info": {
     "title": "RTVI",
     "version": "2.3.0",
-    "description": "RTVI (Real-Time Voice Interface) is the protocol a client app and a Pipecat bot use to talk to each other during a session. This document describes it from the server's point of view: receiveClientMessages lists the messages a client sends, and sendServerMessages the messages the server sends.\n\nEvery message is a JSON object with the label \"rtvi-ai\", a type, its data, and an id on every message a client sends and on the server's answers to them. The session's transport carries messages as data messages, next to the audio and video.\n\nA message can also have x-rtvi-enabled-by, the server setting that turns it on (a field of Pipecat's RTVIObserverParams); x-rtvi-min-client-version, the lowest client protocol version the server sends it to; and x-rtvi-deprecated, what replaces a deprecated message. x-rtvi-behaviors lists the rules the server follows across messages."
+    "description": "RTVI (Real-Time Voice Interface) is the protocol a client app and a Pipecat bot use to talk to each other during a session. This document describes it from the server's point of view: receiveClientMessages lists the messages a client sends, and sendServerMessages the messages the server sends.\n\nEvery message is a JSON object with the label \"rtvi-ai\", a type, its data, and an id on every message a client sends and on the server's answers to them. The session's transport carries messages as data messages, next to the audio and video.\n\nA message can also have x-rtvi-enabled-by, the server setting that turns it on (a field of Pipecat's RTVIObserverParams); x-rtvi-min-client-version, the lowest client protocol version the server sends it to; and x-rtvi-deprecated, what replaces a deprecated message. x-rtvi-behaviors lists the rules the server follows across messages.",
+    "tags": [
+      {
+        "name": "Connection Management",
+        "description": "Starting and ending a session, and errors."
+      },
+      {
+        "name": "Speaking and Transcription",
+        "description": "Who is speaking, the user's audio, and what the user and the bot said."
+      },
+      {
+        "name": "Client-Server Messaging",
+        "description": "Messages of the application's own, and the answers to client messages."
+      },
+      {
+        "name": "Advanced LLM Interactions",
+        "description": "Text, files and keypresses for the bot, and the bot's function calls."
+      },
+      {
+        "name": "Service-Specific Insights",
+        "description": "What the bot's speech-to-text, LLM and text-to-speech services are doing."
+      },
+      {
+        "name": "Metrics and Monitoring",
+        "description": "How the bot's services perform."
+      },
+      {
+        "name": "User Interface",
+        "description": "The bot observing and driving the client's UI."
+      }
+    ]
   },
   "defaultContentType": "application/json",
   "channels": {
@@ -345,6 +375,11 @@
         "name": "client-ready",
         "title": "client-ready",
         "summary": "Tells the server the client is ready, with the protocol version it speaks. The server answers with bot-ready.",
+        "tags": [
+          {
+            "name": "Connection Management"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -390,6 +425,11 @@
         "name": "disconnect-bot",
         "title": "disconnect-bot",
         "summary": "Asks the server to end the session.",
+        "tags": [
+          {
+            "name": "Connection Management"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -424,6 +464,11 @@
         "name": "client-message",
         "title": "client-message",
         "summary": "A custom message for the application. The server answers with server-response or error-response.",
+        "tags": [
+          {
+            "name": "Client-Server Messaging"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -467,6 +512,11 @@
         "name": "send-text",
         "title": "send-text",
         "summary": "Text the user typed, sent to the bot as if the user had said it.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -510,6 +560,11 @@
         "name": "send-file",
         "title": "send-file",
         "summary": "A file for the bot, with text that goes with it.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -558,6 +613,11 @@
         "name": "dtmf",
         "title": "dtmf",
         "summary": "Keypad presses, delivered in order.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -601,6 +661,11 @@
         "name": "llm-function-call-result",
         "title": "llm-function-call-result",
         "summary": "The result of a function call the client ran for the bot's LLM.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -648,6 +713,11 @@
         "name": "raw-audio",
         "title": "raw-audio",
         "summary": "A chunk of the user's audio, for transports that don't carry media.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -690,6 +760,11 @@
         "name": "raw-audio-batch",
         "title": "raw-audio-batch",
         "summary": "Several chunks of the user's audio, for transports that don't carry media.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -735,6 +810,11 @@
         "name": "ui-event",
         "title": "ui-event",
         "summary": "An event from the client's UI, for a UI worker.",
+        "tags": [
+          {
+            "name": "User Interface"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -778,6 +858,11 @@
         "name": "ui-snapshot",
         "title": "ui-snapshot",
         "summary": "An accessibility snapshot of the client's UI, for a UI worker.",
+        "tags": [
+          {
+            "name": "User Interface"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -831,6 +916,11 @@
         "name": "ui-cancel-job-group",
         "title": "ui-cancel-job-group",
         "summary": "Asks the server to cancel a job group it reported with ui-job-group.",
+        "tags": [
+          {
+            "name": "User Interface"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -873,6 +963,11 @@
         "name": "bot-ready",
         "title": "bot-ready",
         "summary": "Answers client-ready once the bot is ready to talk, with the protocol version the server speaks to this client, information about the bot, and what it can do. Its id is the client-ready's id.",
+        "tags": [
+          {
+            "name": "Connection Management"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -923,6 +1018,11 @@
         "name": "error",
         "title": "error",
         "summary": "Reports an error in the bot, such as an AI service that failed. When fatal is true, the bot can't go on and the session ends.",
+        "tags": [
+          {
+            "name": "Connection Management"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -959,6 +1059,11 @@
         "name": "error-response",
         "title": "error-response",
         "summary": "Answers a client message the server couldn't handle, with what went wrong. Its id is the id of the message it answers.",
+        "tags": [
+          {
+            "name": "Client-Server Messaging"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -999,6 +1104,11 @@
         "name": "server-response",
         "title": "server-response",
         "summary": "The bot's answer to a client-message. Its id is the client-message's id, and t is the client-message's t.",
+        "tags": [
+          {
+            "name": "Client-Server Messaging"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1042,6 +1152,11 @@
         "name": "server-message",
         "title": "server-message",
         "summary": "A message from the bot's application to the client, with data of the application's own.",
+        "tags": [
+          {
+            "name": "Client-Server Messaging"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1076,6 +1191,11 @@
         "name": "metrics",
         "title": "metrics",
         "summary": "Performance metrics of the bot's services, such as how long each took to respond and how much it processed. On by default; turned off by the server's `metrics_enabled` setting.",
+        "tags": [
+          {
+            "name": "Metrics and Monitoring"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1118,6 +1238,11 @@
         "name": "system-log",
         "title": "system-log",
         "summary": "A line of the server's log, for debugging. Off by default; turned on by the server's `system_logs_enabled` setting.",
+        "tags": [
+          {
+            "name": "Connection Management"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1154,6 +1279,11 @@
         "name": "user-started-speaking",
         "title": "user-started-speaking",
         "summary": "The user's turn started: the bot considers the user to be speaking. On by default; turned off by the server's `user_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1183,6 +1313,11 @@
         "name": "user-stopped-speaking",
         "title": "user-stopped-speaking",
         "summary": "The user's turn ended: the bot considers the user done speaking. On by default; turned off by the server's `user_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1212,6 +1347,11 @@
         "name": "vad-user-started-speaking",
         "title": "vad-user-started-speaking",
         "summary": "Voice activity detection (VAD) heard the user start speaking. It reacts to any voice, sooner than user-started-speaking, which comes when the bot decides the user's turn started. Off by default; turned on by the server's `vad_user_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1241,6 +1381,11 @@
         "name": "vad-user-stopped-speaking",
         "title": "vad-user-stopped-speaking",
         "summary": "Voice activity detection (VAD) heard the user stop speaking. It reacts to any pause, sooner than user-stopped-speaking, which comes when the bot decides the user's turn ended. Off by default; turned on by the server's `vad_user_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1270,6 +1415,11 @@
         "name": "user-mute-started",
         "title": "user-mute-started",
         "summary": "The bot stopped listening to the user, for example while it says something that must not be interrupted. On by default; turned off by the server's `user_mute_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1300,6 +1450,11 @@
         "name": "user-mute-stopped",
         "title": "user-mute-stopped",
         "summary": "The bot listens to the user again. On by default; turned off by the server's `user_mute_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1330,6 +1485,11 @@
         "name": "bot-started-speaking",
         "title": "bot-started-speaking",
         "summary": "The bot started speaking: its audio started playing to the user. On by default; turned off by the server's `bot_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1359,6 +1519,11 @@
         "name": "bot-stopped-speaking",
         "title": "bot-stopped-speaking",
         "summary": "The bot stopped speaking. On by default; turned off by the server's `bot_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1388,6 +1553,11 @@
         "name": "bot-interrupted",
         "title": "bot-interrupted",
         "summary": "The bot was interrupted and stopped what it was saying. A client should drop the bot's text that hadn't been spoken yet. On by default; turned off by the server's `bot_speaking_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1418,6 +1588,11 @@
         "name": "user-audio-level",
         "title": "user-audio-level",
         "summary": "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while the user's audio comes in. Off by default; turned on by the server's `user_audio_level_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1455,6 +1630,11 @@
         "name": "bot-audio-level",
         "title": "bot-audio-level",
         "summary": "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while the bot speaks. Off by default; turned on by the server's `bot_audio_level_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1492,6 +1672,11 @@
         "name": "user-input",
         "title": "user-input",
         "summary": "What the user said or typed: a transcription of their speech, text the client sent, or a short acknowledgment the user said while the bot talks. On by default; turned off by the server's `user_input_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1533,6 +1718,11 @@
         "name": "user-llm-text",
         "title": "user-llm-text",
         "summary": "The user's message as the bot's LLM receives it. On by default; turned off by the server's `user_llm_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1569,6 +1759,11 @@
         "name": "stt-raw-text",
         "title": "stt-raw-text",
         "summary": "A transcription of the user's speech as the speech-to-text service produces it, including interim transcriptions that may still change. Off by default; turned on by the server's `stt_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1609,6 +1804,11 @@
         "name": "user-transcription",
         "title": "user-transcription",
         "summary": "A transcription of the user's speech, including interim transcriptions that may still change. On by default; turned off by the server's `user_transcription_enabled` setting. Deprecated. Use user-input or stt-raw-text instead.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1649,6 +1849,11 @@
         "name": "bot-output",
         "title": "bot-output",
         "summary": "Text the bot says or shows, a sentence or another unit at a time, with whether it will be spoken and how much of it has been spoken. On by default; turned off by the server's `bot_output_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1693,6 +1898,11 @@
         "name": "bot-llm-started",
         "title": "bot-llm-started",
         "summary": "The bot's LLM started generating a response. On by default; turned off by the server's `bot_llm_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1722,6 +1932,11 @@
         "name": "bot-llm-stopped",
         "title": "bot-llm-stopped",
         "summary": "The bot's LLM finished generating a response. On by default; turned off by the server's `bot_llm_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1751,6 +1966,11 @@
         "name": "bot-tts-started",
         "title": "bot-tts-started",
         "summary": "The bot's text-to-speech service started turning a response into speech. On by default; turned off by the server's `bot_tts_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1780,6 +2000,11 @@
         "name": "bot-tts-stopped",
         "title": "bot-tts-stopped",
         "summary": "The bot's text-to-speech service finished turning a response into speech. On by default; turned off by the server's `bot_tts_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1809,6 +2034,11 @@
         "name": "llm-raw-text",
         "title": "llm-raw-text",
         "summary": "Text exactly as the bot's LLM streams it, a chunk at a time. Off by default; turned on by the server's `llm_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1846,6 +2076,11 @@
         "name": "tts-raw-text",
         "title": "tts-raw-text",
         "summary": "Text the bot's text-to-speech service speaks, as it speaks it. Off by default; turned on by the server's `tts_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1883,6 +2118,11 @@
         "name": "bot-llm-marker",
         "title": "bot-llm-marker",
         "summary": "The marker the bot's LLM put in a response, outside the text it speaks, such as one saying whether the user's turn was complete. Sent once per response, when it ends. Off by default; turned on by the server's `bot_llm_marker_enabled` setting.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1925,6 +2165,11 @@
         "name": "bot-transcription",
         "title": "bot-transcription",
         "summary": "The text of the bot's LLM response, a whole sentence at a time. On by default; turned off by the server's `bot_llm_enabled` setting.",
+        "tags": [
+          {
+            "name": "Speaking and Transcription"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1962,6 +2207,11 @@
         "name": "bot-llm-text",
         "title": "bot-llm-text",
         "summary": "Text as the bot's LLM streams it, a chunk at a time. On by default; turned off by the server's `bot_llm_enabled` setting. Deprecated. Use llm-raw-text instead.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -1999,6 +2249,11 @@
         "name": "bot-tts-text",
         "title": "bot-tts-text",
         "summary": "Text the bot's text-to-speech service speaks, as it speaks it. On by default; turned off by the server's `bot_tts_enabled` setting. Deprecated. Use tts-raw-text instead.",
+        "tags": [
+          {
+            "name": "Service-Specific Insights"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2036,6 +2291,11 @@
         "name": "llm-function-call-started",
         "title": "llm-function-call-started",
         "summary": "The bot's LLM started calling a function. The server's settings decide whether it includes the function's name.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2072,6 +2332,11 @@
         "name": "llm-function-call-in-progress",
         "title": "llm-function-call-in-progress",
         "summary": "A function call is running, with its id and, as the server's settings decide, the function's name and arguments.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2112,6 +2377,11 @@
         "name": "llm-function-call-stopped",
         "title": "llm-function-call-stopped",
         "summary": "A function call finished or was cancelled, with its id and, as the server's settings decide, the function's name and result.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2150,6 +2420,11 @@
         "name": "llm-function-call",
         "title": "llm-function-call",
         "summary": "The bot's LLM called a function, with its name, id and arguments. Deprecated. Use llm-function-call-in-progress instead.",
+        "tags": [
+          {
+            "name": "Advanced LLM Interactions"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2190,6 +2465,11 @@
         "name": "ui-command",
         "title": "ui-command",
         "summary": "A command from the bot to the client's UI, such as showing a notification.",
+        "tags": [
+          {
+            "name": "User Interface"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {
@@ -2228,6 +2508,11 @@
         "name": "ui-job-group",
         "title": "ui-job-group",
         "summary": "Progress of work the bot handed to other workers, for the client's UI: the work started, a worker's update or result, or all of it completed.",
+        "tags": [
+          {
+            "name": "User Interface"
+          }
+        ],
         "payload": {
           "type": "object",
           "properties": {

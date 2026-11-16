@@ -563,6 +563,102 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
 
 
 @dataclass(frozen=True)
+class RTVIMessageGroup:
+    """A group of related messages, as the documentation shows them together.
+
+    Parameters:
+        name: The group's name, e.g. ``"User Interface"``.
+        description: What the group's messages are about.
+        messages: The types of the group's messages, in the order to show them.
+    """
+
+    name: str
+    description: str
+    messages: tuple[str, ...]
+
+
+GROUPS: tuple[RTVIMessageGroup, ...] = (
+    RTVIMessageGroup(
+        "Connection Management",
+        "Starting and ending a session, and errors.",
+        ("client-ready", "bot-ready", "disconnect-bot", "error", "system-log"),
+    ),
+    RTVIMessageGroup(
+        "Speaking and Transcription",
+        "Who is speaking, the user's audio, and what the user and the bot said.",
+        (
+            "user-started-speaking",
+            "user-stopped-speaking",
+            "vad-user-started-speaking",
+            "vad-user-stopped-speaking",
+            "bot-started-speaking",
+            "bot-stopped-speaking",
+            "bot-interrupted",
+            "user-audio-level",
+            "bot-audio-level",
+            "user-mute-started",
+            "user-mute-stopped",
+            "raw-audio",
+            "raw-audio-batch",
+            "user-transcription",
+            "user-input",
+            "bot-output",
+            "bot-transcription",
+        ),
+    ),
+    RTVIMessageGroup(
+        "Client-Server Messaging",
+        "Messages of the application's own, and the answers to client messages.",
+        ("server-message", "client-message", "server-response", "error-response"),
+    ),
+    RTVIMessageGroup(
+        "Advanced LLM Interactions",
+        "Text, files and keypresses for the bot, and the bot's function calls.",
+        (
+            "send-text",
+            "send-file",
+            "dtmf",
+            "llm-function-call-started",
+            "llm-function-call-in-progress",
+            "llm-function-call-stopped",
+            "llm-function-call",
+            "llm-function-call-result",
+        ),
+    ),
+    RTVIMessageGroup(
+        "Service-Specific Insights",
+        "What the bot's speech-to-text, LLM and text-to-speech services are doing.",
+        (
+            "stt-raw-text",
+            "bot-llm-started",
+            "bot-llm-stopped",
+            "user-llm-text",
+            "bot-llm-text",
+            "llm-raw-text",
+            "bot-llm-marker",
+            "bot-tts-started",
+            "bot-tts-stopped",
+            "bot-tts-text",
+            "tts-raw-text",
+        ),
+    ),
+    RTVIMessageGroup(
+        "Metrics and Monitoring",
+        "How the bot's services perform.",
+        ("metrics",),
+    ),
+    RTVIMessageGroup(
+        "User Interface",
+        "The bot observing and driving the client's UI.",
+        ("ui-snapshot", "ui-event", "ui-cancel-job-group", "ui-command", "ui-job-group"),
+    ),
+)
+"""Every message in exactly one group, in the order the documentation shows them."""
+
+_GROUP_OF = {type: group.name for group in GROUPS for type in group.messages}
+
+
+@dataclass(frozen=True)
 class RTVIBehaviorSpec:
     """A rule the server follows across messages, beyond the shape of each one.
 
@@ -768,6 +864,7 @@ def _message(spec: RTVIMessageSpec, data_schema: Any) -> dict:
         "name": spec.type,
         "title": spec.type,
         "summary": " ".join([spec.description, *_notes(spec)]),
+        "tags": [{"name": _GROUP_OF[spec.type]}],
         "payload": _envelope(spec, data_schema),
         "examples": [{"payload": _example(spec)}],
     }
@@ -838,6 +935,7 @@ def build_spec() -> dict:
                 "x-rtvi-deprecated, what replaces a deprecated message. x-rtvi-behaviors lists "
                 "the rules the server follows across messages."
             ),
+            "tags": [{"name": group.name, "description": group.description} for group in GROUPS],
         },
         "defaultContentType": "application/json",
         "channels": {
@@ -905,7 +1003,7 @@ def released() -> dict[str, dict]:
 
 
 # Keys that only describe, and maps whose keys are names rather than keywords.
-_PROSE = frozenset({"description", "summary", "title", "examples"})
+_PROSE = frozenset({"description", "summary", "title", "examples", "tags"})
 _NAMED = frozenset(
     {"properties", "patternProperties", "$defs", "schemas", "messages", "channels", "operations"}
 )
@@ -927,9 +1025,9 @@ def _contract(node: Any, named: bool = False) -> Any:
 def contract_sha256(version: str = RTVI.PROTOCOL_VERSION) -> str:
     """The SHA-256 of a protocol version's contract, as hex.
 
-    The contract is the document without its descriptions, summaries, titles and
-    examples, so clearer wording doesn't change it, and any change to the wire
-    format does.
+    The contract is the document without its descriptions, summaries, titles,
+    examples and tags, so clearer wording doesn't change it, and any change to
+    the wire format does.
 
     Args:
         version: The protocol version. Defaults to the current one.

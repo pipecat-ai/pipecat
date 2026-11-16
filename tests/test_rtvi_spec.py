@@ -13,6 +13,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.processors.frameworks.rtvi.spec import (
     BEHAVIORS,
+    GROUPS,
     MESSAGES,
     build_spec,
     contract_sha256,
@@ -90,6 +91,10 @@ class TestRTVISpec(unittest.TestCase):
         for behavior in BEHAVIORS:
             with self.subTest(behavior.id):
                 self.assertEqual(set(behavior.messages) - types, set())
+
+    def test_every_message_is_in_one_group(self):
+        grouped = [type for group in GROUPS for type in group.messages]
+        self.assertEqual(sorted(grouped), sorted(spec.type for spec in MESSAGES))
 
     def test_responses_carry_an_id(self):
         specs = {spec.type: spec for spec in MESSAGES}
