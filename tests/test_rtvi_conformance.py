@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, PropertyMock, patch
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft7Validator
 from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -124,7 +124,7 @@ class _Spec:
             problems.append(f"{type!r} needs a {minimum} client, sent to {client_version}")
         # The payload schemas point into the document's components.
         schema = {**self.messages[type]["payload"], "components": self.document["components"]}
-        for error in Draft202012Validator(schema).iter_errors(message):
+        for error in Draft7Validator(schema).iter_errors(message):
             path = "/".join(str(p) for p in error.absolute_path) or "(message)"
             problems.append(f"{type!r} at {path}: {error.message}")
         return problems
