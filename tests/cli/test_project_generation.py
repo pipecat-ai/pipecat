@@ -119,6 +119,15 @@ def assert_server_ruff_lint_clean(server_path):
 
 # Test configurations for different transport types
 TEST_CONFIGS = [
+    {
+        "name": "rime-stt",
+        "bot_type": "web",
+        "transports": ["smallwebrtc"],
+        "mode": "cascade",
+        "stt_service": "rime_stt",
+        "llm_service": "openai_llm",
+        "tts_service": "rime_tts",
+    },
     # WebRTC Transports - Cascade
     {
         "name": "daily-cascade",
@@ -532,6 +541,15 @@ def test_project_generation(config_data, temp_output_dir):
     # Verify pyproject.toml has correct dependencies
     pyproject_content = pyproject_file.read_text()
     assert "pipecat-ai[" in pyproject_content, "pyproject.toml should have pipecat-ai dependencies"
+    assert tomllib.loads(pyproject_content)["project"]["requires-python"] == ">=3.11,<3.15", (
+        "pyproject.toml should exclude Python versions onnxruntime has no wheels for"
+    )
+
+    if config.stt_service == "rime_stt":
+        dependencies = tomllib.loads(pyproject_content)["project"]["dependencies"]
+        requirement = next(item for item in dependencies if item.startswith("pipecat-ai["))
+        extras = set(requirement.split("[", 1)[1].split("]", 1)[0].split(","))
+        assert "rime" in extras
 
     # Verify transport extras
     for transport in config.transports:
@@ -1207,6 +1225,49 @@ def test_websocket_transport_generation(temp_output_dir):
     assert "match runner_args" not in bot
 
     ast.parse(bot)
+
+
+def _gen_video_input_bot(temp_output_dir, name, transports):
+    config = ProjectConfig(
+        project_name=name,
+        bot_type="web",
+        transports=transports,
+        mode="cascade",
+        stt_service="deepgram_stt",
+        llm_service="openai_llm",
+        tts_service="cartesia_tts",
+        video_input=True,
+    )
+    ProjectGenerator(config).generate(output_dir=temp_output_dir)
+    return temp_output_dir / name
+
+
+def test_video_input_captures_sources(temp_output_dir):
+    """Video input on Daily and SmallWebRTC lists the camera in video_in_sources, so
+    the transport captures it when the client connects. The screen share is listed
+    commented out, for the developer to enable."""
+    path = _gen_video_input_bot(temp_output_dir, "video-in", ["daily", "smallwebrtc"])
+    assert_server_ruff_clean(path / "server")
+    assert_server_ruff_lint_clean(path / "server")
+    bot = (path / "server" / "bot.py").read_text()
+
+    assert "VideoInSourceParams" in bot.split("transport_params = {")[0]
+    assert bot.count("video_in_sources={") == 2
+    assert bot.count('"camera": VideoInSourceParams(framerate=1)') == 2
+    assert bot.count('# "screenVideo": VideoInSourceParams(framerate=1)') == 2
+    assert bot.count('"screenVideo"') == 2
+    ast.parse(bot)
+
+
+def test_video_input_without_video_transport(temp_output_dir):
+    """A websocket-only bot has no video sources to list, so it doesn't import
+    VideoInSourceParams."""
+    path = _gen_video_input_bot(temp_output_dir, "video-in-ws", ["websocket"])
+    assert_server_ruff_lint_clean(path / "server")
+    bot = (path / "server" / "bot.py").read_text()
+
+    assert "VideoInSourceParams" not in bot
+    assert "video_in_sources" not in bot
 
 
 def test_env_example_lists_selected_service_keys(temp_output_dir):

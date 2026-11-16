@@ -19,8 +19,8 @@ import unittest
 
 from pipecat.bus import BusTTSSpeakMessage
 from pipecat.bus.ui.messages import (
-    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
-    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    UI_CANCEL_JOB_GROUP_EVENT_NAME,
+    UI_SNAPSHOT_EVENT_NAME,
     BusUICommandMessage,
     BusUIEventMessage,
     BusUIJobCompletedMessage,
@@ -99,7 +99,7 @@ class TestUIBridgeInbound(unittest.IsolatedAsyncioTestCase):
         await _fire_ui_message(worker, UISnapshotMessage(id="m2", data=UISnapshotData(tree=tree)))
 
         events = [m for m in sent if isinstance(m, BusUIEventMessage)]
-        self.assertEqual(events[0].event_name, _UI_SNAPSHOT_BUS_EVENT_NAME)
+        self.assertEqual(events[0].event_name, UI_SNAPSHOT_EVENT_NAME)
         self.assertEqual(events[0].payload, tree.model_dump(exclude_none=True))
 
     async def test_cancel_task_message_routes_to_internal_event_name(self):
@@ -113,7 +113,7 @@ class TestUIBridgeInbound(unittest.IsolatedAsyncioTestCase):
         )
 
         events = [m for m in sent if isinstance(m, BusUIEventMessage)]
-        self.assertEqual(events[0].event_name, _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME)
+        self.assertEqual(events[0].event_name, UI_CANCEL_JOB_GROUP_EVENT_NAME)
         self.assertEqual(events[0].payload, {"job_id": "t-1", "reason": "user"})
 
     async def test_missing_payload_becomes_none(self):
@@ -286,3 +286,22 @@ class TestUISpeakBridge(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRTVIDefault(unittest.TestCase):
+    """RTVI is on by default for the worker that owns the client, and off for a bridged one."""
+
+    def _worker(self, **kwargs) -> PipelineWorker:
+        return PipelineWorker(
+            Pipeline([IdentityFilter()]), name="w", cancel_on_idle_timeout=False, **kwargs
+        )
+
+    def test_an_unbridged_worker_has_rtvi(self):
+        self.assertIsNotNone(self._worker()._rtvi)
+
+    def test_a_bridged_worker_has_no_rtvi(self):
+        self.assertIsNone(self._worker(bridged=())._rtvi)
+
+    def test_an_explicit_choice_wins(self):
+        self.assertIsNotNone(self._worker(bridged=(), enable_rtvi=True)._rtvi)
+        self.assertIsNone(self._worker(enable_rtvi=False)._rtvi)

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 #
-# Release evals: spawn each bot in manifest.yaml with the eval transport and
-# run its scenarios against it (via `pipecat eval suite`). Output goes to
+# Release evals: spawn each bot in manifest.yaml and run its scenarios against
+# it (via `pipecat eval suite`). Output goes to
 # test-runs/<timestamp>/ (set by the manifest's runs_dir). Extra args forward,
 # e.g.:
 #
@@ -15,4 +15,7 @@
 #
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
+# The suite runs from the repository root, where the judge factory
+# (evals/judges.py) resolves.
+cd "$here/../.."
 exec uv run python -m pipecat.evals suite -d "$here/manifest.yaml" "$@"

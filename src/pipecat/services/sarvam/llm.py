@@ -13,7 +13,7 @@ from typing import Any, Literal
 from loguru import logger
 from openai import NOT_GIVEN as OPENAI_NOT_GIVEN
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams, openai_is_given
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
@@ -48,14 +48,15 @@ class SarvamLLMService(OpenAILLMService):
     supports_developer_role = False
 
     _SUPPORTED_MODELS = frozenset(
-        {"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b", "sarvam-105b-conversations"}
+        {"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b", "sarvam-105b-conversations"}
     )
     _VISION_MODELS = frozenset({"gemma4"})
-    _REASONING_MODELS = frozenset({"deepseekv4-flash", "gemma4", "glm5.2", "sarvam-105b"})
+    _REASONING_MODELS = frozenset({"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b"})
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     _DEFAULT_BASE_URL = "https://api.sarvam.ai"
 
@@ -145,7 +146,7 @@ class SarvamLLMService(OpenAILLMService):
         non-fatal error frames rather than raised, so an ``LLMSwitcher`` can
         fall back to another service at runtime.
         """
-        error = self._validate_request(self._invocation_params(context))
+        error = self._validate_request(await self._invocation_params(context))
         if error:
             await self.push_error(error)
             return
@@ -177,7 +178,7 @@ class SarvamLLMService(OpenAILLMService):
             no response.
         """
         error = self._validate_request(
-            self._invocation_params(context, system_instruction=system_instruction)
+            await self._invocation_params(context, system_instruction=system_instruction)
         )
         if error:
             await self.push_error(error)
@@ -190,12 +191,12 @@ class SarvamLLMService(OpenAILLMService):
             response_schema=response_schema,
         )
 
-    def _invocation_params(
+    async def _invocation_params(
         self, context: LLMContext, system_instruction: str | None = None
     ) -> OpenAILLMInvocationParams:
         """Derive the invocation params the request will be built from."""
         adapter = self.get_llm_adapter()
-        return adapter.get_llm_invocation_params(
+        return await adapter.get_llm_invocation_params(
             context,
             system_instruction=system_instruction
             or assert_given(self._settings.system_instruction),
@@ -215,18 +216,8 @@ class SarvamLLMService(OpenAILLMService):
 
         model = self._settings.model
 
-        # wiki_grounding is Sarvam-specific and unknown to the OpenAI SDK,
-        # so it must be passed via extra_body to avoid TypeError.
-        extra_body = {}
-        if (
-            model in self._WIKI_GROUNDING_MODELS
-            and is_given(self._settings.wiki_grounding)
-            and self._settings.wiki_grounding is not None
-        ):
-            extra_body["wiki_grounding"] = self._settings.wiki_grounding
-
-        if extra_body:
-            params.setdefault("extra_body", {}).update(extra_body)
+        if model in self._WIKI_GROUNDING_MODELS:
+            self._merge_extra_body(params, {"wiki_grounding": self._settings.wiki_grounding})
 
         if (
             model in self._REASONING_MODELS

@@ -1,5 +1,10 @@
 eval:
-  service: ollama
-  model: gemma4:12b
-  extra:
-    reasoning_effort: none
+  factory: evals.judges.typesafe_classifier
+  # Every judged reply follows a complete marker, so it is a final answer:
+  # right or wrong, never "still working on it".
+  allow_continue: false
+  explainer:
+    service: ollama
+    model: gemma4:12b
+    extra:
+      reasoning_effort: none

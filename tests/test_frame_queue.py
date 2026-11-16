@@ -6,10 +6,11 @@
 
 """The frame queue reads a frame's ``interruptible`` flag as it is."""
 
+import asyncio
 import unittest
 
 from pipecat.frames.frames import EndFrame, TextFrame
-from pipecat.utils.frame_queue import FrameQueue
+from pipecat.utils.frame_queue import FramePriorityQueue, FrameQueue
 
 
 class TestFrameQueueInterruptibility(unittest.IsolatedAsyncioTestCase):
@@ -54,3 +55,27 @@ class TestFrameQueueInterruptibility(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(queue.has_frame(TextFrame))
         self.assertTrue(queue.has_frame(EndFrame))
         self.assertEqual(queue.get_nowait()[1], "down")
+
+
+class TestFramePriorityQueue(unittest.IsolatedAsyncioTestCase):
+    async def test_reset_preserves_priority_order_and_join(self):
+        queue = FramePriorityQueue(frame_getter=lambda item: item[2])
+        frames = [TextFrame(text=str(i)) for i in range(4)]
+        for frame in frames[:3]:
+            frame.interruptible = False
+        for priority, sequence, frame in [
+            (2, 0, frames[0]),
+            (1, 2, frames[2]),
+            (1, 1, frames[1]),
+            (0, 3, frames[3]),
+        ]:
+            queue.put_nowait((priority, sequence, frame))
+
+        queue.reset()
+
+        for frame in [frames[1], frames[2], frames[0]]:
+            self.assertTrue(queue.has_uninterruptible)
+            self.assertIs(queue.get_nowait()[2], frame)
+            queue.task_done()
+        self.assertFalse(queue.has_uninterruptible)
+        await asyncio.wait_for(queue.join(), timeout=1)

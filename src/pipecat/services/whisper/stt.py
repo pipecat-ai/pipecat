@@ -48,6 +48,14 @@ if platform.system() == "Darwin" and platform.machine() == "arm64":
         logger.error('In order to use Whisper, you need to `uv add "pipecat-ai[mlx-whisper]"`.')
         raise ImportError(f"Missing module: {e}") from e
 
+# Speech does not repeat, so a segment that compresses far better than speech is
+# the model hallucinating a loop. Whisper's own decoding treats output past this
+# ratio as repetitive, and a computed ratio is never equal to a fixed value.
+_HALLUCINATION_COMPRESSION_RATIO = 2.4
+
+# Whisper models read 16 kHz audio.
+_WHISPER_SAMPLE_RATE = 16000
+
 
 class Model(StrEnum):
     """Whisper model selection options for Faster Whisper.
@@ -236,6 +244,11 @@ class WhisperSTTService(SegmentedSTTService):
         """Receive segments as raw 16-bit PCM, which the model reads directly."""
         return False
 
+    @property
+    def segment_sample_rate(self) -> int:
+        """Receive segments at 16 kHz, the rate Whisper reads."""
+        return _WHISPER_SAMPLE_RATE
+
     def __init__(
         self,
         *,
@@ -407,7 +420,7 @@ class WhisperSTTService(SegmentedSTTService):
         """Transcribe audio data using Whisper.
 
         Args:
-            audio: Raw audio bytes in 16-bit PCM format.
+            audio: Raw 16-bit PCM audio at 16 kHz.
 
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text
@@ -429,13 +442,22 @@ class WhisperSTTService(SegmentedSTTService):
         # The stored language is a Whisper code rather than a Language, but
         # Language is a StrEnum so downstream handles either.
         language = cast("Language | None", assert_given(self._settings.language))
-        segments, _ = await asyncio.to_thread(
-            self._model.transcribe,
-            audio_float,
-            language=language,
-            hotwords=assert_given(self._settings.hotwords),
-            initial_prompt=assert_given(self._settings.initial_prompt),
-        )
+        model = self._model
+        hotwords = assert_given(self._settings.hotwords)
+        initial_prompt = assert_given(self._settings.initial_prompt)
+
+        def transcribe():
+            # `transcribe` returns a lazy generator that decodes as it is consumed,
+            # so consume it here, in the worker thread, not on the event loop.
+            segments, _ = model.transcribe(
+                audio_float,
+                language=language,
+                hotwords=hotwords,
+                initial_prompt=initial_prompt,
+            )
+            return list(segments)
+
+        segments = await asyncio.to_thread(transcribe)
         text: str = ""
         no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
         for segment in segments:
@@ -547,6 +569,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
         # MLX Whisper loads the model on demand, so only the name is checked here.
         require_given(self._settings.model, "Whisper model")
+        # No model is held, so there are no supported languages to check
+        # against when the language changes.
+        self._model = None
 
     @override
     def _load(self):
@@ -568,7 +593,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         MLX Whisper will handle the conversion internally.
 
         Args:
-            audio: Raw audio bytes in 16-bit PCM format.
+            audio: Raw 16-bit PCM audio at 16 kHz.
 
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text
@@ -598,7 +623,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
             for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
                 # Drop likely hallucinations
-                if segment.get("compression_ratio", None) == 0.5555555555555556:
+                if segment.get("compression_ratio", 0.0) > _HALLUCINATION_COMPRESSION_RATIO:
                     continue
 
                 if (

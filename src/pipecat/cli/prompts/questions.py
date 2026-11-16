@@ -106,8 +106,8 @@ class ProjectConfig:
     # Observability
     enable_observability: bool = False
 
-    # Evals: add an "eval" entry to transport_params so the bot is runnable with
-    # `-t eval` for behavioral evals (see `pipecat eval`). Off by default.
+    # Evals: add an "eval" entry to transport_params so `pipecat eval` can drive
+    # the bot for behavioral evals. Off by default.
     enable_eval: bool = False
 
 
@@ -628,7 +628,7 @@ def ask_project_questions(default_name: str | None = None) -> ProjectConfig:
 
     # Question 9: Eval transport (behavioral evals). Bot-type agnostic; off by
     # default — it adds an inert "eval" entry to transport_params that is only used
-    # when the bot is run with `-t eval`.
+    # when the eval harness connects.
     config.enable_eval = questionary.confirm(
         "Enable evals?",
         default=False,

@@ -27,6 +27,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.tts import GeminiTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -43,6 +44,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -55,7 +60,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting bot with Gemini TTS")
+    logger.info("Starting bot with Gemini 3.8 TTS")
 
     stt = GeminiSTTService(
         api_key=os.environ["GOOGLE_API_KEY"],
@@ -67,33 +72,33 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # ),
     )
 
+    # Gemini 3.8 TTS treats the LLM's text as a verbatim transcript. Sustained
+    # delivery style goes in `prompt` (sent as speech_metadata.style), while
+    # momentary vocal events stay inline as angle-bracket tags. A custom voice
+    # from Voice design can be used by passing its `voice_...` ID as `voice`.
     tts = GeminiTTSService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GeminiTTSService.Settings(
-            model="gemini-3.1-flash-tts-preview",
+            model="gemini-3.8-flash-tts",
+            # model="gemini-3.8-flash-lite-tts",
             voice="Puck",
+            prompt="Warm and conversational, at a relaxed pace.",
         ),
     )
 
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
-            system_instruction="""You are a helpful assistant in a voice conversation.
+            system_instruction="""You are a helpful assistant in a voice conversation. Offer to whisper a secret or laugh at a user's joke.
 
-            IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
-            - [sigh] - Insert a sigh sound
-            - [laughing] - Insert a laugh
-            - [uhm] - Insert a hesitation sound
-            - [whispering] - Speak the next part in a whisper
-            - [shouting] - Speak the next part louder
-            - [extremely fast] - Speak the next part very quickly
-            - [short pause], [medium pause], [long pause] - Add pauses for dramatic effect
+            IMPORTANT: Your responses are spoken by a TTS voice that reads your text verbatim. Write exactly the words to be spoken — no stage directions, delivery instructions, or descriptions of how to speak.
+
+            You may occasionally insert a momentary vocal event inline using an angle-bracket tag: <laugh>, <sigh>, <cough>, <breath>, <short pause>, <medium pause>, <long pause>. Use them sparingly and only where a person would naturally make that sound.
 
             Examples:
-            - "Well [sigh] that's a tricky question."
-            - "[laughing] That's a great joke!"
-            - "[whispering] Let me tell you a secret."
-            - "The answer is... [long pause] ...42!"
+            - "Well <sigh> that's a tricky question."
+            - "<laugh> That's a great joke!"
+            - "The answer is... <long pause> ...42!"
 
             Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative and helpful way.""",
         ),

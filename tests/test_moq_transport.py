@@ -47,9 +47,12 @@ Areas covered:
 
 import argparse
 import asyncio
+import functools
 import itertools
 import time
 import unittest
+import warnings
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,12 +66,25 @@ pytest.importorskip("moq")
 import moq  # noqa: E402
 
 import pipecat.transports.moq.transport as moq_transport  # noqa: E402
+from pipecat.clocks.system_clock import SystemClock  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    CancelFrame,
+    InterruptionFrame,
+    StartFrame,
+    TTSAudioRawFrame,
+)
+from pipecat.processors.frame_processor import (  # noqa: E402
+    FrameDirection,
+    FrameProcessorSetup,
+)
 from pipecat.runner.types import MOQRunnerArguments  # noqa: E402
 from pipecat.runner.utils import create_transport  # noqa: E402
 from pipecat.transports.moq.transport import (  # noqa: E402
+    _AUDIO_CUT_SILENCE_S,
     TRANSCRIPT_EPOCH_FIELD,
     TRANSCRIPT_SEQ_FIELD,
     MOQCallbacks,
+    MOQOutputTransport,
     MOQParams,
     MOQTransport,
     MOQTransportClient,
@@ -77,6 +93,7 @@ from pipecat.transports.moq.transport import (  # noqa: E402
     _is_peer_gone,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+from pipecat.utils.deprecation import _warned_sites  # noqa: E402
 from pipecat.utils.errors import ErrorCategory  # noqa: E402
 
 # ----------------------------------------------------------------------
@@ -218,6 +235,17 @@ def _self_signed_pem(tmp_path):
     return str(pem_path), expected
 
 
+# A relay's stream Cancel as the transcript and catalog readers report it.
+_RELAY_CANCEL = moq.Error.Protocol(
+    moq.ProtocolError(
+        scope=moq.ErrorScope.STREAM,
+        code=1,
+        kind=moq.ProtocolKind.CANCEL,
+        message="cancelled",
+    )
+)
+
+
 # The runner module pulls in FastAPI/uvicorn (the `runner` extra). Skip
 # the cert-hash helper tests when that's not installed; the helpers are
 # defined in run.py, so import = require runner extra.
@@ -233,7 +261,18 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_normal_close_is_peer_gone(self):
         """Session-level normal close counts as the peer leaving too."""
-        self.assertTrue(_is_peer_gone(moq.Error.Protocol("webtransport error: closed")))
+        self.assertTrue(
+            _is_peer_gone(
+                moq.Error.Protocol(
+                    moq.ProtocolError(
+                        scope=moq.ErrorScope.SESSION,
+                        code=0,
+                        kind=moq.ProtocolKind.CANCEL,
+                        message="webtransport error: closed",
+                    )
+                )
+            )
+        )
 
     def test_dropped_producer_is_peer_gone(self):
         """A peer that vanishes mid-call drops its producer without finishing.
@@ -248,14 +287,58 @@ class TestIsPeerGone(unittest.TestCase):
 
     def test_shutdown_variants_are_peer_gone(self):
         """``Cancelled``/``Closed`` are typed, so they need no message match."""
-        self.assertTrue(_is_peer_gone(moq.Error.Cancelled("cancelled")))
-        self.assertTrue(_is_peer_gone(moq.Error.Closed("closed")))
+        self.assertTrue(_is_peer_gone(moq.Error.Cancelled()))
+        self.assertTrue(_is_peer_gone(moq.Error.Closed()))
+
+    def test_gracefully_closed_track_is_peer_gone(self):
+        """A peer that finishes its session cleanly closes with code 0 —
+        "no error" by moq-net convention — which the audio reader renders
+        as the message tail."""
+        self.assertTrue(_is_peer_gone(moq.Error.Audio("moq: no error")))
+
+    def test_cancelled_track_is_peer_gone(self):
+        """A relay cancels the subscription when the peer's publishing session
+        ends. The transcript and catalog readers report a ``CANCEL`` kind; the
+        audio reader renders the error to a string, so only its reason says
+        so, bare or behind moq-mux's prefix."""
+        for error in (
+            _RELAY_CANCEL,
+            moq.Error.Audio("cancelled"),
+            moq.Error.Audio("moq: cancelled"),
+        ):
+            with self.subTest(error=error):
+                self.assertTrue(_is_peer_gone(error))
 
     def test_other_moq_errors_propagate(self):
-        self.assertFalse(_is_peer_gone(moq.Error.Mux("json: cancelled")))
+        """Only a whole reason counts; an error that merely mentions
+        cancellation is a failure."""
+        for error in (
+            moq.Error.Mux("json: expected value at line 1 column 1"),
+            moq.Error.Audio("moq: request cancelled early"),
+            moq.Error.JsonTrack("cancelled by application: bad record"),
+        ):
+            with self.subTest(error=error):
+                self.assertFalse(_is_peer_gone(error))
 
     def test_non_moq_errors_propagate(self):
         self.assertFalse(_is_peer_gone(RuntimeError("remote error: code=4")))
+
+    def test_unknown_code_text_is_peer_gone(self):
+        """A 0.14 peer's reset renders as ``unknown code=N`` under 0.15's
+        decode tables; the peer-gone codes cover NotFound and Unroutable
+        alongside the normal closes."""
+        for code in (13, 24, 25, 30):
+            with self.subTest(code=code):
+                self.assertTrue(_is_peer_gone(moq.Error.Audio(f"moq: unknown code={code}")))
+
+    def test_unrecognized_unknown_code_text_propagates(self):
+        self.assertFalse(_is_peer_gone(moq.Error.Audio("moq: unknown code=50")))
+
+    def test_legacy_code_on_a_protocol_error_is_peer_gone(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=30, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertTrue(_is_peer_gone(moq.Error.Protocol(details)))
 
 
 fastapi = pytest.importorskip("fastapi")
@@ -514,11 +597,13 @@ class TestMOQTransportInit(unittest.TestCase):
     These assertions stop a future refactor from re-introducing it.
     """
 
-    def _make_transport(self):
+    def _make_transport(self, **params_kwargs):
         """Construct a MOQTransport with the moq library's origin mocked so we
         don't need a real QUIC stack just to check that the producer methods
         got called."""
-        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        params_kwargs.setdefault("audio_in_enabled", True)
+        params_kwargs.setdefault("audio_out_enabled", True)
+        params = MOQParams(**params_kwargs)
 
         # A broadcast is created ON an origin, so patch the origin and observe
         # what __init__ asks it for without standing up an actual broadcast.
@@ -563,6 +648,25 @@ class TestMOQTransportInit(unittest.TestCase):
         transport, broadcast, _track, _moq = self._make_transport()
         self.assertIsNone(transport._client._audio_out)
         broadcast.publish_audio.assert_not_called()
+
+    def test_audio_on_defers_the_announce_to_open_audio_track(self):
+        """moq-rs 0.5 routes only announced broadcasts, and the announce
+        belongs after the last track a configuration creates — with audio
+        on, the audio track ``open_audio_track`` adds."""
+        transport, broadcast, _track, _moq = self._make_transport()
+        broadcast.announce.assert_not_called()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
+
+    def test_audio_off_announces_after_the_transcript_track(self):
+        """With audio out disabled ``open_audio_track`` opens nothing, so the
+        transcript is the last track and ``__init__`` announces — without
+        this the peer can't route the transcript until a redial announces
+        the rebuilt broadcast."""
+        transport, broadcast, _track, _moq = self._make_transport(audio_out_enabled=False)
+        broadcast.announce.assert_called_once()
+        transport._client.open_audio_track(24000)
+        broadcast.announce.assert_called_once()
 
     def test_broadcast_paths_built_from_params(self):
         """``<namespace>/<participant_id>`` and ``<namespace>/<peer_id>``
@@ -659,6 +763,13 @@ class TestMOQTransportInit(unittest.TestCase):
         kwargs = self._client_kwargs()
         self.assertNotIn("tls_roots", kwargs)
         self.assertNotIn("tls_fingerprints", kwargs)
+
+    def test_library_reconnect_is_off(self):
+        """The transport owns retry (``_run_client``'s redial with backoff,
+        stall watchdog, fresh publisher per dial); the library's reconnect
+        wraps a refused session's close in a retry-timeout error, hiding
+        the code ``_is_unauthorized`` reads."""
+        self.assertIs(self._client_kwargs()["reconnect"], False)
 
     def test_deprecated_serve_bind_still_sets_the_bind(self):
         """Pydantic drops unknown fields, so without the alias a bot that
@@ -762,6 +873,15 @@ class TestIsNormalClose(unittest.TestCase):
         """A browser leaving mid-call drops its mic producer without finishing."""
         self.assertTrue(_is_normal_close(self._audio_error("moq: remote error: code=24")))
 
+    def test_cancelled_reason_is_normal(self):
+        """The reason form of ``Cancel``, as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: cancelled")))
+
+    def test_no_error_reason_is_normal(self):
+        """The reason form of a code-0 graceful close (``close(0)``, "no
+        error" by moq-net convention), as the audio reader reports it."""
+        self.assertTrue(_is_normal_close(self._audio_error("moq: no error")))
+
     def test_cancel_and_closed_are_normal(self):
         for code in (0, 25):
             with self.subTest(code=code):
@@ -779,6 +899,39 @@ class TestIsNormalClose(unittest.TestCase):
 
     def test_non_moq_exception_is_not_normal(self):
         self.assertFalse(_is_normal_close(RuntimeError("moq: remote error: code=24")))
+
+    def test_unknown_code_text_is_normal(self):
+        """moq-ffi 0.4 decodes with 0.15's tables, where 0.14's codes are
+        unregistered; a 0.14 peer's reset renders as ``unknown code=N``."""
+        for code in (24, 25):
+            with self.subTest(code=code):
+                self.assertTrue(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_unknown_code_text_real_failures_are_not_normal(self):
+        for code in (5, 26, 240):
+            with self.subTest(code=code):
+                self.assertFalse(_is_normal_close(self._audio_error(f"moq: unknown code={code}")))
+
+    def test_legacy_code_on_a_protocol_error_is_normal(self):
+        """0.15's stream table decodes 0.14's Cancel as Internal and has no
+        entry for Dropped or Closed; the verbatim wire code still
+        identifies the hangup."""
+        for code, kind in (
+            (0, moq.ProtocolKind.INTERNAL),
+            (24, moq.ProtocolKind.UNKNOWN),
+            (25, moq.ProtocolKind.UNKNOWN),
+        ):
+            with self.subTest(code=code):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.STREAM, code=code, kind=kind, message="reset"
+                )
+                self.assertTrue(_is_normal_close(moq.Error.Protocol(details)))
+
+    def test_unrecognized_protocol_code_is_not_normal(self):
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(_is_normal_close(moq.Error.Protocol(details)))
 
 
 # ----------------------------------------------------------------------
@@ -890,6 +1043,1075 @@ class TestTranscriptRecords(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------
+# Encoder epoch re-anchoring
+# ----------------------------------------------------------------------
+
+
+class TestEpochReanchor(unittest.IsolatedAsyncioTestCase):
+    """``reset_epoch`` drops the encoder's pending samples and lookahead
+    and publishes a discontinuity, so a mid-utterance delivery stall must
+    not trip it; only the first write and a real idle gap re-anchor."""
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = 24000
+        return client
+
+    async def test_first_write_re_anchors(self):
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_delivery_stall_does_not_re_anchor(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 0.1
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_not_called()
+
+    async def test_an_idle_gap_re_anchors(self):
+        client = self._client_with_audio()
+        client._publish_audio_clock = time.monotonic() - 1.0
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.assert_called_once()
+
+    async def test_a_pacing_reset_mid_sleep_re_anchors(self):
+        """``reset_audio_pacing`` (interruption) can land while a paced
+        write sleeps. The write must complete — re-anchored like a fresh
+        write — with the frame written and the clock advanced."""
+        client = self._client_with_audio()
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        await write
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertAlmostEqual(
+            client._publish_audio_clock, time.monotonic() + duration_s, delta=0.1
+        )
+
+    async def test_a_late_wake_keeps_the_clock_on_schedule(self):
+        """With a budget at or below the event loop's wake-up delay the
+        pacing sleep always ends past the clock. The clock must stay on
+        schedule; absorbing the wake-up delay each write publishes slower
+        than real time and runs the player's buffer dry."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=0)
+        )
+        clock = time.monotonic() + 0.05
+        client._publish_audio_clock = clock
+        await client.publish_audio(b"\x00" * 480)
+        duration_s = 480 / (client._audio_out_sample_rate * 2)
+        self.assertEqual(client._publish_audio_clock, clock + duration_s)
+
+    async def test_the_pts_timeline_tracks_wall_clock_across_an_automatic_idle_gap(self):
+        """A turn gap with no interruption (the LLM just took a while)
+        re-anchors on the next write by itself — no ``reset_audio_pacing``
+        call — and the pts carries the gap."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            clock.t += 5.0
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(client._audio_out.reset_epoch.call_count, 2)
+        self.assertAlmostEqual(second, 5_000_000, delta=20_000)
+
+    async def test_the_pts_timeline_tracks_wall_clock_across_a_gap(self):
+        """Silence between turns is real delay the player schedules
+        against. A presentation timeline that advances only by audio
+        duration is shorter than wall clock by the whole of it, so every
+        turn after the first plays late by the silence before it."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            first = client._audio_out.write.call_args[0][0].timestamp_us
+            # Turn boundary: interruption re-anchors the pacing clock, then
+            # the user talks and the LLM thinks for 5s.
+            client.reset_audio_pacing()
+            clock.t += 5.0
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(first, 0)
+        self.assertAlmostEqual(second, 5_000_000, delta=20_000)
+
+    async def test_a_continuous_run_of_writes_stays_future_dated(self):
+        """Within one utterance the bot writes faster than real time and
+        the timeline advances by audio duration, so the player buffers the
+        lookahead instead of re-anchoring per frame."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        duration_us = int(480 / (24000 * 2) * 1_000_000)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            await client.publish_audio(chunk)
+            second = client._audio_out.write.call_args[0][0].timestamp_us
+        self.assertEqual(second, duration_us)
+
+    async def test_a_teardown_mid_sleep_drops_the_write(self):
+        """``_run``'s finally clears ``_audio_out`` while a paced write
+        sleeps (peer left with a full buffer). The write must return
+        without raising and without touching the closed producer."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client._audio_out = None
+        await write
+        producer.write.assert_not_called()
+
+    async def test_a_teardown_and_reset_mid_sleep_drops_the_write(self):
+        """A teardown and a pacing reset landing in the same sleep must
+        not re-anchor the closed producer's epoch."""
+        client = self._client_with_audio()
+        producer = client._audio_out
+        budget = client._params.audio_out_max_buffer_ms / 1000.0
+        client._publish_audio_clock = time.monotonic() + budget + 0.2
+        write = asyncio.ensure_future(client.publish_audio(b"\x00" * 480))
+        await asyncio.sleep(0.05)
+        client.reset_audio_pacing()
+        client._audio_out = None
+        await write
+        producer.reset_epoch.assert_not_called()
+        producer.write.assert_not_called()
+
+    async def test_an_interruption_cut_publishes_a_discontinuity_and_silence(self):
+        """The browser flushes only its playback ring on interruption;
+        the cancelled write-ahead keeps playing until an epoch
+        discontinuity truncates it. The discontinuity reaches the wire
+        with the next write, so the cut carries it on a short silence."""
+        client = self._client_with_audio()
+        await client.publish_audio(b"\x00" * 480)
+        client._audio_out.reset_epoch.reset_mock()
+        client._audio_out.write.reset_mock()
+        await client.cut_audio()
+        client._audio_out.reset_epoch.assert_called_once()
+        client._audio_out.write.assert_called_once()
+        silence = client._audio_out.write.call_args[0][0].data
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(len(silence), int(24000 * 0.02) * 2)
+
+    async def test_an_interruption_with_nothing_written_leaves_the_track_alone(self):
+        client = self._client_with_audio()
+        await client.cut_audio()
+        client._audio_out.reset_epoch.assert_not_called()
+        client._audio_out.write.assert_not_called()
+
+    async def test_the_cut_keeps_the_pts_timeline_monotonic(self):
+        """The cut's silence lands after the cancelled lookahead, so the
+        next utterance's re-anchor can't rewind past published frames."""
+        client = self._client_with_audio()
+        chunk = b"\x00" * 480
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(chunk)
+            await client.cut_audio()
+            silence_pts = client._audio_out.write.call_args[0][0].timestamp_us
+            clock.t += 2.0
+            await client.publish_audio(chunk)
+            reply_pts = client._audio_out.write.call_args[0][0].timestamp_us
+        duration_us = int(480 / (24000 * 2) * 1_000_000)
+        self.assertEqual(silence_pts, duration_us)
+        self.assertGreater(reply_pts, silence_pts)
+
+
+# ----------------------------------------------------------------------
+# Interruption cut: uninterruptible audio already handed to moq
+# ----------------------------------------------------------------------
+
+
+class TestInterruptionCutProtection(unittest.IsolatedAsyncioTestCase):
+    """The cut's discontinuity drops everything the player has buffered,
+    so uninterruptible audio already handed to moq must be re-published
+    after it — base_output preserves its queued uninterruptible frames,
+    and the published lookahead deserves the same protection."""
+
+    RATE = 24000
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = self.RATE
+        return client
+
+    def _pcm(self, seconds: float, pattern: bytes = b"\x01\x02") -> bytes:
+        return pattern * int(self.RATE * seconds)
+
+    def _written(self, client) -> list[bytes]:
+        return [call.args[0].data for call in client._audio_out.write.call_args_list]
+
+    async def test_the_cut_republishes_the_unplayed_protected_remainder(self):
+        """An uninterruptible announcement interrupted 25ms in keeps its
+        remaining 75ms: the cut publishes the discontinuity silence, then
+        the unplayed remainder in the new epoch."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            client._audio_out.reset_epoch.reset_mock()
+            await client.cut_audio()
+        client._audio_out.reset_epoch.assert_called_once()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(remainder, announcement, played_s=0.025)
+
+    def _assert_remainder(self, remainder: bytes, source: bytes, *, played_s: float):
+        """The remainder is the source's tail, trimmed by the played
+        duration to within a sample (the trim truncates float seconds)."""
+        self.assertTrue(source.endswith(remainder))
+        expected = len(source) - int(played_s * self.RATE) * 2
+        # Each trim truncates float seconds to samples; a repeated cut
+        # trims twice, so allow a couple of samples.
+        self.assertAlmostEqual(len(remainder), expected, delta=4)
+
+    async def test_the_cut_drops_an_interruptible_lookahead_entirely(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1))
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        (silence,) = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+
+    async def test_protected_audio_already_played_is_not_republished(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1), interruptible=False)
+            clock.t += 1.0
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        (silence,) = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+
+    async def test_the_interruptible_tail_behind_the_announcement_is_still_cut(self):
+        """Announcement then ordinary speech, interrupted mid-announcement:
+        only the announcement's remainder comes back."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        speech = self._pcm(0.1, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            await client.publish_audio(speech)
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(remainder, announcement, played_s=0.025)
+
+    async def test_a_second_cut_still_protects_the_remainder(self):
+        """The re-published remainder is protected again, so a second
+        interruption during the announcement preserves what's left."""
+        client = self._client_with_audio()
+        announcement = self._pcm(0.1)
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(announcement, interruptible=False)
+            clock.t += 0.025
+            await client.cut_audio()
+            clock.t += 0.025
+            client._audio_out.write.reset_mock()
+            await client.cut_audio()
+        silence, remainder = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        # First cut at 25ms kept 75ms, re-anchored behind 20ms of
+        # silence; the second cut 25ms later has played that silence
+        # plus 5ms of the remainder.
+        total_played = 0.025 + (0.025 - _AUDIO_CUT_SILENCE_S)
+        self._assert_remainder(remainder, announcement, played_s=total_played)
+
+    async def test_played_out_protected_entries_are_pruned_on_write(self):
+        client = self._client_with_audio()
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(self._pcm(0.1), interruptible=False)
+            clock.t += 1.0
+            await client.publish_audio(self._pcm(0.1))
+        self.assertEqual(len(client._publish_protected), 0)
+
+    async def test_the_cut_commits_without_yielding(self):
+        """base_output's audio task calls ``publish_audio`` concurrently
+        with the cut; an await between the drain and the last replayed
+        write would let a later chunk land inside the replay. A remainder
+        past the pacing budget replays without a single sleep."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        first = self._pcm(0.04)
+        second = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(first, interruptible=False)
+            await client.publish_audio(second, interruptible=False)
+            client._audio_out.write.reset_mock()
+            sleep = AsyncMock()
+            with patch.object(moq_transport.asyncio, "sleep", sleep):
+                await client.cut_audio()
+        sleep.assert_not_awaited()
+        silence, one, two = self._written(client)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(one, first)
+        self.assertEqual(two, second)
+
+    async def test_a_protected_write_in_flight_at_the_cut_lands_after_the_replay(self):
+        """A protected chunk sleeping in ``publish_audio``'s pacing when
+        the interruption lands commits after the whole cut, behind the
+        replayed remainder, and is recorded as protected."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        committed = self._pcm(0.04)
+        in_flight = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        with patch.object(moq_transport, "time", clock):
+            await client.publish_audio(committed, interruptible=False)
+            writer = asyncio.ensure_future(client.publish_audio(in_flight, interruptible=False))
+            for _ in range(3):
+                await asyncio.sleep(0)
+            await client.cut_audio()
+            await writer
+        first, silence, replay, late = self._written(client)
+        self.assertEqual(first, committed)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self.assertEqual(replay, committed)
+        self.assertEqual(late, in_flight)
+        self.assertEqual(client._publish_protected[-1][1], in_flight)
+
+    async def test_a_cut_landing_late_in_the_writers_pacing_sleep_still_replays_first(self):
+        """A writer whose pacing sleep expires just as the cut lands can
+        only commit after the whole cut: a replay that paced its writes
+        would yield mid-cut and let the woken writer land inside it."""
+        params = MOQParams(
+            audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=10
+        )
+        client = self._client_with_audio(params)
+        committed = self._pcm(0.04)
+        in_flight = self._pcm(0.04, b"\x03\x04")
+        clock = SimpleNamespace(monotonic=lambda: clock.t, t=1000.0)
+        real_sleep = asyncio.sleep
+        release = asyncio.Event()
+
+        async def paced_sleep(delay):
+            if not release.is_set():
+                # Writer's pacing sleep: hold until released.
+                await release.wait()
+            else:
+                # Pacing sleep after release (a non-atomic cut's replay):
+                # hand the woken writer the loop.
+                for _ in range(3):
+                    await real_sleep(0)
+
+        with patch.object(moq_transport, "time", clock):
+            with patch.object(moq_transport.asyncio, "sleep", paced_sleep):
+                await client.publish_audio(committed, interruptible=False)
+                writer = asyncio.ensure_future(client.publish_audio(in_flight, interruptible=False))
+                for _ in range(3):
+                    await real_sleep(0)
+                clock.t += 0.025
+                # Writer's sleep expires as the interruption lands.
+                release.set()
+                await client.cut_audio()
+                await writer
+        first, silence, replay, late = self._written(client)
+        self.assertEqual(first, committed)
+        self.assertEqual(silence, b"\x00" * len(silence))
+        self._assert_remainder(replay, committed, played_s=0.025)
+        self.assertEqual(late, in_flight)
+        self.assertEqual(client._publish_protected[-1][1], in_flight)
+
+
+# ----------------------------------------------------------------------
+# Write-ahead cap: default and pacing bound
+# ----------------------------------------------------------------------
+
+
+class TestAudioWriteAheadCap(unittest.IsolatedAsyncioTestCase):
+    """``audio_out_max_buffer_ms`` bounds the published lookahead — the
+    audio a cancelled utterance keeps playing after an interruption."""
+
+    def _client_with_audio(self, params: MOQParams | None = None):
+        client, _stream = _client_with_fake_moq(params)
+        client._audio_out = MagicMock(name="audio_out")
+        client._audio_out_sample_rate = 24000
+        return client
+
+    def test_the_default_cap_is_2s(self):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        self.assertEqual(params.audio_out_max_buffer_ms, 2000)
+
+    async def test_pacing_holds_the_lookahead_to_the_cap(self):
+        """Writing 200ms of audio against a 50ms cap sleeps for the
+        difference and never runs more than cap + one chunk ahead."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=50)
+        )
+        chunk = b"\x00" * 960  # 20ms at 24kHz S16 mono
+        start = time.monotonic()
+        for _ in range(10):
+            await client.publish_audio(chunk)
+            self.assertLessEqual(client._publish_audio_clock - time.monotonic(), 0.05 + 0.021)
+        self.assertGreaterEqual(time.monotonic() - start, 0.2 - 0.05 - 0.03)
+
+    async def test_an_explicit_cap_raises_the_lookahead(self):
+        """The same 200ms under a 1s cap is all lookahead: no pacing
+        sleep, the clock runs the full 200ms ahead."""
+        client = self._client_with_audio(
+            MOQParams(audio_in_enabled=True, audio_out_enabled=True, audio_out_max_buffer_ms=1000)
+        )
+        chunk = b"\x00" * 960
+        start = time.monotonic()
+        for _ in range(10):
+            await client.publish_audio(chunk)
+        self.assertLess(time.monotonic() - start, 0.1)
+        self.assertAlmostEqual(client._publish_audio_clock - time.monotonic(), 0.2, delta=0.05)
+
+
+# ----------------------------------------------------------------------
+# MOQOutputTransport: interruption through process_frame
+# ----------------------------------------------------------------------
+
+
+class TestOutputTransportInterruption(unittest.IsolatedAsyncioTestCase):
+    """InterruptionFrame through ``MOQOutputTransport.process_frame`` —
+    the pipeline-level path that fires ``cut_audio`` — with base_output's
+    chunking and audio task in the loop."""
+
+    RATE = 24000
+
+    async def _make_transport(self, **params_kwargs):
+        params_kwargs.setdefault("audio_in_enabled", True)
+        params_kwargs.setdefault("audio_out_enabled", True)
+        params_kwargs.setdefault("audio_out_sample_rate", self.RATE)
+        params = MOQParams(**params_kwargs)
+        client, _stream = _client_with_fake_moq(params)
+        client.connect = MagicMock()
+        client.cancel = AsyncMock()
+        transport = MOQOutputTransport(client, params)
+        transport.push_frame = AsyncMock()
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=TaskManager(),
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start = StartFrame(audio_out_sample_rate=self.RATE)
+        await transport.process_frame(start, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start)
+        return transport, client
+
+    async def _wait_for_writes(self, producer, count: int):
+        for _ in range(200):
+            if producer.write.call_count >= count:
+                return
+            await asyncio.sleep(0.01)
+        self.fail(f"expected {count} writes, got {producer.write.call_count}")
+
+    def _written(self, client) -> list[bytes]:
+        return [call.args[0].data for call in client._audio_out.write.call_args_list]
+
+    def _audio_frame(self, transport, pattern: bytes, *, interruptible: bool):
+        sender = transport._media_senders[None]
+        frame = TTSAudioRawFrame(
+            pattern * (sender.audio_chunk_size // len(pattern)), sender.sample_rate, 1
+        )
+        frame.interruptible = interruptible
+        return frame
+
+    async def test_an_uninterruptible_announcement_survives_the_interruption(self):
+        """The announcement's unplayed remainder is re-published after the
+        cut's discontinuity, so the player keeps playing it."""
+        transport, client = await self._make_transport()
+        try:
+            producer = client._audio_out
+            announcement = self._audio_frame(transport, b"\x01\x02", interruptible=False)
+            await transport.process_frame(announcement, FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 3)
+            first, silence, republished = self._written(client)
+            self.assertEqual(first, announcement.audio)
+            self.assertEqual(silence, b"\x00" * len(silence))
+            self.assertGreater(len(republished), 0)
+            self.assertTrue(announcement.audio.endswith(republished))
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_ordinary_speech_is_cut_with_nothing_republished(self):
+        transport, client = await self._make_transport()
+        try:
+            producer = client._audio_out
+            speech = self._audio_frame(transport, b"\x03\x04", interruptible=True)
+            await transport.process_frame(speech, FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 2)
+            await asyncio.sleep(0.05)
+            first, silence = self._written(client)
+            self.assertEqual(first, speech.audio)
+            self.assertEqual(silence, b"\x00" * len(silence))
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_an_interruption_lands_while_a_pacing_write_sleeps(self):
+        """The cut's discontinuity goes out at once while the paced write
+        sleeps; the in-flight chunk is still delivered after it (matching
+        base_output, which delivers the frame being written) and the
+        pacing clock lands on the silence plus the chunk."""
+        transport, client = await self._make_transport(audio_out_max_buffer_ms=50)
+        try:
+            producer = client._audio_out
+            budget = 0.05
+            client._publish_audio_clock = time.monotonic() + budget + 0.3
+            speech = self._audio_frame(transport, b"\x05\x06", interruptible=True)
+            await transport.process_frame(speech, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+            self.assertEqual(producer.write.call_count, 0)
+            cut_time = time.monotonic()
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._wait_for_writes(producer, 1)
+            self.assertEqual(self._written(client)[0], b"\x00" * int(self.RATE * 0.02) * 2)
+            producer.reset_epoch.assert_called_once()
+            await self._wait_for_writes(producer, 2)
+            self.assertEqual(self._written(client)[1], speech.audio)
+            chunk_s = len(speech.audio) / (self.RATE * 2)
+            self.assertAlmostEqual(
+                client._publish_audio_clock,
+                cut_time + _AUDIO_CUT_SILENCE_S + chunk_s,
+                delta=0.1,
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+# ----------------------------------------------------------------------
+# Client event handler signatures
+# ----------------------------------------------------------------------
+
+
+class _LegacySyncCallable:
+    """Hashable synchronous callable object with the legacy ``(transport)`` arity."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, transport):
+        self.calls.append(transport)
+
+
+class _UnhashableLegacySyncCallable(_LegacySyncCallable):
+    __hash__ = None
+
+
+class _NewSyncCallable:
+    """Hashable synchronous callable object with the ``(transport, client)`` arity."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, transport, client):
+        self.calls.append((transport, client))
+
+
+class _UnhashableNewSyncCallable(_NewSyncCallable):
+    __hash__ = None
+
+
+class _EqualTaggedCallable:
+    """Distinct callable objects that all compare equal to each other."""
+
+    def __init__(self, calls, tag):
+        self.calls = calls
+        self.tag = tag
+
+    def __call__(self, transport):
+        self.calls.append(self.tag)
+
+    def __eq__(self, other):
+        return isinstance(other, _EqualTaggedCallable)
+
+
+class _HandlerMethods:
+    """Bound-method handlers of every arity."""
+
+    def __init__(self):
+        self.legacy_calls = []
+        self.new_calls = []
+
+    def legacy_sync(self, transport):
+        self.legacy_calls.append(transport)
+
+    async def legacy_async(self, transport):
+        self.legacy_calls.append(transport)
+
+    def new_sync(self, transport, client):
+        self.new_calls.append((transport, client))
+
+    async def new_async(self, transport, client):
+        self.new_calls.append((transport, client))
+
+
+class TestClientEventHandlerSignatures(unittest.IsolatedAsyncioTestCase):
+    """``on_client_connected`` / ``on_client_disconnected`` handlers take
+    ``(transport, client)``; a legacy ``(transport)``-only handler keeps
+    firing through an adapter, with a deprecation warning."""
+
+    def _make_transport(self):
+        params = MOQParams(audio_in_enabled=True, audio_out_enabled=True)
+        with patch("pipecat.transports.moq.transport.moq") as moq_mock:
+            broadcast = MagicMock(name="broadcast")
+            broadcast.publish_json_stream.return_value = MagicMock(name="transcript_stream")
+            origin = MagicMock(name="origin")
+            origin.create_broadcast.return_value = broadcast
+            moq_mock.OriginProducer.return_value = origin
+            return MOQTransport(params=params)
+
+    async def _settle(self, seen):
+        for _ in range(100):
+            if seen:
+                return
+            await asyncio.sleep(0.01)
+        self.fail("event handler never fired")
+
+    async def test_handlers_receive_the_client(self):
+        transport = self._make_transport()
+        seen = []
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            seen.append(client)
+
+        await transport._on_client_connected()
+        await self._settle(seen)
+        self.assertEqual(seen, [{"id": transport._params.peer_id}])
+
+    async def test_a_legacy_single_argument_handler_still_fires(self):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning, match="on_client_connected"):
+
+            @transport.event_handler("on_client_connected")
+            async def on_client_connected(transport):
+                seen.append(transport)
+
+        await transport._on_client_connected()
+        await self._settle(seen)
+        self.assertEqual(seen, [transport])
+
+    async def test_a_legacy_sync_handler_still_fires(self):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning, match="on_client_disconnected"):
+
+            @transport.event_handler("on_client_disconnected")
+            def on_client_disconnected(transport):
+                seen.append(transport)
+
+        await transport._on_client_disconnected()
+        await self._settle(seen)
+        self.assertEqual(seen, [transport])
+
+    def _client_events(self):
+        return [
+            ("on_client_connected", lambda t: t._on_client_connected()),
+            ("on_client_disconnected", lambda t: t._on_client_disconnected()),
+        ]
+
+    async def _assert_explicit_removal(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport):
+            seen.append(transport)
+
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler(event_name, handler)
+        transport.remove_event_handler(event_name, handler)
+        self.assertEqual(transport._event_handlers[event_name].handlers, [])
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(seen, [])
+
+    async def test_a_legacy_handler_is_removed_by_its_original_callback(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_explicit_removal(event_name, fire)
+
+    async def _assert_self_removal_fires_once(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        with pytest.warns(DeprecationWarning):
+
+            @transport.event_handler(event_name)
+            async def handler(transport):
+                transport.remove_event_handler(event_name, handler)
+                seen.append(transport)
+
+        await fire(transport)
+        await self._settle(seen)
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(seen), 1)
+
+    async def test_a_legacy_handler_that_removes_itself_fires_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_self_removal_fires_once(event_name, fire)
+
+    async def _assert_cycles_leave_one_registration(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport):
+            seen.append(transport)
+
+        for _ in range(3):
+            _warned_sites.clear()
+            with pytest.warns(DeprecationWarning):
+                transport.add_event_handler(event_name, handler)
+            transport.remove_event_handler(event_name, handler)
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler(event_name, handler)
+        self.assertEqual(len(transport._event_handlers[event_name].handlers), 1)
+        await fire(transport)
+        await self._settle(seen)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(seen), 1)
+
+    async def test_repeated_registration_and_cleanup_leaves_one_registration(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_cycles_leave_one_registration(event_name, fire)
+
+    async def test_duplicate_legacy_registrations_are_removed_one_at_a_time(self):
+        transport = self._make_transport()
+
+        async def handler(transport):
+            pass
+
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler("on_client_connected", handler)
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning):
+            transport.add_event_handler("on_client_connected", handler)
+        transport.remove_event_handler("on_client_connected", handler)
+        self.assertEqual(len(transport._event_handlers["on_client_connected"].handlers), 1)
+        transport.remove_event_handler("on_client_connected", handler)
+        self.assertEqual(transport._event_handlers["on_client_connected"].handlers, [])
+
+    async def _assert_two_argument_removal(self, event_name, fire):
+        transport = self._make_transport()
+        seen = []
+
+        async def handler(transport, client):
+            seen.append(client)
+
+        transport.add_event_handler(event_name, handler)
+        transport.remove_event_handler(event_name, handler)
+        self.assertEqual(transport._event_handlers[event_name].handlers, [])
+        await fire(transport)
+        await asyncio.sleep(0.05)
+        self.assertEqual(seen, [])
+
+    async def test_a_two_argument_handler_is_removed(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_two_argument_removal(event_name, fire)
+
+    def _add_legacy(self, transport, event_name, handler):
+        _warned_sites.clear()
+        with pytest.warns(DeprecationWarning, match=event_name):
+            transport.add_event_handler(event_name, handler)
+
+    async def _settle_len(self, seen, n):
+        for _ in range(100):
+            if len(seen) >= n:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+
+    def _expected_client(self, transport):
+        return {"id": transport._params.peer_id}
+
+    def _legacy_handler_cases(self):
+        sync_partial_calls = []
+
+        def sync_target(tag, transport):
+            sync_partial_calls.append(transport)
+
+        async_partial_calls = []
+
+        async def async_target(tag, transport):
+            async_partial_calls.append(transport)
+
+        sync_methods = _HandlerMethods()
+        async_methods = _HandlerMethods()
+        hashable_obj = _LegacySyncCallable()
+        unhashable_obj = _UnhashableLegacySyncCallable()
+        return [
+            ("sync bound method", sync_methods.legacy_sync, sync_methods.legacy_calls),
+            ("async bound method", async_methods.legacy_async, async_methods.legacy_calls),
+            ("hashable callable object", hashable_obj, hashable_obj.calls),
+            ("unhashable callable object", unhashable_obj, unhashable_obj.calls),
+            ("sync partial", functools.partial(sync_target, "tag"), sync_partial_calls),
+            ("async partial", functools.partial(async_target, "tag"), async_partial_calls),
+        ]
+
+    async def test_legacy_arity_variants_fire_with_the_transport_alone(self):
+        for event_name, fire in self._client_events():
+            for label, handler, calls in self._legacy_handler_cases():
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    self._add_legacy(transport, event_name, handler)
+                    await fire(transport)
+                    await self._settle_len(calls, 1)
+                    self.assertEqual(calls, [transport])
+
+    def _new_handler_cases(self):
+        sync_fn_calls = []
+
+        def sync_fn(transport, client):
+            sync_fn_calls.append((transport, client))
+
+        async_fn_calls = []
+
+        async def async_fn(transport, client):
+            async_fn_calls.append((transport, client))
+
+        sync_partial_calls = []
+
+        def sync_target(tag, transport, client):
+            sync_partial_calls.append((transport, client))
+
+        async_partial_calls = []
+
+        async def async_target(tag, transport, client):
+            async_partial_calls.append((transport, client))
+
+        sync_methods = _HandlerMethods()
+        async_methods = _HandlerMethods()
+        hashable_obj = _NewSyncCallable()
+        unhashable_obj = _UnhashableNewSyncCallable()
+        return [
+            ("sync function", sync_fn, sync_fn_calls),
+            ("async function", async_fn, async_fn_calls),
+            ("sync bound method", sync_methods.new_sync, sync_methods.new_calls),
+            ("async bound method", async_methods.new_async, async_methods.new_calls),
+            ("hashable callable object", hashable_obj, hashable_obj.calls),
+            ("unhashable callable object", unhashable_obj, unhashable_obj.calls),
+            ("sync partial", functools.partial(sync_target, "tag"), sync_partial_calls),
+            ("async partial", functools.partial(async_target, "tag"), async_partial_calls),
+        ]
+
+    async def test_new_arity_variants_receive_the_client(self):
+        for event_name, fire in self._client_events():
+            for label, handler, calls in self._new_handler_cases():
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("error", DeprecationWarning)
+                        transport.add_event_handler(event_name, handler)
+                    await fire(transport)
+                    await self._settle_len(calls, 1)
+                    self.assertEqual(calls, [(transport, self._expected_client(transport))])
+
+    async def test_an_opaque_builtin_handler_gets_the_legacy_call_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name, handler="deque.append"):
+                transport = self._make_transport()
+                d = deque()
+                self._add_legacy(transport, event_name, d.append)
+                await fire(transport)
+                await self._settle_len(d, 1)
+                self.assertEqual(list(d), [transport])
+            with self.subTest(event=event_name, handler="set.add"):
+                transport = self._make_transport()
+                s = set()
+                self._add_legacy(transport, event_name, s.add)
+                await fire(transport)
+                await self._settle_len(s, 1)
+                self.assertEqual(s, {transport})
+
+    async def test_an_explicit_wrapper_delivers_the_client_to_an_opaque_callable(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                d = deque()
+
+                def wrapper(transport, client, _d=d):
+                    _d.append((transport, client))
+
+                transport.add_event_handler(event_name, wrapper)
+                await fire(transport)
+                await self._settle_len(d, 1)
+                self.assertEqual(list(d), [(transport, self._expected_client(transport))])
+
+    async def test_an_unhashable_handler_is_removed_by_the_original(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                handler = _UnhashableLegacySyncCallable()
+                self._add_legacy(transport, event_name, handler)
+                transport.remove_event_handler(event_name, handler)
+                self.assertEqual(transport._event_handlers[event_name].handlers, [])
+                await fire(transport)
+                await asyncio.sleep(0.05)
+                self.assertEqual(handler.calls, [])
+
+    async def test_unrelated_removals_with_an_unhashable_handler_are_no_ops(self):
+        transport = self._make_transport()
+        transport.remove_event_handler("on_connected", _UnhashableLegacySyncCallable())
+        transport.remove_event_handler("on_unknown_event", _UnhashableLegacySyncCallable())
+
+    async def test_removing_a_never_added_handler_is_a_no_op(self):
+        transport = self._make_transport()
+        for event_name, _ in self._client_events():
+            transport.remove_event_handler(event_name, _UnhashableLegacySyncCallable())
+            transport.remove_event_handler(event_name, lambda t: None)
+
+    async def test_unknown_event_addition_does_not_register(self):
+        transport = self._make_transport()
+        transport.add_event_handler("on_unknown_event", _UnhashableLegacySyncCallable())
+        self.assertNotIn("on_unknown_event", transport._event_handlers)
+
+    async def test_a_fresh_bound_method_removes_the_registration(self):
+        for event_name, fire in self._client_events():
+            for label in ("legacy", "new"):
+                with self.subTest(event=event_name, handler=label):
+                    transport = self._make_transport()
+                    methods = _HandlerMethods()
+                    if label == "legacy":
+                        self._add_legacy(transport, event_name, methods.legacy_sync)
+                        transport.remove_event_handler(event_name, methods.legacy_sync)
+                    else:
+                        transport.add_event_handler(event_name, methods.new_sync)
+                        transport.remove_event_handler(event_name, methods.new_sync)
+                    self.assertEqual(transport._event_handlers[event_name].handlers, [])
+                    await fire(transport)
+                    await asyncio.sleep(0.05)
+                    self.assertEqual(methods.legacy_calls, [])
+                    self.assertEqual(methods.new_calls, [])
+
+    async def test_equal_distinct_callables_remove_the_first_registration(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                transport = self._make_transport()
+                calls = []
+                first = _EqualTaggedCallable(calls, "first")
+                second = _EqualTaggedCallable(calls, "second")
+                self._add_legacy(transport, event_name, first)
+                self._add_legacy(transport, event_name, second)
+                transport.remove_event_handler(event_name, second)
+                await fire(transport)
+                await self._settle_len(calls, 1)
+                self.assertEqual(calls, ["second"])
+
+    async def _assert_aba_removal_order(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler_a(transport):
+            calls.append("a")
+
+        def handler_b(transport):
+            calls.append("b")
+
+        self._add_legacy(transport, event_name, handler_a)
+        self._add_legacy(transport, event_name, handler_b)
+        self._add_legacy(transport, event_name, handler_a)
+        transport.remove_event_handler(event_name, handler_a)
+        await fire(transport)
+        await self._settle_len(calls, 2)
+        self.assertEqual(calls, ["b", "a"])
+
+    async def test_aba_removal_runs_the_remaining_handlers_in_base_order(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_aba_removal_order(event_name, fire)
+
+    async def _assert_dispatch_snapshot_spares_a_removed_handler(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler_b(transport):
+            calls.append("b")
+
+        def handler_a(transport):
+            calls.append("a")
+            transport.remove_event_handler(event_name, handler_b)
+
+        self._add_legacy(transport, event_name, handler_a)
+        self._add_legacy(transport, event_name, handler_b)
+        await fire(transport)
+        await self._settle_len(calls, 2)
+        self.assertEqual(calls, ["a", "b"])
+        await fire(transport)
+        await self._settle_len(calls, 3)
+        self.assertEqual(calls, ["a", "b", "a"])
+
+    async def test_removing_another_handler_during_dispatch_spares_the_current_round(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_dispatch_snapshot_spares_a_removed_handler(event_name, fire)
+
+    async def test_removing_one_events_registration_leaves_the_other(self):
+        transport = self._make_transport()
+        calls = []
+
+        def handler(transport):
+            calls.append("x")
+
+        self._add_legacy(transport, "on_client_connected", handler)
+        self._add_legacy(transport, "on_client_disconnected", handler)
+        transport.remove_event_handler("on_client_connected", handler)
+        await transport._on_client_connected()
+        await transport._on_client_disconnected()
+        await self._settle_len(calls, 1)
+        self.assertEqual(calls, ["x"])
+
+    async def _assert_type_error_invokes_once(self, event_name, fire):
+        transport = self._make_transport()
+        calls = []
+
+        def handler(transport):
+            calls.append("x")
+            raise TypeError("boom")
+
+        self._add_legacy(transport, event_name, handler)
+        await fire(transport)
+        await self._settle_len(calls, 1)
+        self.assertEqual(calls, ["x"])
+
+    async def test_a_handlers_own_type_error_invokes_it_once(self):
+        for event_name, fire in self._client_events():
+            with self.subTest(event=event_name):
+                await self._assert_type_error_invokes_once(event_name, fire)
+
+
+# ----------------------------------------------------------------------
 # Runner arguments: relay_url
 # ----------------------------------------------------------------------
 
@@ -964,7 +2186,12 @@ class _FakeSession:
 
 
 # What moq-ffi raises from ``Session.closed()`` when the relay refused the token.
-_UNAUTHORIZED_CLOSE = "transport: webtransport error: closed: code=6 reason=unauthorized"
+_UNAUTHORIZED_CLOSE = moq.ProtocolError(
+    scope=moq.ErrorScope.SESSION,
+    code=2,
+    kind=moq.ProtocolKind.UNAUTHORIZED,
+    message="unauthorized",
+)
 
 
 class _FakeClient:
@@ -1187,7 +2414,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dials, [self.URL] * 3)
 
     async def test_a_refused_first_dial_is_not_retried(self):
-        self.script[:] = [moq.Error.Forbidden("403 denied")]
+        self.script[:] = [moq.Error.Forbidden()]
         client = self._make_client()
         self._peer_stays(client)
         await asyncio.wait_for(client._run(), timeout=2)
@@ -1208,7 +2435,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         refuses the redial. The peer it had is reported gone, then the
         refusal."""
         first = _FakeSession()
-        self.script[:] = [first, moq.Error.Unauthorized("401 expired")]
+        self.script[:] = [first, moq.Error.Unauthorized()]
         client = self._make_client()
         self._peer_stays(client)
 
@@ -1253,11 +2480,15 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.script[:] = [first] + [_FakeSession(closed=True) for _ in range(1000)]
         client = self._make_client(connection_timeout=0.05)
         self._peer_never_returns(client)
+        # The window runs on a clock that moves 10 ms a dial, so it closes
+        # after a fixed number of dials however slowly the test runs.
+        clock = SimpleNamespace(monotonic=lambda: len(self.dials) * 0.01)
 
-        run = asyncio.create_task(client._run())
-        await self._wait_for_dials(1)
-        first.drop()
-        await asyncio.wait_for(run, timeout=2)
+        with patch.object(moq_transport, "time", clock):
+            run = asyncio.create_task(client._run())
+            await self._wait_for_dials(1)
+            first.drop()
+            await asyncio.wait_for(run, timeout=2)
 
         cb = client._callbacks
         self.assertGreater(len(self.dials), 2)
@@ -1358,7 +2589,7 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0]["seq"] for call in new_stream.append.call_args_list], [0, 1])
         self.assertEqual(new_stream.append.call_args_list[1].args[0]["type"], "b")
         self.assertIsNot(client._audio_out, old_audio)
-        client._publish_broadcast.publish_audio.assert_called_once()
+        client._publish_broadcast.encode_audio.assert_called_once()
 
     async def test_peer_tracks_ending_without_goodbye_redial_and_the_peer_comes_back(self):
         """A relay between the peers failing ends the peer's tracks the way a
@@ -1779,22 +3010,29 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     subscription itself. That is the peer's tracks ending, which the session
     loop answers with a retry and then a redial, not a transport failure."""
 
-    DROPPED = moq.Error.Protocol("dropped")
+    DROPPED = moq.Error.Protocol(
+        moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM,
+            code=13,
+            kind=moq.ProtocolKind.NOT_FOUND,
+            message="dropped",
+        )
+    )
 
     async def test_a_refused_catalog_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_not_called()
+        peer_broadcast.decode_audio.assert_not_called()
 
     async def test_a_refused_audio_subscribe_ends_the_audio_pump(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
         peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
-        peer_broadcast.subscribe_audio = AsyncMock(side_effect=self.DROPPED)
+        peer_broadcast.decode_audio = AsyncMock(side_effect=self.DROPPED)
         await client._forward_peer_audio(peer_broadcast)
-        peer_broadcast.subscribe_audio.assert_awaited_once()
+        peer_broadcast.decode_audio.assert_awaited_once()
 
     async def test_a_refused_transcript_subscribe_ends_the_transcript_pump(self):
         client, _stream = _client_with_fake_moq()
@@ -1806,7 +3044,12 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
     async def test_any_other_subscribe_error_still_propagates(self):
         client, _stream = _client_with_fake_moq()
         peer_broadcast = MagicMock()
-        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=moq.Error.Protocol("boom"))
+        boom = moq.Error.Protocol(
+            moq.ProtocolError(
+                scope=moq.ErrorScope.STREAM, code=50, kind=moq.ProtocolKind.UNKNOWN, message="boom"
+            )
+        )
+        peer_broadcast.subscribe_catalog = AsyncMock(side_effect=boom)
         with self.assertRaises(moq.Error.Protocol):
             await client._forward_peer_audio(peer_broadcast)
 
@@ -1831,28 +3074,132 @@ class TestSubscribeRefusedAsPeerGone(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_error.assert_not_awaited()
 
 
+class _FakeTrackEndingWith:
+    """Stands in for a track consumer: yields scripted items, then raises ``error``."""
+
+    def __init__(self, items, error):
+        self._items = list(items)
+        self._error = error
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._items:
+            raise self._error
+        return self._items.pop(0)
+
+    def cancel(self):
+        pass
+
+
+class TestTrackCancelledAsPeerGone(unittest.IsolatedAsyncioTestCase):
+    """A relay cancels a live subscription when the session publishing the
+    broadcast ends, including when a reconnecting peer replaces its broadcast
+    with a fresh one. That is the peer's tracks ending: the session loop
+    subscribes again rather than failing the transport."""
+
+    async def test_cancelled_audio_ends_the_audio_pump(self):
+        client, _stream = _client_with_fake_moq()
+        peer_broadcast = MagicMock()
+        peer_broadcast.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        peer_broadcast.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        await client._forward_peer_audio(peer_broadcast)
+        client._callbacks.on_audio_received.assert_awaited_once()
+
+    async def test_the_peer_is_followed_to_its_fresh_broadcast(self):
+        """Through the real pumps: the first broadcast's audio and transcript
+        are cancelled mid-call, and the transport subscribes to the peer's
+        fresh broadcast and carries on until the peer says goodbye."""
+        client, _stream = _client_with_fake_moq()
+        client._task_manager = TaskManager()
+        client._peer_connected = True
+        first = MagicMock(name="first_broadcast")
+        first.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([_opus_catalog()]))
+        first.decode_audio = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [MagicMock(data=b"\x00\x01" * 160)], moq.Error.Audio("moq: cancelled")
+            )
+        )
+        first.subscribe_json_stream = AsyncMock(
+            return_value=_FakeTrackEndingWith(
+                [{"label": "rtvi-ai", "type": "client-ready", "seq": 0, "epoch": "e1"}],
+                _RELAY_CANCEL,
+            )
+        )
+        fresh = MagicMock(name="fresh_broadcast")
+        fresh.subscribe_catalog = AsyncMock(return_value=_FakeCatalogs([]))
+        fresh.subscribe_json_stream = AsyncMock(
+            return_value=_FakeJsonStream(
+                [
+                    {"label": "rtvi-ai", "type": "client-message", "seq": 0, "epoch": "e2"},
+                    {"label": "moq-transport", "type": "session-ending", "seq": 1, "epoch": "e2"},
+                ]
+            )
+        )
+        broadcasts = iter([first, fresh])
+        origin = MagicMock(name="subscribe_origin")
+        origin.consume.return_value.announced_broadcast.side_effect = lambda _path: _FakeAnnounced(
+            next(broadcasts)
+        )
+        gone = await asyncio.wait_for(client._consume_peer(origin), timeout=2)
+        self.assertTrue(gone)
+        self.assertTrue(client._peer_goodbye)
+        fresh.subscribe_json_stream.assert_awaited_once()
+        client._callbacks.on_audio_received.assert_awaited_once()
+        self.assertEqual(client._callbacks.on_message_received.await_count, 2)
+        client._callbacks.on_error.assert_not_awaited()
+
+
 class TestIsUnauthorized(unittest.TestCase):
     """A refused token shows up either as an HTTP status on the dial or as
     the session closing with moq-net's ``Unauthorized`` code."""
 
     def test_http_refusals_count(self):
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized("401")))
-        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden("403")))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Unauthorized()))
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Forbidden()))
 
     def test_unauthorized_session_close_counts(self):
         self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(_UNAUTHORIZED_CLOSE)))
 
     def test_other_closes_do_not(self):
-        for message in (
-            "transport: webtransport error: closed: code=4 reason=transport",
-            "transport: webtransport error: closed: code=0 reason=remote err",
-            "webtransport error: closed",
+        for kind, code, message in (
+            (moq.ProtocolKind.PROTOCOL_VIOLATION, 3, "transport"),
+            (moq.ProtocolKind.CANCEL, 0, "remote err"),
+            (moq.ProtocolKind.SESSION_CLOSED, 9, "closed"),
         ):
-            with self.subTest(message=message):
-                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(message)))
+            with self.subTest(kind=kind):
+                details = moq.ProtocolError(
+                    scope=moq.ErrorScope.SESSION, code=code, kind=kind, message=message
+                )
+                self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_0_14_relay_refusal_counts(self):
+        """A 0.14 relay closes a refused session with the old registry's
+        Unauthorized code, which 0.15's session table decodes as
+        ``KEY_VALUE_FORMATTING``."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.SESSION,
+            code=6,
+            kind=moq.ProtocolKind.KEY_VALUE_FORMATTING,
+            message="key-value formatting error",
+        )
+        self.assertTrue(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
+
+    def test_a_stream_scope_code_6_does_not(self):
+        """Only the session-scope decode (KEY_VALUE_FORMATTING) marks a
+        refusal; stream code 6 is unregistered in 0.15's table."""
+        details = moq.ProtocolError(
+            scope=moq.ErrorScope.STREAM, code=6, kind=moq.ProtocolKind.UNKNOWN, message="reset"
+        )
+        self.assertFalse(moq_transport._is_unauthorized(moq.Error.Protocol(details)))
 
     def test_non_moq_errors_do_not(self):
-        self.assertFalse(moq_transport._is_unauthorized(ConnectionError(_UNAUTHORIZED_CLOSE)))
+        self.assertFalse(moq_transport._is_unauthorized(ConnectionError("unauthorized")))
 
 
 # ----------------------------------------------------------------------
@@ -1885,7 +3232,7 @@ class TestErrorsReachThePipeline(unittest.IsolatedAsyncioTestCase):
             seen.append((message, exception))
             fired.set()
 
-        exc = moq.Error.Unauthorized("401")
+        exc = moq.Error.Unauthorized()
         await transport._on_error("401", exc, ErrorCategory.AUTHENTICATION, False)
 
         # Event handlers run in a background task.

@@ -272,7 +272,6 @@ class GradiumTTSService(WebsocketTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.remove_active_audio_context()
             self._websocket = None
             self._setup_context_ids.clear()
             await self._call_event_handler("on_disconnected")

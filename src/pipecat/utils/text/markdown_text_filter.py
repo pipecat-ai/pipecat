@@ -17,9 +17,14 @@ from typing import Any
 from markdown import Markdown
 from pydantic import BaseModel
 
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 
 
+@deprecated(
+    "`MarkdownTextFilter` is deprecated since 1.14.0 and will be removed in 2.0.0. "
+    "Use `strip_markdown` instead."
+)
 class MarkdownTextFilter(BaseTextFilter):
     """Text filter that removes Markdown formatting from text content.
 
@@ -27,6 +32,14 @@ class MarkdownTextFilter(BaseTextFilter):
     including leading and trailing spaces. Handles special cases like
     asterisks and table formatting. Supports selective filtering of code
     blocks and tables based on configuration.
+
+    .. deprecated:: 1.14.0
+        Use :data:`~pipecat.utils.text.transforms.strip_markdown` instead, registered
+        with ``text_transforms``. In place of ``filter_code`` and ``filter_tables``,
+        give the block its own text type with
+        :class:`~pipecat.utils.text.pattern_pair_aggregator.PatternPairAggregator` and
+        list that type in the TTS service's ``skip_text_types``, which keeps the block
+        in the context and out of the audio. Will be removed in 2.0.0.
     """
 
     class InputParams(BaseModel):
@@ -52,7 +65,7 @@ class MarkdownTextFilter(BaseTextFilter):
             **kwargs: Additional keyword arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._settings = params or MarkdownTextFilter.InputParams()
+        self._settings = params or self.InputParams()
         self._in_code_block = False
         self._in_table = False
         self._interrupted = False

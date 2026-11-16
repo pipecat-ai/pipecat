@@ -27,6 +27,7 @@ from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -119,15 +120,6 @@ async def load_conversation(params: FunctionCallParams, filename: str):
         try:
             with open(filename) as file:
                 messages = json.load(file)
-                # HACK: if using the older Nova Sonic (pre-2) model, you need a special way of
-                # triggering the first assistant response. The call to trigger_assistant_response(),
-                # commented out below, is part of this.
-                # messages.append(
-                #     {
-                #         "role": "developer",
-                #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
-                #     }
-                # )
                 # If the last message isn't from the user, add a message asking for a recap
                 if messages and messages[-1].get("role") != "user":
                     messages.append(
@@ -157,6 +149,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -176,16 +172,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
         "two or three sentences for chatty scenarios. "
-        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
-        # bit of text into this instruction to allow the first assistant response to be
-        # programmatically triggered (which happens in the on_client_connected handler)
-        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        region=os.environ["AWS_REGION"],  # as of 2025-05-06, us-east-1 is the only supported region
+        # as of 2026-09-28, the supported regions are us-east-1, us-west-2, eu-north-1
+        # and ap-northeast-1
+        region=os.environ["AWS_REGION"],
         settings=AWSNovaSonicLLMService.Settings(
             voice="tiffany",  # matthew, tiffany, amy
             system_instruction=system_instruction,
@@ -248,10 +242,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await worker.queue_frames([LLMRunFrame()])
-        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
-        # triggering the first assistant response. Note that this trigger requires a special
-        # corresponding bit of text in the system instruction.
-        # await llm.trigger_assistant_response()
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

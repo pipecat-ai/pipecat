@@ -9,12 +9,13 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from pydantic import BaseModel
+
+from pipecat.utils.deprecation import warn_deprecated
 
 if TYPE_CHECKING:
     from pipecat.workers.base_worker import BaseWorker
@@ -31,7 +32,7 @@ class JobParams(BaseModel):
             the worker to become ready and the job itself.
         label: Optional human-readable description of the work, e.g.
             ``"Research: Radiohead"``. A
-            :class:`~pipecat.workers.base_ui_worker.BaseUIWorker` titles
+            :class:`~pipecat.workers.ui.UIWorker` titles
             the client's progress card with it.
         cancellable: Whether an external requester, such as the client UI,
             may ask for the job to be cancelled. Cancellation the worker
@@ -96,10 +97,10 @@ def resolve_job_params(
         return params or params_class()
     if params is not None:
         raise TypeError(f"Pass either `params` or `{'`, `'.join(sorted(passed))}`, not both.")
-    warnings.warn(
-        f"Passing `{'`, `'.join(sorted(passed))}` to a job dispatch method is deprecated since "
-        f"1.8.0 and will be removed in 2.0.0. Use `params={params_class.__name__}(...)` instead.",
-        DeprecationWarning,
+    warn_deprecated(
+        f"`{', '.join(f'{key}=...' for key in sorted(passed))}` is deprecated since 1.8.0 "
+        f"and will be removed in 2.0.0. Use `params={params_class.__name__}(...)` instead. "
+        "Job dispatch methods take these arguments as fields of the params object.",
         stacklevel=3,
     )
     return params_class(**passed)

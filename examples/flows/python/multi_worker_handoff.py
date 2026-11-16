@@ -53,6 +53,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.flows import NO_RESPONSE, ConsolidatedFunctionResult, FlowManager, NodeConfig
+from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -67,6 +68,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
@@ -83,6 +85,10 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
+    "livekit": lambda: LiveKitParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -91,7 +97,6 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
-    # Behavioral evals: run with `-t eval` to drive this bot via `pipecat eval`.
     "eval": lambda: EvalTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -373,13 +378,14 @@ class RouterWorker(LLMWorker):
             reason (str): Why the user is being transferred.
         """
         logger.info(f"Worker '{self.name}': transferring to '{RESERVATION_NAME}' ({reason})")
+        # The reservation worker speaks on activation, so this call has no reply.
+        await params.result_callback(None, properties=FunctionCallResultProperties(run_llm=False))
         await self.activate_worker(
             RESERVATION_NAME,
             args=LLMWorkerActivationArgs(
                 messages=[{"role": "developer", "content": reason}],
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
 
     @tool
@@ -390,11 +396,9 @@ class RouterWorker(LLMWorker):
             reason (str): Why the conversation is ending.
         """
         logger.info(f"Worker '{self.name}': ending conversation ({reason})")
-        await self.end(
-            reason=reason,
-            messages=[{"role": "developer", "content": reason}],
-            result_callback=params.result_callback,
-        )
+        # The result makes the LLM say goodbye, and that is spoken before the end.
+        await params.result_callback(reason)
+        await self.end(reason=reason)
 
 
 def build_router(llm: Any) -> RouterWorker:

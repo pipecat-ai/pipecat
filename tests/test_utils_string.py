@@ -197,6 +197,44 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("This is a sentence. This is another one") == 19
         assert match_endofsentence("For information, call 411.") == 26
 
+    async def test_endofsentence_numbered_list_marker(self):
+        # A line-start list marker is not a sentence on its own.
+        assert not match_endofsentence("1. T")
+        assert not match_endofsentence("  12. The")
+        assert not match_endofsentence("Options:\n1. Take")
+        assert match_endofsentence("1. Take a walk.\n2. Read") == 15
+        assert match_endofsentence("Pick one.\n1. Walk") == 9
+        # Numbers that end a sentence still split.
+        assert match_endofsentence("The answer is 1. Next") == 16
+        assert match_endofsentence("1990.\nThat was the year") == 5
+        # The marker stays masked when an unfinished quote triggers a recheck.
+        assert not match_endofsentence('1. She said, "Dr. Smith')
+        # Languages whose rules never start a sentence at a digit still split
+        # between items.
+        for language in ("de", "da", "fi", "cs", "sk", "ca"):
+            assert match_endofsentence("1. Zug nehmen.\n2. Auto", language=language) == 14
+
+    async def test_endofsentence_numbered_list_multilingual(self):
+        # (language, first item, start of the next item)
+        cases = [
+            ("en", "Options:\n1. Take the train.", "\n2. Drive"),
+            ("fr", "Voici les options :\n1. Prendre le train.", "\n2. Prendre"),
+            ("de", "Optionen:\n1. Den Zug nehmen.", "\n2. Mit"),
+            ("es", "Opciones:\n1. Tomar el tren.", "\n2. Ir"),
+            ("it", "Opzioni:\n1. Prendi il treno.", "\n2. Vai"),
+            ("pt", "Opções:\n1. Pegar o trem.", "\n2. Ir"),
+            ("ru", "Варианты:\n1. Поехать на поезде.", "\n2. Поехать"),
+            ("hi", "विकल्प:\n1. ट्रेन लें।", "\n2. कार"),
+            ("hi", "विकल्प:\n१. ट्रेन लें।", "\n२. कार"),
+            ("ar", "الخيارات:\n1. ركوب القطار.", "\n2. قيادة"),
+            ("ar", "الخيارات:\n١. ركوب القطار.", "\n٢. قيادة"),
+            ("ja", "選択肢：\n1. 電車に乗る。", "\n2. 車で"),
+            ("zh", "选项：\n1. 坐火车。", "\n2. 开车"),
+        ]
+        for language, first, rest in cases:
+            with self.subTest(language=language, text=first + rest):
+                assert match_endofsentence(first + rest, language=language) == len(first)
+
     async def test_endofsentence_streaming_tokens(self):
         """Test the specific use case of streaming LLM tokens."""
 
@@ -240,25 +278,25 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
         # (<a>, </a>)
         assert parse_start_end_tags("Hello from <a>Pipecat</a>!", [("<a>", "</a>")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 0) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
         assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 6) == (
             ("<a>", "</a>"),
-            21,
+            14,
         )
 
         # (spell(, ))
         assert parse_start_end_tags("Hello from spell(Pipecat)!", [("spell(", ")")], None, 0) == (
             None,
-            26,
+            25,
         )
         assert parse_start_end_tags("Hello from spell(Pipecat", [("spell(", ")")], None, 0) == (
             ("spell(", ")"),
-            24,
+            17,
         )
 
     async def test_multiple(self):
@@ -267,15 +305,29 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             "Hello from <a>Pipecat</a>! Hello <a>World</a>!", [("<a>", "</a>")], None, 0
         ) == (
             None,
-            46,
+            45,
         )
 
         assert parse_start_end_tags(
             "Hello from <a>Pipecat</a>! Hello <a>World", [("<a>", "</a>")], None, 0
         ) == (
             ("<a>", "</a>"),
-            41,
+            36,
         )
+
+    async def test_several_pairs(self):
+        tags = [("<a>", "</a>"), ("spell(", ")")]
+        # A tag of any pair opens, not only the first pair's.
+        assert parse_start_end_tags("Hello spell(Pip", tags, None, 0) == (("spell(", ")"), 12)
+        assert parse_start_end_tags("<a>Hi</a> and spell(Pipecat) now", tags, None, 0) == (
+            None,
+            28,
+        )
+
+    async def test_a_pair_with_one_delimiter(self):
+        tags = [("**", "**")]
+        assert parse_start_end_tags("It's **back", tags, None, 0) == (("**", "**"), 7)
+        assert parse_start_end_tags("It's **back up** now", tags, None, 0) == (None, 16)
 
 
 class TestLongestTrailingPartialMatch(unittest.IsolatedAsyncioTestCase):

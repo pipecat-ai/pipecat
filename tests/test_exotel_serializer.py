@@ -58,6 +58,14 @@ class TestExotelDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.audio, audio)
         self.assertEqual(frame.sample_rate, SAMPLE_RATE)
 
+    async def test_malformed_json_is_ignored_not_raised(self):
+        frame = await self.serializer.deserialize("not json")
+        self.assertIsNone(frame)
+
+    async def test_media_event_missing_payload_is_ignored_not_raised(self):
+        frame = await self.serializer.deserialize(json.dumps({"event": "media", "media": {}}))
+        self.assertIsNone(frame)
+
 
 if __name__ == "__main__":
     unittest.main()

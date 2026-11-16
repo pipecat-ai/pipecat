@@ -31,7 +31,8 @@ scenarios:
       text_after: true
       within_ms: 25000
     - event: response
-      eval: the reply is a single short sentence gently inviting the user to continue
+      eval: the reply is a single short sentence gently inviting the user to continue, which may be
+        phrased as a question
       within_ms: 25000
 - name: reprompt_long
   context:
@@ -94,7 +95,8 @@ scenarios:
       markers: 1
       text_after: true
     - event: response
-      eval: the reply engages with the user wanting to visit Japan for the food and temples
+      eval: the reply responds to the user wanting to visit Japan for the food and temples, for example
+        by commenting on them or asking a follow-up question about them
 - name: reprompt_then_user_still_thinking
   context:
   - role: developer

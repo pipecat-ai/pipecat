@@ -11,6 +11,13 @@
 #   ./run.sh -n rates -r 3                # three attempts per run
 #   TURN_COMPLETION_PROMPT=v3 ./run.sh -n v3   # a prompt variant from prompts/
 #
+# A marker or reply arrives within seconds when the model follows the
+# protocol, so an expectation without its own within_ms times out after 30 s
+# (-t 30); a -t of your own overrides it.
+#
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
-exec uv run python -m pipecat.evals suite "$here/manifest.yaml" "$@"
+# The suite runs from the repository root, where the judge factory
+# (evals/judges.py) resolves.
+cd "$here/../.."
+exec uv run python -m pipecat.evals suite "$here/manifest.yaml" -t 30 "$@"

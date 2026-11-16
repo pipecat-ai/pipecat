@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 
 
@@ -157,14 +156,11 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+    async def process_frame(self, frame: Frame):
         """Process an incoming frame to update the turn analyzer and strategy state.
 
         Args:
             frame: The frame to be analyzed.
-
-        Returns:
-            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         await super().process_frame(frame)
 
@@ -194,8 +190,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             # aggressive STT endpoint or a manually raised stop_secs.
             self._transcript_finalized = False
 
-        return ProcessFrameResult.CONTINUE
-
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""
         await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
@@ -213,7 +207,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             _, prediction = await self._turn_analyzer.analyze_end_of_turn()
             await self._handle_prediction_result(prediction)
             self._turn_complete = True
-            await self._maybe_trigger_user_turn_stopped()
+            await self._maybe_report_user_turn_stopped()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
@@ -272,7 +266,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # is False) may already have satisfied the trigger conditions while the
         # analyzer was running. The analyzer's verdict is only known now, so
         # re-check here rather than wait out the safety-net timer.
-        await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_report_user_turn_stopped()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
@@ -281,13 +275,13 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if frame.finalized:
             self._transcript_finalized = True
             # For finalized transcripts, trigger immediately if turn is complete
-            await self._maybe_trigger_user_turn_stopped()
+            await self._maybe_report_user_turn_stopped()
         elif self._timeout_expired and self._turn_complete:
             # The p99 timeout already elapsed without a transcript. Now that
             # we have one, trigger the turn stop immediately. This handles the
             # case where the transcript is slower to arrive than the p99 timeout,
             # trigger the user turn to stop immediately.
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
             return
 
         # Fallback: handle transcripts when no VAD stop was received.
@@ -323,9 +317,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_task = None
 
         self._timeout_expired = True
-        await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_report_user_turn_stopped()
 
-    async def _maybe_trigger_user_turn_stopped(self):
+    async def _maybe_report_user_turn_stopped(self):
         """Trigger user turn stopped if conditions are met.
 
         Conditions:
@@ -344,7 +338,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             if self._timeout_task:
                 await self.task_manager.cancel_task(self._timeout_task)
                 self._timeout_task = None
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
             return
 
         if not self._text:
@@ -356,9 +350,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             if self._timeout_task:
                 await self.task_manager.cancel_task(self._timeout_task)
                 self._timeout_task = None
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()
             return
 
         # For non-finalized, only trigger if timeout task has completed
         if self._timeout_task is None:
-            await self.trigger_user_turn_stopped()
+            await self.report_user_turn_stopped()

@@ -22,6 +22,7 @@ from pipecat.audio.krisp_instance import (
     krisp_sdk_uses_nanobind_bindings,
 )
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
+from pipecat.utils.deprecation import warn_deprecated
 
 try:
     import krisp_audio
@@ -60,7 +61,9 @@ class KrispVivaFilter(BaseAudioFilter):
 
         Args:
             model_path: Path to the Krisp NC model file (.kef extension).
-                If None, uses KRISP_VIVA_FILTER_MODEL_PATH environment variable.
+                If None, uses KRISP_VIVA_FILTER_MODEL_PATH environment variable,
+                falling back to KRISP_VIVA_MODEL_PATH (deprecated since 0.0.99;
+                will be removed in 2.0.0).
             frame_duration: Frame duration in milliseconds.
             noise_suppression_level: Noise suppression level.
             api_key: Krisp SDK API key. If empty, falls back to
@@ -93,9 +96,10 @@ class KrispVivaFilter(BaseAudioFilter):
             if not self._model_path:
                 self._model_path = os.getenv("KRISP_VIVA_MODEL_PATH")
                 if self._model_path:
-                    logger.warning(
-                        "KRISP_VIVA_MODEL_PATH is deprecated. "
-                        "Please use KRISP_VIVA_FILTER_MODEL_PATH instead."
+                    warn_deprecated(
+                        "`KRISP_VIVA_MODEL_PATH` is deprecated since 0.0.99 and will be "
+                        "removed in 2.0.0. Use `KRISP_VIVA_FILTER_MODEL_PATH` instead.",
+                        stacklevel=2,
                     )
         if not self._model_path:
             logger.error("Model path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set.")
