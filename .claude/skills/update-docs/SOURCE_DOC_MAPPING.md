@@ -247,6 +247,13 @@ with the Pipecat and client-js releases that ship it and what it changed, and
 update the version in the Note at the top of the page. The script fails until
 the table has the row.
 
+Other pages link to a message or group on the newest version's page through
+`/api-reference/standards/rtvi/latest#<anchor>`, such as `latest#error` or
+`latest#user-interface`, never through a version number, so they follow new
+versions without edits. The script keeps the `latest` redirect in `docs.json`
+pointing at the newest version, and fails on a link to an anchor that page
+doesn't have.
+
 ## New pages
 
 ### Location and template
