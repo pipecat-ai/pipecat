@@ -10,7 +10,6 @@ This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
 """
 
-import threading
 from typing import Any, cast
 
 import numpy as np
@@ -21,18 +20,10 @@ from pipecat_resampler import Resampler
 from pipecat.audio.turn.smart_turn._whisper_features import compute_whisper_log_mel_features
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.utils.env import env_truthy
+from pipecat.utils.models import get_shared_model
 
 # The Whisper-based ONNX model expects 16 kHz audio input.
 _MODEL_SAMPLE_RATE = 16000
-
-# Process-wide cache of ONNX inference sessions, keyed by (model_path, cpu_count).
-# The model weights are immutable and ONNX Runtime's Run() is thread-safe for
-# concurrent calls on a CPU-EP session, so a single session can back every
-# analyzer instance of the same configuration instead of loading the weights
-# (~30 MB RSS) once per instance. All mutable analyzer state lives on the
-# instance, never on the session.
-_session_cache: dict[tuple[str, int], ort.InferenceSession] = {}
-_session_cache_lock = threading.Lock()
 
 
 def _resolve_bundled_model_path() -> str:
@@ -54,34 +45,17 @@ def _resolve_bundled_model_path() -> str:
             return str(impresources.files(package_path).joinpath(model_name))
 
 
-def _get_cached_session(model_path: str, cpu_count: int) -> ort.InferenceSession:
-    """Return a shared ONNX session for the given model path and thread count.
-
-    Sessions are built once per (model_path, cpu_count) and reused across all
-    analyzer instances of that configuration.
-    """
-    key = (model_path, cpu_count)
-    session = _session_cache.get(key)
-    if session is None:
-        with _session_cache_lock:
-            session = _session_cache.get(key)
-            if session is None:
-                logger.debug(f"Loading Local Smart Turn v3.x model from {model_path}...")
-                so = ort.SessionOptions()
-                so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-                so.inter_op_num_threads = 1
-                so.intra_op_num_threads = cpu_count
-                so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                session = ort.InferenceSession(model_path, sess_options=so)
-                _session_cache[key] = session
-                logger.debug("Loaded Local Smart Turn v3.x")
+def _open_session(model_path: str, cpu_count: int) -> ort.InferenceSession:
+    """Load the smart-turn-v3 model into an ONNX inference session."""
+    logger.debug(f"Loading Local Smart Turn v3.x model from {model_path}...")
+    so = ort.SessionOptions()
+    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    so.inter_op_num_threads = 1
+    so.intra_op_num_threads = cpu_count
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    session = ort.InferenceSession(model_path, sess_options=so)
+    logger.debug("Loaded Local Smart Turn v3.x")
     return session
-
-
-def _reset_session_cache_for_tests() -> None:
-    """Clear the shared session cache. Test-only."""
-    with _session_cache_lock:
-        _session_cache.clear()
 
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
@@ -90,9 +64,8 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     Provides end-of-turn detection using locally-stored ONNX model,
     enabling offline operation without network dependencies.
 
-    The underlying ONNX inference session is shared process-wide across all
-    instances using the same model path and ``cpu_count`` (see
-    ``_get_cached_session``), so the model weights are loaded only once.
+    Every analyzer with the same model path and ``cpu_count`` shares one ONNX
+    session, loaded once a process (see :func:`pipecat.utils.models.get_shared_model`).
     """
 
     def __init__(self, *, smart_turn_model_path: str | None = None, cpu_count: int = 1, **kwargs):
@@ -112,9 +85,12 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         if not smart_turn_model_path:
             smart_turn_model_path = _resolve_bundled_model_path()
 
-        # Reuse a process-wide session shared across all analyzer instances of
-        # the same (model path, cpu_count) configuration.
-        self._session = _get_cached_session(str(smart_turn_model_path), cpu_count)
+        # The session's weights are immutable and ONNX Runtime runs a CPU session
+        # concurrently, so one session serves every analyzer.
+        model_path = str(smart_turn_model_path)
+        self._session = get_shared_model(
+            ("smart-turn-v3", model_path, cpu_count), lambda: _open_session(model_path, cpu_count)
+        )
 
     def _write_audio_to_wav(
         self, audio_array: np.ndarray, sample_rate: int = _MODEL_SAMPLE_RATE, suffix: str = ""

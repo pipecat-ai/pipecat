@@ -21,25 +21,21 @@ These tests verify three properties:
 """
 
 import threading
+import time
 
 import numpy as np
 import pytest
 
-from pipecat.audio.turn.smart_turn import local_smart_turn_v3
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad import silero
 from pipecat.audio.vad.silero import SileroOnnxModel, SileroVADAnalyzer
+from pipecat.utils import models
 
 
 @pytest.fixture(autouse=True)
-def _reset_session_caches():
-    """Session caches are process-global; reset around every test so identity
-    assertions don't depend on execution order."""
-    local_smart_turn_v3._reset_session_cache_for_tests()
-    silero._reset_session_cache_for_tests()
-    yield
-    local_smart_turn_v3._reset_session_cache_for_tests()
-    silero._reset_session_cache_for_tests()
+def _unshared_models(monkeypatch):
+    """Each test starts with no models loaded, so identity checks don't depend on test order."""
+    monkeypatch.setattr(models, "_models", {})
 
 
 # --------------------------------------------------------------------------- #
@@ -107,7 +103,7 @@ def test_silero_shares_session_isolates_state():
 # --------------------------------------------------------------------------- #
 
 
-def test_smart_turn_numerical_equivalence():
+def test_smart_turn_numerical_equivalence(monkeypatch):
     rng = np.random.default_rng(1234)
     audio = rng.standard_normal(16000 * 8).astype(np.float32) * 0.1
 
@@ -115,8 +111,8 @@ def test_smart_turn_numerical_equivalence():
     cached._sample_rate = 16000
     cached_out = cached._predict_endpoint(audio.copy())
 
-    # Drop the cache so the next analyzer builds a fresh, independent session.
-    local_smart_turn_v3._reset_session_cache_for_tests()
+    # Forget the loaded model so the next analyzer builds a fresh, independent session.
+    monkeypatch.setattr(models, "_models", {})
     fresh = LocalSmartTurnAnalyzerV3()
     fresh._sample_rate = 16000
     assert fresh._session is not cached._session
@@ -126,14 +122,14 @@ def test_smart_turn_numerical_equivalence():
     assert cached_out["probability"] == pytest.approx(fresh_out["probability"], abs=1e-6)
 
 
-def test_silero_numerical_equivalence():
+def test_silero_numerical_equivalence(monkeypatch):
     rng = np.random.default_rng(99)
     chunk = rng.standard_normal(512).astype(np.float32) * 0.1
 
     cached = SileroVADAnalyzer()._model
     cached_conf = float(np.ravel(cached(chunk.copy(), 16000))[0])
 
-    silero._reset_session_cache_for_tests()
+    monkeypatch.setattr(models, "_models", {})
     fresh = SileroVADAnalyzer()._model
     assert fresh.session is not cached.session
     fresh_conf = float(np.ravel(fresh(chunk.copy(), 16000))[0])
@@ -169,6 +165,37 @@ def test_silero_concurrent_inference_is_consistent():
         t.join()
 
     # All shared the one session object.
-    assert len(silero._session_cache) == 1
+    assert [key for key in models._models if key[0] == "silero-vad"] == [
+        ("silero-vad", silero._resolve_bundled_model_path(), True)
+    ]
     for idx in range(2):
         assert results[idx] == pytest.approx(expected, abs=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# Loading one model doesn't hold up another
+# --------------------------------------------------------------------------- #
+
+
+def test_a_slow_load_does_not_block_another_model():
+    slow_started = threading.Event()
+    release_slow = threading.Event()
+
+    def slow_load():
+        slow_started.set()
+        release_slow.wait(timeout=5)
+        return "slow"
+
+    slow = threading.Thread(target=models.get_shared_model, args=("slow", slow_load))
+    slow.start()
+    try:
+        assert slow_started.wait(timeout=5)
+        start = time.monotonic()
+        session = SileroVADAnalyzer()._model.session
+        assert time.monotonic() - start < 5
+        assert session is not None
+        assert "slow" not in models._models
+    finally:
+        release_slow.set()
+        slow.join()
+    assert models._models["slow"] == "slow"

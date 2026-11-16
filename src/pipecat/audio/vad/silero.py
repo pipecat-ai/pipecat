@@ -11,14 +11,13 @@ which can detect voice activity in audio streams with high accuracy.
 Supports 8kHz and 16kHz sample rates.
 """
 
-import threading
-import time
 from typing import cast
 
 import numpy as np
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
+from pipecat.utils.models import get_shared_model
 
 # Model state resets.
 #
@@ -48,15 +47,6 @@ except ModuleNotFoundError as e:
     logger.error("In order to use Silero VAD, you need to `uv add pipecat-ai`.")
     raise ImportError(f"Missing module(s): {e}") from e
 
-# Process-wide cache of ONNX inference sessions, keyed by (path, force_onnx_cpu).
-# The Silero model weights are immutable and ONNX Runtime's Run() is thread-safe
-# for concurrent calls on a CPU-EP session, so a single session can back every
-# SileroOnnxModel of the same configuration instead of loading the weights once
-# per instance. The recurrent VAD state (_state/_context) lives on each model
-# instance, never on the shared session.
-_session_cache: dict[tuple[str, bool], "onnxruntime.InferenceSession"] = {}
-_session_cache_lock = threading.Lock()
-
 
 def _resolve_bundled_model_path() -> str:
     """Resolve the filesystem path to the bundled Silero VAD ONNX model."""
@@ -77,41 +67,21 @@ def _resolve_bundled_model_path() -> str:
             return str(impresources.files(package_path).joinpath(model_name))
 
 
-def _get_cached_session(path: str, force_onnx_cpu: bool) -> "onnxruntime.InferenceSession":
-    """Return a shared Silero ONNX session for the given path and provider choice.
+def _open_session(path: str, force_onnx_cpu: bool) -> "onnxruntime.InferenceSession":
+    """Load the Silero VAD model into an ONNX inference session."""
+    logger.debug("Loading Silero VAD model...")
+    opts = onnxruntime.SessionOptions()
+    opts.inter_op_num_threads = 1
+    opts.intra_op_num_threads = 1
 
-    Sessions are built once per (path, force_onnx_cpu) and reused across all
-    model instances of that configuration.
-    """
-    key = (path, force_onnx_cpu)
-    session = _session_cache.get(key)
-    if session is None:
-        with _session_cache_lock:
-            session = _session_cache.get(key)
-            if session is None:
-                logger.debug("Loading Silero VAD model...")
-                opts = onnxruntime.SessionOptions()
-                opts.inter_op_num_threads = 1
-                opts.intra_op_num_threads = 1
-
-                if (
-                    force_onnx_cpu
-                    and "CPUExecutionProvider" in onnxruntime.get_available_providers()
-                ):
-                    session = onnxruntime.InferenceSession(
-                        path, providers=["CPUExecutionProvider"], sess_options=opts
-                    )
-                else:
-                    session = onnxruntime.InferenceSession(path, sess_options=opts)
-                _session_cache[key] = session
-                logger.debug("Loaded Silero VAD")
+    if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
+        session = onnxruntime.InferenceSession(
+            path, providers=["CPUExecutionProvider"], sess_options=opts
+        )
+    else:
+        session = onnxruntime.InferenceSession(path, sess_options=opts)
+    logger.debug("Loaded Silero VAD")
     return session
-
-
-def _reset_session_cache_for_tests() -> None:
-    """Clear the shared session cache. Test-only."""
-    with _session_cache_lock:
-        _session_cache.clear()
 
 
 class SileroOnnxModel:
@@ -121,10 +91,9 @@ class SileroOnnxModel:
     with ONNX runtime for efficient inference. Handles model state management
     and input validation for audio processing.
 
-    The underlying ONNX inference session is shared process-wide across all
-    instances using the same path and ``force_onnx_cpu`` (see
-    ``_get_cached_session``), so the model weights are loaded only once. The
-    recurrent state managed by ``reset_states`` stays per-instance.
+    Every instance with the same path and ``force_onnx_cpu`` shares one ONNX
+    session, loaded once a process (see :func:`pipecat.utils.models.get_shared_model`).
+    The recurrent state managed by ``reset_states`` stays per-instance.
     """
 
     def __init__(self, path, force_onnx_cpu=True):
@@ -134,9 +103,12 @@ class SileroOnnxModel:
             path: Path to the ONNX model file.
             force_onnx_cpu: Whether to force CPU execution provider.
         """
-        # Reuse a process-wide session shared across all instances of the same
-        # (path, force_onnx_cpu) configuration.
-        self.session = _get_cached_session(str(path), force_onnx_cpu)
+        # The session's weights are immutable and ONNX Runtime runs a CPU session
+        # concurrently, so one session serves every instance.
+        path = str(path)
+        self.session = get_shared_model(
+            ("silero-vad", path, force_onnx_cpu), lambda: _open_session(path, force_onnx_cpu)
+        )
 
         self.reset_states()
         self.sample_rates = [8000, 16000]
@@ -233,8 +205,6 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         model_file_path = _resolve_bundled_model_path()
 
-        # The session is shared process-wide; only the recurrent VAD state is
-        # per-instance (see SileroOnnxModel).
         self._model = SileroOnnxModel(model_file_path, force_onnx_cpu=True)
 
         # Windows scored since the model was last reset, and how many of the
