@@ -82,7 +82,7 @@ When a release is prepared, the changelog workflow (`.github/workflows/generate-
 - Its payload matches the document's schema. The check reads the JSON document, not Pipecat's Python models.
 - The client's version is at least the message's `x-rtvi-min-client-version`. Sessions with clients just below each minimum check that those messages are left out.
 
-The server must also accept the example of every client message in the document without an error. Each behavior in a document has a test named after its `id` (`test_<id>`, with underscores) in `TestRTVIBehaviors`, and a behavior without a test fails.
+For the messages a client sends, the example of each must match its schema in the JSON document, and the server must accept it without an error. The server must also answer an `error-response` to each message the document forbids, built from the message's schema: one without `data` when `data` is required, one missing each required field, and one with each field of the wrong type. `_LENIENT` in the test lists the few the server accepts anyway, with the reason. Each behavior in a document has a test named after its `id` (`test_<id>`, with underscores) in `TestRTVIBehaviors`, and a behavior without a test fails.
 
 The session must make the server send every message of the current version, so a message added to `MESSAGES` fails until `_run_session` in the test makes the server send it.
 

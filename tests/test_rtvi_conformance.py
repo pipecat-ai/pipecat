@@ -105,6 +105,29 @@ def _parse(version: str) -> list[int]:
     return [int(part) for part in version.split(".")]
 
 
+# A value of each JSON type, for a field that doesn't allow that type.
+_WRONG_VALUES = (
+    ("object", {"unexpected": True}),
+    ("array", ["unexpected"]),
+    ("string", "unexpected"),
+    ("number", 12345),
+)
+# What the server accepts although the document forbids it, and why.
+_LENIENT = {
+    ("client-ready", "no about"): "the session starts without knowing the client's library",
+    ("client-ready", "about of the wrong type"): "an invalid about is ignored, as a missing one",
+}
+_JSON_TYPE = {str: "string", int: "integer", float: "number", bool: "boolean", type(None): "null"}
+
+
+def _wire(type: str, data: Any) -> dict:
+    """A client message as it arrives on the wire."""
+    message = {"label": RTVI.MESSAGE_LABEL, "type": type, "id": "under-test"}
+    if data is not None:
+        message["data"] = data
+    return message
+
+
 class _Spec:
     """One protocol version's document, and checks of messages against it."""
 
@@ -129,6 +152,61 @@ class _Spec:
             <= _parse(client_version)
         }
 
+    def validator(self, type: str) -> Draft7Validator:
+        """A validator of whole messages of ``type``."""
+        # The payload schemas point into the document's components.
+        schema = {**self.messages[type]["payload"], "components": self.document["components"]}
+        return Draft7Validator(schema)
+
+    def resolve(self, schema: dict) -> dict:
+        """The schema a ``$ref`` points to, or the schema itself."""
+        while "$ref" in schema:
+            schema = self.document["components"]["schemas"][schema["$ref"].rsplit("/", 1)[1]]
+        return schema
+
+    def invalid_data(self, type: str) -> list[tuple[str, Any]]:
+        """Data the document doesn't allow for a client message of ``type``, by what's wrong.
+
+        Built from the message's schema: no data when it's required, and data
+        missing each required field or with a field of the wrong type.
+        """
+        payload = self.messages[type]["payload"]
+        variants: list[tuple[str, Any]] = []
+        if "data" in payload.get("required", []):
+            variants.append(("no data", None))
+        data_schema = self.resolve(payload["properties"].get("data", {}))
+        example = self.messages[type]["examples"][0]["payload"].get("data")
+        if data_schema.get("type") != "object" or not isinstance(example, dict):
+            return variants
+        for field in data_schema.get("required", []):
+            variants.append((f"no {field}", {k: v for k, v in example.items() if k != field}))
+        for field, field_schema in data_schema.get("properties", {}).items():
+            allowed = self._json_types(field_schema)
+            wrong = next((v for t, v in _WRONG_VALUES if t not in allowed), None)
+            if allowed and wrong is not None:
+                variants.append((f"{field} of the wrong type", {**example, field: wrong}))
+        # Keep only the variants the document rejects: a field of any type has none.
+        validator = self.validator(type)
+        return [
+            (problem, data)
+            for problem, data in variants
+            if not validator.is_valid(_wire(type, data))
+        ]
+
+    def _json_types(self, schema: dict) -> set[str]:
+        """The JSON types a schema allows, or none when it doesn't say."""
+        schema = self.resolve(schema)
+        if "anyOf" in schema or "oneOf" in schema:
+            parts = [self._json_types(s) for s in schema.get("anyOf", schema.get("oneOf"))]
+            return set() if not all(parts) else set().union(*parts)
+        if "const" in schema:
+            return {_JSON_TYPE[type(schema["const"])]}
+        types = schema.get("type")
+        if types is None:
+            return {"object"} if "properties" in schema else set()
+        types = {types} if isinstance(types, str) else set(types)
+        return types | {"number"} if "integer" in types else types
+
     def violations(self, message: dict, client_version: str) -> list[str]:
         """What is wrong with a message the server sent to a client of ``client_version``."""
         type = message.get("type")
@@ -138,9 +216,7 @@ class _Spec:
         if type not in self.server_types_for(client_version):
             minimum = self.messages[type]["x-rtvi-min-client-version"]
             problems.append(f"{type!r} needs a {minimum} client, sent to {client_version}")
-        # The payload schemas point into the document's components.
-        schema = {**self.messages[type]["payload"], "components": self.document["components"]}
-        for error in Draft7Validator(schema).iter_errors(message):
+        for error in self.validator(type).iter_errors(message):
             path = "/".join(str(p) for p in error.absolute_path) or "(message)"
             problems.append(f"{type!r} at {path}: {error.message}")
         return problems
@@ -412,6 +488,30 @@ class TestRTVIServerReceives(unittest.IsolatedAsyncioTestCase):
         problems = [p for m in session.sent for p in spec.violations(m, version)]
         self.assertEqual(problems, [])
         return session
+
+    async def test_examples_match_the_document(self):
+        for version in _versions():
+            spec = _Spec(version)
+            for type in sorted(spec.client_types):
+                example = spec.messages[type]["examples"][0]["payload"]
+                with self.subTest(version=version, type=type):
+                    errors = [e.message for e in spec.validator(type).iter_errors(example)]
+                    self.assertEqual(errors, [])
+
+    async def test_messages_the_document_forbids_get_an_error_response(self):
+        # What the document requires of a client message, the server enforces:
+        # it answers a message without required data, missing a required field,
+        # or with a field of the wrong type with an error-response.
+        for version in _versions():
+            spec = _Spec(version)
+            for type in sorted(spec.client_types):
+                for problem, data in spec.invalid_data(type):
+                    if (type, problem) in _LENIENT:
+                        continue
+                    with self.subTest(version=version, type=type, problem=problem):
+                        session = await self._receive(version, type, data)
+                        responses = [m["type"] for m in session.responses_to("under-test")]
+                        self.assertEqual(responses, ["error-response"])
 
     async def test_examples_are_accepted(self):
         for version in _versions():

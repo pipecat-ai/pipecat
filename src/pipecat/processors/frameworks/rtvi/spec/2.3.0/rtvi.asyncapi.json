@@ -3294,7 +3294,7 @@
           },
           "about": {
             "$ref": "#/components/schemas/AboutClientData",
-            "description": "Information about the client."
+            "description": "Information about the client. A server receiving a `client-ready` without it, or with an invalid one, still starts the session, as a client of an unknown library."
           }
         },
         "required": [

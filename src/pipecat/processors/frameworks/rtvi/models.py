@@ -147,7 +147,9 @@ class ClientReadyData(BaseModel):
 
     Parameters:
         version: The RTVI protocol version the client speaks, such as ``2.3.0``.
-        about: Information about the client.
+        about: Information about the client. A server receiving a ``client-ready``
+            without it, or with an invalid one, still starts the session, as a
+            client of an unknown library.
     """
 
     version: str
