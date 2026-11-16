@@ -1,0 +1,5 @@
+name: delegate_ack
+judge: !include ../../../release/scenarios/judge_text.yaml
+scenarios:
+  - name: text
+    turns: !include ../turns/delegate_ack.yaml

@@ -15,22 +15,21 @@ session kinds build the client and the driver for their kind of scenario;
 
 Example::
 
-    params = EvalSessionParams(stop_bot=True)
+    params = EvalSessionParams(default_timeout_ms=30000)
     for scenario in EvalScenarioFile.load("scenarios/greeting.yaml"):
-        session = EvalSession.from_scenario(scenario, "ws://localhost:7860", params=params)
+        session = EvalSession.from_scenario(scenario, "ws://localhost:7860/ws", params=params)
         result = await session.run()
         print(scenario.name, "PASS" if result.passed else "FAIL")
 """
 
 import time
 import traceback
-import warnings
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, overload
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from pipecat.evals.results import (
     EvalAssertionFailure,
@@ -40,6 +39,7 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import EvalKind, EvalScriptScenario, EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.deprecation import warn_deprecated
 
 if TYPE_CHECKING:
     from pipecat.evals.base_driver import BaseEvalDriver
@@ -59,6 +59,10 @@ R = TypeVar("R")
 # than failing on latency. Set ``within_ms`` explicitly to assert on timing.
 DEFAULT_EVENT_TIMEOUT_MS = 60000
 
+# A bot builds its pipeline when the harness connects, so the wait covers its
+# startup: connecting its services and loading any local models.
+DEFAULT_BOT_READY_TIMEOUT_S = 60.0
+
 
 class EvalSessionParams(BaseModel):
     """How a run behaves, whichever kind of scenario it is: timeouts, recording, caching, teardown.
@@ -69,6 +73,8 @@ class EvalSessionParams(BaseModel):
     Parameters:
         connect_timeout_s: How long to wait for the bot to accept the WS
             connection before giving up.
+        bot_ready_timeout_s: How long to wait, once connected, for the bot to
+            answer the RTVI handshake with ``bot-ready``.
         default_timeout_ms: Scripted scenarios only: the latency budget for
             expectations without their own ``within_ms`` (the turn's expectations
             share one deadline anchored at the send). Defaults to 60s.
@@ -78,22 +84,55 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
-        stop_bot: When True, ask the bot to cancel its pipeline, and exit, on
-            teardown. Leave False to keep it running for more scenarios.
-        trigger_disconnect: When True, fire the bot's ``on_client_disconnected``
-            handler when the connection ends. A scenario's own
-            ``trigger_disconnect`` field also opts in. Bots often cancel their
-            pipeline there, so it is off by default to avoid that between
-            scenarios.
+        audio_support_check: Whether an audio run checks that the bot's
+            transport carries the audio it uses, as the bot reports in
+            ``bot-ready``. With ``when_advertised``, a bot that reports a
+            direction the run uses as off is refused before the conversation
+            (failure kind ``audio_unsupported``); a bot that reports nothing,
+            such as one on Pipecat before 1.13, runs unchecked. Defaults to
+            ``off``.
+        stop_bot: No effect: the harness ends the bot's session when a run
+            finishes.
+
+            .. deprecated:: 1.13.0
+                No replacement. The harness always ends the bot's session.
+                Will be removed in 2.0.0.
+
+        trigger_disconnect: When True, a bot serving the server
+            :class:`~pipecat.evals.transport.EvalTransport` fires its
+            ``on_client_disconnected`` handler when the connection ends.
+
+            .. deprecated:: 1.13.0
+                No replacement. A bot fires ``on_client_disconnected`` whenever
+                the harness disconnects. Will be removed in 2.0.0.
     """
 
     connect_timeout_s: float = 5.0
+    bot_ready_timeout_s: float = DEFAULT_BOT_READY_TIMEOUT_S
     default_timeout_ms: int = DEFAULT_EVENT_TIMEOUT_MS
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    audio_support_check: Literal["off", "when_advertised"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
+
+    @model_validator(mode="after")
+    def _warn_deprecated_fields(self) -> "EvalSessionParams":
+        """Warn when a deprecated field asks for something."""
+        if self.stop_bot:
+            warn_deprecated(
+                "`EvalSessionParams.stop_bot` is deprecated since 1.13.0 and will be removed "
+                "in 2.0.0. No replacement.",
+                stacklevel=2,
+            )
+        if self.trigger_disconnect:
+            warn_deprecated(
+                "`EvalSessionParams.trigger_disconnect` is deprecated since 1.13.0 and will be "
+                "removed in 2.0.0. No replacement.",
+                stacklevel=2,
+            )
+        return self
 
 
 def _params_with_deprecated_knobs(
@@ -109,11 +148,10 @@ def _params_with_deprecated_knobs(
     params = params or EvalSessionParams()
     if not given:
         return params
-    names = ", ".join(f"`{name}`" for name in given)
-    warnings.warn(
-        f"{names} of `{caller}` {'is' if len(given) == 1 else 'are'} deprecated since 1.9.0 "
-        "and will be removed in 2.0.0. Use `params=EvalSessionParams(...)` instead.",
-        DeprecationWarning,
+    names = ", ".join(f"{name}=..." for name in given)
+    warn_deprecated(
+        f"`{caller}({names})` is deprecated since 1.9.0 and will be removed in 2.0.0. "
+        "Use `params=EvalSessionParams(...)` instead.",
         stacklevel=3,
     )
     return params.model_copy(update=given)
@@ -263,7 +301,7 @@ class EvalSession(BaseObject, Generic[R]):
         ``judge``, ``user_tts``, or ``bot_stt`` to use your own. Then await
         :meth:`run`::
 
-            session = EvalSession.from_scenario(scenario, "ws://localhost:7860")
+            session = EvalSession.from_scenario(scenario, "ws://localhost:7860/ws")
             result = await session.run()
 
         Args:
@@ -326,7 +364,9 @@ class EvalSession(BaseObject, Generic[R]):
         Raises:
             ValueError: If ``persona_llm`` is given for a scripted scenario,
                 which has no persona, or ``on_progress`` for a simulation,
-                which reports its progress through the event handler alone.
+                which reports its progress through the event handler alone,
+                or if the bot's STT, ``bot_stt`` or the one built from
+                ``judge.transcription``, is not a ``SegmentedSTTService``.
             TypeError: If ``scenario`` is neither kind.
         """
         # Imported here rather than at module level: both subclasses import this module.
@@ -416,7 +456,7 @@ class EvalSession(BaseObject, Generic[R]):
         """
         await self._client.start()
         try:
-            return await self._converse()
+            failures = await self._converse()
         except Exception as e:
             return [self._error_failure(e)]
         finally:
@@ -424,12 +464,29 @@ class EvalSession(BaseObject, Generic[R]):
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
+        # A harness service can fail once nothing is waiting on it, such as the
+        # caller's voice on a last turn that expects nothing. Stopping the client
+        # lets the failure surface; a run that otherwise passed is then no evidence.
+        error = self._stream.harness_error
+        if error is not None and not failures:
+            self._trace.log(f"FAIL: harness: {error}")
+            failure = self._failure("<harness>", error, "error")
+            self._driver.record_failure(failure)
+            failures = [failure]
+        return failures
 
     async def _converse(self) -> list[EvalAssertionFailure]:
         """Run the handshake, then the driver; a bot that never says ready is a failure."""
+        # The client imports this module, so its error is imported here.
+        from pipecat.evals.client import EvalBotUnavailableError
+
         self._trace.log("connected")
         try:
             await self._client.handshake()
+        except EvalBotUnavailableError as e:
+            self._trace.log(f"handshake: failed ({e})")
+            where = {"connect_failed": "<connect>", "error": "<harness>"}.get(e.kind, "<bot-ready>")
+            return [self._failure(where, str(e), e.kind)]
         except TimeoutError as e:
             self._trace.log("handshake: failed (bot-ready not received)")
             return [self._failure("<bot-ready>", str(e), "handshake_timeout")]

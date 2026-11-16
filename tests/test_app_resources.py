@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
-from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import EndFrame, Frame, StartFrame
 from pipecat.pipeline.pipeline import Pipeline

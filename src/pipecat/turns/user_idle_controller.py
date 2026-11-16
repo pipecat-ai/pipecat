@@ -163,7 +163,13 @@ class UserIdleController(BaseObject):
             self._waiting_for_user = False
             self._function_calls_in_progress += len(frame.function_calls)
             await self._cancel_idle_timer()
-        elif isinstance(frame, (FunctionCallResultFrame, FunctionCallCancelFrame)):
+        elif isinstance(frame, FunctionCallResultFrame):
+            # An async tool can report progress with intermediate results
+            # while it keeps running; only its final result settles the call.
+            is_final = frame.properties.is_final if frame.properties else True
+            if is_final:
+                self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+        elif isinstance(frame, FunctionCallCancelFrame):
             self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
 
     async def wait_for_user(self):

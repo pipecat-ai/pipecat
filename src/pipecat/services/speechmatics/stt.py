@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import warnings
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -37,6 +36,7 @@ from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -46,6 +46,7 @@ try:
     from speechmatics.agent_stt import (
         DEFAULT_CHUNK_SIZE,
         DEFAULT_MODEL,
+        SUPPORTED_SAMPLE_RATES,
         AdditionalVocabEntry,
         AgentSttAsyncClient,
         AudioEncoding,
@@ -144,14 +145,21 @@ def _resolve_model(
             "Pass only `model` (`operating_point` is deprecated)."
         )
     if model is None and operating_point is not None:
-        warnings.warn(
+        warn_deprecated(
             "`operating_point` is deprecated since 1.10.0 and will be removed in 2.0.0. "
             "Use `model` instead.",
-            DeprecationWarning,
             stacklevel=3,
         )
     resolved = model or operating_point or DEFAULT_MODEL
     return resolved.value if isinstance(resolved, Model) else resolved
+
+
+def _warn_speaker_active_format(stacklevel: int) -> None:
+    warn_deprecated(
+        "`speaker_active_format` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+        "Use `speaker_format` instead.",
+        stacklevel=stacklevel,
+    )
 
 
 class TurnDetectionMode(StrEnum):
@@ -159,9 +167,9 @@ class TurnDetectionMode(StrEnum):
 
     `VAD`: the STT service runs its own VAD and closes turns itself.
 
-    `EXTERNAL`: turn boundaries are controlled by the caller — the service does not
-    endpoint on its own, and the caller drives turns by calling `finalize()` (for
-    example from Pipecat's own VAD).
+    `EXTERNAL`: turn boundaries are controlled by the pipeline — the service does not
+    endpoint on its own, and closes a turn when a `VADUserStoppedSpeakingFrame`
+    arrives (for example from Pipecat's own VAD).
 
     The values mirror the Agent STT SDK's own turn-detection modes so the two never
     drift.
@@ -193,7 +201,18 @@ class SpeechmaticsSTTSettings(STTSettings):
     Parameters:
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
-        speaker_active_format: Formatter for speaker ID.
+        speaker_format: Optional format string for diarized transcripts. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If None, transcript text is not modified. Applied locally, so
+            changing it does not reconnect.
+        speaker_active_format: Formatter for speaker ID, with the ``text``,
+            ``speaker_id``, ``ts`` and ``lang`` attributes. Takes precedence over
+            ``speaker_format``.
+
+            .. deprecated:: 1.16.0
+                Use ``speaker_format`` instead. Will be removed in 2.0.0.
+
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
         model: Resolved transcription model (operating point). See ``_resolve_model``.
@@ -203,8 +222,13 @@ class SpeechmaticsSTTSettings(STTSettings):
                 Use ``model`` instead. Will be removed in 2.0.0.
 
         enable_partials: Include partial segment fragments.
+        emit_sentences: Close a segment at every end of sentence, not only at the end of
+            the turn, so each sentence is emitted as its own final transcription.
         punctuation_overrides: Punctuation overrides.
-        enable_diarization: Enable speaker diarization.
+        transcript_filtering_config: Post-processing applied to the transcript.
+        enable_diarization: Enable speaker diarization. Transcripts carry the
+            Speechmatics speaker label (e.g. ``"S1"``, or the label you assigned in
+            ``known_speakers``) as ``speaker.label``.
         speaker_sensitivity: Diarization sensitivity.
         max_speakers: Maximum number of speakers to detect.
         prefer_current_speaker: Prefer current speaker ID.
@@ -212,14 +236,19 @@ class SpeechmaticsSTTSettings(STTSettings):
 
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_detection_mode: TurnDetectionMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_active_format: str | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_active_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     known_speakers: list[SpeakerIdentifier] | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_vocab: list[AdditionalVocabEntry] | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     operating_point: Model | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_partials: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emit_sentences: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuation_overrides: dict[str, Any] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    transcript_filtering_config: dict[str, Any] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
     enable_diarization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -229,7 +258,7 @@ class SpeechmaticsSTTSettings(STTSettings):
 
     #: Fields that are purely local (formatting templates) — no reconnect
     #: and no API call needed.
-    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_active_format"})
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format", "speaker_active_format"})
 
 
 def _build_diarization_config(s: SpeechmaticsSTTSettings) -> SpeakerDiarizationConfig | None:
@@ -259,7 +288,8 @@ class SpeechmaticsSTTService(STTService):
 
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
-    and speaker diarization.
+    and speaker diarization. With diarization enabled, each transcript carries its speaker
+    as ``speaker.label``; ``speaker_format`` optionally labels the text.
 
     Event handlers available (in addition to STTService events):
 
@@ -295,7 +325,8 @@ class SpeechmaticsSTTService(STTService):
             language: Language code for transcription. Defaults to `Language.EN`.
 
             turn_detection_mode: How turns are closed. `TurnDetectionMode.EXTERNAL`
-                has the caller drive turns via `finalize()` (e.g. Pipecat's own VAD);
+                closes a turn when a `VADUserStoppedSpeakingFrame` arrives (e.g. from
+                Pipecat's own VAD);
                 `TurnDetectionMode.VAD` lets the STT service run its own VAD and close
                 turns itself. Defaults to `DEFAULT_TURN_DETECTION_MODE`.
 
@@ -341,6 +372,11 @@ class SpeechmaticsSTTService(STTService):
                 in the STT engine. This is useful for languages that use different punctuation
                 than English. See documentation for more information.
 
+            transcript_filtering_config: Post-processing applied to the transcript, as
+                Speechmatics' `transcript_filtering_config` object. `remove_disfluencies`
+                drops fillers such as "um" and "uh"; `replacements` rewrites matched words.
+                Defaults to None, which leaves the transcript as the engine produced it.
+
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
@@ -385,6 +421,7 @@ class SpeechmaticsSTTService(STTService):
         operating_point: Model | str | None = None
         enable_partials: bool | None = None
         punctuation_overrides: dict | None = None
+        transcript_filtering_config: dict | None = None
 
         # Diarization
         enable_diarization: bool | None = None
@@ -412,7 +449,8 @@ class SpeechmaticsSTTService(STTService):
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2/agent`.
-            sample_rate: Optional audio sample rate in Hz.
+            sample_rate: Optional audio sample rate in Hz. Speechmatics accepts 8000 and
+                16000. Defaults to the pipeline's input sample rate.
             encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
 
@@ -458,12 +496,15 @@ class SpeechmaticsSTTService(STTService):
             language=Language.EN,
             domain=None,
             turn_detection_mode=_DEFAULT_TURN_DETECTION_MODE,
-            speaker_active_format="{text}",
+            speaker_format=None,
+            speaker_active_format=None,
             known_speakers=[],
             additional_vocab=[],
             operating_point=None,
             enable_partials=None,
+            emit_sentences=None,
             punctuation_overrides=None,
+            transcript_filtering_config=None,
             enable_diarization=None,
             speaker_sensitivity=None,
             max_speakers=None,
@@ -485,6 +526,9 @@ class SpeechmaticsSTTService(STTService):
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
+
+        if default_settings.speaker_active_format is not None:
+            _warn_speaker_active_format(stacklevel=3)
 
         # Reconcile the preferred `model` with the deprecated `operating_point` alias
         # (model preferred, both-differ raises, default = DEFAULT_MODEL) before building
@@ -524,10 +568,9 @@ class SpeechmaticsSTTService(STTService):
     def _apply_legacy_params(settings: Settings, params: InputParams) -> AudioEncoding | None:
         """Fold the deprecated ``InputParams`` into canonical ``Settings``.
 
-        Every field the two shapes share by name is copied straight across. Two are
-        special-cased and excluded from the generic copy: ``speaker_active_format`` has a
-        diarization-aware default, and ``audio_encoding`` has no ``Settings`` field (it
-        reaches the client via the separate ``encoding`` argument).
+        Every field the two shapes share by name is copied straight across, except
+        ``audio_encoding``, which has no ``Settings`` field (it reaches the client via
+        the separate ``encoding`` argument).
 
         Args:
             settings: The canonical settings to populate in place.
@@ -539,14 +582,8 @@ class SpeechmaticsSTTService(STTService):
             the ``encoding`` argument.
         """
         shared = type(settings).__dataclass_fields__.keys() & type(params).model_fields.keys()
-        for name in shared - {"speaker_active_format"}:
+        for name in shared:
             setattr(settings, name, getattr(params, name))
-
-        # Output formatting default — prefix the speaker when diarizing.
-        fmt = params.speaker_active_format
-        if fmt is None:
-            fmt = "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
-        settings.speaker_active_format = fmt
 
         return params.audio_encoding if "audio_encoding" in params.model_fields_set else None
 
@@ -554,10 +591,10 @@ class SpeechmaticsSTTService(STTService):
     def _service_closes_turns(self) -> bool:
         """True when Speechmatics detects turns itself and emits Start/EndOfTurn.
 
-        Every turn-detection mode except ``EXTERNAL`` (where the caller drives turns via
-        ``finalize()``) has the service close turns. This gates the turn-scoped behavior
-        — turn frames, turn-event subscriptions, and processing metrics — off in EXTERNAL
-        mode, where Pipecat owns endpointing.
+        Every turn-detection mode except ``EXTERNAL`` (where a
+        ``VADUserStoppedSpeakingFrame`` closes each turn) has the service close turns.
+        This gates the turn-scoped behavior — turn frames, turn-event subscriptions, and
+        processing metrics — off in EXTERNAL mode, where Pipecat owns endpointing.
         """
         mode = self._settings.turn_detection_mode
         return is_given(mode) and mode != TurnDetectionMode.EXTERNAL
@@ -610,6 +647,9 @@ class SpeechmaticsSTTService(STTService):
 
         if not changed:
             return changed
+
+        if "speaker_active_format" in changed and self._settings.speaker_active_format is not None:
+            _warn_speaker_active_format(stacklevel=3)
 
         # A runtime change to `model` or the deprecated `operating_point` alias must be
         # re-reconciled into `model` (the only field `_build_config` reads); resolve from
@@ -688,6 +728,17 @@ class SpeechmaticsSTTService(STTService):
         """
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
+
+        # The client rejects an unsupported sample rate when constructed. Check it here so
+        # the rejection is reported as permanent (a retry would fail the same way) rather
+        # than raised out of start().
+        if self.sample_rate not in SUPPORTED_SAMPLE_RATES:
+            supported = ", ".join(str(rate) for rate in SUPPORTED_SAMPLE_RATES)
+            await self._fail_permanently(
+                f"Speechmatics STT does not support a sample rate of {self.sample_rate} Hz "
+                f"(supported: {supported})"
+            )
+            return False
 
         # Agent STT client. Turn detection is a top-level turn_config (sibling of the
         # transcription config); audio encoding / sample rate go via AudioFormat.
@@ -893,7 +944,9 @@ class SpeechmaticsSTTService(STTService):
             output_locale=self._locale_to_speechmatics_locale(sm_language, language),
             domain=s.domain or None,
             enable_partials=assert_given(s.enable_partials),
+            emit_sentences=assert_given(s.emit_sentences),
             punctuation_overrides=assert_given(s.punctuation_overrides),
+            transcript_filtering_config=assert_given(s.transcript_filtering_config),
         )
 
     # ============================================================================
@@ -1072,20 +1125,25 @@ class SpeechmaticsSTTService(STTService):
         # The stored language may be a plain code rather than a Language; the frame
         # carries it as-is.
         language = cast(Language, assert_given(self._settings.language))
-        active_format = assert_given(self._settings.speaker_active_format)
-        text = active_format.format(
-            speaker_id=segment.speaker or "UU",
-            text=segment.transcript,
-            ts=segment.start_time,
-            lang=language,
-        )
+        speaker = self._speaker(segment.speaker or None)
+        active_format = self._settings.speaker_active_format
+        if isinstance(active_format, str):
+            text = active_format.format(
+                speaker_id=segment.speaker or "UU",
+                text=segment.transcript,
+                ts=segment.start_time,
+                lang=language,
+            )
+        else:
+            text = self._apply_speaker_format(segment.transcript, speaker)
 
         frame_cls = TranscriptionFrame if finalized else InterimTranscriptionFrame
         return frame_cls(
             text=text,
-            user_id=segment.speaker or "",
+            user_id=self._user_id,
             timestamp=time_now_iso8601(),
             language=language,
+            speaker=speaker,
         )
 
     async def _send_frame(self, segment: Segment, *, finalized: bool) -> None:
@@ -1318,15 +1376,20 @@ class SpeechmaticsSTTService(STTService):
 
         # Show deprecation warnings
         def _deprecation_warning(old: str, new: str | None = None) -> None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                if new:
-                    message = f"`{old}` is deprecated, use `InputParams.{new}`"
-                else:
-                    message = f"`{old}` is deprecated and not used"
-                # 3 frames out of this nested helper is the caller constructing
-                # the service, which is the code that has to change.
-                warnings.warn(message, DeprecationWarning, stacklevel=3)
+            # The caller constructing the service, which is the code that has to
+            # change: past this helper, _check_deprecated_args, and __init__.
+            if new:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    f"will be removed in 2.0.0. Use `InputParams.{new}` instead.",
+                    stacklevel=4,
+                )
+            else:
+                warn_deprecated(
+                    f"`SpeechmaticsSTTService({old}=...)` is deprecated since 0.0.77 and "
+                    "will be removed in 2.0.0. No replacement. It has no effect.",
+                    stacklevel=4,
+                )
 
         # List of deprecated arguments and their new location
         deprecated_args = [

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 # For a full example of how to deploy to SageMaker, see:
-# https://github.com/pipecat-ai/pipecat-examples/tree/main/nvidia_sagemaker_example/deployment/aws-sagemaker-nvidia
+# https://github.com/pipecat-ai/pipecat-examples/tree/main/deployment/aws-sagemaker-nvidia
 
 import os
 
@@ -28,6 +28,7 @@ from pipecat.services.nvidia.sagemaker.stt import NvidiaSageMakerSTTService
 from pipecat.services.nvidia.sagemaker.tts import NvidiaSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -41,6 +42,10 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "livekit": lambda: LiveKitParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),

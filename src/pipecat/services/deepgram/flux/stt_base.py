@@ -20,16 +20,21 @@ from typing_extensions import override
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    Frame,
+    InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
     TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import DEEPGRAM_FLUX_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -118,6 +123,7 @@ class FluxMessageType(StrEnum):
     TURN_INFO = "TurnInfo"
     CONFIGURE_SUCCESS = "ConfigureSuccess"
     CONFIGURE_FAILURE = "ConfigureFailure"
+    WARNING = "Warning"
 
 
 class FluxEventType(StrEnum):
@@ -143,18 +149,22 @@ class DeepgramFluxSTTSettings(STTSettings):
             Lower values = more aggressive (faster response, more LLM calls).
             Higher values = more conservative (slower response, fewer LLM calls).
         eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
+            At 1.0 Flux ends a turn only on ``eot_timeout_ms`` or ``ForceEndTurn``.
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
         numerals: Convert spoken numbers to numeral form (e.g. "twenty three" → "23").
-            Read only from the connection URL, so an update is applied by
-            reconnecting.
+            Can be updated mid-stream via ``STTUpdateSettingsFrame``.
         profanity_filter: Mask recognized profanity in the transcript. Can be
             updated mid-stream via ``STTUpdateSettingsFrame``.
         redact: Remove sensitive numbers from the transcript: ``"numbers"`` or
             ``"aggressive_numbers"``. Read only from the connection URL, so an
             update is applied by reconnecting.
+        redact_usage: Store keyterms as ``[REDACTED]`` in Deepgram's usage
+            records. Turning it on via ``STTUpdateSettingsFrame`` applies to the
+            live connection. Flux keeps it on for the rest of a connection once
+            enabled, so turning it off is applied by reconnecting.
         language_hints: Languages to bias transcription toward. Only honored by the
             ``flux-general-multi`` model. An empty list clears any active hints;
             ``None``/``NOT_GIVEN`` means no hints (auto-detect). Can be updated
@@ -169,6 +179,7 @@ class DeepgramFluxSTTSettings(STTSettings):
     numerals: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     redact: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_usage: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -189,10 +200,12 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         "eager_eot_threshold",
         "eot_timeout_ms",
         "language_hints",
+        "numerals",
         "profanity_filter",
+        "redact_usage",
     }
     # Fields Flux only accepts in the connection URL, so changing them reconnects.
-    _CONNECTION_FIELDS = {"model", "numerals", "redact"}
+    _CONNECTION_FIELDS = {"model", "redact"}
     # Fields applied to results as they arrive, so no connection change is needed.
     _LOCAL_FIELDS = {"min_confidence"}
     _MULTILINGUAL_MODEL = "flux-general-multi"
@@ -225,9 +238,11 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         mip_opt_out: bool | None = None,
         tag: list | None = None,
         should_interrupt: bool = True,
+        vad_force_turn_endpoint: bool = False,
         watchdog_min_timeout: float = 0.5,
         enable_eager_end_of_turn: bool = False,
         settings: Settings,
+        ttfs_p99_latency: float | None = DEEPGRAM_FLUX_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT base service.
@@ -240,7 +255,12 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
                 the user is speaking. Passed along to the user turn strategies
                 this service recommends, which own the interruption; a
                 user-supplied ``user_turn_strategies`` overrides the
-                recommendation and this setting with it.
+                recommendation and this setting with it. Ignored with
+                ``vad_force_turn_endpoint=True``.
+            vad_force_turn_endpoint: Whether the pipeline's user turn strategies
+                decide when user turns end, instead of Flux. Each
+                ``VADUserStoppedSpeakingFrame`` then asks Flux to finalize the
+                audio sent so far. Defaults to False.
             watchdog_min_timeout: minimum idle timeout before sending silence to
                 prevent dangling turns. The actual threshold is
                 ``max(chunk_duration * 2, watchdog_min_timeout)``. Defaults to 0.5.
@@ -252,11 +272,26 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
                 ``eager_eot_threshold`` to ``_DEFAULT_EAGER_EOT_THRESHOLD`` when the settings leave it
                 unset, since Flux reports no prediction without it.
             settings: Fully resolved settings instance (built by concrete subclass).
+            ttfs_p99_latency: P99 latency from speech end to final transcript in
+                seconds. Only reported with ``vad_force_turn_endpoint=True``.
             **kwargs: Additional arguments passed to the parent STTService (e.g.
                 ``sample_rate``, ``reconnect_on_error``).
+
+        Raises:
+            ValueError: If ``enable_eager_end_of_turn`` and
+                ``vad_force_turn_endpoint`` are both set.
         """
+        if vad_force_turn_endpoint and enable_eager_end_of_turn:
+            raise ValueError(
+                "enable_eager_end_of_turn is not supported with vad_force_turn_endpoint=True, "
+                "where the pipeline's user turn strategies decide when the turn ends"
+            )
+
         super().__init__(
-            settings=settings, enable_eager_end_of_turn=enable_eager_end_of_turn, **kwargs
+            settings=settings,
+            enable_eager_end_of_turn=enable_eager_end_of_turn,
+            ttfs_p99_latency=ttfs_p99_latency,
+            **kwargs,
         )
 
         # Flux reports no prediction unless a threshold asks for one, so an
@@ -268,7 +303,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._mip_opt_out = mip_opt_out
         self._tag = tag or []
         self._should_interrupt = should_interrupt
+        self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._watchdog_min_timeout = watchdog_min_timeout
+
+        if vad_force_turn_endpoint and not should_interrupt:
+            logger.warning(
+                f"{self}: should_interrupt is ignored with vad_force_turn_endpoint=True; "
+                "configure interruptions on the user turn start strategy instead"
+            )
 
         # Connection readiness: Flux sends a "Connected" message when ready
         self._connection_established_event = asyncio.Event()
@@ -288,6 +330,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
         self._last_audio_chunk_duration: float = 0.0
+        # The turn so far, from its latest Update, for a turn whose connection
+        # closes before EndOfTurn (see _end_turn_cut_short).
+        self._turn_transcript = ""
+        self._turn_language: Language | None = None
 
         # Flux event handlers
         self._register_event_handler("on_start_of_turn")
@@ -304,6 +350,11 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         """
         return True
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """Whether TTFS applies: only when VAD, not Flux, marks the end of speech."""
+        return self._vad_force_turn_endpoint
+
     def service_metadata_frame(self) -> STTMetadataFrame:
         """Recommend turn strategies that leave turn detection to Flux.
 
@@ -312,12 +363,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         resolves those rather than running local VAD/smart-turn. With
         ``enable_eager_end_of_turn``, the recommendation also answers Flux's
         predicted end of turn. Applied unless the user passed their own
-        ``user_turn_strategies``.
+        ``user_turn_strategies``. Nothing is recommended with
+        ``vad_force_turn_endpoint=True``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = self.recommended_user_turn_strategies(
-            enable_interruptions=self._should_interrupt,
-        )
+        if not self._vad_force_turn_endpoint:
+            frame.user_turn_strategies = self.eager_user_turn_strategies(
+                enable_interruptions=self._should_interrupt,
+            ) or ExternalUserTurnStrategies(enable_interruptions=self._should_interrupt)
         return frame
 
     # ------------------------------------------------------------------
@@ -375,9 +428,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             The category, or None to fall back to the default classification.
         """
         if isinstance(exception, FluxConnectionNotConfirmedError):
-            # Flux stays silent rather than refusing the connection when a
-            # setting is unsupported, so an unconfirmed connection means the
-            # request was rejected, not that the network was slow.
+            # Raised by the SageMaker transport, whose endpoint can leave a
+            # session for a rejected setting open without confirming it, so
+            # an unconfirmed session means the request was rejected, not that
+            # the network was slow.
             return ErrorCategory.INVALID_REQUEST
         if isinstance(exception, FluxFatalError):
             return self._ERROR_CODE_CATEGORIES.get(exception.code)
@@ -425,6 +479,9 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
 
         if self._settings.redact is not None:
             params.append(urlencode({"redact": self._settings.redact}))
+
+        if self._settings.redact_usage is not None:
+            params.append(f"redact_usage={str(self._settings.redact_usage).lower()}")
 
         if self._mip_opt_out is not None:
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
@@ -503,8 +560,36 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             await self.push_error(error_msg=f"Error sending CloseStream: {e}", exception=e)
 
     # ------------------------------------------------------------------
+    # Turn control
+    # ------------------------------------------------------------------
+
+    async def force_end_turn(self) -> None:
+        """Ask Flux to finalize the audio sent so far, e.g. on a push-to-talk release.
+
+        Does nothing while no turn is in progress.
+        """
+        if not self._transport_is_active() or not self._user_is_speaking:
+            return
+
+        self.request_finalize()
+        logger.trace(f"{self}: sending ForceEndTurn")
+        await self._transport_send_json({"type": "ForceEndTurn"})
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, calling :meth:`force_end_turn` on each VAD stop when enabled.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
+            await self.force_end_turn()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service and connect.
@@ -578,8 +663,14 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         if "keyterm" in fields:
             message["keyterms"] = self._settings.keyterm
 
+        if "numerals" in fields:
+            message["numerals"] = self._settings.numerals
+
         if "profanity_filter" in fields:
             message["profanity_filter"] = self._settings.profanity_filter
+
+        if "redact_usage" in fields:
+            message["redact_usage"] = self._settings.redact_usage
 
         thresholds: dict[str, Any] = {}
         if "eot_threshold" in fields:
@@ -645,10 +736,10 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
     async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
-        eot_timeout_ms, language_hints) are sent to Deepgram via a Configure
-        message. Fields Flux only reads from the connection URL trigger a
-        reconnect, which waits until the user stops speaking.
+        Fields in ``_CONFIGURE_FIELDS`` are sent to Deepgram via a Configure
+        message. Fields Flux only reads from the connection URL, and turning
+        ``redact_usage`` off, trigger a reconnect, which waits until the user
+        stops speaking.
         """
         changed = await super()._update_settings(delta)
 
@@ -656,10 +747,18 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             return changed
 
         configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        reconnect = bool(changed.keys() & self._CONNECTION_FIELDS)
+
+        # Flux keeps redact_usage on for the rest of a connection once it is
+        # enabled, so only a new connection can turn it off.
+        if changed.get("redact_usage") and not self._settings.redact_usage:
+            configure_fields.discard("redact_usage")
+            reconnect = True
+
         if configure_fields and self._transport_is_active():
             await self._send_configure(configure_fields)
 
-        if changed.keys() & self._CONNECTION_FIELDS:
+        if reconnect:
             await self._request_reconnect()
 
         self._warn_unhandled_updated_settings(
@@ -730,6 +829,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
                 logger.warning(f"{self}: {error_msg}")
                 await self._on_configure_acked()
                 await self.push_error(error_msg=error_msg)
+            case FluxMessageType.WARNING:
+                await self._handle_warning(data)
 
     async def _handle_connection_established(self, data: dict[str, Any]):
         """Handle successful connection establishment to Deepgram Flux.
@@ -741,6 +842,22 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         logger.info(f"{self}: Connected to Flux - ready to stream audio ({request_id=})")
         # Notify connection is established
         self._connection_established_event.set()
+
+    async def _handle_warning(self, data: dict[str, Any]):
+        """Log non-fatal Warning messages from Deepgram Flux.
+
+        ``FORCE_END_TURN_NO_ACTIVE_TURN`` means Flux had already ended the turn,
+        so it is logged at trace.
+
+        Args:
+            data: The Warning message data.
+        """
+        code = data.get("code", "unknown")
+        description = data.get("description", "no description")
+        if code == "FORCE_END_TURN_NO_ACTIVE_TURN":
+            logger.trace(f"{self}: ForceEndTurn arrived with no active turn")
+        else:
+            logger.warning(f"{self}: Flux warning: [{code}] {description}")
 
     async def _handle_fatal_error(self, data: dict[str, Any]):
         """Handle fatal error messages from Deepgram Flux.
@@ -795,7 +912,7 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             case FluxEventType.EAGER_END_OF_TURN:
                 await self._handle_eager_end_of_turn(transcript, data)
             case FluxEventType.UPDATE:
-                await self._handle_update(transcript)
+                await self._handle_update(transcript, data)
 
     async def _handle_start_of_turn(self, transcript: str):
         """Handle StartOfTurn events from Deepgram Flux.
@@ -804,15 +921,19 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         of a new speaking turn.
 
         The service will:
-        - Propose a turn start, which the user turn strategies resolve into a
-          UserStartedSpeakingFrame and an interruption
+        - Propose a turn start, unless ``vad_force_turn_endpoint`` is set, which
+          the user turn strategies resolve into a UserStartedSpeakingFrame and an
+          interruption
 
         Args:
             transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
         self._user_is_speaking = True
-        await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        self._turn_transcript = transcript
+        self._turn_language = None
+        if not self._vad_force_turn_endpoint:
+            await self.broadcast_frame(ProposedUserStartedSpeakingFrame)
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
@@ -873,17 +994,23 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         The service will:
         - Create and send a final TranscriptionFrame with the complete transcript
         - Trigger transcription handling with tracing for metrics
-        - Propose a turn stop, which the user turn strategies resolve into a
-          UserStoppedSpeakingFrame
+        - Propose a turn stop, unless ``vad_force_turn_endpoint`` is set, which
+          the user turn strategies resolve into a UserStoppedSpeakingFrame
 
         Args:
             transcript: The final transcript text for the completed turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.debug("User stopped speaking")
+        trigger = data.get("trigger")
+        logger.debug(f"User stopped speaking ({trigger=})")
         self._user_is_speaking = False
+        self._turn_transcript = ""
         # The turn is committed, so any eager prediction it followed is resolved.
         self._clear_eager_end_of_turn()
+
+        # Only a "manual" trigger answers our ForceEndTurn.
+        if trigger == "manual":
+            self.confirm_finalize()
 
         # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
@@ -916,7 +1043,8 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
             )
 
         await self._handle_transcription(transcript, True, detected_language)
-        await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        if not self._vad_force_turn_endpoint:
+            await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: dict[str, Any]):
@@ -943,23 +1071,59 @@ class DeepgramFluxSTTBase(EagerEndOfTurnSTTServiceMixin, STTService):
         )
         await self._call_event_handler("on_eager_end_of_turn", transcript)
 
-    async def _handle_update(self, transcript: str):
+    async def _end_turn_cut_short(self):
+        """End a turn whose connection closed before Flux sent EndOfTurn.
+
+        A Flux turn lives in one connection, so a new connection never ends the
+        old one's turn. The transcript received so far is pushed as the turn's
+        transcription, unfinalized since Flux never committed it, and the turn
+        stop is proposed unless ``vad_force_turn_endpoint`` is set. If the user
+        keeps talking on a new connection, the rest is transcribed as a new turn.
+        """
+        if not self._user_is_speaking:
+            return
+        logger.debug(f"{self}: connection closed mid-turn, ending the turn")
+        self._user_is_speaking = False
+        self._clear_eager_end_of_turn()
+        transcript, self._turn_transcript = self._turn_transcript, ""
+        if transcript:
+            await self.emit_stt_usage_metrics()
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript, self._user_id, time_now_iso8601(), self._turn_language
+                )
+            )
+        if not self._vad_force_turn_endpoint:
+            await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+
+    async def _handle_update(self, transcript: str, data: dict[str, Any]):
         """Handle Update events from Deepgram Flux.
 
         Update events provide incremental transcript updates during an ongoing
-        turn. These events allow for real-time display of transcription progress
-        and can be used to provide visual feedback to users about what's being
-        recognized.
+        turn. Each one is pushed as an InterimTranscriptionFrame holding the
+        transcript of the turn so far.
 
         Args:
             transcript: The current partial transcript text for the ongoing turn.
+            data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         if transcript:
             logger.trace(f"Update event: {transcript}")
+            self._turn_transcript = transcript
+            self._turn_language = self._primary_detected_language(data)
             # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
             # Ideally, TTFB should measure the time from when a user starts speaking
             # until we receive the first transcript. However, Deepgram Flux delivers
             # both the "user started speaking" event and the first transcript simultaneously,
             # making this timing measurement meaningless in this context.
             # await self.stop_ttfb_metrics()
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._primary_detected_language(data),
+                    result=data,
+                )
+            )
             await self._call_event_handler("on_update", transcript)

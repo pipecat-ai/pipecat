@@ -22,6 +22,8 @@ from functools import cache
 from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
 _QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
+# A numbered-list marker such as "1." at the start of a line.
+_LIST_MARKER = re.compile(r"(?m)^[ \t]*\d+\.(?=[ \t])")
 
 
 def resolve_sentence_tokenizer_language(language: str | None) -> str:
@@ -159,14 +161,19 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
     if not text:
         return 0
 
-    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(text)
+    # Sentencex splits after a list marker ("1. The" -> "1.", "The"). Blank the
+    # marker with equal-width spaces so it stays with its item; boundary offsets
+    # still refer to the original text. The digits are blanked too because some
+    # languages' rules (German, Finnish, Czech, ...) never start a sentence at a
+    # digit, which would merge each item into the one before it.
+    tokenizer_text = _LIST_MARKER.sub(lambda m: " " * len(m[0]), text)
+    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
 
     if not sentences:
         return 0
 
     first_sentence = sentences[0]
 
-    tokenizer_text = text
     # With an unfinished quote such as 'She said, "Dr. S', sentencex can split
     # after '"Dr.'. Recheck a proposed split after a quoted word ending in a
     # period, letting sentencex decide whether that word is an abbreviation.
@@ -175,7 +182,7 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         # equal-width spaces so sentencex sees the abbreviation without the quote.
         # Boundary offsets still refer to the original text, which keeps its quotes.
         start, end = quote.span(1)
-        tokenizer_text = text[:start] + " " * (end - start) + text[end:]
+        tokenizer_text = tokenizer_text[:start] + " " * (end - start) + tokenizer_text[end:]
         sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
         first_sentence = sentences[0]
 
@@ -203,40 +210,35 @@ def parse_start_end_tags(
 ) -> tuple[StartEndTags | None, int]:
     """Parse text to identify start and end tag pairs.
 
-    If a start tag was previously found (i.e., current_tag is valid), wait for
-    the corresponding end tag. Otherwise, wait for a start tag.
-
-    This function returns the index in the text where parsing should continue
-    in the next call and the current or new tags.
+    Scans the text from ``current_tag_index``: inside a tag, for its end tag;
+    outside one, for the earliest start tag of any pair, and then for that
+    pair's end tag after it. A pair whose start and end tags are the same,
+    such as ``("^^", "^^")``, is found the same way.
 
     Args:
         text: The text to be parsed.
         tags: List of tuples containing start and end tags.
         current_tag: The currently active tags, if any.
-        current_tag_index: The current index in the text.
+        current_tag_index: Where in the text to resume scanning.
 
     Returns:
-        A tuple containing None or the current tag and the index of the text.
+        The tag the text ends inside, or None, and where to resume scanning:
+        just past the open tag's start, or past the last tag that closed.
     """
-    # If we are already inside a tag, check if the end tag is in the text.
-    if current_tag:
-        _, end_tag = current_tag
-        if end_tag in text[current_tag_index:]:
-            return (None, len(text))
-        return (current_tag, current_tag_index)
-
-    # Check if any start tag appears in the text
-    for start_tag, end_tag in tags:
-        start_tag_count = text[current_tag_index:].count(start_tag)
-        end_tag_count = text[current_tag_index:].count(end_tag)
-        if start_tag_count == 0 and end_tag_count == 0:
-            return (None, current_tag_index)
-        elif start_tag_count > end_tag_count:
-            return ((start_tag, end_tag), len(text))
-        elif start_tag_count == end_tag_count:
-            return (None, len(text))
-
-    return (None, current_tag_index)
+    index = current_tag_index
+    while True:
+        if current_tag:
+            end = text.find(current_tag[1], index)
+            if end < 0:
+                return (current_tag, index)
+            index = end + len(current_tag[1])
+            current_tag = None
+        starts = [(text.find(start, index), (start, end)) for start, end in tags]
+        found = [(position, tag) for position, tag in starts if position >= 0]
+        if not found:
+            return (None, index)
+        position, current_tag = min(found, key=lambda found_tag: found_tag[0])
+        index = position + len(current_tag[0])
 
 
 def longest_trailing_partial_match(text: str, candidates: Sequence[str]) -> int:
@@ -346,3 +348,33 @@ def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
+
+
+# Characters of scripts that are written without spaces between words (Chinese,
+# Japanese kana, Thai). A word boundary can't be required next to them: in
+# "你好小助手今天天气怎么样" there is no boundary between "手" and "今", because both
+# are word characters.
+_UNSPACED_SCRIPT_CHAR_RE = re.compile(
+    r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]"
+)
+
+
+def compile_phrase_pattern(phrase: str) -> re.Pattern:
+    """Compile a case-insensitive pattern that finds a spoken phrase in text.
+
+    The words of the phrase may be separated by any amount of whitespace
+    (including none). The match must start and end on a word boundary, except
+    next to characters of scripts written without spaces (Chinese, Japanese,
+    Thai), where speech-to-text output has no boundaries between words.
+
+    Args:
+        phrase: The phrase to find, for example "hey pipecat" or "小助手".
+
+    Returns:
+        The compiled pattern.
+    """
+    words = phrase.split()
+    body = r"\s*".join(re.escape(word) for word in words)
+    start = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"\b"
+    end = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"\b"
+    return re.compile(start + body + end, re.IGNORECASE)

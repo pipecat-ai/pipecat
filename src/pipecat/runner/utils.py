@@ -44,12 +44,14 @@ from pipecat.runner.types import (
     ExotelCallData,
     LiveKitRunnerArguments,
     MOQRunnerArguments,
+    SIPRunnerArguments,
     SmallWebRTCRunnerArguments,
     TelnyxCallData,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.deprecation import deprecated
 
 if TYPE_CHECKING:
     # Imported for type-checking only so the typed guard functions (e.g.
@@ -110,6 +112,16 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     return "unknown"
 
 
+def _parse_eval_connect(message: dict):
+    """The eval flags of an ``eval-connect`` message, or ``None`` for any other message."""
+    # A cheap check first, so non-eval connections don't import the evals package.
+    if not isinstance(message, dict) or message.get("type") != "client-message":
+        return None
+    from pipecat.evals.serializer import parse_eval_connect
+
+    return parse_eval_connect(message)
+
+
 async def parse_telephony_websocket(websocket: "WebSocket"):
     """Parse telephony WebSocket messages and return transport type and call data.
 
@@ -159,6 +171,15 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
                 "to": str,
             }
 
+        - Eval (the harness's ``eval-connect`` message, sent first)::
+
+            {
+                "body": dict  # the connection's eval flags
+            }
+
+        An eval is recognized from the first message alone; no second message
+        is read, so the harness's next message reaches the eval transport.
+
     Raises:
         ValueError: If WebSocket closes before sending any messages.
 
@@ -196,6 +217,13 @@ async def parse_telephony_websocket(websocket: "WebSocket"):
         pass
     except StopAsyncIteration:
         raise ValueError("WebSocket closed before receiving telephony handshake messages")
+
+    eval_flags = _parse_eval_connect(first_message)
+    if eval_flags is not None:
+        logger.debug("Detected transport: eval (from first message)")
+        result = ("eval", CallData(body=eval_flags.model_dump()))
+        setattr(websocket, "_pipecat_parsed_telephony", result)  # noqa: B010
+        return result
 
     try:
         # Second message - optional, some providers may only send one
@@ -333,8 +361,17 @@ def _is_vonage(transport: BaseTransport) -> "TypeGuard[VonageVideoConnectorTrans
     return _transport_is(transport, "VonageVideoConnectorTransport")
 
 
+@deprecated(
+    "`get_transport_client_id` is deprecated since 1.13.0 and will be removed in 2.0.0. "
+    "Use `BaseTransport.get_client_id()` instead."
+)
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """Get client identifier from transport-specific client object.
+
+    .. deprecated:: 1.13.0
+        Use :meth:`~pipecat.transports.base_transport.BaseTransport.get_client_id`
+        instead: ``transport.get_client_id(client)``.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -343,21 +380,27 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     Returns:
         Client identifier string, empty if transport not supported.
     """
-    if _is_smallwebrtc(transport):
-        return client.pc_id
-    if _is_daily(transport):
-        return client["id"]
-    if _is_vonage(transport):
-        return client["streamId"]
-
-    logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
-    return ""
+    return transport.get_client_id(client)
 
 
+@deprecated(
+    "`maybe_capture_participant_camera` is deprecated since 1.13.0 and will be removed in "
+    "2.0.0. Use `TransportParams.video_in_sources` or "
+    "`BaseTransport.capture_participant_video()` instead."
+)
 async def maybe_capture_participant_camera(
     transport: BaseTransport, client: Any, framerate: int = 0
 ):
     """Capture participant camera video if transport supports it.
+
+    .. deprecated:: 1.13.0
+        Use :attr:`~pipecat.transports.base_transport.TransportParams.video_in_sources`
+        or :meth:`~pipecat.transports.base_transport.BaseTransport.capture_participant_video`
+        instead: the first captures the listed sources as each user connects, the
+        second captures a source on demand. On Vonage, subscribe to video with
+        ``video_in_auto_subscribe`` or
+        ``VonageVideoConnectorTransport.subscribe_to_stream()``.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -366,10 +409,10 @@ async def maybe_capture_participant_camera(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="camera"
+            client["id"], framerate=framerate, video_source="camera", on_request_only=framerate == 0
         )
     elif _is_smallwebrtc(transport):
-        await transport.capture_participant_video(video_source="camera")
+        await transport.capture_participant_video(client.pc_id, None, "camera")
     elif _is_vonage(transport):
         # Imported in-branch (not at module scope) to avoid a hard Vonage dependency;
         # we only get here when the transport is Vonage, so the extra is installed.
@@ -385,10 +428,22 @@ async def maybe_capture_participant_camera(
         )
 
 
+@deprecated(
+    "`maybe_capture_participant_screen` is deprecated since 1.13.0 and will be removed in "
+    "2.0.0. Use `TransportParams.video_in_sources` or "
+    "`BaseTransport.capture_participant_video()` instead."
+)
 async def maybe_capture_participant_screen(
     transport: BaseTransport, client: Any, framerate: int = 0
 ):
     """Capture participant screen video if transport supports it.
+
+    .. deprecated:: 1.13.0
+        Use :attr:`~pipecat.transports.base_transport.TransportParams.video_in_sources`
+        or :meth:`~pipecat.transports.base_transport.BaseTransport.capture_participant_video`
+        instead: the first captures the listed sources as each user connects, the
+        second captures a source on demand.
+        Will be removed in 2.0.0.
 
     Args:
         transport: The transport instance.
@@ -397,10 +452,13 @@ async def maybe_capture_participant_screen(
     """
     if _is_daily(transport):
         await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="screenVideo"
+            client["id"],
+            framerate=framerate,
+            video_source="screenVideo",
+            on_request_only=framerate == 0,
         )
     elif _is_smallwebrtc(transport):
-        await transport.capture_participant_video(video_source="screenVideo")
+        await transport.capture_participant_video(client.pc_id, None, "screenVideo")
 
 
 def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
@@ -483,6 +541,31 @@ def _get_transport_params(transport_key: str, transport_params: dict[str, Callab
     return params
 
 
+def _get_eval_transport_params(transport_params: dict[str, Callable]) -> Any:
+    """Get the eval transport's parameters, with its serializer defaulted.
+
+    Defaulting the serializer to ``EvalSerializer`` means a bot only has to opt
+    into audio input.
+
+    Raises:
+        ValueError: If the ``"eval"`` entry is missing or doesn't build an
+            ``EvalTransportParams``.
+    """
+    from pipecat.evals.serializer import EvalSerializer
+    from pipecat.evals.transport import EvalTransportParams
+
+    params = _get_transport_params("eval", transport_params)
+    if not isinstance(params, EvalTransportParams):
+        raise ValueError(
+            "Eval transport params must be an EvalTransportParams instance. "
+            "Set transport_params['eval'] to a lambda returning "
+            "EvalTransportParams(audio_in_enabled=True)."
+        )
+    if params.serializer is None:
+        params.serializer = EvalSerializer()
+    return params
+
+
 async def _create_telephony_transport(
     websocket: "WebSocket",
     params: Any,
@@ -518,6 +601,10 @@ async def _create_telephony_transport(
             call_sid=call_data["call_id"],
             account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
             auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+            api_key_sid=os.getenv("TWILIO_API_KEY") or None,
+            api_key_secret=os.getenv("TWILIO_API_SECRET") or None,
+            region=os.getenv("TWILIO_REGION") or None,
+            edge=os.getenv("TWILIO_EDGE") or None,
         )
     elif transport_type == "telnyx":
         from pipecat.serializers.telnyx import TelnyxFrameSerializer
@@ -595,6 +682,48 @@ def _maybe_apply_daily_dialin(params: Any, body: Any) -> None:
     params.api_url = request.daily_api_url
 
 
+def _sip_account_available(runner_args: Any) -> bool:
+    """Whether plain runner arguments can be served by the SIP transport.
+
+    True when the body carries a ``sip_client`` block (a Daily SIP-trunk
+    notification) or the environment holds an account. Never true for the
+    provisioning case alone: a bot that passes plain arguments by mistake must
+    not silently create a Daily SIP client.
+    """
+    body = getattr(runner_args, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("sip_client"), dict):
+        return True
+    return bool(os.getenv("SIP_USER") and os.getenv("SIP_DOMAIN"))
+
+
+def _create_sip_transport(
+    runner_args: SIPRunnerArguments, transport_params: dict[str, Callable]
+) -> BaseTransport:
+    params = _get_transport_params("sip", transport_params)
+
+    from pipecat.transports.sip.connection import SIPConnection
+    from pipecat.transports.sip.transport import SIPTransport
+
+    connection = SIPConnection(
+        user=runner_args.user,
+        domain=runner_args.domain,
+        password=runner_args.password,
+        transport=runner_args.transport,
+        audio_codecs=runner_args.audio_codecs,
+        auth_user=runner_args.auth_user,
+        extra_params=runner_args.extra_params,
+        reg_interval=runner_args.reg_interval,
+        rtp_timeout=runner_args.rtp_timeout,
+        instance_id=runner_args.instance_id,
+        native_log_level=runner_args.native_log_level,
+        sip_trace=runner_args.sip_trace,
+        net_interface=runner_args.net_interface,
+        jitter_buffer_mode=runner_args.jitter_buffer_mode,
+        jitter_buffer_ms=runner_args.jitter_buffer_ms,
+    )
+    return SIPTransport(connection, params=params)
+
+
 async def create_transport(
     runner_args: Any, transport_params: dict[str, Callable]
 ) -> BaseTransport:
@@ -602,6 +731,16 @@ async def create_transport(
 
     This function uses the clean transport_params factory pattern where users
     define a dictionary mapping transport names to parameter factory functions.
+
+    SIP needs no transport-specific arguments from the bot. Plain
+    ``RunnerArguments`` whose body carries a ``sip_client`` block (a Daily
+    SIP-trunk notification, what Pipecat Cloud passes through) or whose
+    environment holds ``SIP_USER``/``SIP_PASS``/``SIP_DOMAIN`` build the SIP
+    transport too: the account is resolved with
+    :func:`pipecat.runner.sip.configure` and converted with
+    :func:`pipecat.runner.sip.sip_runner_arguments`, the same path the
+    development runner takes. A temporary Daily SIP client is never
+    provisioned here; call ``configure()`` yourself for that.
 
     Args:
         runner_args: Arguments from the runner.
@@ -696,6 +835,16 @@ async def create_transport(
         runner_args.transport_type = transport_type
         runner_args.call_data = call_data
 
+        if transport_type == "eval":
+            from pipecat.evals.fastapi_transport import EvalFastAPIWebsocketTransport
+            from pipecat.evals.serializer import EvalConnectionFlags
+
+            return EvalFastAPIWebsocketTransport(
+                runner_args.websocket,
+                _get_eval_transport_params(transport_params),
+                EvalConnectionFlags.model_validate(call_data.body),
+            )
+
         params = _get_transport_params(transport_type, transport_params)
 
         # Create telephony transport with pre-parsed data
@@ -719,18 +868,9 @@ async def create_transport(
         # RTVIProcessor and pass an RTVIObserver to the task. Default the
         # serializer to EvalSerializer so examples only need to opt into
         # audio input.
-        from pipecat.evals.serializer import EvalSerializer
-        from pipecat.evals.transport import EvalTransport, EvalTransportParams
+        from pipecat.evals.transport import EvalTransport
 
-        params = _get_transport_params("eval", transport_params)
-        if not isinstance(params, EvalTransportParams):
-            raise ValueError(
-                "Eval transport params must be an EvalTransportParams instance. "
-                "Set transport_params['eval'] to a lambda returning "
-                "EvalTransportParams(audio_in_enabled=True)."
-            )
-        if params.serializer is None:
-            params.serializer = EvalSerializer()
+        params = _get_eval_transport_params(transport_params)
 
         # EvalTransport handles the eval-only behavior: the virtual mic, skip-TTS
         # before an on-connect greeting, and audio capture/recording.
@@ -739,6 +879,8 @@ async def create_transport(
             host=runner_args.host,
             port=runner_args.port,
         )
+    elif isinstance(runner_args, SIPRunnerArguments):
+        return _create_sip_transport(runner_args, transport_params)
     elif isinstance(runner_args, VonageRunnerArguments):
         from pipecat.transports.vonage.video_connector import (
             VonageVideoConnectorTransport,
@@ -809,5 +951,15 @@ async def create_transport(
 
         return transport
 
+    elif _sip_account_available(runner_args):
+        # Plain arguments with a SIP account in the body or the environment: resolve and
+        # convert them here so the bot writes the same line it would under the runner.
+        import aiohttp
+
+        from pipecat.runner.sip import configure, sip_runner_arguments
+
+        async with aiohttp.ClientSession() as session:
+            config = await configure(session, body=getattr(runner_args, "body", None))
+        return _create_sip_transport(sip_runner_arguments(config, runner_args), transport_params)
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

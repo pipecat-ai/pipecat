@@ -1,0 +1,6 @@
+name: implicit_cancel
+user: !include ../../../release/scenarios/user_audio.yaml
+judge: !include ../../../release/scenarios/judge_audio.yaml
+scenarios:
+  - name: audio
+    turns: !include ../turns/implicit_cancel.yaml

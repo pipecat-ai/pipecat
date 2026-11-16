@@ -11,7 +11,6 @@ from enum import Enum
 from loguru import logger
 
 from pipecat.frames.frames import (
-    EagerEndOfTurnCancelFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
@@ -20,6 +19,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.frame_queue import FrameQueue
@@ -54,8 +54,8 @@ class SpeculationGate:
     turn that may not have ended, and the response that follows is held from its
     :class:`~pipecat.frames.frames.LLMFullResponseStartFrame` onward. A
     :class:`~pipecat.frames.frames.UserStoppedSpeakingFrame` releases it — the
-    turn it answers has ended — and an
-    :class:`~pipecat.frames.frames.EagerEndOfTurnCancelFrame` discards it.
+    turn it answers has ended — and a
+    :class:`~pipecat.frames.frames.UserTurnResponseCancelFrame` discards it.
     Neither names a response: only one speculation is ever in flight, since
     producing one takes a whole user turn.
 
@@ -175,7 +175,7 @@ class SpeculationGate:
             # Emitted before the verdict is applied, so a released response
             # still follows the frame that ended the turn it answers.
             emitted = [(frame, direction)]
-            if isinstance(frame, (EagerEndOfTurnCancelFrame, InterruptionFrame)):
+            if isinstance(frame, (UserTurnResponseCancelFrame, InterruptionFrame)):
                 emitted += self._discard()
             elif isinstance(frame, UserStoppedSpeakingFrame):
                 emitted += self._release()

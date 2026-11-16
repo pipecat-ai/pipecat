@@ -37,11 +37,17 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
-from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.aws.sagemaker.bidi_client import (
+    SageMakerBidiClient,
+    SageMakerBidiSessionError,
+    classify_sagemaker_bidi_error,
+)
 from pipecat.services.deepgram.tts import format_deepgram_pronunciation
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -124,7 +130,7 @@ class DeepgramSageMakerTTSService(TTSService):
         super().__init__(
             sample_rate=sample_rate,
             push_start_frame=True,
-            push_stop_frames=True,
+            push_stop_frames=False,
             pause_frame_processing=True,
             append_trailing_space=True,
             settings=default_settings,
@@ -204,6 +210,10 @@ class DeepgramSageMakerTTSService(TTSService):
         await super().cancel(frame)
         await self._disconnect()
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify SageMaker session failures, which carry no HTTP status attribute."""
+        return classify_sagemaker_bidi_error(exception)
+
     async def _connect(self):
         """Connect to the SageMaker endpoint and start the BiDi session.
 
@@ -233,7 +243,13 @@ class DeepgramSageMakerTTSService(TTSService):
             await self._call_event_handler("on_connected")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            # Nothing reconnects after a failed session start, so the service
+            # can't do any more work in this session.
+            await self.push_error(
+                error_msg=f"Unknown error occurred: {e}",
+                exception=e,
+                force_treat_as_permanent=isinstance(e, SageMakerBidiSessionError),
+            )
             await self._call_event_handler("on_connection_error", str(e))
 
     async def _disconnect(self):
@@ -312,6 +328,11 @@ class DeepgramSageMakerTTSService(TTSService):
                                 logger.trace(f"Received metadata: {parsed}")
                             elif msg_type == "Flushed":
                                 logger.trace(f"Received Flushed: {parsed}")
+                                ctx_id = self.get_active_audio_context_id()
+                                await self.append_to_audio_context(
+                                    ctx_id, TTSStoppedFrame(context_id=ctx_id)
+                                )
+                                await self.remove_audio_context(ctx_id)
                             elif msg_type == "Cleared":
                                 logger.trace(f"Received Cleared: {parsed}")
                             elif msg_type == "Warning":

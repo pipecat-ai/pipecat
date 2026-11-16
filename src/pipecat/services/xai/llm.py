@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from loguru import logger
+from openai.types import CompletionUsage
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
     OpenAILLMService,
@@ -33,11 +35,18 @@ class GrokLLMSettings(BaseOpenAILLMService.Settings):
             accepts varies (``grok-4.6`` rejects "none", ``xhigh`` needs
             ``grok-4.6`` or later, and the non-reasoning models reject the
             parameter altogether). When unset, xAI's per-model default applies.
+        guidelines: Per-category content guidelines, e.g.
+            ``[{"type": "policy", "category": "profanity", "behavior": "decline"}]``.
+            xAI documents the categories "nsfw", "violence" and "profanity" and
+            the behavior "decline"; a category left out keeps the model's
+            default handling. Multi-agent models reject guidelines. When unset,
+            xAI's default moderation applies.
     """
 
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    guidelines: list[dict[str, Any]] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GrokLLMService(OpenAILLMService):
@@ -49,6 +58,7 @@ class GrokLLMService(OpenAILLMService):
 
     Settings = GrokLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -78,6 +88,7 @@ class GrokLLMService(OpenAILLMService):
         default_settings = self.Settings(
             model="grok-4.20-non-reasoning",
             reasoning_effort=None,
+            guidelines=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -112,7 +123,8 @@ class GrokLLMService(OpenAILLMService):
     ) -> dict[str, Any]:
         """Build parameters for Grok chat completion request.
 
-        Extends the base OpenAI parameters with Grok's reasoning effort control.
+        Extends the base OpenAI parameters with Grok's reasoning effort control
+        and content guidelines.
 
         Args:
             params_from_context: Parameters, derived from the LLM context, to
@@ -128,4 +140,28 @@ class GrokLLMService(OpenAILLMService):
         if is_given(reasoning_effort) and reasoning_effort is not None:
             params.setdefault("reasoning_effort", reasoning_effort)
 
+        self._merge_extra_body(params, {"guidelines": self._settings.guidelines})
+
         return params
+
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        """Convert a Grok chat completion's usage into Pipecat's token usage.
+
+        xAI reports reasoning tokens apart from ``completion_tokens``, with
+        ``total_tokens`` covering both, so they are added to the completion
+        count. A total that already matches the prompt and completion counts
+        means reasoning was included, and the counts are kept as reported.
+
+        Args:
+            usage: The usage reported with the completion.
+
+        Returns:
+            The token usage to report.
+        """
+        tokens = super()._token_usage(usage)
+        reasoning = tokens.reasoning_tokens or 0
+        if reasoning and tokens.total_tokens == (
+            tokens.prompt_tokens + tokens.completion_tokens + reasoning
+        ):
+            tokens.completion_tokens += reasoning
+        return tokens

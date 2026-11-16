@@ -44,7 +44,10 @@ def _clear_env(monkeypatch):
 
 
 def _service(**kwargs) -> SpeechmaticsSTTService:
-    return SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    service = SpeechmaticsSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+    # setup() resolves the sample rate; these tests never run it, so mirror what it does.
+    service._sample_rate = 16000
+    return service
 
 
 # ---------------------------------------------------------------------------
@@ -113,20 +116,13 @@ def test_apply_legacy_params_returns_encoding_without_setting_it_on_settings():
     assert not hasattr(settings, "audio_encoding")
 
 
-def test_apply_legacy_params_speaker_format_default_depends_on_diarization():
-    """When no format is given, the default prefixes the speaker only when diarizing
-    (so multi-speaker transcripts are legible), and an explicit format is preserved."""
+def test_apply_legacy_params_speaker_format_is_copied_as_is():
+    """No format is invented when diarizing, and an explicit format is preserved."""
     on = SpeechmaticsSTTService.Settings()
     SpeechmaticsSTTService._apply_legacy_params(
         on, SpeechmaticsSTTService.InputParams(enable_diarization=True)
     )
-    assert on.speaker_active_format == "@{speaker_id}: {text}"
-
-    off = SpeechmaticsSTTService.Settings()
-    SpeechmaticsSTTService._apply_legacy_params(
-        off, SpeechmaticsSTTService.InputParams(enable_diarization=False)
-    )
-    assert off.speaker_active_format == "{text}"
+    assert on.speaker_active_format is None
 
     explicit = SpeechmaticsSTTService.Settings()
     SpeechmaticsSTTService._apply_legacy_params(
@@ -249,6 +245,14 @@ def test_punctuation_overrides_reach_the_wire_config():
     assert _service()._config.punctuation_overrides is None
 
 
+def test_emit_sentences_reaches_the_wire_config_only_when_set():
+    """Unset means the service default (turn-level segments), so the key stays off the wire."""
+    assert "emit_sentences" not in _service()._config.to_dict()
+
+    service = _service(settings=SpeechmaticsSTTService.Settings(emit_sentences=True))
+    assert service._config.to_dict()["emit_sentences"] is True
+
+
 def test_no_diarization_leaves_config_empty():
     """With diarization off, neither the diarization flag nor a speaker config may be
     sent — otherwise the engine would attempt attribution it was not asked for."""
@@ -345,16 +349,76 @@ def test_segment_to_frame_final_vs_interim_type():
     assert isinstance(interim, InterimTranscriptionFrame)
 
 
+def test_segment_to_frame_carries_speaker_and_keeps_user_id():
+    """The speaker goes in speaker; user_id stays the transport participant."""
+    service = _service(settings=SpeechmaticsSTTService.Settings(enable_diarization=True))
+    service._user_id = "session-user"
+
+    frame = service._segment_to_frame(Segment(transcript="hi", speaker="S1"), finalized=True)
+
+    assert frame.text == "hi"
+    assert frame.speaker.label == "S1"
+    assert frame.user_id == "session-user"
+
+
+def test_segment_to_frame_without_speaker_has_no_label():
+    service = _service(settings=SpeechmaticsSTTService.Settings(speaker_format="{speaker}: {text}"))
+
+    frame = service._segment_to_frame(Segment(transcript="hi"), finalized=False)
+
+    assert frame.text == "hi"
+    assert frame.speaker is None
+
+
 def test_segment_to_frame_applies_speaker_format():
-    """The configured speaker_active_format must shape the emitted text and the speaker
-    must become the frame's user_id — that is how per-speaker context reaches the LLM."""
-    service = _service(
-        settings=SpeechmaticsSTTService.Settings(speaker_active_format="@{speaker_id}: {text}")
-    )
+    service = _service(settings=SpeechmaticsSTTService.Settings(speaker_format="{speaker}: {text}"))
+
+    frame = service._segment_to_frame(Segment(transcript="hi", speaker="S1"), finalized=True)
+
+    assert frame.text == "S1: hi"
+
+
+def test_deprecated_speaker_active_format_still_formats_and_warns():
+    """The deprecated format keeps its own placeholders and wins over speaker_format."""
+    with pytest.warns(DeprecationWarning, match="speaker_active_format"):
+        service = _service(
+            settings=SpeechmaticsSTTService.Settings(
+                speaker_format="{speaker}: {text}",
+                speaker_active_format="@{speaker_id}: {text}",
+            )
+        )
+
     frame = service._segment_to_frame(Segment(transcript="hi", speaker="S1"), finalized=True)
 
     assert frame.text == "@S1: hi"
-    assert frame.user_id == "S1"
+    assert frame.speaker.label == "S1"
+
+
+@pytest.mark.asyncio
+async def test_update_speaker_format_does_not_reconnect():
+    service = _service()
+    service._request_reconnect = AsyncMock()
+
+    changed = await service._update_settings(
+        SpeechmaticsSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    service._request_reconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_deprecated_speaker_active_format_warns_without_reconnect():
+    service = _service()
+    service._request_reconnect = AsyncMock()
+
+    with pytest.warns(DeprecationWarning, match="speaker_active_format"):
+        changed = await service._update_settings(
+            SpeechmaticsSTTService.Settings(speaker_active_format="@{speaker_id}: {text}")
+        )
+
+    assert "speaker_active_format" in changed
+    service._request_reconnect.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -668,6 +732,41 @@ async def test_open_connection_auth_rejection_is_permanent(monkeypatch):
     service.push_error.assert_awaited_once()
     assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
     assert service.push_error.call_args.kwargs.get("fatal") is None
+
+
+@pytest.mark.asyncio
+async def test_open_connection_unsupported_sample_rate_is_permanent(monkeypatch):
+    """A pipeline rate the service does not accept fails every attempt the same way, so it
+    must stop the session with a permanent error before a client is built, not raise the
+    client's ValueError out of start()."""
+    service = _service()
+    service._sample_rate = 24000
+    service.push_error = AsyncMock()
+    client = Mock()
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is False
+    assert service._closed is True
+    client.assert_not_called()
+    assert service.push_error.call_args.kwargs.get("force_treat_as_permanent") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate", [8000, 16000])
+async def test_open_connection_supported_sample_rate_connects(monkeypatch, rate):
+    """Both rates the service accepts must reach the client's AudioFormat unchanged."""
+    service = _service()
+    service._sample_rate = rate
+    client = Mock(return_value=Mock(connect=AsyncMock()))
+    monkeypatch.setattr("pipecat.services.speechmatics.stt.AgentSttAsyncClient", client)
+    service.create_task = Mock(side_effect=lambda coroutine, *args, **kwargs: coroutine.close())
+
+    ok = await service._open_connection(report_error=True)
+
+    assert ok is True
+    assert client.call_args.kwargs["audio_format"].sample_rate == rate
 
 
 @pytest.mark.asyncio

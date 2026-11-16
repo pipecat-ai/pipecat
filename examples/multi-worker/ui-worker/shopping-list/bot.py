@@ -57,7 +57,7 @@ from typing import Any
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus.messages import BusJobRequestMessage
 from pipecat.classifiers.base_classifier import ChoiceQuestion
@@ -80,6 +80,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
@@ -94,6 +95,7 @@ transport_params = {
         audio_out_enabled=True,
     ),
     "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
+    "livekit": lambda: LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
 }
 

@@ -240,13 +240,17 @@ try {
   await run(process.execPath, [cli, "add", ...ITEMS, "--yes", "--overwrite"], scratch);
 
   // Copy the installed source over the previous snapshot. Only src/ is copied into
-  // generated projects; dependencies.json beside it is read by the generator.
+  // generated projects; dependencies.json beside it is read by the generator. The
+  // shadcn/ui license notice is kept so it ships with the components it covers.
+  const shadcnNotice = path.join(output, "src/components/ui/LICENSE-shadcn.md");
+  const shadcnNoticeText = fs.readFileSync(shadcnNotice, "utf8");
   fs.rmSync(path.join(output, "src"), { recursive: true, force: true });
   for (const dir of ["components", "hooks", "lib"]) {
     fs.cpSync(path.join(scratch, "src", dir), path.join(output, "src", dir), {
       recursive: true,
     });
   }
+  fs.writeFileSync(shadcnNotice, shadcnNoticeText);
   // The stylesheet the shadcn CLI generated, including the theme tokens the
   // registry items merged in, becomes the React templates' stylesheet as is.
   for (const stylesheet of [

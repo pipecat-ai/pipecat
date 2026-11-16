@@ -156,10 +156,8 @@ async def test_flux_sagemaker_tts_protocol_roundtrip(fake_client):
         frames_to_send=[
             TTSSpeakFrame(text="Hello from Flux."),
             SleepFrame(sleep=0.3),
-            # With pause_frame_processing=True the transport's
-            # BotStoppedSpeakingFrame resumes frame processing; there is no
-            # transport in run_test, so send it explicitly (it is a system
-            # frame, so it bypasses the paused queue).
+            # The output transport sends this once playback ends; run_test
+            # has no transport.
             BotStoppedSpeakingFrame(),
         ],
     )
@@ -187,6 +185,7 @@ async def test_flux_sagemaker_tts_protocol_roundtrip(fake_client):
     assert query["sample_rate"] == ["24000"]
     assert "speed" not in query
     assert "expressivity" not in query
+    assert "normalize_volume" not in query
 
     types_sent = [m.get("type") for m in client.messages]
     assert "Flush" in types_sent
