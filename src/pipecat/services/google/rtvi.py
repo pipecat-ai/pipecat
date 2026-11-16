@@ -56,13 +56,21 @@ class GoogleRTVIObserver(RTVIObserver):
     particularly LLM search response frames from Google services.
     """
 
-    def __init__(self, rtvi: RTVIProcessor):
+    def __init__(
+        self,
+        rtvi: RTVIProcessor,
+        *,
+        params: RTVIObserverParams | None = None,
+        **kwargs,
+    ):
         """Initialize the Google RTVI observer.
 
         Args:
             rtvi: The RTVI processor to send messages through.
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
         """
-        super().__init__(rtvi)
+        super().__init__(rtvi, params=params, **kwargs)
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames being pushed through the pipeline.
@@ -106,4 +114,4 @@ class GoogleRTVIProcessor(RTVIProcessor):
         Returns:
             A new RTVI observer.
         """
-        return GoogleRTVIObserver(self)
+        return GoogleRTVIObserver(self, params=params, **kwargs)
