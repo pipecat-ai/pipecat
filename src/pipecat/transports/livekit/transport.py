@@ -1057,6 +1057,7 @@ class LiveKitInputTransport(BaseInputTransport):
         self._resamplers: dict[str, BaseAudioResampler] = {}
         self._video_samplers = _VideoInSamplers()
         self._audio_in_user_tracks = params.audio_in_user_tracks
+        self._audio_in_10ms_chunks = params.audio_in_10ms_chunks
         self._mixer: _ParticipantAudioMixer | None = None
         self._mixed_resampler = create_stream_resampler()
 
@@ -1288,7 +1289,7 @@ class LiveKitInputTransport(BaseInputTransport):
             self._mixer = _ParticipantAudioMixer(
                 sample_rate=audio_frame.sample_rate,
                 num_channels=audio_frame.num_channels,
-                chunk_ms=self._params.audio_in_10ms_chunks * 10,
+                chunk_ms=self._audio_in_10ms_chunks * 10,
             )
         for chunk in self._mixer.add(participant_id, audio_frame.data.tobytes()):
             audio = await self._mixed_resampler.resample(
